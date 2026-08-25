@@ -1,7 +1,7 @@
 export default {
     // Dashboard
     dashboard: {
-      title: 'Admin Dashboard',
+      title: 'Overview',
       description: 'System overview and real-time statistics',
       apiKeys: 'API Keys',
       totalApiKeys: 'Total API Keys',
@@ -77,7 +77,23 @@ export default {
       groupPricingDesc: 'Configure batch discount and hold ratio',
       systemSettings: 'System Settings',
       configureSystem: 'Configure system settings',
-      failedToLoad: 'Failed to load dashboard statistics'
+      gatewayTraffic: 'Gateway traffic',
+      receivingTraffic: 'Receiving traffic',
+      idleTraffic: 'No recent traffic',
+      accountHealth: 'Account health',
+      accountAttention: 'Account attention required',
+      noAccountExceptions: 'All accounts reporting normally',
+      reviewAccounts: 'Review accounts',
+      throttled: 'throttled',
+      overloaded: 'overloaded',
+      modelsRouting: 'Models & Routing',
+      viewAccounts: 'View accounts',
+      viewRouting: 'View routing',
+      activity: 'Activity',
+      viewActivity: 'View activity',
+      traffic: 'Traffic',
+      failedToLoad: 'Failed to load dashboard statistics',
+      retry: 'Retry'
     },
 
     backup: {

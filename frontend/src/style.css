@@ -587,6 +587,58 @@
     @apply text-gray-400 dark:text-dark-500;
   }
 
+  /* Operator console: flatter, denser surfaces for repeated admin work. */
+  .operator-console .glass {
+    @apply bg-white dark:bg-dark-900;
+    backdrop-filter: none;
+  }
+
+  .operator-console .card {
+    @apply rounded-lg border-gray-200 bg-white shadow-none dark:border-dark-700 dark:bg-dark-900;
+    transition-property: border-color, background-color;
+  }
+
+  .operator-console .btn {
+    @apply rounded-md transition-colors;
+    transform: none;
+  }
+
+  .operator-console .btn-primary {
+    @apply bg-primary-600 shadow-none hover:bg-primary-700 hover:shadow-none;
+    background-image: none;
+  }
+
+  .operator-console .btn-danger {
+    @apply bg-red-600 shadow-none hover:bg-red-700 hover:shadow-none;
+    background-image: none;
+  }
+
+  .operator-console .btn-success {
+    @apply bg-emerald-600 shadow-none hover:bg-emerald-700 hover:shadow-none;
+    background-image: none;
+  }
+
+  .operator-console .btn-warning {
+    @apply bg-amber-600 shadow-none hover:bg-amber-700 hover:shadow-none;
+    background-image: none;
+  }
+
+  .operator-console .sidebar-link {
+    @apply rounded-md;
+  }
+
+  .operator-console .sidebar-section-title {
+    letter-spacing: 0;
+  }
+
+  .operator-context-link {
+    @apply inline-flex min-h-9 items-center border-b-2 border-transparent px-1 py-2 text-sm font-medium text-gray-600 outline-none transition-colors hover:border-gray-300 hover:text-gray-900 focus-visible:ring-2 focus-visible:ring-primary-500/50 focus-visible:ring-offset-2 dark:text-dark-300 dark:hover:border-dark-500 dark:hover:text-white dark:focus-visible:ring-offset-dark-950;
+  }
+
+  .operator-context-link-active {
+    @apply border-primary-600 text-primary-700 dark:border-primary-400 dark:text-primary-300;
+  }
+
   /* ============ 页面头部 ============ */
   .page-header {
     @apply mb-6;

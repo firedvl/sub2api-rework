@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6">
+    <div class="mx-auto w-full min-w-0 max-w-6xl space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -25,6 +25,7 @@
                 type="button"
                 role="tab"
                 :aria-selected="activeTab === tab.key"
+                :aria-controls="settingsTabPanelIds[tab.key].join(' ')"
                 :tabindex="activeTab === tab.key ? 0 : -1"
                 :class="[
                   'settings-tab',
@@ -45,7 +46,7 @@
         </div>
 
         <!-- Tab: Security — Admin API Key -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <div id="settings-panel-security-key" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="space-y-6">
           <!-- Admin API Key Settings -->
           <div class="card">
             <div
@@ -202,7 +203,7 @@
         <!-- /Tab: Security — Admin API Key -->
 
         <!-- Tab: Gateway -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <div id="settings-panel-gateway-resilience" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="space-y-6">
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -1421,7 +1422,7 @@
         <!-- /Tab: Gateway -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
-        <div v-show="activeTab === 'security'" class="space-y-6">
+        <div id="settings-panel-security-controls" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="space-y-6">
           <!-- Registration Settings -->
           <div class="card">
             <div
@@ -3822,7 +3823,7 @@
         <!-- /Tab: Security — Registration, Turnstile, LinuxDo, OIDC -->
 
         <!-- Tab: Users -->
-        <div v-show="activeTab === 'users'" class="space-y-6">
+        <div id="settings-panel-users" v-show="activeTab === 'users'" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" class="space-y-6">
           <!-- Default Settings -->
           <div class="card">
             <div
@@ -4438,7 +4439,7 @@
         <!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
-        <div v-show="activeTab === 'gateway'" class="space-y-6">
+        <div id="settings-panel-gateway-policy" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="space-y-6">
           <!-- Claude Code Settings -->
           <div class="card">
             <div
@@ -6221,7 +6222,7 @@
         <!-- /Tab: Gateway — Claude Code, Scheduling -->
 
         <!-- Tab: General -->
-        <div v-show="activeTab === 'general'" class="space-y-6">
+        <div id="settings-panel-general" v-show="activeTab === 'general'" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" class="space-y-6">
           <!-- Site Settings -->
           <div class="card">
             <div
@@ -6783,7 +6784,7 @@
 	        <!-- /Tab: General -->
 
 	        <!-- Tab: Login Agreement -->
-	        <div v-show="activeTab === 'agreement'" class="space-y-6">
+	        <div id="settings-panel-agreement" v-show="activeTab === 'agreement'" role="tabpanel" aria-labelledby="settings-tab-agreement" tabindex="0" class="space-y-6">
 	          <div class="card">
 	            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
 	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -6985,7 +6986,7 @@
         <!-- /Tab: Login Agreement -->
 
 	        <!-- Tab: Features (功能开关) -->
-        <div v-show="activeTab === 'features'" class="space-y-6">
+        <div id="settings-panel-features" v-show="activeTab === 'features'" role="tabpanel" aria-labelledby="settings-tab-features" tabindex="0" class="space-y-6">
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -7686,7 +7687,7 @@
 
         <!-- Tab: Email -->
         <!-- Tab: Payment -->
-        <div v-show="activeTab === 'payment'" class="space-y-6">
+        <div id="settings-panel-payment" v-show="activeTab === 'payment'" role="tabpanel" aria-labelledby="settings-tab-payment" tabindex="0" class="space-y-6">
           <!-- Payment System Settings -->
           <div class="card">
             <div
@@ -8237,7 +8238,7 @@
           />
         </div>
 
-        <div v-show="activeTab === 'email'" class="space-y-6">
+        <div id="settings-panel-email" v-show="activeTab === 'email'" role="tabpanel" aria-labelledby="settings-tab-email" tabindex="0" class="space-y-6">
           <!-- Email disabled hint - show when email_verify_enabled is off -->
           <div v-if="!form.email_verify_enabled" class="card">
             <div class="p-6">
@@ -8659,7 +8660,7 @@
         <!-- /Tab: Email -->
 
         <!-- Tab: Backup -->
-        <div v-show="activeTab === 'backup'">
+        <div id="settings-panel-backup" v-show="activeTab === 'backup'" role="tabpanel" aria-labelledby="settings-tab-backup" tabindex="0">
           <BackupSettings />
         </div>
 
@@ -8858,6 +8859,18 @@ const settingsTabs = [
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
+
+const settingsTabPanelIds: Record<SettingsTab, string[]> = {
+  general: ["settings-panel-general"],
+  agreement: ["settings-panel-agreement"],
+  features: ["settings-panel-features"],
+  security: ["settings-panel-security-key", "settings-panel-security-controls"],
+  users: ["settings-panel-users"],
+  gateway: ["settings-panel-gateway-resilience", "settings-panel-gateway-policy"],
+  payment: ["settings-panel-payment"],
+  email: ["settings-panel-email"],
+  backup: ["settings-panel-backup"],
+};
 
 const settingsTabKeyboardActions = {
   ArrowLeft: -1,
@@ -12908,11 +12921,8 @@ watch(
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {
-  @apply sticky z-20 -mx-1 rounded-2xl border border-white/80 bg-white/90 p-1.5 backdrop-blur-xl;
-  top: 4.75rem;
-  box-shadow:
-    0 12px 28px rgb(15 23 42 / 0.07),
-    0 1px 0 rgb(255 255 255 / 0.9) inset;
+  @apply sticky z-20 -mx-1 border-b border-gray-200 bg-gray-50/95 px-1 dark:border-dark-700 dark:bg-dark-950/95;
+  top: 0;
 }
 
 .settings-tabs-scroll {
@@ -12930,7 +12940,7 @@ watch(
 }
 
 .settings-tab {
-  @apply relative isolate flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-200 ease-out dark:text-gray-300;
+  @apply relative flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-150 ease-out hover:text-gray-900 dark:text-gray-300 dark:hover:text-white;
 }
 
 @media (min-width: 768px) {
@@ -12947,30 +12957,12 @@ watch(
   }
 }
 
-.settings-tab::before {
-  @apply absolute inset-0 -z-10 rounded-xl opacity-0 transition-opacity duration-200;
-  content: "";
-  background: linear-gradient(135deg, rgb(248 250 252 / 0.95), rgb(241 245 249 / 0.8));
-}
-
-.settings-tab:hover::before,
-.settings-tab:focus-visible::before {
-  opacity: 1;
-}
-
 .settings-tab:focus-visible {
-  @apply ring-2 ring-primary-500/40 ring-offset-2 ring-offset-white dark:ring-offset-dark-900;
+  @apply ring-2 ring-primary-500/50 ring-offset-1 ring-offset-gray-50 dark:ring-offset-dark-950;
 }
 
 .settings-tab-active {
-  @apply border-primary-200/80 bg-white text-primary-700 shadow-sm dark:border-primary-400/30 dark:bg-dark-700/95 dark:text-primary-200;
-  box-shadow:
-    0 8px 18px rgb(15 23 42 / 0.08),
-    0 1px 0 rgb(255 255 255 / 0.92) inset;
-}
-
-.settings-tab-active::before {
-  opacity: 0;
+  @apply text-primary-700 dark:text-primary-300;
 }
 
 .settings-tab-active::after {
@@ -12979,13 +12971,12 @@ watch(
   bottom: 0.25rem;
   left: 0.75rem;
   height: 2px;
-  border-radius: 9999px;
   content: "";
-  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
+  @apply bg-primary-600 dark:bg-primary-400;
 }
 
 .settings-tab-icon {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors duration-200 dark:text-gray-400;
+  @apply flex h-7 w-7 shrink-0 items-center justify-center text-gray-500 transition-colors duration-150 dark:text-gray-400;
 }
 
 .settings-tab:hover .settings-tab-icon,
@@ -12994,33 +12985,10 @@ watch(
 }
 
 .settings-tab-active .settings-tab-icon {
-  @apply bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300;
+  @apply text-primary-600 dark:text-primary-300;
 }
 
 .settings-tab-label {
   @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
-}
-</style>
-
-<style>
-/* Dark-mode overrides for the settings tabs shell. Kept in an UNSCOPED block
-   because Vue's scoped-CSS compiler was dropping the `:global(.dark) ...`
-   rules in the production build, leaving inactive tabs unreadable on dark. */
-.dark .settings-tabs-shell {
-  border-color: rgb(51 65 85 / 0.65);
-  background: rgb(15 23 42 / 0.86);
-  box-shadow:
-    0 16px 36px rgb(0 0 0 / 0.28),
-    0 1px 0 rgb(255 255 255 / 0.06) inset;
-}
-
-.dark .settings-tab::before {
-  background: linear-gradient(135deg, rgb(30 41 59 / 0.9), rgb(51 65 85 / 0.62));
-}
-
-.dark .settings-tab-active {
-  box-shadow:
-    0 12px 26px rgb(0 0 0 / 0.22),
-    0 1px 0 rgb(255 255 255 / 0.08) inset;
 }
 </style>

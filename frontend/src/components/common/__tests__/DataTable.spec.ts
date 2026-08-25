@@ -83,6 +83,28 @@ describe('DataTable', () => {
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
+  it('sizes the desktop empty state to the visible table viewport', async () => {
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(640)
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: Array.from({ length: 8 }, (_, index) => ({
+          key: `column-${index}`,
+          label: `Column ${index}`
+        })),
+        data: []
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const emptyState = wrapper.get('[data-test="desktop-empty-state"]')
+    expect(emptyState.classes()).toEqual(expect.arrayContaining(['sticky', 'left-0']))
+    expect(emptyState.attributes('style')).toContain('width: 640px')
+
+    clientWidth.mockRestore()
+  })
+
   it('renders every row with no virtual padding spacer for small datasets (virtualization off)', async () => {
     const data = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {

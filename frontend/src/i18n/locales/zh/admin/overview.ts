@@ -1,7 +1,7 @@
 export default {
     // Dashboard
     dashboard: {
-      title: '管理控制台',
+      title: '概览',
       description: '系统概览与统计数据',
       apiKeys: 'API 密钥',
       totalApiKeys: 'API 密钥总数',
@@ -77,7 +77,23 @@ export default {
       groupPricingDesc: '设置批量折扣和冻结比例',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
-      failedToLoad: '加载仪表盘数据失败'
+      gatewayTraffic: '网关流量',
+      receivingTraffic: '正在接收流量',
+      idleTraffic: '近期无流量',
+      accountHealth: '账号健康状态',
+      accountAttention: '账号需要关注',
+      noAccountExceptions: '所有账号状态正常',
+      reviewAccounts: '查看账号',
+      throttled: '限流',
+      overloaded: '过载',
+      modelsRouting: '模型与路由',
+      viewAccounts: '查看账号',
+      viewRouting: '查看路由',
+      activity: '活动',
+      viewActivity: '查看活动',
+      traffic: '流量',
+      failedToLoad: '加载仪表盘数据失败',
+      retry: '重试'
     },
 
     backup: {

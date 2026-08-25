@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
+import { operatorAreas } from '@/router/operatorNavigation'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (path: string) => readFileSync(resolve(here, path), 'utf8')
@@ -18,12 +19,15 @@ describe('Prompt Audit integration surface', () => {
     expect(route).toContain('requiresRiskControl: true')
   })
 
-  it('keeps the legacy content moderation route and adds both pages under an expand-only security group', () => {
-    const sidebar = read('../../../components/layout/AppSidebar.vue')
-    const group = sidebar.slice(sidebar.indexOf("path: '/admin/security-audit'"), sidebar.indexOf("path: '/admin/redeem'"))
-    expect(group).toContain('expandOnly: true')
-    expect(group).toContain("path: '/admin/risk-control'")
-    expect(group).toContain("path: '/admin/prompt-audit'")
+  it('keeps content moderation and Prompt Audit in feature-gated Settings navigation', () => {
+    const settings = operatorAreas.find((area) => area.id === 'settings')
+
+    expect(settings?.sections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: '/admin/risk-control', gate: 'risk-control' }),
+        expect.objectContaining({ path: '/admin/prompt-audit', gate: 'risk-control' }),
+      ]),
+    )
   })
 
   it('keeps Prompt Audit locale trees symmetric and all operational controls named', () => {

@@ -157,6 +157,12 @@ export default {
 
   // Navigation
   nav: {
+    operatorConsole: 'Operator console',
+    overview: 'Overview',
+    modelsRouting: 'Models & Routing',
+    activity: 'Activity',
+    more: 'More',
+    areaSections: '{area} sections',
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',

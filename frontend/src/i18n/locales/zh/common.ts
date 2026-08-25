@@ -157,6 +157,12 @@ export default {
 
   // Navigation
   nav: {
+    operatorConsole: '运营控制台',
+    overview: '概览',
+    modelsRouting: '模型与路由',
+    activity: '活动',
+    more: '更多',
+    areaSections: '{area}分区',
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
