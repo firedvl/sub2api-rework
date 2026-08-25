@@ -18,8 +18,8 @@ known limitations.
 | Upstream baseline | Supported | Pinned to upstream `v0.1.181` (`3af5443b224823ae507a50c7b113aa50604409c8`) |
 | One-key multi-provider routing | Experimental | Uses inherited API-key, group, account-pool, and composite-routing behavior |
 | OpenAI-compatible gateway | Experimental | Preserves upstream Responses and Chat Completions paths |
-| Codex client tools | In progress | Namespace and custom-tool compatibility is being validated |
-| Standalone Codex web search | Planned | Protocol research and implementation are tracked separately |
+| Codex client tools | Experimental | Antigravity forwarding reuses shared namespace and custom-tool adaptation |
+| Standalone Codex web search | Experimental | Uses a separate, configurable `alpha_search` Composite route |
 | Operator console | Planned | The current UI remains in place while the replacement is designed |
 
 No stable rework release exists yet.
@@ -49,6 +49,7 @@ account knowledge.
 - [Roadmap](docs/ROADMAP.md)
 - [Upstream sync policy](docs/UPSTREAM_SYNC.md)
 - [Codex compatibility](docs/CODEX_COMPATIBILITY.md)
+- [Codex standalone search](docs/CODEX_STANDALONE_SEARCH.md)
 - [UI rework plan](docs/UI_REWORK.md)
 - [Upstream deployment documentation](deploy/README.md)
 

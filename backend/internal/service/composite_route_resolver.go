@@ -33,7 +33,15 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 		if err != nil {
 			return decision, fmt.Errorf("list composite routes: %w", err)
 		}
-		if route, ok := matchCompositeRoute(routes, model, endpoint); ok {
+		allowAnyEndpoint := true
+		if endpoint == CompositeRouteEndpointAlphaSearch {
+			allowAnyEndpoint = false
+		}
+		route, ok := matchCompositeRoute(routes, model, endpoint, allowAnyEndpoint)
+		if !ok && endpoint == CompositeRouteEndpointAlphaSearch {
+			route, ok = matchCompositeRoute(routes, model, CompositeRouteEndpointResponses, true)
+		}
+		if ok {
 			upstreamModel := strings.TrimSpace(route.UpstreamModel)
 			if upstreamModel == "" {
 				upstreamModel = model
@@ -66,7 +74,7 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 	return decision, nil
 }
 
-func matchCompositeRoute(routes []CompositeModelRoute, model, endpoint string) (CompositeModelRoute, bool) {
+func matchCompositeRoute(routes []CompositeModelRoute, model, endpoint string, allowAnyEndpoint bool) (CompositeModelRoute, bool) {
 	if len(routes) == 0 {
 		return CompositeModelRoute{}, false
 	}
@@ -80,7 +88,7 @@ func matchCompositeRoute(routes []CompositeModelRoute, model, endpoint string) (
 	candidates := make([]candidate, 0, len(routes))
 	for _, route := range routes {
 		route.Endpoint = normalizeCompositeRouteEndpoint(route.Endpoint)
-		if route.Endpoint != endpoint && route.Endpoint != CompositeRouteEndpointAny {
+		if route.Endpoint != endpoint && (!allowAnyEndpoint || route.Endpoint != CompositeRouteEndpointAny) {
 			continue
 		}
 		route.MatchType = normalizeCompositeRouteMatchType(route.MatchType)

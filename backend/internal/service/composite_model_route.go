@@ -16,6 +16,7 @@ const (
 	CompositeRouteEndpointMessages        = "messages"
 	CompositeRouteEndpointCountTokens     = "count_tokens"
 	CompositeRouteEndpointResponses       = "responses"
+	CompositeRouteEndpointAlphaSearch     = "alpha_search"
 	CompositeRouteEndpointChatCompletions = "chat_completions"
 	CompositeRouteEndpointEmbeddings      = "embeddings"
 	CompositeRouteEndpointImages          = "images"
@@ -92,6 +93,7 @@ func normalizeCompositeRouteEndpoint(endpoint string) string {
 	case CompositeRouteEndpointMessages,
 		CompositeRouteEndpointCountTokens,
 		CompositeRouteEndpointResponses,
+		CompositeRouteEndpointAlphaSearch,
 		CompositeRouteEndpointChatCompletions,
 		CompositeRouteEndpointEmbeddings,
 		CompositeRouteEndpointImages,

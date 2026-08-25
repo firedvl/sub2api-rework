@@ -4782,6 +4782,10 @@ const compositeRouteEndpointOptions = computed(() => [
     label: t("admin.groups.compositeRoutes.endpoints.responses"),
   },
   {
+    value: "alpha_search",
+    label: t("admin.groups.compositeRoutes.endpoints.alphaSearch"),
+  },
+  {
     value: "chat_completions",
     label: t("admin.groups.compositeRoutes.endpoints.chatCompletions"),
   },

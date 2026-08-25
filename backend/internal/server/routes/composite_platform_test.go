@@ -194,15 +194,86 @@ func TestCompositeRequestModelFromMultipartLiveSession(t *testing.T) {
 	require.Equal(t, "live-alias", compositeRequestModelFromBody(writer.FormDataContentType(), body.Bytes()))
 }
 
-func TestCompositeCodexControlPathsUseResponsesRoutes(t *testing.T) {
+func TestCompositeCodexControlPathsUseEndpointSpecificRoutes(t *testing.T) {
 	for _, path := range []string{
 		"/v1/alpha/search",
 		"/backend-api/codex/alpha/search",
+	} {
+		require.Equal(t, service.CompositeRouteEndpointAlphaSearch, compositeRouteEndpointForPath(path), "path=%s", path)
+	}
+
+	for _, path := range []string{
 		"/v1/live",
 		"/backend-api/codex/realtime/calls",
 	} {
 		require.Equal(t, service.CompositeRouteEndpointResponses, compositeRouteEndpointForPath(path), "path=%s", path)
 	}
+}
+
+func TestCompositeTargetPlatformMiddlewareUsesAlphaSearchRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(1)
+	resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{
+		routes: []service.CompositeModelRoute{
+			{
+				ID:             1,
+				GroupID:        groupID,
+				PublicModel:    "gemini-3.1-pro-high",
+				MatchType:      service.CompositeRouteMatchExact,
+				TargetPlatform: service.PlatformAntigravity,
+				UpstreamModel:  "gemini-pro-agent",
+				Endpoint:       service.CompositeRouteEndpointResponses,
+				Priority:       100,
+				Enabled:        true,
+			},
+			{
+				ID:             2,
+				GroupID:        groupID,
+				PublicModel:    "gemini-3.1-pro-high",
+				MatchType:      service.CompositeRouteMatchExact,
+				TargetPlatform: service.PlatformOpenAI,
+				UpstreamModel:  "gpt-5.6-luna",
+				Endpoint:       service.CompositeRouteEndpointAlphaSearch,
+				Priority:       100,
+				Enabled:        true,
+			},
+		},
+	})
+	router := gin.New()
+	router.Use(gin.HandlerFunc(servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+		})
+		c.Next()
+	})))
+	router.Use(compositeTargetPlatformMiddleware(resolver))
+	router.POST("/v1/alpha/search", func(c *gin.Context) {
+		platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, service.PlatformOpenAI, platform)
+
+		upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, "gpt-5.6-luna", upstreamModel)
+
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"model":"gpt-5.6-luna","commands":{"search_query":[{"q":"test"}]}}`, string(body))
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/alpha/search",
+		strings.NewReader(`{"model":"gemini-3.1-pro-high","commands":{"search_query":[{"q":"test"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
 func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteForMultipartImages(t *testing.T) {

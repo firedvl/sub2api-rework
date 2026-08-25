@@ -651,6 +651,7 @@ export type CompositeRouteEndpoint =
   | 'messages'
   | 'count_tokens'
   | 'responses'
+  | 'alpha_search'
   | 'chat_completions'
   | 'embeddings'
   | 'images'
