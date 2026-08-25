@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -268,6 +269,198 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 	}
 }
 
+func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstreamBody := `data: {"response":{"responseId":"resp_3757","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_3757","name":"shell__exec","args":{"command":"pwd"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}},
+	}
+	svc := newAntigravityCompatService(
+		config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		upstream,
+	)
+
+	body := []byte(`{
+		"model":"gemini-3.1-pro-high",
+		"input":[{
+			"role":"user",
+			"content":[{
+				"type":"input_text",
+				"text":"hello"
+			}]
+		}],
+		"stream":true,
+		"tools":[
+			{"type":"web_search"},
+			{
+				"type":"namespace",
+				"name":"shell",
+				"tools":[{
+					"type":"function",
+					"name":"exec",
+					"description":"Run a shell command",
+					"parameters":{
+						"type":"object",
+						"properties":{
+							"command":{"type":"string"}
+						},
+						"required":["command"]
+					}
+				}]
+			}
+		]
+	}`)
+
+	c, recorder := newAntigravityCompatContext(
+		http.MethodPost,
+		"/v1/responses",
+		body,
+	)
+
+	result, err := svc.ForwardAsResponses(
+		context.Background(),
+		c,
+		newAntigravityCompatAccount(AccountTypeOAuth),
+		body,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+
+	requestBody := upstream.requestBodies[0]
+
+	require.True(
+		t,
+		gjson.GetBytes(
+			requestBody,
+			"request.toolConfig.includeServerSideToolInvocations",
+		).Bool(),
+	)
+
+	require.Equal(
+		t,
+		"shell__exec",
+		gjson.GetBytes(
+			requestBody,
+			"request.tools.0.functionDeclarations.0.name",
+		).String(),
+	)
+
+	require.True(
+		t,
+		gjson.GetBytes(
+			requestBody,
+			"request.tools.1.googleSearch",
+		).Exists(),
+	)
+
+	require.Contains(t, recorder.Body.String(), `"namespace":"shell"`)
+	require.Contains(t, recorder.Body.String(), `"name":"exec"`)
+	require.NotContains(t, recorder.Body.String(), `"name":"shell__exec"`)
+}
+
+func TestAntigravityCompatResponsesAdaptsStandaloneWebRunWithShell(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		stream     bool
+		streamJSON string
+	}{
+		{name: "buffered", streamJSON: "false"},
+		{name: "streaming", stream: true, streamJSON: "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstreamBody := `data: {"response":{"responseId":"resp_3757","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_web","name":"web__run","args":{"search_query":[{"q":"standalone search"}]}}},{"functionCall":{"id":"call_shell","name":"shell__exec","args":{"command":"pwd"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
+			upstream := &queuedHTTPUpstreamStub{
+				responses: []*http.Response{{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+				}},
+			}
+			svc := newAntigravityCompatService(
+				config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+				upstream,
+			)
+			body := []byte(`{
+				"model":"gemini-3.1-pro-high",
+				"input":"Use web search and shell",
+				"stream":` + tt.streamJSON + `,
+				"tools":[
+					{
+						"type":"namespace",
+						"name":"web",
+						"tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
+					},
+					{
+						"type":"namespace",
+						"name":"shell",
+						"tools":[{"type":"function","name":"exec","parameters":{"type":"object"}}]
+					}
+				]
+			}`)
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
+
+			result, err := svc.ForwardAsResponses(
+				context.Background(),
+				c,
+				newAntigravityCompatAccount(AccountTypeOAuth),
+				body,
+				nil,
+			)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.requestBodies, 1)
+
+			requestBody := upstream.requestBodies[0]
+			declarations := gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations.#.name").Array()
+			names := make([]string, 0, len(declarations))
+			for _, declaration := range declarations {
+				names = append(names, declaration.String())
+			}
+			require.ElementsMatch(t, []string{"web__run", "shell__exec"}, names)
+			require.NotContains(t, string(requestBody), `"googleSearch"`)
+
+			responseBody := recorder.Body.String()
+			require.Contains(t, responseBody, `"namespace":"web"`)
+			require.Contains(t, responseBody, `"name":"run"`)
+			require.Contains(t, responseBody, `"namespace":"shell"`)
+			require.Contains(t, responseBody, `"name":"exec"`)
+			require.NotContains(t, responseBody, `"name":"web__run"`)
+			require.NotContains(t, responseBody, `"name":"shell__exec"`)
+			if tt.stream {
+				require.Contains(t, responseBody, "response.completed")
+				var sequences []int64
+				for _, line := range strings.Split(responseBody, "\n") {
+					if !strings.HasPrefix(line, "data: {") {
+						continue
+					}
+					sequences = append(sequences, gjson.Get(strings.TrimPrefix(line, "data: "), "sequence_number").Int())
+				}
+				require.NotEmpty(t, sequences)
+				for i, sequence := range sequences {
+					require.Equal(t, int64(i), sequence)
+				}
+			} else {
+				require.Equal(t, "web", gjson.Get(responseBody, "output.0.namespace").String())
+				require.Equal(t, "run", gjson.Get(responseBody, "output.0.name").String())
+				require.Equal(t, "shell", gjson.Get(responseBody, "output.1.namespace").String())
+				require.Equal(t, "exec", gjson.Get(responseBody, "output.1.name").String())
+			}
+		})
+	}
+}
+
 func TestAntigravityCompatPreservesChatTokenLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
@@ -392,7 +585,7 @@ func TestAntigravityCompatEmptyStreamTriggersFailover(t *testing.T) {
 		{
 			name: "responses",
 			run: func(svc *AntigravityGatewayService, c *gin.Context, resp *http.Response) (*antigravityStreamResult, error) {
-				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 			},
 		},
 	}
@@ -435,7 +628,7 @@ func TestAntigravityCompatUsageOnlyStreamTriggersFailover(t *testing.T) {
 		{
 			name: "responses",
 			run: func(svc *AntigravityGatewayService, c *gin.Context, resp *http.Response) (*antigravityStreamResult, error) {
-				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 			},
 		},
 	}
@@ -626,7 +819,7 @@ func TestAntigravityCompatStreamErrorCommitsSingleTerminalFrame(t *testing.T) {
 		},
 	}
 
-	result, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+	result, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 
 	require.Error(t, err)
 	require.Nil(t, result)
@@ -646,7 +839,7 @@ func TestAntigravityCompatKeepaliveAfterFirstEvent(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+		_, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 		done <- err
 	}()
 	_, err := io.WriteString(

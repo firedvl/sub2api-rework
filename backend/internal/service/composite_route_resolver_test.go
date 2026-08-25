@@ -107,6 +107,68 @@ func TestCompositeRouteResolverPrefersEndpointSpecificLongestPrefix(t *testing.T
 	require.Equal(t, int64(2), decision.Route.ID)
 }
 
+func TestCompositeRouteResolverAlphaSearchPrefersDedicatedRouteAndFallsBackToResponses(t *testing.T) {
+	routes := []CompositeModelRoute{
+		{
+			ID:             1,
+			GroupID:        7,
+			PublicModel:    "gemini-3.1-pro-high",
+			MatchType:      CompositeRouteMatchExact,
+			TargetPlatform: PlatformOpenAI,
+			UpstreamModel:  "gpt-4.1",
+			Endpoint:       CompositeRouteEndpointAny,
+			Priority:       100,
+			Enabled:        true,
+		},
+		{
+			ID:             2,
+			GroupID:        7,
+			PublicModel:    "gemini-3.1-pro-high",
+			MatchType:      CompositeRouteMatchExact,
+			TargetPlatform: PlatformOpenAI,
+			UpstreamModel:  "gpt-5",
+			Endpoint:       CompositeRouteEndpointResponses,
+			Priority:       100,
+			Enabled:        true,
+		},
+		{
+			ID:             3,
+			GroupID:        7,
+			PublicModel:    "gemini-3.1-pro-high",
+			MatchType:      CompositeRouteMatchExact,
+			TargetPlatform: PlatformOpenAI,
+			UpstreamModel:  "gpt-5.6-luna",
+			Endpoint:       CompositeRouteEndpointAlphaSearch,
+			Priority:       100,
+			Enabled:        true,
+		},
+	}
+
+	for _, tt := range []struct {
+		name      string
+		routes    []CompositeModelRoute
+		wantID    int64
+		wantModel string
+	}{
+		{name: "dedicated route", routes: routes, wantID: 3, wantModel: "gpt-5.6-luna"},
+		{name: "responses fallback", routes: routes[:2], wantID: 2, wantModel: "gpt-5"},
+		{name: "any fallback", routes: routes[:1], wantID: 1, wantModel: "gpt-4.1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: tt.routes})
+
+			decision, err := resolver.Resolve(context.Background(), 7, "gemini-3.1-pro-high", CompositeRouteEndpointAlphaSearch)
+
+			require.NoError(t, err)
+			require.True(t, decision.Matched)
+			require.Equal(t, PlatformOpenAI, decision.TargetPlatform)
+			require.Equal(t, tt.wantModel, decision.UpstreamModel)
+			require.NotNil(t, decision.Route)
+			require.Equal(t, tt.wantID, decision.Route.ID)
+		})
+	}
+}
+
 // TestCompositeRouteResolverPrefixEmptyUpstreamPassesThroughRequestedModel 验证：
 // 前缀匹配路由留空 upstream_model 时，转发的是具体请求模型（各自原样），而不是
 // 塌缩成 public_model。这是「留空 = 透传原始模型」语义的核心场景。

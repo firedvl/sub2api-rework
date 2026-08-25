@@ -37,7 +37,7 @@ Each route belongs to one composite group and contains:
 - `target_platform`: concrete provider platform.
 - `upstream_model`: model identifier sent upstream. If omitted, the public
   model is reused.
-- `endpoint`: `any`, `messages`, `count_tokens`, `responses`,
+- `endpoint`: `any`, `messages`, `count_tokens`, `responses`, `alpha_search`,
   `chat_completions`, `embeddings`, `images`, or `gemini`.
 - `priority`: lower values win after match specificity.
 - `enabled`: disabled routes are ignored by runtime resolution but remain
@@ -53,9 +53,14 @@ route's `upstream_model` before dispatch. For Gemini native paths such as
 `/v1beta/models/{model}:generateContent`, the gateway resolves `{model}` and
 the handler forwards the resolved upstream model.
 
-Codex Alpha Search and Live requests use the `responses` route domain. Live
-requests resolve the model from `session.model`, including multipart `session`
-payloads, and apply the configured `upstream_model` before dispatch.
+Codex Alpha Search requests use the `alpha_search` route domain. This lets a
+Gemini or Claude public model keep its normal `responses` route while sending
+the separate search call to an OpenAI account. Live requests use the
+`responses` route domain, resolve the model from `session.model`, including
+multipart `session` payloads, and apply the configured `upstream_model` before
+dispatch. If no `alpha_search` route matches, Alpha Search falls back to an
+existing `responses` or `any` route for compatibility with older Composite
+settings.
 Codex model manifest requests reuse the existing OpenAI account selection and
 failover path within the Composite group.
 

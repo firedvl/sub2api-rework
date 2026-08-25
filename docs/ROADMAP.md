@@ -10,7 +10,7 @@ boundary, and **Planned** means no compatibility claim is made.
 - Experimental: composite model routing
 - Experimental: OpenAI, Gemini, and Claude paths inherited from Sub2API
 - Experimental: Codex Responses and client function tools
-- Planned: standalone Codex web search
+- Experimental: standalone Codex web search through a separately routed alpha call
 - Known limitation: some Antigravity transports reject native search and custom
   functions in the same inference request
 

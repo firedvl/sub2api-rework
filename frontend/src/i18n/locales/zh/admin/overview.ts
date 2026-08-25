@@ -1092,6 +1092,7 @@ export default {
           messages: 'Messages',
           countTokens: 'Count Tokens',
           responses: 'Responses',
+          alphaSearch: '独立搜索',
           chatCompletions: 'Chat Completions',
           embeddings: 'Embeddings',
           images: 'Images',

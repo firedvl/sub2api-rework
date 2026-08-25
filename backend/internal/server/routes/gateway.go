@@ -700,8 +700,9 @@ func compositeRouteEndpointForPath(path string) string {
 		return service.CompositeRouteEndpointCountTokens
 	case strings.Contains(path, "/messages"):
 		return service.CompositeRouteEndpointMessages
+	case strings.Contains(path, "/alpha/search"):
+		return service.CompositeRouteEndpointAlphaSearch
 	case strings.Contains(path, "/responses"),
-		strings.Contains(path, "/alpha/search"),
 		strings.Contains(path, "/realtime/calls"),
 		strings.HasSuffix(strings.TrimRight(path, "/"), "/live"):
 		return service.CompositeRouteEndpointResponses
