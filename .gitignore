@@ -141,6 +141,12 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/ARCHITECTURE.md
+!docs/CODEX_COMPATIBILITY.md
+!docs/DEVELOPMENT.md
+!docs/ROADMAP.md
+!docs/UI_REWORK.md
+!docs/UPSTREAM_SYNC.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
