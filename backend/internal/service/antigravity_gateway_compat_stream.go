@@ -70,13 +70,22 @@ func (a *antigravityChatStreamAdapter) emitResponseEvent(event *apicompat.Respon
 }
 
 type antigravityResponsesStreamAdapter struct {
-	anthropicState *apicompat.AnthropicEventToResponsesState
+	anthropicState     *apicompat.AnthropicEventToResponsesState
+	clientToolRestorer *apicompat.ResponsesClientToolStreamRestorer
 }
 
-func newAntigravityResponsesStreamAdapter(model string) *antigravityResponsesStreamAdapter {
+func newAntigravityResponsesStreamAdapter(
+	model string,
+	clientToolMapping apicompat.ResponsesClientToolMapping,
+) *antigravityResponsesStreamAdapter {
 	state := apicompat.NewAnthropicEventToResponsesState()
 	state.Model = model
-	return &antigravityResponsesStreamAdapter{anthropicState: state}
+	return &antigravityResponsesStreamAdapter{
+		anthropicState: state,
+		clientToolRestorer: apicompat.NewResponsesClientToolStreamRestorer(
+			clientToolMapping,
+		),
+	}
 }
 
 func (a *antigravityResponsesStreamAdapter) Emit(event *apicompat.AnthropicStreamEvent, writer *antigravityClientWriter) {
@@ -95,9 +104,28 @@ func (a *antigravityResponsesStreamAdapter) WriteError(writer *antigravityClient
 	writer.Fprintf("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"upstream_error\",\"message\":%q}}\n\n", reason)
 }
 
-func (a *antigravityResponsesStreamAdapter) emitResponseEvent(event apicompat.ResponsesStreamEvent, writer *antigravityClientWriter) {
-	if data, err := apicompat.ResponsesEventToSSE(event); err == nil {
-		writer.Write([]byte(data))
+func (a *antigravityResponsesStreamAdapter) emitResponseEvent(
+	event apicompat.ResponsesStreamEvent,
+	writer *antigravityClientWriter,
+) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+
+	payloads, _, err := a.clientToolRestorer.RestoreEvent(payload)
+	if err != nil {
+		return
+	}
+
+	for _, restored := range payloads {
+		var restoredEvent apicompat.ResponsesStreamEvent
+		if json.Unmarshal(restored, &restoredEvent) != nil {
+			continue
+		}
+		if data, err := apicompat.ResponsesEventToSSE(restoredEvent); err == nil {
+			writer.Write([]byte(data))
+		}
 	}
 }
 
@@ -462,13 +490,17 @@ func (s *AntigravityGatewayService) handleResponsesStreamingFromAntigravity(
 	resp *http.Response,
 	startTime time.Time,
 	originalModel string,
+	clientToolMapping apicompat.ResponsesClientToolMapping,
 ) (*antigravityStreamResult, error) {
 	return s.handleAntigravityCompatStream(
 		c,
 		resp,
 		startTime,
 		originalModel,
-		newAntigravityResponsesStreamAdapter(originalModel),
+		newAntigravityResponsesStreamAdapter(
+			originalModel,
+			clientToolMapping,
+		),
 		"antigravity responses stream",
 	)
 }

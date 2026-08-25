@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -268,6 +269,103 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 	}
 }
 
+func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstreamBody := `data: {"response":{"responseId":"resp_3757","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_3757","name":"shell__exec","args":{"command":"pwd"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}},
+	}
+	svc := newAntigravityCompatService(
+		config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		upstream,
+	)
+
+	body := []byte(`{
+		"model":"gemini-3.1-pro-high",
+		"input":[{
+			"role":"user",
+			"content":[{
+				"type":"input_text",
+				"text":"hello"
+			}]
+		}],
+		"stream":true,
+		"tools":[
+			{"type":"web_search"},
+			{
+				"type":"namespace",
+				"name":"shell",
+				"tools":[{
+					"type":"function",
+					"name":"exec",
+					"description":"Run a shell command",
+					"parameters":{
+						"type":"object",
+						"properties":{
+							"command":{"type":"string"}
+						},
+						"required":["command"]
+					}
+				}]
+			}
+		]
+	}`)
+
+	c, recorder := newAntigravityCompatContext(
+		http.MethodPost,
+		"/v1/responses",
+		body,
+	)
+
+	result, err := svc.ForwardAsResponses(
+		context.Background(),
+		c,
+		newAntigravityCompatAccount(AccountTypeOAuth),
+		body,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+
+	requestBody := upstream.requestBodies[0]
+
+	require.True(
+		t,
+		gjson.GetBytes(
+			requestBody,
+			"request.toolConfig.includeServerSideToolInvocations",
+		).Bool(),
+	)
+
+	require.Equal(
+		t,
+		"shell__exec",
+		gjson.GetBytes(
+			requestBody,
+			"request.tools.0.functionDeclarations.0.name",
+		).String(),
+	)
+
+	require.True(
+		t,
+		gjson.GetBytes(
+			requestBody,
+			"request.tools.1.googleSearch",
+		).Exists(),
+	)
+
+	require.Contains(t, recorder.Body.String(), `"namespace":"shell"`)
+	require.Contains(t, recorder.Body.String(), `"name":"exec"`)
+	require.NotContains(t, recorder.Body.String(), `"name":"shell__exec"`)
+}
+
 func TestAntigravityCompatPreservesChatTokenLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
@@ -392,7 +490,7 @@ func TestAntigravityCompatEmptyStreamTriggersFailover(t *testing.T) {
 		{
 			name: "responses",
 			run: func(svc *AntigravityGatewayService, c *gin.Context, resp *http.Response) (*antigravityStreamResult, error) {
-				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 			},
 		},
 	}
@@ -435,7 +533,7 @@ func TestAntigravityCompatUsageOnlyStreamTriggersFailover(t *testing.T) {
 		{
 			name: "responses",
 			run: func(svc *AntigravityGatewayService, c *gin.Context, resp *http.Response) (*antigravityStreamResult, error) {
-				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+				return svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 			},
 		},
 	}
@@ -626,7 +724,7 @@ func TestAntigravityCompatStreamErrorCommitsSingleTerminalFrame(t *testing.T) {
 		},
 	}
 
-	result, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+	result, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 
 	require.Error(t, err)
 	require.Nil(t, result)
@@ -646,7 +744,7 @@ func TestAntigravityCompatKeepaliveAfterFirstEvent(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high")
+		_, err := svc.handleResponsesStreamingFromAntigravity(c, resp, time.Now(), "gemini-3.1-pro-high", apicompat.ResponsesClientToolMapping{})
 		done <- err
 	}()
 	_, err := io.WriteString(
