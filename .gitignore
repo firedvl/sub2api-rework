@@ -158,6 +158,9 @@ docs/screenshots/*
 .serena/
 .codex/
 frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
 aicodex
 output/
 .codegraph/
