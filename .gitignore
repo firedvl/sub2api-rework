@@ -146,6 +146,7 @@ docs/*
 !docs/CODEX_STANDALONE_SEARCH.md
 !docs/DEVELOPMENT.md
 !docs/ROADMAP.md
+!docs/UI_AUDIT.md
 !docs/UI_REWORK.md
 !docs/UPSTREAM_CONTRIBUTION_NOTES.md
 !docs/UPSTREAM_SYNC.md
