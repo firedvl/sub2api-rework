@@ -109,8 +109,8 @@ editor to configure the same public model in two endpoint scopes:
 
 The same pattern applies to Claude or any inference model whose normal route
 does not use OpenAI. The `alpha_search` scope avoids hard-coded provider or
-model identities and uses the existing Composite route store; no schema
-migration is needed.
+model identities and uses the existing Composite route store. Migration `231`
+extends the route endpoint constraint to admit the new scope.
 
 Sub2API reuses its normal API-key authentication, group authorization,
 OpenAI-account scheduling, failover, concurrency, audit, billing, cancellation,
