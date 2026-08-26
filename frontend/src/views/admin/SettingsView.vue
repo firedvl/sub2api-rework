@@ -12962,7 +12962,11 @@ watch(
 }
 
 .settings-tab-active {
-  @apply text-primary-700 dark:text-primary-300;
+  color: var(--operator-foreground, #0f766e);
+}
+
+.dark .settings-tab-active {
+  color: var(--operator-foreground, #5eead4);
 }
 
 .settings-tab-active::after {
@@ -12972,7 +12976,11 @@ watch(
   left: 0.75rem;
   height: 2px;
   content: "";
-  @apply bg-primary-600 dark:bg-primary-400;
+  background: var(--operator-foreground, #0d9488);
+}
+
+.dark .settings-tab-active::after {
+  background: var(--operator-foreground, #2dd4bf);
 }
 
 .settings-tab-icon {
@@ -12985,7 +12993,11 @@ watch(
 }
 
 .settings-tab-active .settings-tab-icon {
-  @apply text-primary-600 dark:text-primary-300;
+  color: var(--operator-foreground, #0d9488);
+}
+
+.dark .settings-tab-active .settings-tab-icon {
+  color: var(--operator-foreground, #5eead4);
 }
 
 .settings-tab-label {

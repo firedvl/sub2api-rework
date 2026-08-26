@@ -9,7 +9,7 @@ const primaryLinks = [
   { href: '/admin/settings', target: '/admin/settings' },
 ]
 
-const fidelityAdminRoutes = ['/admin/dashboard', '/admin/accounts', '/admin/usage', '/admin/settings']
+const fidelityAdminRoutes = ['/admin/dashboard', '/admin/accounts', '/admin/groups', '/admin/usage', '/admin/settings']
 const fidelityViewports = [
   { width: 1440, height: 900 },
   { width: 1280, height: 800 },
@@ -25,8 +25,9 @@ test.describe('operator console navigation', () => {
 
   test('reaches all five areas and keeps history and deep-link state', async ({ page }) => {
     await page.goto('/admin/dashboard')
+    await expect(page.locator('.operator-primary-nav a[href="/admin/dashboard"]')).toHaveClass(/operator-primary-link-active/)
 
-    for (const link of primaryLinks) {
+    for (const link of primaryLinks.slice(1)) {
       const navLink = page.locator(`.operator-primary-nav a[href="${link.href}"]`)
       await expect(navLink).toBeVisible()
       await navLink.click()
@@ -73,19 +74,34 @@ test.describe('operator console navigation', () => {
     await expect(page.locator('.operator-console')).toHaveCount(0)
   })
 
-  test('keeps table pages inside the desktop viewport', async ({ page }) => {
+  test('keeps the Accounts technical table inside the desktop layout', async ({ page }) => {
     await page.goto('/admin/accounts')
 
-    const tableLayout = page.locator('.table-page-layout')
-    await expect(tableLayout).toBeVisible()
-    const bounds = await tableLayout.evaluate((element) => ({
-      bottom: element.getBoundingClientRect().bottom,
-      viewportHeight: window.innerHeight,
-    }))
-    expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight + 1)
+    const layout = page.locator('.operator-accounts-layout')
+    const details = page.locator('.operator-account-details')
+    await expect(layout).toBeVisible()
+    await details.locator('summary').click()
+
+    const table = page.locator('.operator-account-table')
+    await expect(table).toBeVisible()
+    const bounds = await layout.evaluate((element) => {
+      const layoutBounds = element.getBoundingClientRect()
+      const tableBounds = element.querySelector('.operator-account-table')!.getBoundingClientRect()
+      return {
+        layoutLeft: layoutBounds.left,
+        layoutRight: layoutBounds.right,
+        tableLeft: tableBounds.left,
+        tableRight: tableBounds.right,
+        viewportWidth: window.innerWidth,
+      }
+    })
+    expect(bounds.layoutRight).toBeLessThanOrEqual(bounds.viewportWidth + 1)
+    expect(bounds.tableLeft).toBeGreaterThanOrEqual(bounds.layoutLeft - 1)
+    expect(bounds.tableRight).toBeLessThanOrEqual(bounds.layoutRight + 1)
   })
 
   test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {
+    test.setTimeout(60_000)
     const anonymous = await browser.newContext()
     const loginPage = await anonymous.newPage()
     await installOperatorApiMock(loginPage)

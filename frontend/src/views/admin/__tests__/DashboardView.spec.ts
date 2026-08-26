@@ -50,13 +50,6 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-const formatLocalDate = (date: Date): string => {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 const createDashboardStats = (): DashboardStats => ({
   total_users: 0,
   today_new_users: 0,
@@ -126,11 +119,6 @@ const mountDashboard = () => mount(DashboardView, {
       AppLayout: { template: '<div><slot /></div>' },
       LoadingSpinner: true,
       Icon: true,
-      DateRangePicker: true,
-      Select: true,
-      ModelDistributionChart: true,
-      TokenUsageTrend: true,
-      Line: true
     }
   }
 })
@@ -169,20 +157,21 @@ describe('admin DashboardView', () => {
     getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
   })
 
-  it('uses last 24 hours as default dashboard range', async () => {
+  it('requests only the fleet-wide snapshot data owned by Overview', async () => {
     mountDashboard()
 
     await flushPromises()
 
-    const now = new Date()
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
-    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
-      start_date: formatLocalDate(yesterday),
-      end_date: formatLocalDate(now),
-      granularity: 'hour'
-    }))
+    expect(getSnapshotV2).toHaveBeenCalledWith({
+      include_stats: true,
+      include_trend: false,
+      include_model_stats: false,
+      include_group_stats: false,
+      include_users_trend: false
+    })
+    expect(getUserUsageTrend).not.toHaveBeenCalled()
+    expect(getUserSpendingRanking).not.toHaveBeenCalled()
   })
 
   it('reports a snapshot load failure', async () => {
@@ -234,13 +223,6 @@ describe('admin DashboardView', () => {
     expect(listAccounts).toHaveBeenNthCalledWith(2, 2, 1000, { include_scheduler_score: '0' })
     expect(wrapper.text()).toContain('First persisted account')
     expect(wrapper.text()).toContain('Second persisted account')
-    expect(getBatchUsage).not.toHaveBeenCalled()
-
-    const refresh = wrapper.findAll('button').find((button) => button.text() === 'common.refresh')
-    expect(refresh).toBeDefined()
-    await refresh!.trigger('click')
-    await flushPromises()
-
     expect(getBatchUsage).not.toHaveBeenCalled()
   })
 

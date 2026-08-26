@@ -1,7 +1,11 @@
 <template>
   <div
-    class="min-h-screen bg-gray-50 dark:bg-dark-950"
-    :class="{ 'operator-console': isOperatorConsole, 'fixture-review-mode': isFixtureReview }"
+    class="min-h-screen"
+    :class="{
+      'operator-console': isOperatorConsole,
+      'fixture-review-mode': isFixtureReview,
+      'bg-gray-50 dark:bg-dark-950': !isOperatorConsole
+    }"
   >
     <!-- Background Decoration -->
     <div v-if="!isOperatorConsole" class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
@@ -40,7 +44,7 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores'
@@ -79,8 +83,16 @@ const { replayTour } = useOnboardingTour({
 
 const onboardingStore = useOnboardingStore()
 
+watch(isOperatorConsole, (enabled) => {
+  document.body.toggleAttribute('data-operator-console', enabled)
+}, { immediate: true })
+
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)
+})
+
+onUnmounted(() => {
+  document.body.removeAttribute('data-operator-console')
 })
 
 defineExpose({ replayTour })

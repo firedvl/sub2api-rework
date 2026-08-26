@@ -1,7 +1,9 @@
 export default {
     accounts: {
-      title: 'Account Management',
+      title: 'Accounts',
       description: 'Manage AI platform accounts and credentials',
+      technicalDetails: 'Technical account details and actions',
+      technicalDetailsHint: 'IDs, usage diagnostics, routing metrics, proxies, and advanced actions',
       createAccount: 'Create Account',
       autoRefresh: 'Auto Refresh',
       enableAutoRefresh: 'Enable auto refresh',

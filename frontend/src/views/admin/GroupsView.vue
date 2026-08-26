@@ -4584,13 +4584,14 @@ const onboardingStore = useOnboardingStore();
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
 // Default hidden columns (hidden on first load / after schema bumps).
-const DEFAULT_HIDDEN_COLUMNS = ["id"];
+const DEFAULT_HIDDEN_COLUMNS = ["id", "usage"];
 const HIDDEN_COLUMNS_KEY = "group-hidden-columns";
 // Bump when adding new default-hidden columns so existing admins pick them up once.
 const COLUMN_SETTINGS_VERSION_KEY = "group-column-settings-version";
-const COLUMN_SETTINGS_VERSION = 2;
+const COLUMN_SETTINGS_VERSION = 3;
 const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
   2: ["id"],
+  3: ["usage"],
 };
 
 const allColumns = computed<Column[]>(() => [

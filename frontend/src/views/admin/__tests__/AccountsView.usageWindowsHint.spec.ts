@@ -6,12 +6,14 @@ import AccountsView from '../AccountsView.vue'
 const {
   listAccounts,
   listWithEtag,
+  getBatchUsage,
   getBatchTodayStats,
   getAllProxies,
   getAllGroups
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
+  getBatchUsage: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn()
@@ -22,6 +24,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       listWithEtag,
+      getBatchUsage,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       delete: vi.fn(),
@@ -67,6 +70,7 @@ const DataTableStub = {
   props: ['columns', 'data'],
   template: `
     <div data-test="data-table">
+      <div data-test="table-rows">{{ data.map(row => row.name).join(',') }}</div>
       <template v-for="column in columns" :key="column.key">
         <div v-if="column.key === 'usage'" data-test="usage-header">
           <slot :name="'header-' + column.key" :column="column" />
@@ -88,8 +92,9 @@ const HelpTooltipStub = {
   template: '<span data-test="usage-windows-hint">{{ content }}</span>'
 }
 
-function mountView() {
+function mountView(attachTo?: Element) {
   return mount(AccountsView, {
+    attachTo,
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
@@ -105,7 +110,7 @@ function mountView() {
           props: ['groups'],
           template: '<div data-test="account-filters" :data-group-count="groups.length"></div>'
         },
-        AccountBulkActionsBar: true,
+        AccountBulkActionsBar: { template: '<div data-test="bulk-actions"></div>' },
         AccountActionMenu: true,
         ImportDataModal: true,
         ReAuthAccountModal: true,
@@ -137,6 +142,7 @@ describe('admin AccountsView usage windows hint', () => {
 
     listAccounts.mockReset()
     listWithEtag.mockReset()
+    getBatchUsage.mockReset()
     getBatchTodayStats.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
@@ -153,6 +159,7 @@ describe('admin AccountsView usage windows hint', () => {
       etag: null,
       data: null
     })
+    getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
@@ -168,6 +175,80 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="account-filters"]').attributes('data-group-count')).toBe('1')
   })
 
+  it('summarizes every filtered account while the technical table remains paginated', async () => {
+    const makeAccount = (id: number, name: string, platform: 'openai' | 'gemini') => ({
+      id,
+      name,
+      platform,
+      type: platform === 'openai' ? 'oauth' : 'apikey',
+      status: 'active',
+      schedulable: true,
+      created_at: '2026-08-25T00:00:00Z',
+      updated_at: '2026-08-26T00:00:00Z',
+      proxy_id: null,
+      concurrency: 1,
+      priority: 1,
+      error_message: null,
+      last_used_at: null,
+      expires_at: null,
+      auto_pause_on_expired: false,
+      rate_limited_at: null,
+      rate_limit_reset_at: null,
+      overload_until: null,
+      temp_unschedulable_until: null,
+      temp_unschedulable_reason: null,
+      session_window_start: null,
+      session_window_end: null,
+      session_window_status: null,
+    })
+    const tableAccount = makeAccount(1, 'Current table page', 'openai')
+    const reserveAccount = makeAccount(2, 'OpenAI reserve fleet row', 'openai')
+    const geminiAccount = makeAccount(3, 'Gemini fleet row', 'gemini')
+
+    listAccounts.mockImplementation(async (page: number, pageSize: number) => {
+      if (pageSize !== 1000) {
+        return { items: [tableAccount], total: 3, page: 1, page_size: pageSize, pages: 3 }
+      }
+      return page === 1
+        ? { items: [tableAccount, reserveAccount], total: 3, page: 1, page_size: pageSize, pages: 2 }
+        : { items: [geminiAccount], total: 3, page: 2, page_size: pageSize, pages: 2 }
+    })
+    getBatchUsage.mockResolvedValue({
+      usage: {
+        '1': { updated_at: null, five_hour: null, seven_day: null, seven_day_sonnet: null },
+        '2': { updated_at: null, five_hour: null, seven_day: null, seven_day_sonnet: null },
+        '3': { updated_at: null, five_hour: null, seven_day: null, seven_day_sonnet: null },
+      },
+      errors: {},
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="table-rows"]').text()).toBe('Current table page')
+    expect(wrapper.text()).toContain('OpenAI reserve fleet row')
+    expect(wrapper.text()).toContain('Gemini fleet row')
+    expect(wrapper.findAll('.operator-capacity-provider-header h3').map((node) => node.text())).toEqual([
+      'OpenAI',
+      'Gemini',
+    ])
+    expect(listAccounts).toHaveBeenCalledWith(1, 1000, {
+      platform: '',
+      type: '',
+      status: '',
+      group: '',
+      privacy_mode: '',
+      search: '',
+    })
+    expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.any(Object))
+    expect(getBatchUsage).toHaveBeenCalledWith([1, 2, 3], false)
+
+    const technicalDetails = wrapper.get('details.operator-account-details')
+    expect(technicalDetails.find('[data-test="bulk-actions"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="bulk-actions"]').element.compareDocumentPosition(technicalDetails.element))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
   it('renders an explanatory tooltip next to the usage windows column header', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -180,6 +261,30 @@ describe('admin AccountsView usage windows hint', () => {
     const hint = wrapper.find('[data-test="usage-windows-hint"]')
     expect(hint.exists()).toBe(true)
     expect(hint.text()).toBe('admin.accounts.usageWindowsHint')
+  })
+
+  it('closes the account tools dropdown on Escape and restores trigger focus', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const wrapper = mountView(host)
+    await flushPromises()
+
+    const trigger = wrapper.get('button[title="admin.accounts.moreActions"]')
+    ;(trigger.element as HTMLButtonElement).focus()
+    await trigger.trigger('click')
+    await flushPromises()
+
+    const menu = document.body.querySelector<HTMLElement>('.account-tools-menu')
+    expect(menu).not.toBeNull()
+    menu?.querySelector<HTMLElement>('button')?.focus()
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+
+    expect(document.body.querySelector('.account-tools-menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger.element)
+    wrapper.unmount()
+    host.remove()
   })
 
   it('keeps Ollama Cloud in the single usage column and ignores legacy column preferences', async () => {

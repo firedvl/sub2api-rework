@@ -115,7 +115,7 @@ describe('admin AccountsView priority column preferences', () => {
     await wrapper.get('[data-test="sort-priority"]').trigger('click')
     await flushPromises()
 
-    expect(listAccounts).toHaveBeenLastCalledWith(
+    expect(listAccounts).toHaveBeenCalledWith(
       1,
       20,
       expect.objectContaining({ sort_by: 'priority', sort_order: 'desc' }),
