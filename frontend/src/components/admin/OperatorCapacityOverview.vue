@@ -151,7 +151,7 @@
         </p>
       </section>
 
-      <section class="operator-capacity-fleet">
+      <section v-if="compact" class="operator-capacity-fleet" data-testid="provider-capacity-overview">
         <div class="operator-capacity-section-heading">
           <h3>{{ t('admin.dashboard.capacity.byProvider') }}</h3>
           <span v-if="unknownCount">
@@ -163,47 +163,48 @@
             v-for="provider in providers"
             :key="`fleet-${provider.platform}`"
             class="operator-capacity-fleet-provider"
+            :data-testid="`provider-capacity-${provider.platform}`"
           >
             <div class="operator-capacity-fleet-label">
               <div>
                 <strong>{{ providerLabel(provider.platform) }}</strong>
-                <span>{{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}</span>
+                <span>{{ normalizedRemainingLabel(provider.remainingPercent) }}</span>
               </div>
-              <strong :class="capacityTone(provider.lowestRemaining)">
-                {{ percentLabel(provider.lowestRemaining) }}
+              <strong :class="capacityTone(provider.remainingPercent)">
+                {{ provider.remainingPercent === null ? t('common.unknown') : `${formatPercent(provider.remainingPercent)}%` }}
               </strong>
             </div>
             <div
               class="operator-capacity-track"
-              :class="{ 'is-unknown': provider.lowestRemaining === null }"
+              :class="{ 'is-unknown': provider.remainingPercent === null }"
               role="progressbar"
-              :aria-label="`${providerLabel(provider.platform)} ${percentLabel(provider.lowestRemaining)}`"
+              :aria-label="providerAriaLabel(provider)"
               aria-valuemin="0"
               aria-valuemax="100"
-              :aria-valuenow="provider.lowestRemaining === null ? undefined : Math.round(provider.lowestRemaining)"
+              :aria-valuenow="provider.remainingPercent === null ? undefined : Math.round(provider.remainingPercent)"
             >
               <span
-                v-if="provider.lowestRemaining !== null"
-                :class="capacityTone(provider.lowestRemaining)"
-                :style="{ width: `${provider.lowestRemaining}%` }"
+                v-if="provider.remainingPercent !== null"
+                :class="capacityTone(provider.remainingPercent)"
+                :style="{ width: `${provider.remainingPercent}%` }"
               />
             </div>
-            <ul v-if="compact" class="operator-capacity-compact-accounts">
-              <li
-                v-for="summary in provider.accounts"
-                :key="summary.account.id"
-                class="operator-capacity-compact-account"
-              >
-                <span :title="summary.account.name">{{ summary.account.name }}</span>
-                <span class="operator-capacity-compact-meta">
-                  <span :class="['operator-capacity-status', `is-${summary.health}`]">
-                    <span aria-hidden="true" />
-                    {{ healthLabel(summary.health) }}
-                  </span>
-                  <strong :class="capacityTone(summary.lowestRemaining)">
-                    {{ percentLabel(summary.lowestRemaining) }}
-                  </strong>
-                </span>
+            <ul class="operator-provider-capacity-meta">
+              <li>
+                {{ t('admin.dashboard.capacity.knownCount', { count: provider.knownCount }) }}
+                <span aria-hidden="true">&middot;</span>
+                {{ t('admin.dashboard.capacity.unknownCount', { count: provider.unknownCount }) }}
+                <span aria-hidden="true">&middot;</span>
+                {{ t('admin.dashboard.capacity.schedulableCount', { count: provider.schedulableCount }) }}
+              </li>
+              <li v-if="provider.lowestAccount && provider.lowestRemaining !== null">
+                {{ t('admin.dashboard.capacity.lowestAccountRemaining', {
+                  value: formatPercent(provider.lowestRemaining),
+                  account: provider.lowestAccount.account.name,
+                }) }}
+              </li>
+              <li v-if="provider.nextReset">
+                {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(provider.nextReset) }) }}
               </li>
             </ul>
           </article>
@@ -230,14 +231,30 @@
                 />
                 <span>
                   <span class="operator-capacity-provider-name">{{ providerLabel(provider.platform) }}</span>
-                  <span>{{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}</span>
+                  <span class="operator-capacity-provider-counts">
+                    {{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}
+                    <span aria-hidden="true">&middot;</span>
+                    {{ t('admin.dashboard.capacity.knownCount', { count: provider.knownCount }) }}
+                    <template v-if="provider.unknownCount">
+                      <span aria-hidden="true">&middot;</span>
+                      {{ t('admin.dashboard.capacity.unknownCount', { count: provider.unknownCount }) }}
+                    </template>
+                  </span>
                 </span>
               </span>
               <span class="operator-capacity-provider-summary">
-                <span>{{ t('admin.dashboard.capacity.lowestRemaining') }}</span>
-                <strong :class="capacityTone(provider.lowestRemaining)">
-                  {{ percentLabel(provider.lowestRemaining) }}
+                <strong :class="capacityTone(provider.remainingPercent)">
+                  {{ normalizedRemainingLabel(provider.remainingPercent) }}
                 </strong>
+                <span v-if="provider.lowestAccount && provider.lowestRemaining !== null">
+                  {{ t('admin.dashboard.capacity.lowestAccountRemaining', {
+                    value: formatPercent(provider.lowestRemaining),
+                    account: provider.lowestAccount.account.name,
+                  }) }}
+                </span>
+                <span v-if="provider.nextReset">
+                  {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(provider.nextReset) }) }}
+                </span>
               </span>
             </button>
           </header>
@@ -347,6 +364,7 @@ import {
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
   type OperatorAccountHealth,
+  type OperatorProviderCapacity,
 } from '@/utils/operatorCapacity'
 import type { Account, AccountPlatform, AccountType, AccountUsageInfo } from '@/types'
 
@@ -475,6 +493,20 @@ const formatPercent = (value: number) => Number.isInteger(value)
 const percentLabel = (value: number | null) => value === null
   ? t('common.unknown')
   : t('admin.dashboard.capacity.remaining', { value: formatPercent(value) })
+
+const normalizedRemainingLabel = (value: number | null) => value === null
+  ? t('admin.dashboard.capacity.quotaUnknown')
+  : t('admin.dashboard.capacity.normalizedRemaining', { value: formatPercent(value) })
+
+const providerAriaLabel = (provider: OperatorProviderCapacity) => t(
+  'admin.dashboard.capacity.providerCapacityAria',
+  {
+    provider: providerLabel(provider.platform),
+    remaining: normalizedRemainingLabel(provider.remainingPercent),
+    known: provider.knownCount,
+    unknown: provider.unknownCount,
+  },
+)
 
 const capacityTone = (value: number | null) => {
   if (value === null) return 'is-unknown'
@@ -794,7 +826,7 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 
 .operator-capacity-fleet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
@@ -819,36 +851,20 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 }
 .operator-capacity-fleet-label > strong { flex: 0 0 auto; }
 
-.operator-capacity-compact-accounts {
-  display: grid;
+.operator-provider-capacity-meta {
+  display: flex;
   margin-top: 0.75rem;
   padding-top: 0.625rem;
+  flex-direction: column;
   border-top: 1px solid var(--operator-border);
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
-.operator-capacity-compact-account {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.75rem;
+.operator-provider-capacity-meta li {
+  overflow-wrap: anywhere;
+  color: var(--operator-muted-foreground);
   font-size: 0.8125rem;
+  line-height: 1.4;
 }
-.operator-capacity-compact-account > span:first-child {
-  overflow: hidden;
-  color: var(--operator-foreground);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.operator-capacity-compact-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  white-space: nowrap;
-}
-.operator-capacity-compact-meta .operator-capacity-status { font-size: 0.75rem; }
-.operator-capacity-compact-meta > strong { font-weight: 700; }
 
 .operator-capacity-providers { border-top: 1px solid var(--operator-border); }
 .operator-capacity-provider + .operator-capacity-provider { border-top: 1px solid var(--operator-border); }
@@ -862,6 +878,7 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   color: var(--operator-muted-foreground);
   font-size: 0.8125rem;
 }
+.operator-capacity-provider-counts > span { margin: 0 0.2rem; }
 
 .operator-capacity-provider-toggle {
   display: flex;
@@ -911,12 +928,18 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 
 .operator-capacity-provider-summary {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
+  min-width: 0;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 0.125rem;
   color: var(--operator-muted-foreground);
   font-size: 0.8125rem;
+  text-align: right;
 }
-.operator-capacity-provider-summary strong { font-size: 0.875rem; }
+.operator-capacity-provider-summary strong {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
 
 .operator-capacity-account-list {
   display: grid;
@@ -1103,6 +1126,7 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   }
   .operator-capacity-account-body { grid-template-columns: 1fr; }
   .operator-pool-legend { grid-template-columns: 1fr; }
+  .operator-capacity-fleet-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 639px) {
@@ -1128,7 +1152,8 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   .operator-pool-unknown-count { white-space: normal; }
   .operator-capacity-provider-summary {
     width: 100%;
-    justify-content: space-between;
+    align-items: flex-start;
+    text-align: left;
   }
   .operator-capacity-window-grid { grid-template-columns: 1fr; }
   .operator-capacity-window-detail {

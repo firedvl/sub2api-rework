@@ -485,6 +485,61 @@ export const operatorFixtureChannels = [
   },
 ]
 
+export const operatorFixtureProxies = [
+  {
+    id: 41,
+    name: 'US West relay',
+    protocol: 'https',
+    host: 'proxy-west.example.test',
+    port: 8443,
+    username: null,
+    status: 'active',
+    account_count: 3,
+    latency_ms: 86,
+    latency_status: 'success',
+    ip_address: '192.0.2.41',
+    country: 'United States',
+    country_code: 'US',
+    region: 'Oregon',
+    city: 'Portland',
+    quality_status: 'healthy',
+    quality_score: 94,
+    quality_grade: 'A',
+    expires_at: null,
+    fallback_mode: 'direct',
+    backup_proxy_id: null,
+    expiry_warn_days: 7,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  },
+  {
+    id: 42,
+    name: 'EU standby relay',
+    protocol: 'socks5',
+    host: 'proxy-eu.example.test',
+    port: 1080,
+    username: 'review',
+    status: 'active',
+    account_count: 1,
+    latency_ms: 132,
+    latency_status: 'success',
+    ip_address: '198.51.100.42',
+    country: 'Germany',
+    country_code: 'DE',
+    region: 'Hesse',
+    city: 'Frankfurt',
+    quality_status: 'healthy',
+    quality_score: 88,
+    quality_grade: 'B',
+    expires_at: null,
+    fallback_mode: 'none',
+    backup_proxy_id: null,
+    expiry_warn_days: 7,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  },
+]
+
 const opsOverview = {
   start_time: '2026-08-25T18:00:00Z',
   end_time: '2026-08-25T19:00:00Z',
@@ -716,10 +771,14 @@ export function getOperatorFixtureData(
   }
   if (pathname === '/api/v1/admin/groups/live-capability') return { supported: true }
   if (pathname === '/api/v1/admin/channels') return paginated(operatorFixtureChannels)
-  if (pathname === '/api/v1/admin/proxies/all') return []
+  if (pathname === '/api/v1/admin/proxies') return paginated(operatorFixtureProxies)
+  if (pathname === '/api/v1/admin/proxies/all') return operatorFixtureProxies
 
   if (pathname === '/api/v1/admin/usage') return paginated(usageLogs)
   if (pathname === '/api/v1/admin/usage/stats') return usageStats
+  if (pathname === '/api/v1/admin/usage/search-users') {
+    return [{ id: 2, email: 'member@example.test', deleted: false }]
+  }
   if (pathname === '/api/v1/admin/audit-logs') {
     return paginated([
       { id: 1, user_id: 1, action: 'account.test', resource_type: 'account', resource_id: '101', details: { result: 'healthy' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-25T18:42:00Z', user: operatorFixtureUser() },

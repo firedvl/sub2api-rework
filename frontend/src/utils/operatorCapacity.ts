@@ -31,9 +31,23 @@ export interface OperatorAccountCapacity {
 export interface OperatorProviderCapacity {
   platform: AccountPlatform
   accounts: OperatorAccountCapacity[]
+  remainingPercent: number | null
   knownCount: number
   unknownCount: number
   lowestRemaining: number | null
+  lowestAccount: OperatorAccountCapacity | null
+  schedulableCount: number
+  nextReset: string | null
+}
+
+export interface OperatorNormalizedCapacityAggregate {
+  remainingPercent: number | null
+  knownCount: number
+  unknownCount: number
+  lowestRemaining: number | null
+  lowestAccount: OperatorAccountCapacity | null
+  schedulableCount: number
+  nextReset: string | null
 }
 
 export interface OperatorPoolCapacitySegment {
@@ -41,10 +55,7 @@ export interface OperatorPoolCapacitySegment {
   contributionPercent: number
 }
 
-export interface OperatorPoolCapacity {
-  knownCount: number
-  unknownCount: number
-  remainingPercent: number | null
+export interface OperatorPoolCapacity extends OperatorNormalizedCapacityAggregate {
   usedPercent: number | null
   segments: OperatorPoolCapacitySegment[]
   unknownAccounts: OperatorAccountCapacity[]
@@ -326,23 +337,58 @@ export function buildProviderCapacity(
         return left.lowestRemaining - right.lowestRemaining
           || left.account.name.localeCompare(right.account.name)
       })
-      const known = providerAccounts.filter((account) => account.lowestRemaining !== null)
       return {
         platform,
         accounts: providerAccounts,
-        knownCount: known.length,
-        unknownCount: providerAccounts.length - known.length,
-        lowestRemaining: known.length
-          ? Math.min(...known.map((account) => account.lowestRemaining as number))
-          : null,
+        ...aggregateNormalizedCapacity(providerAccounts, now),
       }
     })
     .sort((left, right) => PLATFORM_ORDER.indexOf(left.platform) - PLATFORM_ORDER.indexOf(right.platform))
 }
 
+export function aggregateNormalizedCapacity(
+  accounts: OperatorAccountCapacity[],
+  now = new Date(),
+): OperatorNormalizedCapacityAggregate {
+  const knownAccounts = accounts.filter(
+    (summary): summary is OperatorAccountCapacity & { lowestRemaining: number } => (
+      summary.lowestRemaining !== null
+    ),
+  )
+  const lowestAccount = knownAccounts.reduce<OperatorAccountCapacity | null>(
+    (lowest, summary) => (
+      lowest === null || summary.lowestRemaining < (lowest.lowestRemaining as number)
+        ? summary
+        : lowest
+    ),
+    null,
+  )
+  const nextReset = knownAccounts
+    .flatMap((summary) => summary.windows.filter((window) => (
+      window.remainingPercent === summary.lowestRemaining && isFuture(window.resetsAt, now)
+    )))
+    .sort((left, right) => (
+      new Date(left.resetsAt as string).getTime() - new Date(right.resetsAt as string).getTime()
+    ))[0]?.resetsAt ?? null
+
+  return {
+    remainingPercent: knownAccounts.length
+      ? knownAccounts.reduce((total, summary) => total + summary.lowestRemaining, 0) / knownAccounts.length
+      : null,
+    knownCount: knownAccounts.length,
+    unknownCount: accounts.length - knownAccounts.length,
+    lowestRemaining: lowestAccount?.lowestRemaining ?? null,
+    lowestAccount,
+    schedulableCount: accounts.filter((summary) => summary.account.schedulable).length,
+    nextReset,
+  }
+}
+
 export function buildNormalizedPoolCapacity(
   accounts: OperatorAccountCapacity[],
+  now = new Date(),
 ): OperatorPoolCapacity {
+  const aggregate = aggregateNormalizedCapacity(accounts, now)
   const knownAccounts = accounts.filter(
     (summary): summary is OperatorAccountCapacity & { lowestRemaining: number } => (
       summary.lowestRemaining !== null
@@ -352,9 +398,7 @@ export function buildNormalizedPoolCapacity(
 
   if (!knownAccounts.length) {
     return {
-      knownCount: 0,
-      unknownCount: unknownAccounts.length,
-      remainingPercent: null,
+      ...aggregate,
       usedPercent: null,
       segments: [],
       unknownAccounts,
@@ -365,16 +409,10 @@ export function buildNormalizedPoolCapacity(
     summary,
     contributionPercent: summary.lowestRemaining / knownAccounts.length,
   }))
-  const remainingPercent = segments.reduce(
-    (total, segment) => total + segment.contributionPercent,
-    0,
-  )
 
   return {
-    knownCount: knownAccounts.length,
-    unknownCount: unknownAccounts.length,
-    remainingPercent,
-    usedPercent: 100 - remainingPercent,
+    ...aggregate,
+    usedPercent: 100 - (aggregate.remainingPercent as number),
     segments,
     unknownAccounts,
   }

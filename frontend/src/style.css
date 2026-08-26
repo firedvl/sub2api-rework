@@ -1845,62 +1845,111 @@ body:has(.auth-codex-shell) .modal-footer {
   background: var(--operator-card);
 }
 
-body[data-operator-console] .select-dropdown-portal {
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:hover {
+  border-color: color-mix(in oklch, var(--operator-border) 65%, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:is(:focus-visible, .operator-control-open) {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+  --tw-ring-color: transparent;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:disabled {
+  cursor: not-allowed;
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  opacity: 0.65;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu {
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
   background: var(--operator-card);
   box-shadow: 0 8px 24px oklch(0 0 0 / 0.14);
   color: var(--operator-foreground);
-}
-
-body[data-operator-console] .select-dropdown-portal :is(.select-search, .select-option-group) {
-  border-color: var(--operator-border);
-}
-
-body[data-operator-console] .select-dropdown-portal :is(.select-search-input, .select-option, .select-empty) {
-  color: var(--operator-foreground);
-  font-size: 0.875rem;
-}
-
-body[data-operator-console] .select-dropdown-portal .select-option {
-  min-height: 2.5rem;
-}
-
-body[data-operator-console] .select-dropdown-portal .select-option-selected {
-  background: var(--operator-muted);
-  color: var(--operator-foreground);
-}
-
-body[data-operator-console] .select-dropdown-portal .select-option-selected svg {
-  color: var(--operator-foreground);
-}
-
-body[data-operator-console] .select-option:hover,
-body[data-operator-console] .select-option-focused {
-  background: var(--operator-muted);
-}
-
-body[data-operator-console] :is(.action-menu-content, .account-tools-menu) {
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius);
-  background: var(--operator-card);
-  box-shadow: 0 8px 24px oklch(0 0 0 / 0.2);
-  color: var(--operator-foreground);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
-body[data-operator-console] :is(.action-menu-content, .account-tools-menu) button {
-  min-height: 2.5rem;
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search, .select-option-group, .operator-menu-divider) {
+  border-color: var(--operator-border);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search-input, .select-empty) {
   color: var(--operator-foreground);
   font-size: 0.875rem;
 }
 
-body[data-operator-console] :is(.action-menu-content, .account-tools-menu) button:hover {
-  background: var(--operator-muted);
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item {
+  min-height: 2.5rem;
+  background: transparent;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
 }
 
-body[data-operator-console] .action-menu-content button > :is(svg, span:first-child) {
-  color: var(--operator-muted-foreground) !important;
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
+  :hover,
+  :focus-visible,
+  .select-option-focused,
+  .select-option-selected,
+  [aria-selected="true"],
+  [aria-current="true"],
+  [aria-pressed="true"]
+) {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item:disabled,
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--operator-muted-foreground);
+  opacity: 0.55;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-check {
+  color: var(--operator-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-checkbox {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-primary-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) :is(
+  .operator-menu-item[aria-selected="true"],
+  .operator-menu-item.select-option-selected
+) .operator-menu-checkbox {
+  border-color: var(--operator-primary);
+  background: var(--operator-primary);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-checkbox svg {
+  color: inherit;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-primary {
+  background: var(--operator-primary);
+  color: var(--operator-primary-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-primary:hover {
+  background: color-mix(in oklch, var(--operator-primary) 88%, var(--operator-card));
 }
 
 body[data-operator-console] ::selection {

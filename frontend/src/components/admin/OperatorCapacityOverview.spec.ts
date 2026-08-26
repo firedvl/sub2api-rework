@@ -90,6 +90,9 @@ describe('OperatorCapacityOverview', () => {
     expect(wrapper.text()).toContain('OpenAI reserve')
     expect(wrapper.text()).toContain('Gemini primary')
     expect(wrapper.findAll('[data-testid="account-technical-details"]')).toHaveLength(0)
+    expect(wrapper.get('[data-testid="provider-toggle-openai"]').text()).toContain(
+      'admin.dashboard.capacity.normalizedRemaining',
+    )
 
     const openAIToggle = wrapper.get('[data-testid="provider-toggle-openai"]')
     expect(openAIToggle.attributes('aria-expanded')).toBe('true')
@@ -121,5 +124,14 @@ describe('OperatorCapacityOverview', () => {
     expect(pool.text()).toContain('Account 2')
     expect(pool.text()).toContain('Account 3')
     expect(pool.text()).toContain('admin.dashboard.capacity.poolUnknownExcluded:1')
+
+    const openAIProvider = wrapper.get('[data-testid="provider-capacity-openai"]')
+    expect(openAIProvider.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('60')
+    expect(openAIProvider.text()).toContain('admin.dashboard.capacity.knownCount:2')
+    expect(openAIProvider.text()).toContain('admin.dashboard.capacity.unknownCount:0')
+
+    const geminiProvider = wrapper.get('[data-testid="provider-capacity-gemini"]')
+    expect(geminiProvider.get('[role="progressbar"]').attributes('aria-valuenow')).toBeUndefined()
+    expect(geminiProvider.text()).toContain('admin.dashboard.capacity.quotaUnknown')
   })
 })

@@ -11,8 +11,9 @@
       :aria-label="ariaLabel ?? 'Select option'"
       :aria-describedby="ariaDescribedby"
       :class="[
-        'select-trigger',
+        'select-trigger operator-control',
         isOpen && 'select-trigger-open',
+        isOpen && 'operator-control-open',
         error && 'select-trigger-error',
         disabled && 'select-trigger-disabled'
       ]"
@@ -51,7 +52,7 @@
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal"
+          class="select-dropdown-portal operator-menu"
           :class="[instanceId]"
           :style="dropdownStyle"
           role="listbox"
@@ -84,7 +85,7 @@
               @click.stop="!isOptionDisabled(option) && selectOption(option)"
               @mouseenter="handleOptionMouseEnter(option, index)"
               :class="[
-                'select-option',
+                'select-option operator-menu-item',
                 isGroupHeaderOption(option) && 'select-option-group',
                 isSelected(option) && 'select-option-selected',
                 isOptionDisabled(option) && !isGroupHeaderOption(option) && 'select-option-disabled',
@@ -103,7 +104,7 @@
                   v-if="isSelected(option)"
                   name="check"
                   size="sm"
-                  class="text-primary-500"
+                  class="operator-menu-check"
                   :stroke-width="2"
                 />
               </slot>

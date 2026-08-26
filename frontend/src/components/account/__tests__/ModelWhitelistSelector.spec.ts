@@ -29,10 +29,10 @@ vi.mock('@/composables/useClipboard', () => ({
 
 import ModelWhitelistSelector from '../ModelWhitelistSelector.vue'
 
-function mountSelector() {
+function mountSelector(modelValue: string[] = []) {
   return mount(ModelWhitelistSelector, {
     props: {
-      modelValue: [],
+      modelValue,
       platform: 'openai'
     },
     global: {
@@ -85,5 +85,17 @@ describe('ModelWhitelistSelector', () => {
 
     expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-5.6-sol']]])
     expect(copyToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('uses the shared operator primitives for open and selected states', async () => {
+    const wrapper = mountSelector(['gpt-5.6-sol'])
+    await wrapper.get('div.cursor-pointer').trigger('click')
+
+    expect(wrapper.get('div.cursor-pointer').classes()).toContain('operator-control-open')
+    expect(wrapper.get('.operator-menu').exists()).toBe(true)
+    const row = findModelRow(wrapper, 'gpt-5.6-sol')
+    expect(row.classes()).toContain('operator-menu-item')
+    expect(row.classes()).toContain('select-option-selected')
+    expect(row.get('.operator-menu-checkbox').exists()).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
 
 const primaryLinks = [
@@ -16,6 +16,34 @@ const fidelityViewports = [
   { width: 1024, height: 768 },
   { width: 768, height: 900 },
 ]
+
+async function expectNeutralOperatorMenu(page: Page, menu: Locator, emphasizedItem: Locator) {
+  await expect(menu).toBeVisible()
+  await expect(emphasizedItem).toBeVisible()
+  await emphasizedItem.hover()
+  await page.waitForTimeout(200)
+
+  const tokens = await page.locator('.operator-console').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      card: style.getPropertyValue('--operator-card').trim(),
+      border: style.getPropertyValue('--operator-border').trim(),
+      muted: style.getPropertyValue('--operator-muted').trim(),
+      foreground: style.getPropertyValue('--operator-foreground').trim(),
+    }
+  })
+  const menuColors = await menu.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { background: style.backgroundColor, border: style.borderColor }
+  })
+  const itemColors = await emphasizedItem.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { background: style.backgroundColor, color: style.color }
+  })
+
+  expect(menuColors).toEqual({ background: tokens.card, border: tokens.border })
+  expect(itemColors).toEqual({ background: tokens.muted, color: tokens.foreground })
+}
 
 test.describe('operator console navigation', () => {
   test.beforeEach(async ({ page }) => {
@@ -185,6 +213,14 @@ test.describe('operator console navigation', () => {
     await expect(pool).toContainText('Gemini Recovery')
     await expect(pool).toContainText('1 unknown excluded')
     await expect(pool.locator('svg[role="img"]')).toHaveAttribute('aria-label', /41\.4% available, 58\.6% Used capacity/)
+
+    const providerOverview = page.getByTestId('provider-capacity-overview')
+    await expect(providerOverview).toBeVisible()
+    await expect(page.getByTestId('provider-capacity-openai')).toContainText('66.8% normalized remaining')
+    await expect(page.getByTestId('provider-capacity-anthropic')).toContainText('4% normalized remaining')
+    await expect(page.getByTestId('provider-capacity-antigravity')).toContainText('28% normalized remaining')
+    await expect(page.getByTestId('provider-capacity-gemini')).toContainText('Quota unknown')
+    await expect(page.getByTestId('provider-capacity-openai').getByRole('progressbar')).toHaveAttribute('aria-valuenow', '67')
   })
 
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
@@ -193,6 +229,9 @@ test.describe('operator console navigation', () => {
     const toggle = page.getByTestId('provider-toggle-openai')
     const panel = page.locator('#operator-provider-openai-accounts')
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(toggle).toContainText('66.8% normalized remaining')
+    await expect(toggle).toContainText('Lowest 52% - Codex Team West')
+    await expect(toggle).toContainText('Next limiting reset')
     await toggle.focus()
     await page.keyboard.press('Enter')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -206,7 +245,10 @@ test.describe('operator console navigation', () => {
     await expect(panel).toBeVisible()
   })
 
-  test('uses semantic green switches and neutral open-menu states', async ({ page }) => {
+  test('uses semantic green switches and neutral open-menu states across operator areas', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
+    await page.setViewportSize({ width: 1024, height: 900 })
     await page.goto('/admin/accounts')
 
     const inactiveContextBorder = await page.locator('.operator-context-link:not(.operator-context-link-active)').first()
@@ -237,37 +279,54 @@ test.describe('operator console navigation', () => {
     const platformSelect = page.locator('.select-trigger').first()
     await platformSelect.click()
     const selectedOption = page.locator('.select-dropdown-portal .select-option-selected')
-    await expect(selectedOption).toBeVisible()
-    const selectColors = await selectedOption.evaluate((element) => {
-      const root = document.querySelector('.operator-console') as HTMLElement
-      const rootStyle = getComputedStyle(root)
-      return {
-        expectedBackground: rootStyle.getPropertyValue('--operator-muted').trim(),
-        expectedColor: rootStyle.getPropertyValue('--operator-foreground').trim(),
-        background: getComputedStyle(element).backgroundColor,
-        color: getComputedStyle(element).color,
-        checkColor: getComputedStyle(element.querySelector('svg')!).color,
-      }
-    })
-    expect(selectColors.background).toBe(selectColors.expectedBackground)
-    expect(selectColors.color).toBe(selectColors.expectedColor)
-    expect(selectColors.checkColor).toBe(selectColors.expectedColor)
+    await expectNeutralOperatorMenu(page, page.locator('.select-dropdown-portal'), selectedOption)
+    const checkColor = await selectedOption.locator('svg').evaluate((element) => getComputedStyle(element).color)
+    const expectedForeground = await page.locator('.operator-console').evaluate(
+      (element) => getComputedStyle(element).getPropertyValue('--operator-foreground').trim(),
+    )
+    expect(checkColor).toBe(expectedForeground)
     await page.keyboard.press('Escape')
 
     const moreButton = page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'More' }).first()
     await moreButton.click()
     const menu = page.locator('.action-menu-content')
     await expect(menu).toBeVisible()
-    const menuColors = await menu.evaluate((element) => {
-      const root = document.querySelector('.operator-console') as HTMLElement
-      const expected = getComputedStyle(root).getPropertyValue('--operator-foreground').trim()
-      return {
-        expected,
-        buttons: [...element.querySelectorAll('button')].map((button) => getComputedStyle(button).color),
-      }
-    })
-    expect(menuColors.buttons.length).toBeGreaterThan(2)
-    expect(menuColors.buttons.every((color) => color === menuColors.expected)).toBe(true)
+    const [menuBox, statusBarBox] = await Promise.all([
+      menu.boundingBox(),
+      page.locator('.operator-status-bar').boundingBox(),
+    ])
+    expect(menuBox).not.toBeNull()
+    expect(statusBarBox).not.toBeNull()
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(statusBarBox!.y)
+    const firstAction = menu.locator('.operator-menu-item').first()
+    await expectNeutralOperatorMenu(page, menu, firstAction)
+    await page.keyboard.press('Escape')
+
+    await page.goto('/admin/ops')
+    const activitySelect = page.locator('.select-trigger').first()
+    await activitySelect.click()
+    await page.keyboard.press('ArrowDown')
+    await expectNeutralOperatorMenu(
+      page,
+      page.locator('.select-dropdown-portal'),
+      page.locator('.select-dropdown-portal .select-option-focused'),
+    )
+    await page.keyboard.press('Escape')
+
+    await page.goto('/admin/groups')
+    await page.getByRole('button', { name: 'Column Settings' }).click()
+    const groupsMenu = page.locator('.operator-menu:visible')
+    await expectNeutralOperatorMenu(page, groupsMenu, groupsMenu.locator('[aria-pressed="true"]').first())
+
+    await page.goto('/admin/settings')
+    await page.getByRole('tab', { name: 'Gateway' }).click()
+    await page.locator('.select-trigger:visible').first().click()
+    await page.keyboard.press('ArrowDown')
+    await expectNeutralOperatorMenu(
+      page,
+      page.locator('.select-dropdown-portal'),
+      page.locator('.select-dropdown-portal .select-option-focused'),
+    )
   })
 
   test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {

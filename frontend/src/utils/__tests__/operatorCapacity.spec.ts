@@ -86,7 +86,10 @@ describe('operator capacity normalization', () => {
     expect(providers.find((provider) => provider.platform === 'openai')).toMatchObject({
       knownCount: 2,
       unknownCount: 0,
+      remainingPercent: 66.8,
       lowestRemaining: 52,
+      lowestAccount: expect.objectContaining({ account: expect.objectContaining({ id: 1 }) }),
+      schedulableCount: 2,
     })
     expect(providers.find((provider) => provider.platform === 'gemini')).toMatchObject({
       knownCount: 0,
@@ -117,5 +120,83 @@ describe('operator capacity normalization', () => {
     expect(pool.segments.map((segment) => segment.contributionPercent)).toEqual([40, 20])
     expect(pool.knownCount).toBe(2)
     expect(pool.unknownAccounts.map((summary) => summary.account.id)).toEqual([3])
+  })
+
+  it('reports mixed and all-unknown provider quota without treating unknown as zero', () => {
+    const providers = buildProviderCapacity(
+      [
+        account(1),
+        account(2),
+        account(3, { platform: 'gemini' }),
+      ],
+      {
+        '1': usage({
+          five_hour: { utilization: 25, resets_at: '2026-08-26T02:00:00Z', remaining_seconds: 7200 },
+        }),
+      },
+      {},
+      new Date('2026-08-25T18:00:00Z'),
+    )
+
+    expect(providers.find((provider) => provider.platform === 'openai')).toMatchObject({
+      remainingPercent: 75,
+      knownCount: 1,
+      unknownCount: 1,
+      lowestRemaining: 75,
+      nextReset: '2026-08-26T02:00:00Z',
+    })
+    expect(providers.find((provider) => provider.platform === 'gemini')).toMatchObject({
+      remainingPercent: null,
+      knownCount: 0,
+      unknownCount: 1,
+      lowestRemaining: null,
+      lowestAccount: null,
+      nextReset: null,
+    })
+  })
+
+  it('uses only limiting windows for the next provider reset', () => {
+    const provider = buildProviderCapacity(
+      [account(1), account(2)],
+      {
+        '1': usage({
+          five_hour: { utilization: 20, resets_at: '2026-08-25T20:00:00Z', remaining_seconds: 7200 },
+          seven_day: { utilization: 60, resets_at: '2026-08-28T00:00:00Z', remaining_seconds: 172800 },
+        }),
+        '2': usage({
+          five_hour: { utilization: 70, resets_at: '2026-08-26T01:00:00Z', remaining_seconds: 25200 },
+        }),
+      },
+      {},
+      new Date('2026-08-25T18:00:00Z'),
+    )[0]
+
+    expect(provider.lowestAccount?.account.id).toBe(2)
+    expect(provider.nextReset).toBe('2026-08-26T01:00:00Z')
+  })
+
+  it('keeps the global average consistent with known-account-weighted provider averages', () => {
+    const providers = buildProviderCapacity(
+      [
+        account(1),
+        account(2),
+        account(3, { platform: 'anthropic' }),
+        account(4, { platform: 'gemini' }),
+      ],
+      {
+        '1': usage({ five_hour: { utilization: 20, resets_at: null, remaining_seconds: null } }),
+        '2': usage({ five_hour: { utilization: 40, resets_at: null, remaining_seconds: null } }),
+        '3': usage({ five_hour: { utilization: 90, resets_at: null, remaining_seconds: null } }),
+      },
+    )
+    const pool = buildNormalizedPoolCapacity(providers.flatMap((provider) => provider.accounts))
+    const providerWeightedAverage = providers.reduce(
+      (total, provider) => total + (provider.remainingPercent ?? 0) * provider.knownCount,
+      0,
+    ) / providers.reduce((total, provider) => total + provider.knownCount, 0)
+
+    expect(pool.remainingPercent).toBeCloseTo(providerWeightedAverage)
+    expect(pool.remainingPercent).toBe(50)
+    expect(pool.unknownCount).toBe(1)
   })
 })

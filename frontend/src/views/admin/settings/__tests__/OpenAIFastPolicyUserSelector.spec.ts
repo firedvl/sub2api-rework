@@ -87,10 +87,13 @@ describe('OpenAIFastPolicyUserSelector', () => {
     await flushPromises()
 
     expect(mockSearchUsers).toHaveBeenCalledWith('a')
+    expect(input.classes()).toContain('operator-control')
+    expect(wrapper.get('.operator-menu').exists()).toBe(true)
     const result = wrapper.findAll('button').find((button) =>
       button.text().includes('alice@example.com'),
     )
     expect(result).toBeDefined()
+    expect(result!.classes()).toContain('operator-menu-item')
     await result!.trigger('click')
 
     expect(wrapper.emitted('update:modelValue')).toEqual([[[9]]])

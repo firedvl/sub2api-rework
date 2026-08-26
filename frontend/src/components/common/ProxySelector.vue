@@ -5,8 +5,8 @@
       @click="toggle"
       :disabled="disabled"
       :class="[
-        'select-trigger',
-        isOpen && 'select-trigger-open',
+        'select-trigger operator-control',
+        isOpen && 'select-trigger-open operator-control-open',
         disabled && 'select-trigger-disabled'
       ]"
     >
@@ -23,7 +23,7 @@
     </button>
 
     <Transition name="select-dropdown">
-      <div v-if="isOpen" class="select-dropdown">
+      <div v-if="isOpen" class="select-dropdown operator-menu">
         <!-- Search and Batch Test Header -->
         <div class="select-header">
           <div class="select-search">
@@ -69,10 +69,10 @@
           <!-- No Proxy option -->
           <div
             @click="selectOption(null)"
-            :class="['select-option', modelValue === null && 'select-option-selected']"
+            :class="['select-option operator-menu-item', modelValue === null && 'select-option-selected']"
           >
             <span class="select-option-label">{{ t('admin.accounts.noProxy') }}</span>
-            <Icon v-if="modelValue === null" name="check" size="sm" class="text-primary-500" />
+            <Icon v-if="modelValue === null" name="check" size="sm" class="operator-menu-check" />
           </div>
 
           <!-- Proxy options -->
@@ -80,7 +80,7 @@
             v-for="proxy in filteredProxies"
             :key="proxy.id"
             @click="selectOption(proxy.id)"
-            :class="['select-option', modelValue === proxy.id && 'select-option-selected']"
+            :class="['select-option operator-menu-item', modelValue === proxy.id && 'select-option-selected']"
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
@@ -153,7 +153,7 @@
               v-if="modelValue === proxy.id"
               name="check"
               size="sm"
-              class="flex-shrink-0 text-primary-500"
+              class="operator-menu-check flex-shrink-0"
             />
           </div>
 
@@ -410,6 +410,13 @@ onUnmounted(() => {
   @apply text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400;
   @apply hover:bg-emerald-50 dark:hover:bg-emerald-900/20;
   @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+:global(body[data-operator-console] .select-trigger.operator-control),
+:global(body[data-operator-console] .select-dropdown.operator-menu) {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
 }
 
 /* Dropdown animation */

@@ -3,6 +3,7 @@ import {
   getOperatorFixtureData,
   isOperatorFixtureReadRequest,
   operatorFixtureAccounts,
+  operatorFixtureProxies,
 } from '../../e2e/fixtures/operatorData'
 
 describe('operator fixture data', () => {
@@ -24,5 +25,17 @@ describe('operator fixture data', () => {
     }
 
     expect(response.stats.total_accounts).toBe(operatorFixtureAccounts.length)
+  })
+
+  it('provides records for selector and open-menu fixture review', () => {
+    const proxies = getOperatorFixtureData('/api/v1/admin/proxies') as {
+      items: typeof operatorFixtureProxies
+    }
+    const users = getOperatorFixtureData('/api/v1/admin/usage/search-users') as Array<{
+      email: string
+    }>
+
+    expect(proxies.items).toEqual(operatorFixtureProxies)
+    expect(users).toEqual([{ id: 2, email: 'member@example.test', deleted: false }])
   })
 })
