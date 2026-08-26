@@ -2,8 +2,9 @@
   <aside
     class="sidebar"
     :class="[
-      sidebarCollapsed ? 'w-[72px]' : 'w-64',
-      { '-translate-x-full lg:translate-x-0': !mobileOpen }
+      mobileOnly ? 'operator-mobile-sidebar w-72 lg:hidden' : (sidebarCollapsed ? 'w-[72px]' : 'w-64'),
+      mobileOpen ? 'translate-x-0' : '-translate-x-full',
+      { 'lg:translate-x-0': !mobileOnly }
     ]"
   >
     <!-- Logo/Brand -->
@@ -31,8 +32,24 @@
 
     <!-- Navigation -->
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
+      <template v-if="mobileOnly">
+        <div class="operator-mobile-nav-section">
+          <router-link
+            v-for="area in visibleOperatorAreas"
+            :key="area.id"
+            :to="area.primaryPath"
+            class="operator-mobile-nav-link"
+            :class="{ 'operator-mobile-nav-link-active': activeOperatorArea?.id === area.id }"
+            :aria-current="activeOperatorArea?.id === area.id ? 'page' : undefined"
+            @click="handleMenuItemClick(area.primaryPath)"
+          >
+            {{ t(area.labelKey) }}
+          </router-link>
+        </div>
+      </template>
+
       <!-- Admin View: Admin menu first, then personal menu -->
-      <template v-if="isAdmin">
+      <template v-else-if="isAdmin">
         <!-- Admin Section -->
         <div class="sidebar-section">
           <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
@@ -170,6 +187,7 @@
 
       <!-- Collapse Button -->
       <button
+        v-if="!mobileOnly"
         @click="toggleSidebar"
         class="sidebar-link w-full"
         :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
@@ -203,6 +221,7 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import { getOperatorArea, operatorAreas } from '@/router/operatorNavigation'
 
 interface NavItem {
   path: string
@@ -225,6 +244,10 @@ interface NavItem {
    */
   featureFlag?: () => boolean | undefined
 }
+
+const props = withDefaults(defineProps<{ mobileOnly?: boolean }>(), {
+  mobileOnly: false,
+})
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
 // 使用 `!== false` 宽容语义：undefined（设置未加载）或 true 都视为显示。
@@ -251,9 +274,14 @@ const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const mobileOnly = computed(() => props.mobileOnly)
+const sidebarCollapsed = computed(() => !props.mobileOnly && appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
+const visibleOperatorAreas = computed(() =>
+  operatorAreas.filter((area) => !(authStore.isSimpleMode && area.hideInSimpleMode)),
+)
+const activeOperatorArea = computed(() => getOperatorArea(route.path))
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 

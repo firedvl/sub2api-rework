@@ -52,6 +52,21 @@ pnpm run build
 The root `make test-frontend` target runs lint, type checking, and the critical
 Vitest set used by CI.
 
+### Operator UI fixture review
+
+Run the operator console without a backend or external connection:
+
+```bash
+cd frontend
+pnpm review:ui
+```
+
+Open `http://127.0.0.1:4174`. The root URL redirects to the fixture-backed
+Overview, and `/login` remains available for login-page review. The server binds
+only to localhost, seeds a synthetic admin session, serves sanitized fixed data,
+disables normal backend proxies, and rejects writes. To test the fixture login,
+use `operator@example.test` and `review-only`.
+
 ## Full Build
 
 ```bash

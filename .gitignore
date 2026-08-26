@@ -39,6 +39,9 @@ frontend/dist/
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js.timestamp-*
+frontend/e2e/fixtures/operatorData.d.ts
+frontend/e2e/fixtures/operatorData.js
+frontend/.playwright-cli/
 
 # 日志
 npm-debug.log*
@@ -155,6 +158,20 @@ docs/*
 !docs/screenshots/
 docs/screenshots/*
 !docs/screenshots/mobile-account-actions-menu.png
+!docs/screenshots/operator-ui/
+docs/screenshots/operator-ui/*
+!docs/screenshots/operator-ui/before-login.png
+!docs/screenshots/operator-ui/after-login.png
+!docs/screenshots/operator-ui/reference-login.jpg
+!docs/screenshots/operator-ui/before-overview.png
+!docs/screenshots/operator-ui/after-overview.png
+!docs/screenshots/operator-ui/reference-overview.jpg
+!docs/screenshots/operator-ui/before-accounts.png
+!docs/screenshots/operator-ui/after-accounts.png
+!docs/screenshots/operator-ui/reference-accounts.jpg
+!docs/screenshots/operator-ui/before-settings.png
+!docs/screenshots/operator-ui/after-settings.png
+!docs/screenshots/operator-ui/reference-settings.jpg
 .serena/
 .codex/
 frontend/coverage/

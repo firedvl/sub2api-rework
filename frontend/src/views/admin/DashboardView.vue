@@ -22,50 +22,39 @@
       </section>
 
       <template v-else-if="stats">
-        <section class="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,0.9fr)]">
-          <div class="card p-5">
-            <div class="flex items-start justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.gatewayTraffic') }}</p>
-                <div class="mt-2 flex items-baseline gap-3">
-                  <p class="text-3xl font-semibold text-gray-900 dark:text-white">{{ formatNumber(stats.rpm) }} <span class="text-base font-medium text-gray-500 dark:text-gray-400">RPM</span></p>
-                  <p class="text-sm font-medium text-primary-700 dark:text-primary-300">{{ formatTokens(stats.tpm) }} TPM</p>
-                </div>
-              </div>
-              <span class="inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium" :class="hasGatewayTraffic ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'">
-                <span class="h-1.5 w-1.5 rounded-full" :class="hasGatewayTraffic ? 'bg-emerald-500' : 'bg-gray-400'" />
-                {{ hasGatewayTraffic ? t('admin.dashboard.receivingTraffic') : t('admin.dashboard.idleTraffic') }}
-              </span>
+        <section class="operator-stats-grid">
+          <article class="card operator-stat-card">
+            <div class="operator-stat-heading">
+              <span>{{ t('admin.dashboard.todayRequests') }}</span>
+              <span class="operator-stat-icon bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300"><Icon name="chart" size="md" /></span>
             </div>
-            <dl class="mt-5 grid grid-cols-3 gap-3 border-t border-gray-100 pt-4 text-sm dark:border-dark-700">
-              <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.todayRequests') }}</dt>
-                <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatNumber(stats.today_requests) }}</dd>
-              </div>
-              <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.activeUsers') }}</dt>
-                <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatNumber(stats.hourly_active_users) }}</dd>
-              </div>
-              <div>
-                <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.avgResponse') }}</dt>
-                <dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatDuration(stats.average_duration_ms) }}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div class="card p-5">
-            <div class="flex items-center justify-between gap-3">
-              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.accountHealth') }}</h2>
-              <button type="button" class="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.viewAccounts') }}</button>
+            <p class="operator-stat-value">{{ formatNumber(stats.today_requests) }}</p>
+            <p class="operator-stat-meta">{{ formatNumber(stats.rpm) }} RPM</p>
+          </article>
+          <article class="card operator-stat-card">
+            <div class="operator-stat-heading">
+              <span>{{ t('admin.dashboard.todayTokens') }}</span>
+              <span class="operator-stat-icon bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-300"><Icon name="database" size="md" /></span>
             </div>
-            <p class="mt-3 text-2xl font-semibold text-gray-900 dark:text-white">{{ formatNumber(stats.normal_accounts) }} <span class="text-sm font-medium text-gray-500 dark:text-gray-400">/ {{ formatNumber(stats.total_accounts) }}</span></p>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ hasAccountExceptions ? t('admin.dashboard.accountAttention') : t('admin.dashboard.noAccountExceptions') }}</p>
-            <div class="mt-4 grid grid-cols-3 gap-2 border-t border-gray-100 pt-3 text-xs dark:border-dark-700">
-              <span><strong class="text-gray-900 dark:text-white">{{ formatNumber(stats.error_accounts) }}</strong> {{ t('common.error') }}</span>
-              <span><strong class="text-gray-900 dark:text-white">{{ formatNumber(stats.ratelimit_accounts) }}</strong> {{ t('admin.dashboard.throttled') }}</span>
-              <span><strong class="text-gray-900 dark:text-white">{{ formatNumber(stats.overload_accounts) }}</strong> {{ t('admin.dashboard.overloaded') }}</span>
+            <p class="operator-stat-value">{{ formatTokens(stats.today_tokens) }}</p>
+            <p class="operator-stat-meta">{{ formatTokens(stats.today_input_tokens) }} {{ t('admin.dashboard.input') }}</p>
+          </article>
+          <article class="card operator-stat-card">
+            <div class="operator-stat-heading">
+              <span>{{ t('admin.dashboard.todayCost') }}</span>
+              <span class="operator-stat-icon bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-300"><Icon name="dollar" size="md" /></span>
             </div>
-          </div>
+            <p class="operator-stat-value">${{ formatCost(stats.today_actual_cost) }}</p>
+            <p class="operator-stat-meta">{{ t('admin.dashboard.accountCost') }} ${{ formatCost(stats.today_account_cost) }}</p>
+          </article>
+          <article class="card operator-stat-card">
+            <div class="operator-stat-heading">
+              <span>{{ t('admin.dashboard.avgResponse') }}</span>
+              <span class="operator-stat-icon bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-300"><Icon name="clock" size="md" /></span>
+            </div>
+            <p class="operator-stat-value">{{ formatDuration(stats.average_duration_ms) }}</p>
+            <p class="operator-stat-meta">{{ formatNumber(stats.hourly_active_users) }} {{ t('admin.dashboard.activeUsers') }}</p>
+          </article>
         </section>
 
         <section v-if="hasAccountExceptions" class="flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
@@ -73,32 +62,37 @@
           <button type="button" class="font-medium underline underline-offset-2" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.reviewAccounts') }}</button>
         </section>
 
-        <section class="grid gap-4 lg:grid-cols-3">
-          <button type="button" class="card group flex items-center gap-3 p-4 text-left hover:border-primary-200 dark:hover:border-primary-800" @click="router.push('/admin/accounts')">
-            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300"><Icon name="server" size="md" /></span>
-            <span class="min-w-0 flex-1"><span class="block text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.accounts') }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ formatNumber(stats.total_accounts) }} {{ t('admin.dashboard.totalAccounts') }}</span></span>
-            <Icon name="chevronRight" size="sm" class="text-gray-400 group-hover:text-primary-600" />
-          </button>
-          <button v-if="!authStore.isSimpleMode" type="button" class="card group flex items-center gap-3 p-4 text-left hover:border-primary-200 dark:hover:border-primary-800" @click="router.push('/admin/groups')">
-            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"><Icon name="grid" size="md" /></span>
-            <span class="min-w-0 flex-1"><span class="block text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.modelsRouting') }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.viewRouting') }}</span></span>
-            <Icon name="chevronRight" size="sm" class="text-gray-400 group-hover:text-primary-600" />
-          </button>
-          <button type="button" class="card group flex items-center gap-3 p-4 text-left hover:border-primary-200 dark:hover:border-primary-800" @click="router.push('/admin/usage')">
-            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"><Icon name="chart" size="md" /></span>
-            <span class="min-w-0 flex-1"><span class="block text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.activity') }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.viewActivity') }}</span></span>
-            <Icon name="chevronRight" size="sm" class="text-gray-400 group-hover:text-primary-600" />
-          </button>
-        </section>
-
-        <section class="card overflow-hidden">
-          <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700"><h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.traffic') }}</h2></div>
-          <dl class="grid grid-cols-2 divide-x divide-y divide-gray-100 text-sm sm:grid-cols-4 dark:divide-dark-700">
-            <div class="p-4"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.todayRequests') }}</dt><dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatNumber(stats.today_requests) }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('common.total') }} {{ formatNumber(stats.total_requests) }}</p></div>
-            <div class="p-4"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.avgResponse') }}</dt><dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatDuration(stats.average_duration_ms) }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatNumber(stats.rpm) }} RPM</p></div>
-            <div class="p-4"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.todayTokens') }}</dt><dd class="mt-1 font-semibold text-gray-900 dark:text-white">{{ formatTokens(stats.today_tokens) }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ formatTokens(stats.today_input_tokens) }} {{ t('admin.dashboard.input') }} / {{ formatTokens(stats.today_output_tokens) }} {{ t('admin.dashboard.output') }}</p></div>
-            <div class="p-4"><dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.todayCost') }}</dt><dd class="mt-1 font-semibold text-gray-900 dark:text-white">${{ formatCost(stats.today_actual_cost) }}</dd><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.accountCost') }} ${{ formatCost(stats.today_account_cost) }}</p></div>
-          </dl>
+        <section class="grid gap-4 lg:grid-cols-2">
+          <article class="card operator-summary-panel">
+            <div class="operator-summary-header">
+              <div>
+                <h2>{{ t('admin.dashboard.accountHealth') }}</h2>
+                <p>{{ hasAccountExceptions ? t('admin.dashboard.accountAttention') : t('admin.dashboard.noAccountExceptions') }}</p>
+              </div>
+              <button type="button" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.viewAccounts') }}</button>
+            </div>
+            <p class="operator-summary-value">{{ formatNumber(stats.normal_accounts) }} <span>/ {{ formatNumber(stats.total_accounts) }}</span></p>
+            <dl class="operator-summary-grid">
+              <div><dt>{{ t('common.error') }}</dt><dd>{{ formatNumber(stats.error_accounts) }}</dd></div>
+              <div><dt>{{ t('admin.dashboard.throttled') }}</dt><dd>{{ formatNumber(stats.ratelimit_accounts) }}</dd></div>
+              <div><dt>{{ t('admin.dashboard.overloaded') }}</dt><dd>{{ formatNumber(stats.overload_accounts) }}</dd></div>
+            </dl>
+          </article>
+          <article class="card operator-summary-panel">
+            <div class="operator-summary-header">
+              <div>
+                <h2>{{ t('admin.dashboard.gatewayTraffic') }}</h2>
+                <p>{{ hasGatewayTraffic ? t('admin.dashboard.receivingTraffic') : t('admin.dashboard.idleTraffic') }}</p>
+              </div>
+              <button type="button" @click="router.push('/admin/usage')">{{ t('admin.dashboard.viewActivity') }}</button>
+            </div>
+            <p class="operator-summary-value">{{ formatNumber(stats.rpm) }} <span>RPM</span></p>
+            <dl class="operator-summary-grid">
+              <div><dt>TPM</dt><dd>{{ formatTokens(stats.tpm) }}</dd></div>
+              <div><dt>{{ t('admin.dashboard.activeUsers') }}</dt><dd>{{ formatNumber(stats.hourly_active_users) }}</dd></div>
+              <div><dt>{{ t('common.total') }}</dt><dd>{{ formatNumber(stats.total_requests) }}</dd></div>
+            </dl>
+          </article>
         </section>
 
         <section class="space-y-4">
@@ -183,7 +177,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -227,7 +220,6 @@ ChartJS.register(
 )
 
 const appStore = useAppStore()
-const authStore = useAuthStore()
 const router = useRouter()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const stats = ref<DashboardStats | null>(null)

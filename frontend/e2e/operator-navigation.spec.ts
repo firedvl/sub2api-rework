@@ -19,26 +19,26 @@ test.describe('operator console navigation', () => {
     await page.goto('/admin/dashboard')
 
     for (const link of primaryLinks) {
-      const navLink = page.locator(`aside a.sidebar-link[href="${link.href}"]`)
+      const navLink = page.locator(`.operator-primary-nav a[href="${link.href}"]`)
       await expect(navLink).toBeVisible()
       await navLink.click()
       await expect(page).toHaveURL(new RegExp(`${link.target.replaceAll('/', '\\/')}(?:\\?.*)?$`))
-      await expect(navLink).toHaveClass(/sidebar-link-active/)
+      await expect(navLink).toHaveClass(/operator-primary-link-active/)
     }
 
     await page.goto('/admin/channels/pricing')
-    await expect(page.locator('aside a.sidebar-link[href="/admin/groups"]')).toHaveClass(/sidebar-link-active/)
+    await expect(page.locator('.operator-primary-nav a[href="/admin/groups"]')).toHaveClass(/operator-primary-link-active/)
     await expect(page.locator('nav[aria-label] a[href="/admin/channels/pricing"]')).toHaveClass(/operator-context-link-active/)
 
     await page.goto('/admin/audit-logs')
-    await expect(page.locator('aside a.sidebar-link[href="/admin/ops"]')).toHaveClass(/sidebar-link-active/)
+    await expect(page.locator('.operator-primary-nav a[href="/admin/ops"]')).toHaveClass(/operator-primary-link-active/)
     await expect(page.locator('nav[aria-label] a[href="/admin/audit-logs"]')).toHaveClass(/operator-context-link-active/)
 
     await page.goto('/admin/accounts')
     await page.goto('/admin/groups')
     await page.goBack()
     await expect(page).toHaveURL(/\/admin\/accounts$/)
-    await expect(page.locator('aside a.sidebar-link[href="/admin/accounts"]')).toHaveClass(/sidebar-link-active/)
+    await expect(page.locator('.operator-primary-nav a[href="/admin/accounts"]')).toHaveClass(/operator-primary-link-active/)
     await page.goForward()
     await expect(page).toHaveURL(/\/admin\/groups$/)
   })
@@ -92,7 +92,7 @@ test.describe('operator console navigation', () => {
       }
     })
 
-    const header = await page.locator('header').boundingBox()
+    const header = await page.locator('.operator-header').boundingBox()
     const mainRegion = await main.boundingBox()
     const tabBar = await tabs.boundingBox()
 
@@ -145,7 +145,7 @@ test('simple mode hides navigation for a restricted operator area', async ({ bro
 
   await page.goto('/admin/channels/pricing')
   await expect(page).toHaveURL(/\/admin\/channels\/pricing$/)
-  await expect(page.locator('aside a.sidebar-link[href="/admin/groups"]')).toHaveCount(0)
+  await expect(page.locator('.operator-primary-nav a[href="/admin/groups"]')).toHaveCount(0)
   await expect(page.locator('.operator-context-nav')).toHaveCount(0)
 
   await page.goto('/admin/dashboard')

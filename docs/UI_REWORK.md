@@ -7,6 +7,12 @@ recomposes existing routes and page owners; no backend contract was replaced and
 no production deployment was performed. See [UI_AUDIT.md](UI_AUDIT.md) for the
 architecture, evidence, and route-preservation matrix.
 
+The current visual system is a Vue port and adaptation of codex-lb's operator UI
+at commit `b311aea760aa639fd96f63bd118f775e9b4a89f9` (`v1.24.0-beta.4`). It keeps
+Sub2API's routes, data contracts, and provider-specific controls. See
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) for attribution and license
+terms.
+
 ## Purpose
 
 The operator console should make the gateway's current state and next useful
