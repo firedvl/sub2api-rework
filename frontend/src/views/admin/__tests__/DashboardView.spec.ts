@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-import type { DashboardStats } from '@/types'
+import type { Account, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, listAccounts, getBatchUsage, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
+  listAccounts: vi.fn(),
+  getBatchUsage: vi.fn(),
   showError: vi.fn()
 }))
 
@@ -18,7 +20,11 @@ vi.mock('@/api/admin', () => ({
       getSnapshotV2,
       getUserUsageTrend,
       getUserSpendingRanking
-    }
+    },
+    accounts: {
+      list: listAccounts,
+      getBatchUsage
+    },
   }
 }))
 
@@ -87,6 +93,48 @@ const createDashboardStats = (): DashboardStats => ({
   tpm: 0
 })
 
+const createAccount = (id: number, name: string, overrides: Partial<Account> = {}): Account => ({
+  id,
+  name,
+  platform: 'openai',
+  type: 'oauth',
+  proxy_id: null,
+  concurrency: 1,
+  priority: 1,
+  status: 'active',
+  error_message: null,
+  last_used_at: null,
+  expires_at: null,
+  auto_pause_on_expired: false,
+  created_at: '2026-08-25T00:00:00Z',
+  updated_at: '2026-08-25T00:00:00Z',
+  schedulable: true,
+  rate_limited_at: null,
+  rate_limit_reset_at: null,
+  overload_until: null,
+  temp_unschedulable_until: null,
+  temp_unschedulable_reason: null,
+  session_window_start: null,
+  session_window_end: null,
+  session_window_status: null,
+  ...overrides
+})
+
+const mountDashboard = () => mount(DashboardView, {
+  global: {
+    stubs: {
+      AppLayout: { template: '<div><slot /></div>' },
+      LoadingSpinner: true,
+      Icon: true,
+      DateRangePicker: true,
+      Select: true,
+      ModelDistributionChart: true,
+      TokenUsageTrend: true,
+      Line: true
+    }
+  }
+})
+
 describe('admin DashboardView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -94,6 +142,8 @@ describe('admin DashboardView', () => {
     getSnapshotV2.mockReset()
     getUserUsageTrend.mockReset()
     getUserSpendingRanking.mockReset()
+    listAccounts.mockReset()
+    getBatchUsage.mockReset()
     showError.mockReset()
 
     getSnapshotV2.mockResolvedValue({
@@ -115,23 +165,12 @@ describe('admin DashboardView', () => {
       start_date: '',
       end_date: ''
     })
+    listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1000, pages: 0 })
+    getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
   })
 
   it('uses last 24 hours as default dashboard range', async () => {
-    mount(DashboardView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          LoadingSpinner: true,
-          Icon: true,
-          DateRangePicker: true,
-          Select: true,
-          ModelDistributionChart: true,
-          TokenUsageTrend: true,
-          Line: true
-        }
-      }
-    })
+    mountDashboard()
 
     await flushPromises()
 
@@ -148,31 +187,85 @@ describe('admin DashboardView', () => {
 
   it('reports a snapshot load failure', async () => {
     getSnapshotV2.mockRejectedValueOnce(new Error('snapshot unavailable'))
-
-    const wrapper = mount(DashboardView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          LoadingSpinner: true,
-          Icon: true,
-          DateRangePicker: true,
-          Select: true,
-          ModelDistributionChart: true,
-          TokenUsageTrend: true,
-          Line: true
-        }
-      }
+    listAccounts.mockResolvedValue({
+      items: [createAccount(1, 'Persisted capacity account')],
+      total: 1,
+      page: 1,
+      page_size: 1000,
+      pages: 1
     })
+
+    const wrapper = mountDashboard()
 
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('admin.dashboard.failedToLoad')
     expect(wrapper.get('[data-testid="dashboard-load-error"]').text()).toContain('admin.dashboard.failedToLoad')
+    expect(wrapper.text()).toContain('Persisted capacity account')
 
     await wrapper.get('[data-testid="dashboard-load-error"] button').trigger('click')
     await flushPromises()
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-testid="dashboard-load-error"]').exists()).toBe(false)
+  })
+
+  it('loads every persisted account without requesting active usage', async () => {
+    listAccounts
+      .mockResolvedValueOnce({
+        items: [createAccount(1, 'First persisted account')],
+        total: 2,
+        page: 1,
+        page_size: 1000,
+        pages: 2
+      })
+      .mockResolvedValueOnce({
+        items: [createAccount(2, 'Second persisted account', { platform: 'gemini' })],
+        total: 2,
+        page: 2,
+        page_size: 1000,
+        pages: 2
+      })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenNthCalledWith(1, 1, 1000, { include_scheduler_score: '0' })
+    expect(listAccounts).toHaveBeenNthCalledWith(2, 2, 1000, { include_scheduler_score: '0' })
+    expect(wrapper.text()).toContain('First persisted account')
+    expect(wrapper.text()).toContain('Second persisted account')
+    expect(getBatchUsage).not.toHaveBeenCalled()
+
+    const refresh = wrapper.findAll('button').find((button) => button.text() === 'common.refresh')
+    expect(refresh).toBeDefined()
+    await refresh!.trigger('click')
+    await flushPromises()
+
+    expect(getBatchUsage).not.toHaveBeenCalled()
+  })
+
+  it('shows an account-list failure and recovers on retry', async () => {
+    listAccounts
+      .mockRejectedValueOnce(new Error('accounts unavailable'))
+      .mockResolvedValueOnce({
+        items: [createAccount(3, 'Recovered capacity account')],
+        total: 1,
+        page: 1,
+        page_size: 1000,
+        pages: 1
+      })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="capacity-load-error"]').text()).toContain('admin.dashboard.capacity.loadFailed')
+    expect(wrapper.text()).not.toContain('admin.dashboard.capacity.empty')
+
+    await wrapper.get('[data-testid="capacity-load-error"] button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="capacity-load-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Recovered capacity account')
+    expect(getBatchUsage).not.toHaveBeenCalled()
   })
 })

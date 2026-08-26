@@ -17,4 +17,12 @@ describe('operator fixture data', () => {
     expect(isOperatorFixtureReadRequest('POST', '/api/v1/admin/accounts/101/test')).toBe(false)
     expect(isOperatorFixtureReadRequest('POST', '/api/v1/admin/accounts/usage/batch')).toBe(true)
   })
+
+  it('keeps dashboard account totals aligned with the account fixture', () => {
+    const response = getOperatorFixtureData('/api/v1/admin/dashboard/snapshot-v2') as {
+      stats: { total_accounts: number }
+    }
+
+    expect(response.stats.total_accounts).toBe(operatorFixtureAccounts.length)
+  })
 })

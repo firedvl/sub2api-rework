@@ -1,6 +1,14 @@
 <template>
   <AppLayout>
     <TablePageLayout>
+      <template #actions>
+        <OperatorCapacityOverview
+          :accounts="accounts"
+          :usage-by-account-id="usageBatchByAccountId"
+          :errors-by-account-id="usageBatchErrorByAccountId"
+          :loading="loading"
+        />
+      </template>
       <template #filters>
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
@@ -545,6 +553,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -552,6 +561,7 @@ import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRules
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { supportsBatchAccountUsage } from '@/utils/operatorCapacity'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -749,17 +759,6 @@ const buildDefaultTodayStats = (): WindowStats => ({
   user_cost: 0
 })
 
-const accountSupportsBatchUsage = (account: Account) => {
-  if (account.platform === 'anthropic') {
-    return account.type === 'oauth' || account.type === 'setup-token'
-  }
-  if (account.platform === 'gemini') return true
-  if (account.platform === 'antigravity') return account.type === 'oauth'
-  if (account.platform === 'openai') return account.type === 'oauth'
-  if (account.platform === 'grok') return account.type === 'oauth'
-  return false
-}
-
 const setUsageBatchLoading = (accountID: number, loadingState: boolean) => {
   usageBatchLoadingByAccountId.value = {
     ...usageBatchLoadingByAccountId.value,
@@ -846,7 +845,7 @@ const flushQueuedUsageBatch = async () => {
 
 const queueBatchedUsage = (account: Account, options?: { force?: boolean }) => {
   if (!isDesktopViewport.value) return
-  if (!accountSupportsBatchUsage(account)) return
+  if (!supportsBatchAccountUsage(account)) return
 
   const force = options?.force === true
   const cacheKey = account.id

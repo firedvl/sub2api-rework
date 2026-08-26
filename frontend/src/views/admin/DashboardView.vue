@@ -6,7 +6,7 @@
       </div>
 
       <section
-        v-else-if="snapshotError"
+        v-if="!loading && snapshotError"
         role="alert"
         data-testid="dashboard-load-error"
         class="flex min-h-64 flex-col items-center justify-center border border-red-200 bg-white px-6 py-12 text-center dark:border-red-900/70 dark:bg-dark-900"
@@ -21,7 +21,7 @@
         </button>
       </section>
 
-      <template v-else-if="stats">
+      <template v-if="!loading && stats">
         <section class="operator-stats-grid">
           <article class="card operator-stat-card">
             <div class="operator-stat-heading">
@@ -56,7 +56,17 @@
             <p class="operator-stat-meta">{{ formatNumber(stats.hourly_active_users) }} {{ t('admin.dashboard.activeUsers') }}</p>
           </article>
         </section>
+      </template>
 
+      <OperatorCapacityOverview
+        v-if="!loading"
+        :accounts="capacityAccounts"
+        :loading="capacityLoading"
+        :error="capacityError"
+        @retry="loadAccountCapacity"
+      />
+
+      <template v-if="!loading && stats">
         <section v-if="hasAccountExceptions" class="flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <div class="flex items-center gap-2"><Icon name="server" size="sm" /><span>{{ t('admin.dashboard.accountAttention') }}</span></div>
           <button type="button" class="font-medium underline underline-offset-2" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.reviewAccounts') }}</button>
@@ -181,6 +191,7 @@ import { useAppStore } from '@/stores/app'
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
+  Account,
   DashboardStats,
   TrendDataPoint,
   ModelStat,
@@ -194,6 +205,7 @@ import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 
 import {
@@ -229,6 +241,10 @@ const userTrendLoading = ref(false)
 const rankingLoading = ref(false)
 const rankingError = ref(false)
 const snapshotError = ref(false)
+const capacityAccounts = ref<Account[]>([])
+const capacityLoading = ref(false)
+const capacityError = ref(false)
+let capacityLoadSeq = 0
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
@@ -580,11 +596,40 @@ const loadUserSpendingRanking = async () => {
   }
 }
 
+const loadAccountCapacity = async () => {
+  const currentSeq = ++capacityLoadSeq
+  capacityLoading.value = true
+  capacityError.value = false
+
+  try {
+    const pageSize = 1000
+    const firstPage = await adminAPI.accounts.list(1, pageSize, {
+      include_scheduler_score: '0'
+    })
+    const rows = [...firstPage.items]
+    for (let page = 2; page <= firstPage.pages; page += 1) {
+      const result = await adminAPI.accounts.list(page, pageSize, {
+        include_scheduler_score: '0'
+      })
+      rows.push(...result.items)
+    }
+    if (currentSeq !== capacityLoadSeq) return
+    capacityAccounts.value = rows
+  } catch (error) {
+    if (currentSeq !== capacityLoadSeq) return
+    capacityError.value = true
+    console.error('Error loading accounts for capacity:', error)
+  } finally {
+    if (currentSeq === capacityLoadSeq) capacityLoading.value = false
+  }
+}
+
 const loadDashboardStats = async () => {
   await Promise.all([
     loadDashboardSnapshot(true),
     loadUsersTrend(),
-    loadUserSpendingRanking()
+    loadUserSpendingRanking(),
+    loadAccountCapacity()
   ])
 }
 

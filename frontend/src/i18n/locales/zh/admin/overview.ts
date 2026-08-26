@@ -93,7 +93,39 @@ export default {
       viewActivity: '查看活动',
       traffic: '流量',
       failedToLoad: '加载仪表盘数据失败',
-      retry: '重试'
+      retry: '重试',
+      capacity: {
+        title: '可用容量',
+        description: '按账号显示最新可用额度；不同供应商窗口与消费限额分别展示。',
+        accountCount: '{count} 个账号',
+        knownCount: '{count} 个有额度数据',
+        unknownCount: '{count} 个未知',
+        loading: '正在加载账号容量...',
+        loadFailed: '额度快照不可用',
+        empty: '当前视图没有账号。',
+        providerAccounts: '{count} 个账号',
+        lowestRemaining: '最低剩余',
+        remaining: '剩余 {value}%',
+        used: '已用 {value}%',
+        resets: '{time} 重置',
+        noReset: '不自动重置',
+        resetUnknown: '重置时间未知',
+        quotaUnknown: '额度未知',
+        quotaUnknownHint: '该账号暂无已记录的可比较额度数据。',
+        plan: '方案',
+        routing: '路由：',
+        schedulable: '可调度',
+        notSchedulable: '不可调度',
+        health: {
+          healthy: '正常',
+          rate_limited: '已限流',
+          overloaded: '过载',
+          paused: '已暂停',
+          unschedulable: '不可调度',
+          inactive: '未启用',
+          error: '错误'
+        }
+      }
     },
 
     backup: {

@@ -93,7 +93,39 @@ export default {
       viewActivity: 'View activity',
       traffic: 'Traffic',
       failedToLoad: 'Failed to load dashboard statistics',
-      retry: 'Retry'
+      retry: 'Retry',
+      capacity: {
+        title: 'Available capacity',
+        description: 'Latest available quota by account. Provider windows and spend limits stay separate.',
+        accountCount: '{count} account | {count} accounts',
+        knownCount: '{count} with quota',
+        unknownCount: '{count} unknown',
+        loading: 'Loading account capacity...',
+        loadFailed: 'Quota snapshot unavailable',
+        empty: 'No accounts match this view.',
+        providerAccounts: '{count} account | {count} accounts',
+        lowestRemaining: 'Lowest remaining',
+        remaining: '{value}% remaining',
+        used: '{value}% used',
+        resets: 'Resets {time}',
+        noReset: 'No automatic reset',
+        resetUnknown: 'Reset unknown',
+        quotaUnknown: 'Quota unknown',
+        quotaUnknownHint: 'No recorded comparable quota is available for this account.',
+        plan: 'Plan',
+        routing: 'Routing:',
+        schedulable: 'Schedulable',
+        notSchedulable: 'Not schedulable',
+        health: {
+          healthy: 'Healthy',
+          rate_limited: 'Rate limited',
+          overloaded: 'Overloaded',
+          paused: 'Paused',
+          unschedulable: 'Unschedulable',
+          inactive: 'Inactive',
+          error: 'Error'
+        }
+      }
     },
 
     backup: {

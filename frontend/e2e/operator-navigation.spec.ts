@@ -5,8 +5,16 @@ const primaryLinks = [
   { href: '/admin/dashboard', target: '/admin/dashboard' },
   { href: '/admin/accounts', target: '/admin/accounts' },
   { href: '/admin/groups', target: '/admin/groups' },
-  { href: '/admin/ops', target: '/admin/ops' },
+  { href: '/admin/usage', target: '/admin/usage' },
   { href: '/admin/settings', target: '/admin/settings' },
+]
+
+const fidelityAdminRoutes = ['/admin/dashboard', '/admin/accounts', '/admin/usage', '/admin/settings']
+const fidelityViewports = [
+  { width: 1440, height: 900 },
+  { width: 1280, height: 800 },
+  { width: 1024, height: 768 },
+  { width: 768, height: 900 },
 ]
 
 test.describe('operator console navigation', () => {
@@ -31,7 +39,7 @@ test.describe('operator console navigation', () => {
     await expect(page.locator('nav[aria-label] a[href="/admin/channels/pricing"]')).toHaveClass(/operator-context-link-active/)
 
     await page.goto('/admin/audit-logs')
-    await expect(page.locator('.operator-primary-nav a[href="/admin/ops"]')).toHaveClass(/operator-primary-link-active/)
+    await expect(page.locator('.operator-primary-nav a[href="/admin/usage"]')).toHaveClass(/operator-primary-link-active/)
     await expect(page.locator('nav[aria-label] a[href="/admin/audit-logs"]')).toHaveClass(/operator-context-link-active/)
 
     await page.goto('/admin/accounts')
@@ -75,6 +83,39 @@ test.describe('operator console navigation', () => {
       viewportHeight: window.innerHeight,
     }))
     expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight + 1)
+  })
+
+  test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {
+    const anonymous = await browser.newContext()
+    const loginPage = await anonymous.newPage()
+    await installOperatorApiMock(loginPage)
+
+    for (const viewport of fidelityViewports) {
+      await loginPage.setViewportSize(viewport)
+      await loginPage.goto('/login')
+      await expect(loginPage).toHaveURL(/\/login$/)
+      const loginOverflow = await loginPage.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }))
+      expect(loginOverflow.scrollWidth, `login at ${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(
+        loginOverflow.clientWidth + 1,
+      )
+
+      await page.setViewportSize(viewport)
+      for (const route of fidelityAdminRoutes) {
+        await page.goto(route)
+        const overflow = await page.evaluate(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }))
+        expect(overflow.scrollWidth, `${route} at ${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(
+          overflow.clientWidth + 1,
+        )
+      }
+    }
+
+    await anonymous.close()
   })
 
   test('keeps the header and task tabs visible while scrolling long Settings content', async ({ page }) => {

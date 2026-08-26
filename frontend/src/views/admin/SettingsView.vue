@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto w-full min-w-0 max-w-6xl space-y-6">
+    <div class="mx-auto w-full min-w-0 max-w-none space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -9,7 +9,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form v-else @submit.prevent="saveSettings" class="operator-settings-form space-y-6" novalidate>
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav

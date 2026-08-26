@@ -2,68 +2,6 @@
   <AppLayout>
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" />
-      <!-- Charts Section -->
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
-                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
-            v-model:source="modelDistributionSource"
-            v-model:metric="modelDistributionMetric"
-            :model-stats="requestedModelStats"
-            :upstream-model-stats="upstreamModelStats"
-            :mapping-model-stats="mappingModelStats"
-            :loading="modelStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
-            v-model:source="endpointDistributionSource"
-            v-model:metric="endpointDistributionMetric"
-            :endpoint-stats="inboundEndpointStats"
-            :upstream-endpoint-stats="upstreamEndpointStats"
-            :endpoint-path-stats="endpointPathStats"
-            :loading="endpointStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
-        </div>
-      </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
       <div class="card">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
@@ -159,6 +97,68 @@
             :model="filters.model"
             @select-user="handleRankingSelectUser"
           />
+        </div>
+      </div>
+      <!-- Charts Section -->
+      <div class="space-y-4">
+        <div class="card p-4">
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
+              <DateRangePicker
+                v-model:start-date="startDate"
+                v-model:end-date="endDate"
+                @change="onDateRangeChange"
+              />
+            </div>
+            <div class="ml-auto flex items-center gap-2">
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
+              <div class="w-28">
+                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <ModelDistributionChart
+            v-model:source="modelDistributionSource"
+            v-model:metric="modelDistributionMetric"
+            :model-stats="requestedModelStats"
+            :upstream-model-stats="upstreamModelStats"
+            :mapping-model-stats="mappingModelStats"
+            :loading="modelStatsLoading"
+            :show-source-toggle="true"
+            :show-metric-toggle="true"
+            :start-date="startDate"
+            :end-date="endDate"
+            :filters="breakdownFilters"
+          />
+          <GroupDistributionChart
+            v-model:metric="groupDistributionMetric"
+            :group-stats="groupStats"
+            :loading="chartsLoading"
+            :show-metric-toggle="true"
+            :start-date="startDate"
+            :end-date="endDate"
+            :filters="breakdownFilters"
+          />
+        </div>
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <EndpointDistributionChart
+            v-model:source="endpointDistributionSource"
+            v-model:metric="endpointDistributionMetric"
+            :endpoint-stats="inboundEndpointStats"
+            :upstream-endpoint-stats="upstreamEndpointStats"
+            :endpoint-path-stats="endpointPathStats"
+            :loading="endpointStatsLoading"
+            :show-source-toggle="true"
+            :show-metric-toggle="true"
+            :title="t('usage.endpointDistribution')"
+            :start-date="startDate"
+            :end-date="endDate"
+            :filters="breakdownFilters"
+          />
+          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
       <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="'request'" />

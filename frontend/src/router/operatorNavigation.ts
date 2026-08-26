@@ -50,10 +50,10 @@ export const operatorAreas: OperatorArea[] = [
   {
     id: 'activity',
     labelKey: 'nav.activity',
-    primaryPath: '/admin/ops',
+    primaryPath: '/admin/usage',
     sections: [
-      { path: '/admin/ops', labelKey: 'nav.ops', gate: 'ops-monitoring' },
       { path: '/admin/usage', labelKey: 'nav.usage' },
+      { path: '/admin/ops', labelKey: 'nav.ops', gate: 'ops-monitoring' },
       { path: '/admin/audit-logs', labelKey: 'nav.auditLogs', hideInSimpleMode: true },
     ],
   },
