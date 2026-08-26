@@ -194,4 +194,8 @@ describe('production router navigation', () => {
     expect((await navigate('/purchase')).path).toBe('/purchase')
     expect(stores.app.fetchPublicSettings).toHaveBeenCalledOnce()
   })
+
+  it('keeps the operator prototype lab out of the production route table', async () => {
+    expect(router.getRoutes().some((route) => route.path === '/ui-lab')).toBe(false)
+  })
 })

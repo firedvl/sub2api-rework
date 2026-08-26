@@ -67,6 +67,20 @@ only to localhost, seeds a synthetic admin session, serves sanitized fixed data,
 disables normal backend proxies, and rejects writes. To test the fixture login,
 use `operator@example.test` and `review-only`.
 
+### Operator prototype lab
+
+Run the fixture-only visual comparison lab:
+
+```bash
+cd frontend
+pnpm review:prototypes
+```
+
+Open `http://127.0.0.1:4174/ui-lab`. Use the A-D switcher to compare the same
+Overview, Accounts, Models & Routing, and Settings fixture data. This route is
+registered only in `operator-prototypes` mode and is absent from production and
+ordinary development navigation.
+
 ## Full Build
 
 ```bash

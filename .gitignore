@@ -172,6 +172,16 @@ docs/screenshots/operator-ui/*
 !docs/screenshots/operator-ui/before-settings.png
 !docs/screenshots/operator-ui/after-settings.png
 !docs/screenshots/operator-ui/reference-settings.jpg
+!docs/screenshots/operator-prototypes/
+docs/screenshots/operator-prototypes/*
+!docs/screenshots/operator-prototypes/a-overview.png
+!docs/screenshots/operator-prototypes/a-accounts.png
+!docs/screenshots/operator-prototypes/b-overview.png
+!docs/screenshots/operator-prototypes/b-accounts.png
+!docs/screenshots/operator-prototypes/c-overview.png
+!docs/screenshots/operator-prototypes/c-accounts.png
+!docs/screenshots/operator-prototypes/d-overview.png
+!docs/screenshots/operator-prototypes/d-accounts.png
 .serena/
 .codex/
 frontend/coverage/

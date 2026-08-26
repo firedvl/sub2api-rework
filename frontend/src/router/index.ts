@@ -714,6 +714,16 @@ const routes: RouteRecordRaw[] = [
     }
   },
 
+  ...(import.meta.env.MODE === 'operator-prototypes' ? [{
+    path: '/ui-lab',
+    name: 'OperatorPrototypeLab',
+    component: () => import('@/prototypes/operator-lab/OperatorLabView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Operator Prototype Lab'
+    }
+  } satisfies RouteRecordRaw] : []),
+
   // ==================== 404 Not Found ====================
   {
     path: '/:pathMatch(.*)*',

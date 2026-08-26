@@ -94,7 +94,7 @@ function sendReviewJson(response: ServerResponse, status: number, payload: unkno
   response.end(JSON.stringify(payload))
 }
 
-function operatorReviewFixtures(): Plugin {
+function operatorReviewFixtures(landingPath = '/admin/dashboard'): Plugin {
   const fixtureUser = operatorFixtureUser()
   const appConfig = JSON.stringify(operatorFixturePublicSettings)
   const sessionUser = JSON.stringify(fixtureUser)
@@ -117,7 +117,7 @@ function operatorReviewFixtures(): Plugin {
 
         if (pathname === '/' && String(request.headers.accept || '').includes('text/html')) {
           response.statusCode = 302
-          response.setHeader('Location', '/admin/dashboard')
+          response.setHeader('Location', landingPath)
           response.end()
           return
         }
@@ -166,10 +166,31 @@ function operatorReviewFixtures(): Plugin {
   }
 }
 
+function preventPrototypeBundleLeak(): Plugin {
+  const markers = ['/ui-lab', 'operator-prototype-lab']
+
+  return {
+    name: 'prevent-operator-prototype-bundle-leak',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      for (const output of Object.values(bundle)) {
+        const source = output.type === 'chunk'
+          ? output.code
+          : typeof output.source === 'string' ? output.source : ''
+        if (markers.some((marker) => source.includes(marker))) {
+          this.error(`Production bundle contains operator prototype code in ${output.fileName}`)
+        }
+      }
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
   const isOperatorReview = mode === 'operator-review'
+  const isPrototypeReview = mode === 'operator-prototypes'
+  const isFixtureReview = isOperatorReview || isPrototypeReview
   const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
   const devPort = Number(env.VITE_DEV_PORT || 3000)
 
@@ -179,7 +200,10 @@ export default defineConfig(({ mode }) => {
       checker({
         vueTsc: true
       }),
-      isOperatorReview ? operatorReviewFixtures() : injectPublicSettings(backendUrl)
+      isFixtureReview
+        ? operatorReviewFixtures(isPrototypeReview ? '/ui-lab' : '/admin/dashboard')
+        : injectPublicSettings(backendUrl),
+      ...(isPrototypeReview ? [] : [preventPrototypeBundleLeak()]),
     ],
   resolve: {
     alias: {
@@ -245,10 +269,10 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
-      host: isOperatorReview ? '127.0.0.1' : '0.0.0.0',
-      port: isOperatorReview ? 4174 : devPort,
-      strictPort: isOperatorReview,
-      proxy: isOperatorReview ? undefined : {
+      host: isFixtureReview ? '127.0.0.1' : '0.0.0.0',
+      port: isFixtureReview ? 4174 : devPort,
+      strictPort: isFixtureReview,
+      proxy: isFixtureReview ? undefined : {
         '/api': {
           target: backendUrl,
           changeOrigin: true
