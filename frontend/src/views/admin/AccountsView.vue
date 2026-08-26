@@ -1,6 +1,45 @@
 <template>
   <AppLayout>
     <div class="operator-accounts-layout">
+      <div
+        class="operator-account-view-tabs"
+        role="tablist"
+        :aria-label="t('admin.accounts.viewSwitcher')"
+      >
+        <button
+          id="account-capacity-tab"
+          ref="capacityViewTabRef"
+          type="button"
+          role="tab"
+          class="operator-account-view-tab"
+          :class="{ 'is-active': accountView === 'capacity' }"
+          :aria-selected="accountView === 'capacity'"
+          aria-controls="account-capacity-panel"
+          :tabindex="accountView === 'capacity' ? 0 : -1"
+          @click="setAccountView('capacity')"
+          @keydown.right.prevent="setAccountView('technical', true)"
+          @keydown.end.prevent="setAccountView('technical', true)"
+        >
+          {{ t('admin.accounts.capacityView') }}
+        </button>
+        <button
+          id="account-technical-tab"
+          ref="technicalViewTabRef"
+          type="button"
+          role="tab"
+          class="operator-account-view-tab"
+          :class="{ 'is-active': accountView === 'technical' }"
+          :aria-selected="accountView === 'technical'"
+          aria-controls="account-technical-panel"
+          :tabindex="accountView === 'technical' ? 0 : -1"
+          @click="setAccountView('technical')"
+          @keydown.left.prevent="setAccountView('capacity', true)"
+          @keydown.home.prevent="setAccountView('capacity', true)"
+        >
+          {{ t('admin.accounts.technicalView') }}
+        </button>
+      </div>
+
       <div class="operator-accounts-toolbar">
         <div class="flex flex-wrap-reverse items-start justify-between gap-3">
           <AccountTableFilters
@@ -177,62 +216,68 @@
         </div>
       </div>
 
-      <OperatorCapacityOverview
-        :accounts="fleetAccounts"
-        :usage-by-account-id="fleetUsageByAccountId"
-        :errors-by-account-id="fleetUsageErrorByAccountId"
-        :loading="fleetLoading"
-        :error="fleetError"
-        @retry="loadFleetCapacity"
+      <section
+        v-show="accountView === 'capacity'"
+        id="account-capacity-panel"
+        role="tabpanel"
+        aria-labelledby="account-capacity-tab"
       >
-        <template #account-actions="{ account }">
-          <button
-            type="button"
-            class="operator-account-row-action"
-            :title="t('common.edit')"
-            @click="handleEdit(account)"
-          >
-            <Icon name="edit" size="sm" />
-            <span>{{ t('common.edit') }}</span>
-          </button>
-          <button
-            type="button"
-            class="operator-account-row-action"
-            :title="t('common.more')"
-            @click="openMenu(account, $event)"
-          >
-            <Icon name="more" size="sm" />
-            <span>{{ t('common.more') }}</span>
-          </button>
-        </template>
-      </OperatorCapacityOverview>
+        <OperatorCapacityOverview
+          :accounts="fleetAccounts"
+          :usage-by-account-id="fleetUsageByAccountId"
+          :errors-by-account-id="fleetUsageErrorByAccountId"
+          :loading="fleetLoading"
+          :error="fleetError"
+          @retry="loadFleetCapacity"
+        >
+          <template #account-actions="{ account }">
+            <button
+              type="button"
+              class="operator-account-row-action"
+              :title="t('common.edit')"
+              @click="handleEdit(account)"
+            >
+              <Icon name="edit" size="sm" />
+              <span>{{ t('common.edit') }}</span>
+            </button>
+            <button
+              type="button"
+              class="operator-account-row-action"
+              :title="t('common.more')"
+              @click="openMenu(account, $event)"
+            >
+              <Icon name="more" size="sm" />
+              <span>{{ t('common.more') }}</span>
+            </button>
+          </template>
+        </OperatorCapacityOverview>
+      </section>
 
-      <AccountBulkActionsBar
-        :selected-ids="selIds"
-        :total-results="pagination.total"
-        :selecting-all="selectingAllResults"
-        :all-results-selected="allResultsSelected"
-        @delete="handleBulkDelete"
-        @reset-status="handleBulkResetStatus"
-        @refresh-token="handleBulkRefreshToken"
-        @probe-upstream-billing="handleBulkProbeUpstreamBilling"
-        @edit-selected="openBulkEditSelected"
-        @edit-filtered="openBulkEditFiltered"
-        @clear="clearSelection"
-        @select-page="selectPage"
-        @select-all-results="handleSelectAllResults"
-        @toggle-schedulable="handleBulkToggleSchedulable"
-      />
+      <section
+        v-show="accountView === 'technical'"
+        id="account-technical-panel"
+        class="operator-account-technical-view"
+        role="tabpanel"
+        aria-labelledby="account-technical-tab"
+      >
+        <AccountBulkActionsBar
+          :selected-ids="selIds"
+          :total-results="pagination.total"
+          :selecting-all="selectingAllResults"
+          :all-results-selected="allResultsSelected"
+          @delete="handleBulkDelete"
+          @reset-status="handleBulkResetStatus"
+          @refresh-token="handleBulkRefreshToken"
+          @probe-upstream-billing="handleBulkProbeUpstreamBilling"
+          @edit-selected="openBulkEditSelected"
+          @edit-filtered="openBulkEditFiltered"
+          @clear="clearSelection"
+          @select-page="selectPage"
+          @select-all-results="handleSelectAllResults"
+          @toggle-schedulable="handleBulkToggleSchedulable"
+        />
 
-      <details class="operator-account-details">
-        <summary class="operator-account-details-summary">
-          <span>
-            <strong>{{ t('admin.accounts.technicalDetails') }}</strong>
-            <small>{{ t('admin.accounts.technicalDetailsHint') }}</small>
-          </span>
-          <Icon name="chevronDown" size="sm" />
-        </summary>
-        <div class="operator-account-details-content">
+        <div class="operator-account-technical-shell">
         <div ref="accountTableRef" class="operator-account-table flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           ref="dataTableRef"
@@ -342,7 +387,7 @@
                 :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
                 :disabled="togglingSchedulable === row.id"
                 class="operator-scheduling-switch relative inline-flex flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                :class="row.schedulable ? 'bg-primary-600 hover:bg-primary-700' : 'bg-gray-300 hover:bg-gray-400 dark:bg-dark-600 dark:hover:bg-dark-500'"
+                :class="row.schedulable ? 'is-enabled' : 'is-disabled'"
                 @click="handleToggleSchedulable(row)"
               >
                 <span class="pointer-events-none inline-block transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" />
@@ -511,9 +556,9 @@
           </template>
         </DataTable>
         </div>
-        <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+        <Pagination v-if="pagination.total > 0" class="operator-account-pagination" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
-      </details>
+      </section>
     </div>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
@@ -551,7 +596,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -604,6 +649,18 @@ import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType,
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+
+type AccountView = 'capacity' | 'technical'
+const accountView = ref<AccountView>('capacity')
+const capacityViewTabRef = ref<HTMLButtonElement | null>(null)
+const technicalViewTabRef = ref<HTMLButtonElement | null>(null)
+const setAccountView = (view: AccountView, focus = false) => {
+  accountView.value = view
+  if (!focus) return
+  nextTick(() => {
+    (view === 'capacity' ? capacityViewTabRef.value : technicalViewTabRef.value)?.focus()
+  })
+}
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
@@ -2655,6 +2712,43 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.operator-account-view-tabs {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.125rem;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-muted);
+}
+
+.operator-account-view-tab {
+  min-width: 6.5rem;
+  min-height: 2.375rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--operator-radius);
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.operator-account-view-tab:hover {
+  color: var(--operator-foreground);
+}
+
+.operator-account-view-tab.is-active {
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+  color: var(--operator-foreground);
+}
+
+.operator-account-view-tab:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+
 .operator-account-row-action {
   display: inline-flex;
   min-height: 2.25rem;
@@ -2677,13 +2771,19 @@ onUnmounted(() => {
 
 .operator-account-row-action:focus-visible,
 .operator-table-row-action:focus-visible,
-.operator-account-details-summary:focus-visible,
 .operator-scheduling-switch:focus-visible {
   outline: 2px solid var(--operator-focus);
   outline-offset: 2px;
 }
 
-.operator-account-details {
+.operator-account-technical-view {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.operator-account-technical-shell {
   overflow: hidden;
   border: 1px solid var(--operator-border);
   border-radius: 0.5rem;
@@ -2691,61 +2791,10 @@ onUnmounted(() => {
   box-shadow: var(--operator-shadow-xs);
 }
 
-.operator-account-details-summary {
-  display: flex;
-  min-height: 3.5rem;
-  cursor: pointer;
-  list-style: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  color: var(--operator-foreground);
-}
-
-.operator-account-details-summary::-webkit-details-marker {
-  display: none;
-}
-
-.operator-account-details-summary:hover {
-  background: var(--operator-muted);
-}
-
-.operator-account-details-summary > span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.operator-account-details-summary strong {
-  font-size: 0.9375rem;
-  font-weight: 650;
-}
-
-.operator-account-details-summary small {
-  margin-top: 0.125rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-}
-
-.operator-account-details-summary > svg {
-  flex: 0 0 auto;
-  transition: transform 150ms ease;
-}
-
-.operator-account-details[open] .operator-account-details-summary > svg {
-  transform: rotate(180deg);
-}
-
-.operator-account-details-content {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  border-top: 1px solid var(--operator-border);
-}
-
-.operator-account-details-content > :deep(.pagination) {
-  border-top: 1px solid var(--operator-border);
+.operator-account-technical-shell :deep(.table-wrapper) {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .operator-account-table {
@@ -2753,9 +2802,26 @@ onUnmounted(() => {
   max-height: 60vh;
 }
 
+.operator-account-pagination {
+  border-top: 1px solid var(--operator-border);
+}
+
 .operator-scheduling-switch {
   width: 2.5rem;
   height: 1.5rem;
+  background: var(--operator-track);
+}
+
+.operator-scheduling-switch.is-enabled {
+  background: var(--operator-success-fill);
+}
+
+.operator-scheduling-switch.is-enabled:hover {
+  background: color-mix(in oklch, var(--operator-success-fill) 88%, black);
+}
+
+.operator-scheduling-switch.is-disabled:hover {
+  background: color-mix(in oklch, var(--operator-track) 82%, var(--operator-foreground));
 }
 
 .operator-scheduling-switch > span {
@@ -2805,12 +2871,13 @@ onUnmounted(() => {
 }
 
 @media (max-width: 639px) {
-  .operator-account-details-summary small {
-    white-space: normal;
-  }
-
   .operator-account-row-action span {
     display: none;
+  }
+
+  .operator-account-view-tabs,
+  .operator-account-view-tab {
+    width: 100%;
   }
 }
 </style>

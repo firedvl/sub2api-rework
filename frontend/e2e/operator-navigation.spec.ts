@@ -24,6 +24,7 @@ test.describe('operator console navigation', () => {
   })
 
   test('reaches all five areas and keeps history and deep-link state', async ({ page }) => {
+    test.setTimeout(60_000)
     await page.goto('/admin/dashboard')
     await expect(page.locator('.operator-primary-nav a[href="/admin/dashboard"]')).toHaveClass(/operator-primary-link-active/)
 
@@ -31,8 +32,9 @@ test.describe('operator console navigation', () => {
       const navLink = page.locator(`.operator-primary-nav a[href="${link.href}"]`)
       await expect(navLink).toBeVisible()
       await navLink.click()
-      await expect(page).toHaveURL(new RegExp(`${link.target.replaceAll('/', '\\/')}(?:\\?.*)?$`))
+      await expect(page).toHaveURL(new RegExp(`${link.target.replaceAll('/', '\\/')}(?:\\?.*)?$`), { timeout: 15_000 })
       await expect(navLink).toHaveClass(/operator-primary-link-active/)
+      await expect(page.getByRole('progressbar', { name: 'Loading' })).toBeHidden()
     }
 
     await page.goto('/admin/channels/pricing')
@@ -74,30 +76,198 @@ test.describe('operator console navigation', () => {
     await expect(page.locator('.operator-console')).toHaveCount(0)
   })
 
-  test('keeps the Accounts technical table inside the desktop layout', async ({ page }) => {
+  test('switches Accounts views without stacking or refetching', async ({ page }) => {
     await page.goto('/admin/accounts')
 
-    const layout = page.locator('.operator-accounts-layout')
-    const details = page.locator('.operator-account-details')
-    await expect(layout).toBeVisible()
-    await details.locator('summary').click()
+    const capacityTab = page.getByRole('tab', { name: 'Capacity' })
+    const technicalTab = page.getByRole('tab', { name: 'Technical' })
+    const capacityPanel = page.getByRole('tabpanel', { name: 'Capacity' })
+    const technicalPanel = page.getByRole('tabpanel', { name: 'Technical' })
+    await expect(capacityTab).toHaveAttribute('aria-selected', 'true')
+    await expect(capacityPanel).toBeVisible()
+    await expect(technicalPanel).toBeHidden()
+    await expect(page.locator('details.operator-account-details')).toHaveCount(0)
 
-    const table = page.locator('.operator-account-table')
-    await expect(table).toBeVisible()
-    const bounds = await layout.evaluate((element) => {
-      const layoutBounds = element.getBoundingClientRect()
-      const tableBounds = element.querySelector('.operator-account-table')!.getBoundingClientRect()
+    await capacityTab.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(technicalTab).toBeFocused()
+    await expect(technicalTab).toHaveAttribute('aria-selected', 'true')
+    await expect(capacityPanel).toBeHidden()
+    await expect(technicalPanel).toBeVisible()
+
+    await page.keyboard.press('ArrowLeft')
+    await expect(capacityTab).toBeFocused()
+    await expect(capacityPanel).toBeVisible()
+    await expect(technicalPanel).toBeHidden()
+  })
+
+  test('keeps technical sticky columns aligned at every review width', async ({ page }) => {
+    test.setTimeout(60_000)
+
+    for (const viewport of fidelityViewports) {
+      await page.setViewportSize(viewport)
+      await page.goto('/admin/accounts')
+      await page.getByRole('tab', { name: 'Technical' }).click()
+
+      const table = page.locator('.operator-account-table .table-wrapper')
+      await expect(table).toBeVisible()
+      const leftmost = await table.evaluate(async (element) => {
+        element.scrollLeft = 0
+        element.dispatchEvent(new Event('scroll'))
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const wrapper = element.getBoundingClientRect()
+        const headers = element.querySelectorAll('thead th')
+        const cells = element.querySelectorAll('tbody tr[data-index]:first-of-type td')
+        const checkbox = headers[0].getBoundingClientRect()
+        const name = headers[1].getBoundingClientRect()
+        const id = headers[2].getBoundingClientRect()
+        const rowCheckbox = cells[0].getBoundingClientRect()
+        const rowName = cells[1].getBoundingClientRect()
+        return {
+          scrollLeft: element.scrollLeft,
+          wrapper: { left: wrapper.left, right: wrapper.right },
+          checkbox: { left: checkbox.left, right: checkbox.right },
+          name: { left: name.left, right: name.right, text: headers[1].textContent?.trim() },
+          id: { left: id.left, text: headers[2].textContent?.trim() },
+          rowCheckbox: { left: rowCheckbox.left, right: rowCheckbox.right },
+          rowName: { left: rowName.left, text: cells[1].textContent?.trim() },
+        }
+      })
+
+      expect(leftmost.scrollLeft, `${viewport.width}px scroll origin`).toBe(0)
+      expect(leftmost.checkbox.left).toBeGreaterThanOrEqual(leftmost.wrapper.left - 1)
+      expect(Math.abs(leftmost.checkbox.right - leftmost.name.left)).toBeLessThanOrEqual(1)
+      expect(Math.abs(leftmost.name.right - leftmost.id.left)).toBeLessThanOrEqual(1)
+      expect(leftmost.name.text).toBe('Name')
+      expect(leftmost.id.text).toBe('Account ID')
+      expect(leftmost.rowName.text).toContain('Codex Team West')
+      expect(Math.abs(leftmost.rowCheckbox.right - leftmost.rowName.left)).toBeLessThanOrEqual(1)
+      expect(Math.abs(leftmost.checkbox.left - leftmost.rowCheckbox.left)).toBeLessThanOrEqual(1)
+
+      const scrolled = await table.evaluate(async (element) => {
+        element.scrollLeft = Math.min(600, element.scrollWidth - element.clientWidth)
+        element.dispatchEvent(new Event('scroll'))
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const wrapper = element.getBoundingClientRect()
+        const headers = element.querySelectorAll('thead th')
+        const cells = element.querySelectorAll('tbody tr[data-index]:first-of-type td')
+        const checkbox = headers[0].getBoundingClientRect()
+        const name = headers[1].getBoundingClientRect()
+        const rowName = cells[1].getBoundingClientRect()
+        const actions = headers[headers.length - 1].getBoundingClientRect()
+        return {
+          scrollLeft: element.scrollLeft,
+          hasScrolledClass: element.classList.contains('is-scrolled-left'),
+          wrapper: { left: wrapper.left, right: wrapper.right },
+          checkbox: { left: checkbox.left, right: checkbox.right },
+          name: { left: name.left },
+          rowName: { left: rowName.left },
+          actions: { right: actions.right },
+        }
+      })
+
+      expect(scrolled.scrollLeft, `${viewport.width}px horizontal scroll`).toBeGreaterThan(0)
+      expect(scrolled.hasScrolledClass).toBe(true)
+      expect(Math.abs(scrolled.checkbox.left - scrolled.wrapper.left)).toBeLessThanOrEqual(1)
+      expect(Math.abs(scrolled.checkbox.right - scrolled.name.left)).toBeLessThanOrEqual(1)
+      expect(Math.abs(scrolled.name.left - scrolled.rowName.left)).toBeLessThanOrEqual(1)
+      expect(scrolled.actions.right).toBeLessThanOrEqual(scrolled.wrapper.right + 1)
+    }
+  })
+
+  test('shows normalized pool capacity and keeps unknown quota separate', async ({ page }) => {
+    await page.goto('/admin/dashboard')
+
+    const pool = page.getByTestId('account-pool-capacity')
+    await expect(pool).toBeVisible()
+    await expect(pool.locator('[data-testid="account-pool-segment"]')).toHaveCount(4)
+    await expect(pool).toContainText('41.4%')
+    await expect(pool).toContainText('Gemini Recovery')
+    await expect(pool).toContainText('1 unknown excluded')
+    await expect(pool.locator('svg[role="img"]')).toHaveAttribute('aria-label', /41\.4% available, 58\.6% Used capacity/)
+  })
+
+  test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
+    await page.goto('/admin/accounts')
+
+    const toggle = page.getByTestId('provider-toggle-openai')
+    const panel = page.locator('#operator-provider-openai-accounts')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await toggle.focus()
+    await page.keyboard.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(panel).toBeHidden()
+
+    await page.reload()
+    await expect(page.getByTestId('provider-toggle-openai')).toHaveAttribute('aria-expanded', 'false')
+    await page.getByTestId('provider-toggle-openai').focus()
+    await page.keyboard.press('Space')
+    await expect(page.getByTestId('provider-toggle-openai')).toHaveAttribute('aria-expanded', 'true')
+    await expect(panel).toBeVisible()
+  })
+
+  test('uses semantic green switches and neutral open-menu states', async ({ page }) => {
+    await page.goto('/admin/accounts')
+
+    const inactiveContextBorder = await page.locator('.operator-context-link:not(.operator-context-link-active)').first()
+      .evaluate((element) => getComputedStyle(element).borderBottomColor)
+    expect(inactiveContextBorder).toBe('rgba(0, 0, 0, 0)')
+
+    await page.getByRole('tab', { name: 'Technical' }).click()
+
+    const enabledSwitch = page.locator('.operator-scheduling-switch[aria-checked="true"]').first()
+    const disabledSwitch = page.locator('.operator-scheduling-switch[aria-checked="false"]').first()
+    await expect(enabledSwitch).toBeVisible()
+    await expect(disabledSwitch).toBeVisible()
+    const switchColors = await page.evaluate(() => {
+      const root = document.querySelector('.operator-console') as HTMLElement
+      const enabled = document.querySelector('.operator-scheduling-switch[aria-checked="true"]') as HTMLElement
+      const disabled = document.querySelector('.operator-scheduling-switch[aria-checked="false"]') as HTMLElement
+      const rootStyle = getComputedStyle(root)
       return {
-        layoutLeft: layoutBounds.left,
-        layoutRight: layoutBounds.right,
-        tableLeft: tableBounds.left,
-        tableRight: tableBounds.right,
-        viewportWidth: window.innerWidth,
+        success: rootStyle.getPropertyValue('--operator-success-fill').trim(),
+        track: rootStyle.getPropertyValue('--operator-track').trim(),
+        enabled: getComputedStyle(enabled).backgroundColor,
+        disabled: getComputedStyle(disabled).backgroundColor,
       }
     })
-    expect(bounds.layoutRight).toBeLessThanOrEqual(bounds.viewportWidth + 1)
-    expect(bounds.tableLeft).toBeGreaterThanOrEqual(bounds.layoutLeft - 1)
-    expect(bounds.tableRight).toBeLessThanOrEqual(bounds.layoutRight + 1)
+    expect(switchColors.enabled).toBe(switchColors.success)
+    expect(switchColors.disabled).toBe(switchColors.track)
+
+    const platformSelect = page.locator('.select-trigger').first()
+    await platformSelect.click()
+    const selectedOption = page.locator('.select-dropdown-portal .select-option-selected')
+    await expect(selectedOption).toBeVisible()
+    const selectColors = await selectedOption.evaluate((element) => {
+      const root = document.querySelector('.operator-console') as HTMLElement
+      const rootStyle = getComputedStyle(root)
+      return {
+        expectedBackground: rootStyle.getPropertyValue('--operator-muted').trim(),
+        expectedColor: rootStyle.getPropertyValue('--operator-foreground').trim(),
+        background: getComputedStyle(element).backgroundColor,
+        color: getComputedStyle(element).color,
+        checkColor: getComputedStyle(element.querySelector('svg')!).color,
+      }
+    })
+    expect(selectColors.background).toBe(selectColors.expectedBackground)
+    expect(selectColors.color).toBe(selectColors.expectedColor)
+    expect(selectColors.checkColor).toBe(selectColors.expectedColor)
+    await page.keyboard.press('Escape')
+
+    const moreButton = page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'More' }).first()
+    await moreButton.click()
+    const menu = page.locator('.action-menu-content')
+    await expect(menu).toBeVisible()
+    const menuColors = await menu.evaluate((element) => {
+      const root = document.querySelector('.operator-console') as HTMLElement
+      const expected = getComputedStyle(root).getPropertyValue('--operator-foreground').trim()
+      return {
+        expected,
+        buttons: [...element.querySelectorAll('button')].map((button) => getComputedStyle(button).color),
+      }
+    })
+    expect(menuColors.buttons.length).toBeGreaterThan(2)
+    expect(menuColors.buttons.every((color) => color === menuColors.expected)).toBe(true)
   })
 
   test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {

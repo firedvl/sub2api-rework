@@ -827,7 +827,7 @@ body:has(.auth-codex-shell) {
   --operator-border: oklch(0.84 0 0);
   --operator-border-subtle: oklch(0.91 0 0);
   --operator-track: oklch(0.88 0 0);
-  --operator-focus: oklch(0.52 0.12 250);
+  --operator-focus: oklch(0.42 0 0);
   --operator-success: oklch(0.43 0.13 154);
   --operator-success-fill: oklch(0.6 0.15 154);
   --operator-warning: oklch(0.49 0.13 70);
@@ -861,7 +861,7 @@ body[data-operator-console] :is(.font-mono, code, pre) {
   --operator-border: oklch(0.31 0 0);
   --operator-border-subtle: oklch(0.24 0 0);
   --operator-track: oklch(0.29 0 0);
-  --operator-focus: oklch(0.68 0.1 245);
+  --operator-focus: oklch(0.78 0 0);
   --operator-success: oklch(0.72 0.15 154);
   --operator-success-fill: oklch(0.64 0.16 154);
   --operator-warning: oklch(0.78 0.14 80);
@@ -1095,6 +1095,7 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
 .operator-console .operator-context-link {
   min-height: 2.375rem;
   padding: 0.5rem 0.125rem;
+  border-color: transparent;
   border-bottom-width: 2px;
   border-radius: 0;
   color: var(--operator-muted-foreground);
@@ -1773,8 +1774,8 @@ body[data-operator-console] :is(
 }
 
 /* Replace the inherited primary accent only inside the operator/auth surfaces. */
-.operator-console :is([class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"]),
-.auth-codex-shell :is([class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"]) {
+.operator-console :is([class~="text-primary-300"], [class~="text-primary-400"], [class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"], [class~="text-primary-900"]),
+.auth-codex-shell :is([class~="text-primary-300"], [class~="text-primary-400"], [class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"], [class~="text-primary-900"]) {
   color: var(--operator-primary);
 }
 
@@ -1809,7 +1810,7 @@ body[data-operator-console] :is(
   background-color: var(--operator-card);
 }
 
-.dark .operator-console :is([class~="dark:bg-dark-600"], [class~="dark:bg-primary-900/20"], [class~="dark:bg-primary-900/30"], [class~="dark:bg-primary-900/40"]) {
+.dark .operator-console :is([class~="dark:bg-dark-600"], [class~="dark:bg-primary-900/10"], [class~="dark:bg-primary-900/20"], [class~="dark:bg-primary-900/30"], [class~="dark:bg-primary-900/40"]) {
   background-color: var(--operator-muted);
 }
 
@@ -1870,6 +1871,10 @@ body[data-operator-console] .select-dropdown-portal .select-option-selected {
   color: var(--operator-foreground);
 }
 
+body[data-operator-console] .select-dropdown-portal .select-option-selected svg {
+  color: var(--operator-foreground);
+}
+
 body[data-operator-console] .select-option:hover,
 body[data-operator-console] .select-option-focused {
   background: var(--operator-muted);
@@ -1896,6 +1901,83 @@ body[data-operator-console] :is(.action-menu-content, .account-tools-menu) butto
 
 body[data-operator-console] .action-menu-content button > :is(svg, span:first-child) {
   color: var(--operator-muted-foreground) !important;
+}
+
+body[data-operator-console] ::selection {
+  background: color-mix(in oklch, var(--operator-foreground) 18%, transparent);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="text-blue-"], [class*=" text-blue-"],
+  [class^="text-sky-"], [class*=" text-sky-"],
+  [class^="text-indigo-"], [class*=" text-indigo-"],
+  [class^="text-cyan-"], [class*=" text-cyan-"],
+  [class^="text-purple-"], [class*=" text-purple-"]
+) {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="bg-blue-"], [class*=" bg-blue-"],
+  [class^="bg-sky-"], [class*=" bg-sky-"],
+  [class^="bg-indigo-"], [class*=" bg-indigo-"],
+  [class^="bg-cyan-"], [class*=" bg-cyan-"],
+  [class^="bg-purple-"], [class*=" bg-purple-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class^="border-blue-"], [class*=" border-blue-"],
+  [class^="border-sky-"], [class*=" border-sky-"],
+  [class^="border-indigo-"], [class*=" border-indigo-"],
+  [class^="border-cyan-"], [class*=" border-cyan-"],
+  [class^="border-purple-"], [class*=" border-purple-"]
+) {
+  border-color: var(--operator-border);
+}
+
+body[data-operator-console] :is(
+  [class*="hover:bg-blue-"], [class*="hover:bg-sky-"], [class*="hover:bg-indigo-"],
+  [class*="hover:bg-cyan-"], [class*="hover:bg-purple-"]
+):hover {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class*="hover:text-blue-"], [class*="hover:text-sky-"], [class*="hover:text-indigo-"],
+  [class*="hover:text-cyan-"], [class*="hover:text-purple-"]
+):hover {
+  color: var(--operator-foreground);
+}
+
+.dark body[data-operator-console] :is(
+  [class^="dark:text-blue-"], [class*=" dark:text-blue-"],
+  [class^="dark:text-sky-"], [class*=" dark:text-sky-"],
+  [class^="dark:text-indigo-"], [class*=" dark:text-indigo-"],
+  [class^="dark:text-cyan-"], [class*=" dark:text-cyan-"],
+  [class^="dark:text-purple-"], [class*=" dark:text-purple-"]
+) {
+  color: var(--operator-muted-foreground);
+}
+
+.dark body[data-operator-console] :is(
+  [class^="dark:bg-blue-"], [class*=" dark:bg-blue-"],
+  [class^="dark:bg-sky-"], [class*=" dark:bg-sky-"],
+  [class^="dark:bg-indigo-"], [class*=" dark:bg-indigo-"],
+  [class^="dark:bg-cyan-"], [class*=" dark:bg-cyan-"],
+  [class^="dark:bg-purple-"], [class*=" dark:bg-purple-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] [class*="ring-blue-"],
+body[data-operator-console] [class*="ring-sky-"],
+body[data-operator-console] [class*="ring-indigo-"],
+body[data-operator-console] [class*="ring-cyan-"],
+body[data-operator-console] [class*="ring-purple-"] {
+  --tw-ring-color: color-mix(in oklch, var(--operator-focus) 55%, transparent);
 }
 
 body[data-operator-console] [class*="bg-gradient-"],

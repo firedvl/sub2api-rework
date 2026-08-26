@@ -61,6 +61,8 @@
       <OperatorCapacityOverview
         v-if="!loading"
         :accounts="capacityAccounts"
+        :usage-by-account-id="capacityUsageByAccountId"
+        :errors-by-account-id="capacityUsageErrorByAccountId"
         :loading="capacityLoading"
         :error="capacityError"
         compact
@@ -121,12 +123,14 @@ const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
   Account,
+  AccountUsageInfo,
   DashboardStats
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
+import { supportsBatchAccountUsage } from '@/utils/operatorCapacity'
 
 const appStore = useAppStore()
 const router = useRouter()
@@ -134,6 +138,8 @@ const stats = ref<DashboardStats | null>(null)
 const loading = ref(false)
 const snapshotError = ref(false)
 const capacityAccounts = ref<Account[]>([])
+const capacityUsageByAccountId = ref<Record<string, AccountUsageInfo | null>>({})
+const capacityUsageErrorByAccountId = ref<Record<string, string | null>>({})
 const capacityLoading = ref(false)
 const capacityError = ref(false)
 let capacityLoadSeq = 0
@@ -236,7 +242,25 @@ const loadAccountCapacity = async () => {
       rows.push(...result.items)
     }
     if (currentSeq !== capacityLoadSeq) return
+
+    const usageAccountIDs = rows.filter(supportsBatchAccountUsage).map((account) => account.id)
+    let usage: Record<string, AccountUsageInfo | null> = {}
+    let errors: Record<string, string | null> = {}
+    if (usageAccountIDs.length) {
+      try {
+        const result = await adminAPI.accounts.getBatchUsage(usageAccountIDs, false)
+        usage = result.usage ?? {}
+        errors = result.errors ?? {}
+      } catch (error) {
+        errors = Object.fromEntries(usageAccountIDs.map((id) => [String(id), 'Failed']))
+        console.error('Error loading account usage for capacity:', error)
+      }
+    }
+    if (currentSeq !== capacityLoadSeq) return
+
     capacityAccounts.value = rows
+    capacityUsageByAccountId.value = usage
+    capacityUsageErrorByAccountId.value = errors
   } catch (error) {
     if (currentSeq !== capacityLoadSeq) return
     capacityError.value = true

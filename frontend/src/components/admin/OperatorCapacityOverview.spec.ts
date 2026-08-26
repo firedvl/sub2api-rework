@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import type { Account, AccountUsageInfo } from '@/types'
@@ -51,7 +51,11 @@ const usage = (utilization: number): AccountUsageInfo => ({
 })
 
 describe('OperatorCapacityOverview', () => {
-  it('groups the whole fleet by provider and discloses redacted technical metadata per account', async () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('groups accounts by provider and persists collapsed sections for the session', async () => {
     const wrapper = mount(OperatorCapacityOverview, {
       props: {
         accounts: [
@@ -78,24 +82,44 @@ describe('OperatorCapacityOverview', () => {
       }
     })
 
-    expect(wrapper.findAll('.operator-capacity-provider-header h3').map((node) => node.text())).toEqual([
+    expect(wrapper.findAll('.operator-capacity-provider-name').map((node) => node.text())).toEqual([
       'OpenAI',
       'Gemini',
     ])
     expect(wrapper.text()).toContain('OpenAI primary')
     expect(wrapper.text()).toContain('OpenAI reserve')
     expect(wrapper.text()).toContain('Gemini primary')
-    expect(wrapper.findAll('[data-testid="account-technical-details"]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-testid="account-technical-details"]')).toHaveLength(0)
 
-    const primaryAccount = wrapper.findAll('.operator-capacity-account')
-      .find((node) => node.get('h4').text() === 'OpenAI primary')!
-    const technicalDetails = primaryAccount.get('[data-testid="account-technical-details"]')
-    await technicalDetails.get('summary').trigger('click')
-    expect(technicalDetails.attributes()).toHaveProperty('open')
-    expect(technicalDetails.text()).toContain('project-visible')
-    expect(technicalDetails.text()).toContain('production')
-    expect(technicalDetails.text()).toContain('gpt-5')
-    expect(technicalDetails.text()).toContain('gpt-5.1-mini')
-    expect(technicalDetails.text()).toContain('compact')
+    const openAIToggle = wrapper.get('[data-testid="provider-toggle-openai"]')
+    expect(openAIToggle.attributes('aria-expanded')).toBe('true')
+    await openAIToggle.trigger('click')
+    expect(openAIToggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('#operator-provider-openai-accounts').attributes('style')).toContain('display: none')
+    expect(sessionStorage.getItem('operator-capacity-collapsed-providers')).toBe('["openai"]')
+  })
+
+  it('renders an accessible normalized pool and excludes unknown quota', () => {
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        compact: true,
+        accounts: [account(1), account(2), account(3, { platform: 'gemini' })],
+        usageByAccountId: {
+          '1': usage(20),
+          '2': usage(60),
+        },
+      },
+      global: {
+        stubs: { LoadingSpinner: true }
+      }
+    })
+
+    const pool = wrapper.get('[data-testid="account-pool-capacity"]')
+    expect(pool.get('svg[role="img"]').attributes('aria-label')).toContain('admin.dashboard.capacity.poolTitle')
+    expect(pool.findAll('[data-testid="account-pool-segment"]')).toHaveLength(2)
+    expect(pool.text()).toContain('Account 1')
+    expect(pool.text()).toContain('Account 2')
+    expect(pool.text()).toContain('Account 3')
+    expect(pool.text()).toContain('admin.dashboard.capacity.poolUnknownExcluded:1')
   })
 })

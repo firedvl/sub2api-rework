@@ -292,7 +292,7 @@ const accountUsage = {
     updated_at: updatedAt,
     five_hour: usageProgress(61, '2026-08-25T21:00:00Z'),
     seven_day: usageProgress(37, '2026-08-30T00:00:00Z'),
-    seven_day_sonnet: usageProgress(28, '2026-08-30T00:00:00Z'),
+    seven_day_sonnet: usageProgress(96, '2026-08-30T00:00:00Z'),
   },
   '103': {
     source: 'passive',
@@ -311,7 +311,7 @@ const accountUsage = {
     five_hour: null,
     seven_day: null,
     seven_day_sonnet: null,
-    gemini_shared_daily: usageProgress(19, '2026-08-26T00:00:00Z'),
+    gemini_shared_daily: null,
     error: 'Fixture: reauthorization required',
   },
   '105': {

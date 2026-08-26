@@ -331,6 +331,42 @@ describe('DataTable', () => {
     expect(wrapper.emitted('selectionChange')?.at(-1)?.[0]).toEqual([99, 2])
   })
 
+  it('keeps the selection cell and first data column on distinct sticky offsets', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [{ id: 1, name: 'One' }],
+        rowKey: 'id',
+        selectable: true,
+      }
+    })
+
+    const headers = wrapper.findAll('thead th')
+    expect(headers[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(headers[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+    const cells = wrapper.findAll('tbody tr[data-index] td')
+    expect(cells[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(cells[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+  })
+
+  it('supports the legacy explicit select column without a phantom left gap', () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'select', label: '' },
+          { key: 'name', label: 'Name' },
+          { key: 'id', label: 'ID' },
+        ],
+        data: [{ id: 1, name: 'One' }],
+      }
+    })
+
+    const headers = wrapper.findAll('thead th')
+    expect(headers[0].classes()).toEqual(expect.arrayContaining(['sticky-col-left-first']))
+    expect(headers[1].classes()).toEqual(expect.arrayContaining(['sticky-col-left-second']))
+    expect(headers[2].classes()).not.toContain('sticky-col')
+  })
+
   it('keeps the single usage field shrinkable in a 320px mobile card', () => {
     stubMobileMatchMedia()
     const viewport = document.createElement('div')

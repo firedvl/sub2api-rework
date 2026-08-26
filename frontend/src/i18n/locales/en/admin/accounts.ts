@@ -2,6 +2,9 @@ export default {
     accounts: {
       title: 'Accounts',
       description: 'Manage AI platform accounts and credentials',
+      viewSwitcher: 'Account view',
+      capacityView: 'Capacity',
+      technicalView: 'Technical',
       technicalDetails: 'Technical account details and actions',
       technicalDetailsHint: 'IDs, usage diagnostics, routing metrics, proxies, and advanced actions',
       createAccount: 'Create Account',

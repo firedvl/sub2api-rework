@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, AccountUsageInfo } from '@/types'
-import { buildProviderCapacity, normalizeAccountCapacity } from '../operatorCapacity'
+import {
+  buildNormalizedPoolCapacity,
+  buildProviderCapacity,
+  normalizeAccountCapacity,
+} from '../operatorCapacity'
 
 const account = (id: number, overrides: Partial<Account> = {}): Account => ({
   id,
@@ -89,5 +93,29 @@ describe('operator capacity normalization', () => {
       unknownCount: 1,
       lowestRemaining: null,
     })
+  })
+
+  it('weights known accounts equally and excludes unknown quota from the pool', () => {
+    const highCapacity = normalizeAccountCapacity(account(1), usage({
+      five_hour: { utilization: 20, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },
+      seven_day: { utilization: 10, resets_at: '2026-08-29T00:00:00Z', remaining_seconds: 345600 },
+    }))
+    const limitedCapacity = normalizeAccountCapacity(account(2), usage({
+      five_hour: { utilization: 60, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },
+    }))
+    const unknownCapacity = normalizeAccountCapacity(account(3, { platform: 'gemini' }))
+
+    const pool = buildNormalizedPoolCapacity([
+      highCapacity,
+      limitedCapacity,
+      unknownCapacity,
+    ])
+
+    expect(highCapacity.lowestRemaining).toBe(80)
+    expect(pool.remainingPercent).toBe(60)
+    expect(pool.usedPercent).toBe(40)
+    expect(pool.segments.map((segment) => segment.contributionPercent)).toEqual([40, 20])
+    expect(pool.knownCount).toBe(2)
+    expect(pool.unknownAccounts.map((summary) => summary.account.id)).toEqual([3])
   })
 })

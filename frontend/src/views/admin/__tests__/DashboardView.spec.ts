@@ -199,7 +199,7 @@ describe('admin DashboardView', () => {
     expect(wrapper.find('[data-testid="dashboard-load-error"]').exists()).toBe(false)
   })
 
-  it('loads every persisted account without requesting active usage', async () => {
+  it('loads every persisted account and its passive capacity snapshot', async () => {
     listAccounts
       .mockResolvedValueOnce({
         items: [createAccount(1, 'First persisted account')],
@@ -223,7 +223,7 @@ describe('admin DashboardView', () => {
     expect(listAccounts).toHaveBeenNthCalledWith(2, 2, 1000, { include_scheduler_score: '0' })
     expect(wrapper.text()).toContain('First persisted account')
     expect(wrapper.text()).toContain('Second persisted account')
-    expect(getBatchUsage).not.toHaveBeenCalled()
+    expect(getBatchUsage).toHaveBeenCalledWith([1, 2], false)
   })
 
   it('shows an account-list failure and recovers on retry', async () => {
@@ -248,6 +248,6 @@ describe('admin DashboardView', () => {
 
     expect(wrapper.find('[data-testid="capacity-load-error"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Recovered capacity account')
-    expect(getBatchUsage).not.toHaveBeenCalled()
+    expect(getBatchUsage).toHaveBeenCalledWith([3], false)
   })
 })

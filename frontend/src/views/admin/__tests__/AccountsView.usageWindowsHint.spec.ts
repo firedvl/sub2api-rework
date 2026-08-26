@@ -228,7 +228,7 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="table-rows"]').text()).toBe('Current table page')
     expect(wrapper.text()).toContain('OpenAI reserve fleet row')
     expect(wrapper.text()).toContain('Gemini fleet row')
-    expect(wrapper.findAll('.operator-capacity-provider-header h3').map((node) => node.text())).toEqual([
+    expect(wrapper.findAll('.operator-capacity-provider-name').map((node) => node.text())).toEqual([
       'OpenAI',
       'Gemini',
     ])
@@ -243,10 +243,21 @@ describe('admin AccountsView usage windows hint', () => {
     expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.any(Object))
     expect(getBatchUsage).toHaveBeenCalledWith([1, 2, 3], false)
 
-    const technicalDetails = wrapper.get('details.operator-account-details')
-    expect(technicalDetails.find('[data-test="bulk-actions"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="bulk-actions"]').element.compareDocumentPosition(technicalDetails.element))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    const capacityPanel = wrapper.get('#account-capacity-panel')
+    const technicalPanel = wrapper.get('#account-technical-panel')
+    expect(capacityPanel.attributes('style')).toBeUndefined()
+    expect(technicalPanel.attributes('style')).toContain('display: none')
+    expect(wrapper.find('details.operator-account-details').exists()).toBe(false)
+
+    const listCalls = listAccounts.mock.calls.length
+    const usageCalls = getBatchUsage.mock.calls.length
+    await wrapper.get('#account-technical-tab').trigger('click')
+    expect(capacityPanel.attributes('style')).toContain('display: none')
+    expect(technicalPanel.attributes('style')).not.toContain('display: none')
+    expect(technicalPanel.find('[data-test="bulk-actions"]').exists()).toBe(true)
+    expect(technicalPanel.find('[data-test="data-table"]').exists()).toBe(true)
+    expect(listAccounts).toHaveBeenCalledTimes(listCalls)
+    expect(getBatchUsage).toHaveBeenCalledTimes(usageCalls)
   })
 
   it('renders an explanatory tooltip next to the usage windows column header', async () => {

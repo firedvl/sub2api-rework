@@ -44,6 +44,113 @@
     </div>
 
     <template v-else-if="accounts.length">
+      <section
+        v-if="compact"
+        class="operator-pool-capacity"
+        data-testid="account-pool-capacity"
+        :aria-labelledby="poolTitleId"
+      >
+        <div class="operator-pool-heading">
+          <div>
+            <h3 :id="poolTitleId">{{ t('admin.dashboard.capacity.poolTitle') }}</h3>
+            <p>{{ t('admin.dashboard.capacity.poolDescription') }}</p>
+          </div>
+          <span v-if="normalizedPool.unknownCount" class="operator-pool-unknown-count">
+            {{ t('admin.dashboard.capacity.poolUnknownExcluded', { count: normalizedPool.unknownCount }) }}
+          </span>
+        </div>
+
+        <div class="operator-pool-layout">
+          <div class="operator-pool-chart">
+            <svg
+              viewBox="0 0 120 120"
+              role="img"
+              :aria-label="poolAriaLabel"
+            >
+              <title>{{ poolAriaLabel }}</title>
+              <circle
+                class="operator-pool-ring"
+                :class="normalizedPool.usedPercent === null ? 'is-unknown' : 'is-used'"
+                cx="60"
+                cy="60"
+                r="46"
+                pathLength="100"
+                tabindex="0"
+              >
+                <title>
+                  {{ normalizedPool.usedPercent === null
+                    ? t('admin.dashboard.capacity.quotaUnknown')
+                    : t('admin.dashboard.capacity.poolUsedValue', { value: formatPercent(normalizedPool.usedPercent) }) }}
+                </title>
+              </circle>
+              <circle
+                v-for="segment in poolChartSegments"
+                :key="segment.summary.account.id"
+                class="operator-pool-ring operator-pool-segment"
+                :class="segmentTone(segment.index)"
+                cx="60"
+                cy="60"
+                r="46"
+                pathLength="100"
+                tabindex="0"
+                data-testid="account-pool-segment"
+                :style="{
+                  strokeDasharray: `${segment.contributionPercent} ${100 - segment.contributionPercent}`,
+                  strokeDashoffset: `${-segment.offset}`,
+                }"
+              >
+                <title>
+                  {{ segment.summary.account.name }}:
+                  {{ t('admin.dashboard.capacity.remaining', { value: formatPercent(segment.summary.lowestRemaining) }) }},
+                  {{ t('admin.dashboard.capacity.poolContribution', { value: formatPercent(segment.contributionPercent) }) }}
+                </title>
+              </circle>
+            </svg>
+            <div class="operator-pool-chart-label" aria-hidden="true">
+              <strong>
+                {{ normalizedPool.remainingPercent === null
+                  ? t('common.unknown')
+                  : `${formatPercent(normalizedPool.remainingPercent)}%` }}
+              </strong>
+              <span>{{ t('admin.dashboard.capacity.poolAvailable') }}</span>
+            </div>
+          </div>
+
+          <ul class="operator-pool-legend" :aria-label="t('admin.dashboard.capacity.poolLegend')">
+            <li v-if="normalizedPool.usedPercent !== null">
+              <span class="operator-pool-swatch is-used" aria-hidden="true" />
+              <span class="operator-pool-legend-label">
+                <strong>{{ t('admin.dashboard.capacity.poolUsed') }}</strong>
+                <small>{{ t('admin.dashboard.capacity.poolNormalized') }}</small>
+              </span>
+              <strong>{{ formatPercent(normalizedPool.usedPercent) }}%</strong>
+            </li>
+            <li v-for="segment in poolChartSegments" :key="`legend-${segment.summary.account.id}`">
+              <span
+                class="operator-pool-swatch"
+                :class="segmentTone(segment.index)"
+                aria-hidden="true"
+              />
+              <span class="operator-pool-legend-label">
+                <strong>{{ segment.summary.account.name }}</strong>
+                <small>{{ providerLabel(segment.summary.account.platform) }}</small>
+              </span>
+              <span class="operator-pool-legend-value">
+                <strong>{{ formatPercent(segment.summary.lowestRemaining) }}%</strong>
+                <small>
+                  {{ t('admin.dashboard.capacity.poolContribution', { value: formatPercent(segment.contributionPercent) }) }}
+                </small>
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <p v-if="normalizedPool.unknownAccounts.length" class="operator-pool-unknown-list">
+          <strong>{{ t('admin.dashboard.capacity.quotaUnknown') }}:</strong>
+          {{ normalizedPool.unknownAccounts.map((summary) => summary.account.name).join(', ') }}
+        </p>
+      </section>
+
       <section class="operator-capacity-fleet">
         <div class="operator-capacity-section-heading">
           <h3>{{ t('admin.dashboard.capacity.byProvider') }}</h3>
@@ -106,19 +213,40 @@
       <div v-if="!compact" class="operator-capacity-providers">
         <section v-for="provider in providers" :key="provider.platform" class="operator-capacity-provider">
           <header class="operator-capacity-provider-header">
-            <div>
-              <h3>{{ providerLabel(provider.platform) }}</h3>
-              <p>{{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}</p>
-            </div>
-            <div class="operator-capacity-provider-summary">
-              <span>{{ t('admin.dashboard.capacity.lowestRemaining') }}</span>
-              <strong :class="capacityTone(provider.lowestRemaining)">
-                {{ percentLabel(provider.lowestRemaining) }}
-              </strong>
-            </div>
+            <button
+              type="button"
+              class="operator-capacity-provider-toggle"
+              :aria-expanded="!isProviderCollapsed(provider.platform)"
+              :aria-controls="providerPanelId(provider.platform)"
+              :data-testid="`provider-toggle-${provider.platform}`"
+              @click="toggleProvider(provider.platform)"
+            >
+              <span class="operator-capacity-provider-identity">
+                <Icon
+                  name="chevronDown"
+                  size="sm"
+                  :class="{ 'is-collapsed': isProviderCollapsed(provider.platform) }"
+                  aria-hidden="true"
+                />
+                <span>
+                  <span class="operator-capacity-provider-name">{{ providerLabel(provider.platform) }}</span>
+                  <span>{{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}</span>
+                </span>
+              </span>
+              <span class="operator-capacity-provider-summary">
+                <span>{{ t('admin.dashboard.capacity.lowestRemaining') }}</span>
+                <strong :class="capacityTone(provider.lowestRemaining)">
+                  {{ percentLabel(provider.lowestRemaining) }}
+                </strong>
+              </span>
+            </button>
           </header>
 
-          <div class="operator-capacity-account-list">
+          <div
+            v-show="!isProviderCollapsed(provider.platform)"
+            :id="providerPanelId(provider.platform)"
+            class="operator-capacity-account-list"
+          >
             <article
               v-for="summary in provider.accounts"
               :key="summary.account.id"
@@ -201,52 +329,6 @@
                   <span>{{ summary.error || t('admin.dashboard.capacity.quotaUnknownHint') }}</span>
                 </div>
               </div>
-
-              <details class="operator-capacity-technical" data-testid="account-technical-details">
-                <summary>{{ t('admin.dashboard.capacity.technicalDetails') }}</summary>
-                <div class="operator-capacity-technical-content">
-                  <dl class="operator-capacity-technical-grid">
-                    <div>
-                      <dt>{{ t('admin.dashboard.capacity.accountId') }}</dt>
-                      <dd><code>{{ summary.account.id }}</code></dd>
-                    </div>
-                    <div>
-                      <dt>{{ t('admin.dashboard.capacity.authType') }}</dt>
-                      <dd>{{ accountTypeLabel(summary.account.type) }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ t('admin.dashboard.capacity.routingGroups') }}</dt>
-                      <dd>{{ summary.groups.join(', ') || t('admin.dashboard.capacity.noneConfigured') }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ t('admin.dashboard.capacity.createdAt') }}</dt>
-                      <dd>{{ formatTechnicalDate(summary.account.created_at) }}</dd>
-                    </div>
-                    <div>
-                      <dt>{{ t('admin.dashboard.capacity.updatedAt') }}</dt>
-                      <dd>{{ formatTechnicalDate(summary.account.updated_at) }}</dd>
-                    </div>
-                    <div v-for="identifier in providerIdentifiers(summary.account)" :key="identifier.key">
-                      <dt><code>{{ identifier.key }}</code></dt>
-                      <dd><code>{{ identifier.value }}</code></dd>
-                    </div>
-                    <div class="operator-capacity-technical-wide">
-                      <dt>{{ t('admin.dashboard.capacity.modelMappings') }}</dt>
-                      <dd v-if="modelMappings(summary.account).length">
-                        <ul class="operator-capacity-mapping-list">
-                          <li v-for="mapping in modelMappings(summary.account)" :key="mapping.key">
-                            <span v-if="mapping.kind === 'compact'" class="operator-capacity-mapping-kind">compact</span>
-                            <code>{{ mapping.source }}</code>
-                            <span aria-hidden="true">&rarr;</span>
-                            <code>{{ mapping.target }}</code>
-                          </li>
-                        </ul>
-                      </dd>
-                      <dd v-else>{{ t('admin.dashboard.capacity.noneConfigured') }}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </details>
             </article>
           </div>
         </section>
@@ -256,11 +338,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
 import {
+  buildNormalizedPoolCapacity,
   buildProviderCapacity,
   type OperatorAccountHealth,
 } from '@/utils/operatorCapacity'
@@ -291,6 +375,15 @@ const providers = computed(() => buildProviderCapacity(
   props.errorsByAccountId,
 ))
 const summaries = computed(() => providers.value.flatMap((provider) => provider.accounts))
+const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value))
+const poolChartSegments = computed(() => {
+  let offset = 0
+  return normalizedPool.value.segments.map((segment, index) => {
+    const chartSegment = { ...segment, index, offset }
+    offset += segment.contributionPercent
+    return chartSegment
+  })
+})
 const accountCount = computed(() => props.totalCount ?? props.accounts.length)
 const schedulableCount = computed(() => summaries.value.filter((summary) => summary.account.schedulable).length)
 const unavailableCount = computed(() => summaries.value.filter(
@@ -302,18 +395,33 @@ const warningCount = computed(() => summaries.value.filter((summary) => (
   && summary.health !== 'inactive'
 ) || (summary.lowestRemaining !== null && summary.lowestRemaining <= 20)).length)
 const unknownCount = computed(() => providers.value.reduce((total, provider) => total + provider.unknownCount, 0))
+const poolTitleId = 'operator-account-pool-title'
+const PROVIDER_COLLAPSE_STORAGE_KEY = 'operator-capacity-collapsed-providers'
 
-const PROVIDER_IDENTIFIER_KEYS = [
-  'account_id',
-  'antigravity_project_id',
-  'chatgpt_account_id',
-  'organization_id',
-  'project_id',
-  'subscription_id',
-  'team_id',
-  'tenant_id',
-  'workspace_id',
-] as const
+const loadCollapsedProviders = (): Set<AccountPlatform> => {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(PROVIDER_COLLAPSE_STORAGE_KEY) ?? '[]')
+    return Array.isArray(stored) ? new Set(stored.filter((value): value is AccountPlatform => typeof value === 'string')) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+const collapsedProviders = ref(loadCollapsedProviders())
+const isProviderCollapsed = (platform: AccountPlatform) => collapsedProviders.value.has(platform)
+const providerPanelId = (platform: AccountPlatform) => `operator-provider-${platform}-accounts`
+const toggleProvider = (platform: AccountPlatform) => {
+  const next = new Set(collapsedProviders.value)
+  if (next.has(platform)) next.delete(platform)
+  else next.add(platform)
+  collapsedProviders.value = next
+  try {
+    sessionStorage.setItem(PROVIDER_COLLAPSE_STORAGE_KEY, JSON.stringify([...next]))
+  } catch {
+    // Session persistence is optional; the accordion still works without storage.
+  }
+}
 
 const recordEntries = (value: unknown): Array<[string, string]> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return []
@@ -337,20 +445,6 @@ const modelMappings = (account: Account) => [
 ]
 
 const modelMappingCount = (account: Account) => modelMappings(account).length
-
-const providerIdentifiers = (account: Account) => {
-  const credentials = account.credentials ?? {}
-  const identifiers: Array<{ key: string; value: string }> = PROVIDER_IDENTIFIER_KEYS.flatMap((key) => {
-    const value = credentials[key]
-    return typeof value === 'string' && value.trim()
-      ? [{ key, value: value.trim() }]
-      : []
-  })
-  if (account.parent_chatgpt_account_id) {
-    identifiers.push({ key: 'parent_chatgpt_account_id', value: account.parent_chatgpt_account_id })
-  }
-  return identifiers
-}
 
 const providerLabel = (platform: AccountPlatform) => ({
   openai: 'OpenAI',
@@ -389,8 +483,12 @@ const capacityTone = (value: number | null) => {
   return 'is-healthy'
 }
 
+const segmentTone = (index: number) => `is-segment-${index % 5}`
+const poolAriaLabel = computed(() => normalizedPool.value.remainingPercent === null
+  ? `${t('admin.dashboard.capacity.poolTitle')}: ${t('admin.dashboard.capacity.quotaUnknown')}`
+  : `${t('admin.dashboard.capacity.poolTitle')}: ${formatPercent(normalizedPool.value.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}, ${formatPercent(normalizedPool.value.usedPercent as number)}% ${t('admin.dashboard.capacity.poolUsed')}`)
+
 const formatReset = (value: string) => formatDateTimeToMinute(value) || t('common.unknown')
-const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || t('common.unknown')
 </script>
 
 <style scoped>
@@ -422,7 +520,7 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
 
 .operator-capacity-header h2,
 .operator-capacity-section-heading h3,
-.operator-capacity-provider-header h3,
+.operator-capacity-provider-name,
 .operator-capacity-account h4 {
   color: var(--operator-foreground);
   font-weight: 650;
@@ -482,6 +580,207 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
   gap: 0.5rem;
   color: var(--operator-muted-foreground);
   font-size: 0.875rem;
+}
+
+.operator-pool-capacity {
+  padding: 1.25rem 1.5rem 1.5rem;
+  border-bottom: 1px solid var(--operator-border);
+}
+
+.operator-pool-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.operator-pool-heading h3 {
+  color: var(--operator-foreground);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.operator-pool-heading p {
+  max-width: 52rem;
+  margin-top: 0.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.operator-pool-unknown-count {
+  flex: 0 0 auto;
+  padding: 0.3125rem 0.5625rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-pool-layout {
+  display: grid;
+  margin-top: 1.125rem;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem 2rem;
+}
+
+.operator-pool-chart {
+  position: relative;
+  width: min(100%, 14rem);
+  aspect-ratio: 1;
+  justify-self: center;
+}
+
+.operator-pool-chart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.operator-pool-ring {
+  fill: none;
+  stroke-width: 16;
+}
+
+.operator-pool-ring.is-used {
+  stroke: color-mix(in oklch, var(--operator-muted-foreground) 55%, var(--operator-track));
+}
+
+.operator-pool-ring.is-unknown {
+  stroke: var(--operator-track);
+  stroke-dasharray: 2 3;
+}
+
+.operator-pool-segment {
+  transition: stroke-width 150ms ease;
+}
+
+.operator-pool-segment:hover,
+.operator-pool-segment:focus-visible {
+  stroke-width: 19;
+  outline: none;
+}
+
+.operator-pool-segment:focus-visible {
+  filter: drop-shadow(0 0 2px var(--operator-focus));
+}
+
+.operator-pool-chart-label {
+  position: absolute;
+  inset: 25%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.operator-pool-chart-label strong {
+  color: var(--operator-foreground);
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.operator-pool-chart-label span {
+  margin-top: 0.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-pool-legend {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem 1.5rem;
+}
+
+.operator-pool-legend li {
+  display: grid;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.5rem 0;
+  grid-template-columns: 0.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  border-bottom: 1px solid var(--operator-border-subtle);
+}
+
+.operator-pool-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.operator-pool-swatch.is-used {
+  color: color-mix(in oklch, var(--operator-muted-foreground) 55%, var(--operator-track));
+}
+
+.is-segment-0 { color: var(--operator-success-fill); stroke: var(--operator-success-fill); }
+.is-segment-1 {
+  color: color-mix(in oklch, var(--operator-success-fill) 62%, var(--operator-foreground));
+  stroke: color-mix(in oklch, var(--operator-success-fill) 62%, var(--operator-foreground));
+}
+.is-segment-2 { color: var(--operator-warning-fill); stroke: var(--operator-warning-fill); }
+.is-segment-3 {
+  color: color-mix(in oklch, var(--operator-foreground) 68%, var(--operator-border));
+  stroke: color-mix(in oklch, var(--operator-foreground) 68%, var(--operator-border));
+}
+.is-segment-4 {
+  color: color-mix(in oklch, var(--operator-warning-fill) 55%, var(--operator-foreground));
+  stroke: color-mix(in oklch, var(--operator-warning-fill) 55%, var(--operator-foreground));
+}
+
+.operator-pool-legend-label,
+.operator-pool-legend-value {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.operator-pool-legend-label strong {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-pool-legend small {
+  margin-top: 0.125rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.operator-pool-legend-value {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.operator-pool-legend-value > strong,
+.operator-pool-legend > li > strong {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.operator-pool-unknown-list {
+  margin-top: 0.875rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.operator-pool-unknown-list strong {
+  color: var(--operator-foreground);
+  font-weight: 600;
 }
 
 .operator-capacity-fleet { padding: 1.25rem 1.5rem 1.5rem; }
@@ -554,14 +853,60 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
 .operator-capacity-providers { border-top: 1px solid var(--operator-border); }
 .operator-capacity-provider + .operator-capacity-provider { border-top: 1px solid var(--operator-border); }
 .operator-capacity-provider-header {
-  padding: 0.875rem 1.5rem;
+  padding: 0;
   background: var(--operator-muted);
 }
-.operator-capacity-provider-header h3 { font-size: 1rem; }
-.operator-capacity-provider-header p {
+.operator-capacity-provider-name { font-size: 1rem; }
+.operator-capacity-provider-identity > span > span {
   margin-top: 0.125rem;
   color: var(--operator-muted-foreground);
   font-size: 0.8125rem;
+}
+
+.operator-capacity-provider-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1.5rem;
+  color: var(--operator-foreground);
+  text-align: left;
+  transition: background-color 150ms ease;
+}
+
+.operator-capacity-provider-toggle:hover {
+  background: color-mix(in oklch, var(--operator-muted) 68%, var(--operator-card));
+}
+
+.operator-capacity-provider-toggle:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -3px;
+}
+
+.operator-capacity-provider-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.operator-capacity-provider-identity > svg {
+  flex: 0 0 auto;
+  transition: transform 150ms ease;
+}
+
+.operator-capacity-provider-identity > svg.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.operator-capacity-provider-identity > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .operator-capacity-provider-summary {
@@ -573,11 +918,20 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
 }
 .operator-capacity-provider-summary strong { font-size: 0.875rem; }
 
+.operator-capacity-account-list {
+  display: grid;
+  padding: 0.625rem;
+  background: var(--operator-muted);
+  gap: 0.625rem;
+}
+
 .operator-capacity-account {
   min-width: 0;
-  padding: 1.125rem 1.5rem 1.25rem;
+  padding: 1.125rem 1.25rem 1.25rem;
+  border: 1px solid var(--operator-border-subtle);
+  border-radius: 0.25rem;
+  background: var(--operator-card);
 }
-.operator-capacity-account + .operator-capacity-account { border-top: 1px solid var(--operator-border-subtle); }
 .operator-capacity-account-title,
 .operator-capacity-account-meta,
 .operator-capacity-window { min-width: 0; }
@@ -731,61 +1085,6 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
   font-size: 0.8125rem;
   line-height: 1.4;
 }
-.operator-capacity-technical {
-  margin-top: 1rem;
-  border-top: 1px solid var(--operator-border-subtle);
-}
-.operator-capacity-technical summary {
-  width: fit-content;
-  min-height: 2.5rem;
-  padding: 0.625rem 0;
-  cursor: pointer;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-  font-weight: 600;
-}
-.operator-capacity-technical summary:hover { color: var(--operator-foreground); }
-.operator-capacity-technical summary:focus-visible {
-  border-radius: var(--operator-radius);
-  outline: 2px solid var(--operator-focus);
-  outline-offset: 2px;
-}
-.operator-capacity-technical-content { padding: 0.25rem 0; }
-.operator-capacity-technical-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.875rem 1.5rem;
-}
-.operator-capacity-technical-grid > div { min-width: 0; }
-.operator-capacity-technical-grid dt {
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-}
-.operator-capacity-technical-grid dd {
-  margin-top: 0.25rem;
-  overflow-wrap: anywhere;
-  color: var(--operator-foreground);
-  font-size: 0.8125rem;
-}
-.operator-capacity-technical-wide { grid-column: 1 / -1; }
-.operator-capacity-mapping-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-}
-.operator-capacity-mapping-list li {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.375rem;
-}
-.operator-capacity-mapping-kind {
-  padding: 0.125rem 0.25rem;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius);
-  color: var(--operator-muted-foreground);
-  font-size: 0.75rem;
-}
 .operator-capacity-compact .operator-capacity-fleet { padding-bottom: 1.25rem; }
 
 @media (max-width: 1023px) {
@@ -803,28 +1102,35 @@ const formatTechnicalDate = (value: string) => formatDateTimeToMinute(value) || 
     margin-left: auto;
   }
   .operator-capacity-account-body { grid-template-columns: 1fr; }
-  .operator-capacity-technical-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operator-pool-legend { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 639px) {
   .operator-capacity-header,
-  .operator-capacity-provider-header {
+  .operator-pool-heading,
+  .operator-capacity-provider-toggle {
     align-items: flex-start;
     flex-direction: column;
   }
   .operator-capacity-account,
   .operator-capacity-header,
   .operator-capacity-fleet,
-  .operator-capacity-provider-header {
+  .operator-pool-capacity {
     padding-right: 1rem;
     padding-left: 1rem;
   }
+  .operator-capacity-provider-toggle {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+  .operator-pool-layout { grid-template-columns: 1fr; }
+  .operator-pool-chart { width: min(100%, 12rem); }
+  .operator-pool-unknown-count { white-space: normal; }
   .operator-capacity-provider-summary {
     width: 100%;
     justify-content: space-between;
   }
   .operator-capacity-window-grid { grid-template-columns: 1fr; }
-  .operator-capacity-technical-grid { grid-template-columns: 1fr; }
   .operator-capacity-window-detail {
     align-items: flex-start;
     flex-direction: column;

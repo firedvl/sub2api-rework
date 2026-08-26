@@ -36,6 +36,20 @@ export interface OperatorProviderCapacity {
   lowestRemaining: number | null
 }
 
+export interface OperatorPoolCapacitySegment {
+  summary: OperatorAccountCapacity & { lowestRemaining: number }
+  contributionPercent: number
+}
+
+export interface OperatorPoolCapacity {
+  knownCount: number
+  unknownCount: number
+  remainingPercent: number | null
+  usedPercent: number | null
+  segments: OperatorPoolCapacitySegment[]
+  unknownAccounts: OperatorAccountCapacity[]
+}
+
 const PLATFORM_ORDER: AccountPlatform[] = [
   'openai',
   'anthropic',
@@ -324,4 +338,44 @@ export function buildProviderCapacity(
       }
     })
     .sort((left, right) => PLATFORM_ORDER.indexOf(left.platform) - PLATFORM_ORDER.indexOf(right.platform))
+}
+
+export function buildNormalizedPoolCapacity(
+  accounts: OperatorAccountCapacity[],
+): OperatorPoolCapacity {
+  const knownAccounts = accounts.filter(
+    (summary): summary is OperatorAccountCapacity & { lowestRemaining: number } => (
+      summary.lowestRemaining !== null
+    ),
+  )
+  const unknownAccounts = accounts.filter((summary) => summary.lowestRemaining === null)
+
+  if (!knownAccounts.length) {
+    return {
+      knownCount: 0,
+      unknownCount: unknownAccounts.length,
+      remainingPercent: null,
+      usedPercent: null,
+      segments: [],
+      unknownAccounts,
+    }
+  }
+
+  const segments = knownAccounts.map((summary) => ({
+    summary,
+    contributionPercent: summary.lowestRemaining / knownAccounts.length,
+  }))
+  const remainingPercent = segments.reduce(
+    (total, segment) => total + segment.contributionPercent,
+    0,
+  )
+
+  return {
+    knownCount: knownAccounts.length,
+    unknownCount: unknownAccounts.length,
+    remainingPercent,
+    usedPercent: 100 - remainingPercent,
+    segments,
+    unknownAccounts,
+  }
 }
