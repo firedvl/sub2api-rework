@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
@@ -18,6 +18,13 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
+const isOperatorConsole = computed(
+  () => authStore.isAdmin && (route.path === '/admin' || route.path.startsWith('/admin/')),
+)
+
+watch(isOperatorConsole, (enabled) => {
+  document.body.toggleAttribute('data-operator-console', enabled)
+}, { immediate: true })
 
 function updateDocumentTitle() {
   const customMenuItems = [
@@ -110,6 +117,7 @@ router.afterEach(() => {
 })
 
 onBeforeUnmount(() => {
+  document.body.removeAttribute('data-operator-console')
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
 })

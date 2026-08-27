@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Geist Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/GeistSans-Variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 @layer base {
   * {
     @apply border-gray-200 dark:border-dark-700;
@@ -774,5 +802,1701 @@
 
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/*
+ * Operator UI port. Values follow codex-lb's compact neutral visual system;
+ * see THIRD_PARTY_NOTICES.md for the design reference and license notice.
+ */
+.operator-console,
+.auth-codex-shell,
+body[data-operator-console],
+body:has(.auth-codex-shell) {
+  --operator-radius: 0.375rem;
+  --operator-shadow-xs: 0 1px 2px oklch(0 0 0 / 0.04);
+  --operator-shadow-sm: 0 1px 3px oklch(0 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.04);
+  --operator-background: oklch(0.975 0 0);
+  --operator-foreground: oklch(0.16 0 0);
+  --operator-card: oklch(1 0 0);
+  --operator-raised: oklch(0.965 0 0);
+  --operator-primary: oklch(0.22 0 0);
+  --operator-primary-foreground: oklch(0.99 0 0);
+  --operator-muted: oklch(0.94 0 0);
+  --operator-muted-foreground: oklch(0.44 0 0);
+  --operator-border: oklch(0.84 0 0);
+  --operator-border-subtle: oklch(0.91 0 0);
+  --operator-track: oklch(0.88 0 0);
+  --operator-focus: oklch(0.42 0 0);
+  --operator-success: oklch(0.43 0.13 154);
+  --operator-success-fill: oklch(0.6 0.15 154);
+  --operator-warning: oklch(0.49 0.13 70);
+  --operator-warning-fill: oklch(0.68 0.15 78);
+  --operator-destructive: oklch(0.52 0.2 27);
+  --operator-destructive-fill: oklch(0.61 0.2 27);
+  color: var(--operator-foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+.operator-console :is(.font-mono, code, pre),
+.auth-codex-shell :is(.font-mono, code, pre),
+body[data-operator-console] :is(.font-mono, code, pre) {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.dark .operator-console,
+.dark .auth-codex-shell,
+.dark body[data-operator-console],
+.dark body:has(.auth-codex-shell) {
+  --operator-shadow-xs: 0 1px 2px oklch(0 0 0 / 0.15);
+  --operator-shadow-sm: 0 1px 3px oklch(0 0 0 / 0.2), 0 1px 2px oklch(0 0 0 / 0.15);
+  --operator-background: oklch(0.07 0 0);
+  --operator-foreground: oklch(0.95 0 0);
+  --operator-card: oklch(0.14 0 0);
+  --operator-raised: oklch(0.19 0 0);
+  --operator-primary: oklch(0.92 0 0);
+  --operator-primary-foreground: oklch(0.1 0 0);
+  --operator-muted: oklch(0.21 0 0);
+  --operator-muted-foreground: oklch(0.78 0 0);
+  --operator-border: oklch(0.31 0 0);
+  --operator-border-subtle: oklch(0.24 0 0);
+  --operator-track: oklch(0.29 0 0);
+  --operator-focus: oklch(0.78 0 0);
+  --operator-success: oklch(0.72 0.15 154);
+  --operator-success-fill: oklch(0.64 0.16 154);
+  --operator-warning: oklch(0.78 0.14 80);
+  --operator-warning-fill: oklch(0.7 0.16 78);
+  --operator-destructive: oklch(0.72 0.18 25);
+  --operator-destructive-fill: oklch(0.65 0.2 27);
+}
+
+.operator-console,
+.operator-shell,
+.operator-main {
+  background: var(--operator-background);
+}
+
+.operator-console {
+  --table-header-background: color-mix(in oklch, var(--operator-muted) 70%, var(--operator-card));
+  --table-body-background: var(--operator-card);
+  --table-row-hover-background: color-mix(in oklch, var(--operator-muted) 55%, var(--operator-card));
+}
+
+.operator-console *,
+.auth-codex-shell * {
+  letter-spacing: 0;
+}
+
+body[data-operator-console] :is(
+  [class~="text-xs"],
+  [class~="text-[9px]"],
+  [class~="text-[10px]"],
+  [class~="text-[11px]"],
+  [class~="text-[12px]"]
+) {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+body[data-operator-console] :is(button, a, input, select, textarea):focus-visible {
+  outline-color: var(--operator-focus);
+  --tw-ring-color: color-mix(in oklch, var(--operator-focus) 55%, transparent);
+}
+
+.operator-header {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--operator-border);
+  background: var(--operator-background);
+  box-shadow: none;
+}
+
+.dark .operator-header {
+  box-shadow: 0 1px 12px oklch(0 0 0 / 0.25);
+}
+
+.operator-header-inner {
+  display: grid;
+  width: 100%;
+  max-width: 1500px;
+  min-height: 4rem;
+  margin: 0 auto;
+  padding: 0.625rem 1.5rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+}
+
+.operator-brand-wrap,
+.operator-header-actions,
+.operator-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.operator-brand-wrap {
+  gap: 0.5rem;
+}
+
+.operator-brand {
+  gap: 0.625rem;
+  border-radius: 0.5rem;
+  color: var(--operator-foreground);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.operator-brand:hover {
+  opacity: 0.8;
+}
+
+.operator-brand:focus-visible,
+.operator-primary-link:focus-visible,
+.operator-icon-button:focus-visible,
+.operator-logout:focus-visible,
+.operator-mobile-nav-link:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+
+.operator-brand-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  border: 1px solid var(--operator-border);
+  background: var(--operator-raised);
+  color: var(--operator-foreground);
+}
+
+.operator-brand-mark img {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: contain;
+}
+
+.operator-primary-nav {
+  display: flex;
+  align-items: center;
+  padding: 0.125rem;
+  border: 1px solid color-mix(in oklch, var(--operator-border) 50%, transparent);
+  border-radius: 0.5rem;
+  background: var(--operator-muted);
+}
+
+.operator-primary-link {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  padding: 0 0.875rem;
+  border-radius: var(--operator-radius);
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.operator-primary-link:hover {
+  color: var(--operator-foreground);
+}
+
+.operator-primary-link-active {
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+  color: var(--operator-foreground);
+}
+
+.operator-header-actions {
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+.operator-header-actions button,
+.operator-icon-button,
+.operator-logout {
+  min-width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+}
+
+.operator-icon-button,
+.operator-logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0 0.5rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.operator-icon-button:hover,
+.operator-logout:hover,
+.operator-header-actions button:hover {
+  background: color-mix(in oklch, var(--operator-muted) 70%, transparent);
+  color: var(--operator-foreground);
+  transform: none;
+}
+
+.operator-main {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.operator-content-shell {
+  display: flex;
+  width: 100%;
+  max-width: 1500px;
+  min-height: 100%;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 2rem;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.operator-page-heading {
+  flex: 0 0 auto;
+  margin-bottom: 1rem;
+}
+
+.operator-page-heading h1 {
+  margin: 0;
+  color: var(--operator-foreground);
+  font-size: 1.625rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.operator-page-heading p {
+  margin: 0.375rem 0 0;
+  color: var(--operator-muted-foreground);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.operator-console .operator-context-nav {
+  flex: 0 0 auto;
+  margin-bottom: 1.25rem;
+  border-color: var(--operator-border);
+}
+
+.operator-console .operator-context-link {
+  min-height: 2.375rem;
+  padding: 0.5rem 0.125rem;
+  border-color: transparent;
+  border-bottom-width: 2px;
+  border-radius: 0;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.operator-console .operator-context-link:hover {
+  border-color: color-mix(in oklch, var(--operator-border) 70%, var(--operator-foreground));
+  color: var(--operator-foreground);
+}
+
+.operator-console .operator-context-link-active {
+  border-color: var(--operator-foreground);
+  color: var(--operator-foreground);
+}
+
+.operator-status-bar {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  min-height: 2.5rem;
+  border-top: 1px solid var(--operator-border);
+  background: var(--operator-background);
+  box-shadow: none;
+}
+
+.dark .operator-status-bar {
+  box-shadow: 0 -1px 12px oklch(0 0 0 / 0.25);
+}
+
+.operator-status-inner {
+  display: flex;
+  width: 100%;
+  max-width: 1500px;
+  min-height: 2.5rem;
+  margin: 0 auto;
+  padding: 0.5rem 1.5rem;
+  align-items: center;
+  gap: 1.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-status-item,
+.operator-review-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+.operator-status-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.operator-status-secondary {
+  margin-left: auto;
+}
+
+.operator-review-status {
+  color: var(--operator-muted-foreground);
+  font-weight: 500;
+}
+
+body[data-operator-console] .operator-status-dot.bg-gray-500 {
+  background: var(--operator-muted-foreground);
+}
+
+.operator-console .card,
+.operator-console .glass,
+.operator-console .glass-card,
+.operator-console .card-glass {
+  border: 1px solid var(--operator-border);
+  border-radius: 0.75rem;
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+  backdrop-filter: none;
+  transition-property: border-color, background-color;
+}
+
+.operator-console [class~="rounded-xl"] {
+  border-radius: 0.5rem;
+}
+
+.operator-console [class~="rounded-2xl"],
+.operator-console [class~="rounded-3xl"] {
+  border-radius: 0.75rem;
+}
+
+.operator-console [class*="bg-gradient-"],
+.auth-codex-shell [class*="bg-gradient-"] {
+  background-image: none;
+}
+
+.operator-console [class*="shadow-glow"] {
+  box-shadow: none;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--operator-radius);
+  font-size: 0.875rem;
+  line-height: 1;
+  box-shadow: var(--operator-shadow-xs);
+  background-image: none;
+  transform: none;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+:is(body[data-operator-console], .operator-console) .btn-sm {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--operator-radius);
+  font-size: 0.8125rem;
+}
+
+:is(body[data-operator-console], .operator-console) .btn-icon {
+  width: 2.5rem;
+  padding: 0;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-primary {
+  border: 1px solid var(--operator-primary);
+  background: var(--operator-primary);
+  color: var(--operator-primary-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  background-image: none;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-primary:hover {
+  background: color-mix(in oklch, var(--operator-primary) 88%, black);
+  box-shadow: var(--operator-shadow-xs);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-secondary {
+  border: 1px solid var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.btn-secondary, .btn-ghost):hover {
+  border-color: var(--operator-border);
+  background: var(--operator-muted);
+}
+
+:is(body[data-operator-console], .operator-console) .btn-danger {
+  border: 1px solid var(--operator-destructive);
+  background: var(--operator-destructive);
+  box-shadow: var(--operator-shadow-xs);
+  background-image: none;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input, .select-trigger, select, textarea) {
+  min-height: 2.5rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  font-size: 0.875rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  font-size: 0.875rem;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger:hover {
+  border-color: color-mix(in oklch, var(--operator-border) 65%, var(--operator-foreground));
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger.select-trigger-open,
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger:focus-visible {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .input {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input:focus, .select-trigger:focus-visible, select:focus, textarea:focus) {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .input-label {
+  margin-bottom: 0.375rem;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input-hint, .input-error-text) {
+  font-size: 0.8125rem;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) :is(.input-hint, .input-error-text) {
+  color: var(--operator-muted-foreground);
+}
+
+.operator-console .badge {
+  border-radius: var(--operator-radius);
+  padding: 0.25rem 0.5625rem;
+  font-size: 0.8125rem;
+}
+
+body[data-operator-console] .operator-console .badge-gray {
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-console :is(.table-body, tbody[class*="divide-"]) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--operator-border);
+}
+
+body[data-operator-console] .operator-console tbody.table-body[class*="divide-"] {
+  border-color: var(--operator-border);
+}
+
+.operator-console .progress {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--operator-muted);
+}
+
+.operator-console .progress-bar {
+  background: var(--operator-primary);
+}
+
+.operator-console .switch {
+  width: 2.5rem;
+  height: 1.375rem;
+}
+
+.operator-console .switch-thumb {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.operator-console .switch-active .switch-thumb {
+  transform: translateX(1.125rem);
+}
+
+.operator-console .table-page-layout {
+  gap: 1rem;
+}
+
+.operator-console .operator-content-shell .table-page-layout .table-scroll-container,
+.operator-console .table-container,
+.operator-console .table-wrapper {
+  border-color: var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+}
+
+.operator-console .operator-content-shell .table-page-layout .table-scroll-container thead,
+.operator-console .table thead,
+.operator-console .table-wrapper thead {
+  background: color-mix(in oklch, var(--operator-muted) 70%, transparent);
+  backdrop-filter: none;
+}
+
+.operator-console .operator-content-shell .table-page-layout .table-scroll-container th,
+.operator-console .table th,
+.operator-console .table-wrapper th {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-color: var(--operator-border);
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.operator-console .operator-content-shell .table-page-layout .table-scroll-container td,
+.operator-console .table td,
+.operator-console .table-wrapper td {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-color: color-mix(in oklch, var(--operator-border) 70%, transparent);
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+}
+
+.operator-console .table tbody tr:hover,
+.operator-console .table-wrapper tbody tr:hover {
+  background: color-mix(in oklch, var(--operator-muted) 55%, transparent);
+}
+
+.operator-console .operator-content-shell .settings-tabs-shell {
+  margin-right: 0;
+  margin-bottom: 1.25rem;
+  margin-left: 0;
+  padding: 0.125rem;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-muted);
+}
+
+.operator-console .operator-content-shell .settings-tab {
+  height: 2.5rem;
+  min-width: 5.5rem;
+  padding: 0 0.625rem;
+  border-radius: var(--operator-radius);
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.operator-console .operator-content-shell .settings-tab-active {
+  background: var(--operator-background);
+  box-shadow: var(--operator-shadow-xs);
+  color: var(--operator-foreground);
+}
+
+.operator-console .operator-content-shell .settings-tab-active::after {
+  display: none;
+}
+
+body[data-operator-console] .operator-console .operator-content-shell .settings-tab-icon {
+  width: 1rem;
+  height: 1rem;
+  color: inherit;
+}
+
+.operator-console .operator-settings-form [role="tabpanel"] > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1rem;
+}
+
+.operator-console .operator-settings-form [role="tabpanel"] > .card > :first-child {
+  padding: 0.875rem 1rem;
+}
+
+.operator-console .operator-settings-form [role="tabpanel"] > .card > :not(:first-child) {
+  padding: 1rem;
+}
+
+.operator-console .operator-settings-form [role="tabpanel"] > .card > :first-child h2 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.operator-console .operator-settings-form [role="tabpanel"] > .card > :first-child p {
+  margin-top: 0.1875rem;
+  font-size: 0.8125rem;
+}
+
+.operator-stats-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.operator-stat-card {
+  min-height: 8.75rem;
+  padding: 1.25rem;
+}
+
+.operator-stat-heading,
+.operator-summary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.operator-stat-heading {
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.operator-stat-icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.5rem;
+}
+
+.operator-stat-icon-neutral {
+  border: 1px solid var(--operator-border);
+  background: var(--operator-raised);
+  color: var(--operator-muted-foreground);
+}
+
+.operator-stat-value {
+  margin-top: 0.625rem;
+  color: var(--operator-foreground);
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.operator-stat-meta {
+  margin-top: 0.5rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-summary-panel {
+  padding: 1.25rem;
+}
+
+.operator-summary-header h2 {
+  color: var(--operator-foreground);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.operator-summary-header p {
+  margin-top: 0.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-summary-header button {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.operator-summary-header button:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.operator-summary-value {
+  margin-top: 1.25rem;
+  color: var(--operator-foreground);
+  font-size: 1.75rem;
+  font-weight: 650;
+}
+
+.operator-summary-value span {
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.operator-summary-grid {
+  display: grid;
+  margin-top: 1rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--operator-border);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.operator-summary-grid dt {
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-summary-grid dd {
+  margin-top: 0.25rem;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+body[data-operator-console] .operator-mobile-sidebar {
+  width: 18rem;
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+.operator-mobile-sidebar .sidebar-header {
+  height: 3.5rem;
+  padding: 0.625rem 1rem;
+  border-color: var(--operator-border);
+}
+
+.operator-mobile-sidebar .sidebar-logo {
+  border-radius: 0.5rem;
+  box-shadow: none;
+}
+
+.operator-mobile-sidebar .sidebar-nav {
+  padding: 0.75rem;
+}
+
+.operator-mobile-nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.operator-mobile-nav-link {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.operator-mobile-nav-link:hover {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+.operator-mobile-nav-link-active {
+  background: color-mix(in oklch, var(--operator-primary) 10%, transparent);
+  color: var(--operator-primary);
+}
+
+/* Keep legacy chromatic utilities neutral on operator routes and their portals. */
+body[data-operator-console] :is(
+  [class^="bg-blue-"], [class*=" bg-blue-"],
+  [class^="bg-cyan-"], [class*=" bg-cyan-"],
+  [class^="bg-teal-"], [class*=" bg-teal-"],
+  [class^="bg-sky-"], [class*=" bg-sky-"],
+  [class^="bg-indigo-"], [class*=" bg-indigo-"],
+  [class^="bg-violet-"], [class*=" bg-violet-"],
+  [class^="bg-purple-"], [class*=" bg-purple-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class^="bg-blue-500"], [class*=" bg-blue-500"],
+  [class^="bg-blue-600"], [class*=" bg-blue-600"],
+  [class^="bg-blue-700"], [class*=" bg-blue-700"],
+  [class^="bg-cyan-500"], [class*=" bg-cyan-500"],
+  [class^="bg-cyan-600"], [class*=" bg-cyan-600"],
+  [class^="bg-teal-500"], [class*=" bg-teal-500"],
+  [class^="bg-teal-600"], [class*=" bg-teal-600"],
+  [class^="bg-sky-500"], [class*=" bg-sky-500"],
+  [class^="bg-sky-600"], [class*=" bg-sky-600"],
+  [class^="bg-indigo-500"], [class*=" bg-indigo-500"],
+  [class^="bg-indigo-600"], [class*=" bg-indigo-600"],
+  [class^="bg-violet-500"], [class*=" bg-violet-500"],
+  [class^="bg-violet-600"], [class*=" bg-violet-600"],
+  [class^="bg-purple-500"], [class*=" bg-purple-500"],
+  [class^="bg-purple-600"], [class*=" bg-purple-600"]
+) {
+  background-color: var(--operator-primary);
+  color: var(--operator-primary-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="text-blue-"], [class*=" text-blue-"],
+  [class^="text-cyan-"], [class*=" text-cyan-"],
+  [class^="text-teal-"], [class*=" text-teal-"],
+  [class^="text-sky-"], [class*=" text-sky-"],
+  [class^="text-indigo-"], [class*=" text-indigo-"],
+  [class^="text-violet-"], [class*=" text-violet-"],
+  [class^="text-purple-"], [class*=" text-purple-"]
+) {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="border-blue-"], [class*=" border-blue-"],
+  [class^="border-cyan-"], [class*=" border-cyan-"],
+  [class^="border-teal-"], [class*=" border-teal-"],
+  [class^="border-sky-"], [class*=" border-sky-"],
+  [class^="border-indigo-"], [class*=" border-indigo-"],
+  [class^="border-violet-"], [class*=" border-violet-"],
+  [class^="border-purple-"], [class*=" border-purple-"]
+) {
+  border-color: var(--operator-border);
+}
+
+.dark body[data-operator-console] :is(
+  [class^="dark:bg-blue-"], [class*=" dark:bg-blue-"],
+  [class^="dark:bg-cyan-"], [class*=" dark:bg-cyan-"],
+  [class^="dark:bg-teal-"], [class*=" dark:bg-teal-"],
+  [class^="dark:bg-sky-"], [class*=" dark:bg-sky-"],
+  [class^="dark:bg-indigo-"], [class*=" dark:bg-indigo-"],
+  [class^="dark:bg-violet-"], [class*=" dark:bg-violet-"],
+  [class^="dark:bg-purple-"], [class*=" dark:bg-purple-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+.dark body[data-operator-console] :is(
+  [class^="dark:text-blue-"], [class*=" dark:text-blue-"],
+  [class^="dark:text-cyan-"], [class*=" dark:text-cyan-"],
+  [class^="dark:text-teal-"], [class*=" dark:text-teal-"],
+  [class^="dark:text-sky-"], [class*=" dark:text-sky-"],
+  [class^="dark:text-indigo-"], [class*=" dark:text-indigo-"],
+  [class^="dark:text-violet-"], [class*=" dark:text-violet-"],
+  [class^="dark:text-purple-"], [class*=" dark:text-purple-"]
+) {
+  color: var(--operator-foreground);
+}
+
+.dark body[data-operator-console] :is(
+  [class^="dark:border-blue-"], [class*=" dark:border-blue-"],
+  [class^="dark:border-cyan-"], [class*=" dark:border-cyan-"],
+  [class^="dark:border-teal-"], [class*=" dark:border-teal-"],
+  [class^="dark:border-sky-"], [class*=" dark:border-sky-"],
+  [class^="dark:border-indigo-"], [class*=" dark:border-indigo-"],
+  [class^="dark:border-violet-"], [class*=" dark:border-violet-"],
+  [class^="dark:border-purple-"], [class*=" dark:border-purple-"]
+) {
+  border-color: var(--operator-border);
+}
+
+body[data-operator-console] :is(
+  [class^="text-slate-"], [class*=" text-slate-"],
+  [class^="dark:text-slate-"], [class*=" dark:text-slate-"]
+) {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="bg-slate-"], [class*=" bg-slate-"],
+  [class^="dark:bg-slate-"], [class*=" dark:bg-slate-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class^="border-slate-"], [class*=" border-slate-"],
+  [class^="dark:border-slate-"], [class*=" dark:border-slate-"]
+) {
+  border-color: var(--operator-border);
+}
+
+/* Legacy utility shades are too faint on the neutral operator surfaces. */
+body[data-operator-console] :is(
+  [class~="text-gray-300"], [class~="text-gray-400"], [class~="text-gray-500"], [class~="text-gray-600"],
+  [class~="text-dark-300"], [class~="text-dark-400"], [class~="text-dark-500"],
+  [class~="dark:text-gray-300"], [class~="dark:text-gray-400"], [class~="dark:text-gray-500"], [class~="dark:text-gray-600"],
+  [class~="dark:text-dark-300"], [class~="dark:text-dark-400"], [class~="dark:text-dark-500"]
+) {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] [class~="bg-gray-900"] :is(
+  [class~="text-gray-300"],
+  [class~="text-blue-400"]
+) {
+  color: oklch(0.9 0 0);
+}
+
+body[data-operator-console] .select-value {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) :is(
+  .select-icon,
+  .select-clear,
+  .date-picker-icon,
+  .date-picker-chevron
+) {
+  color: var(--operator-muted-foreground);
+}
+
+.dark body[data-operator-console] :is(
+  [class*="dark:bg-gray-500"],
+  [class*="dark:bg-gray-600"],
+  [class*="dark:bg-gray-700"]
+) {
+  background-color: var(--operator-muted);
+}
+
+.dark body[data-operator-console] :is(
+  [class*="dark:bg-gray-800"],
+  [class*="dark:bg-gray-900"]
+) {
+  background-color: var(--operator-card);
+}
+
+body[data-operator-console] :is(
+  [class^="text-green-"], [class*=" text-green-"],
+  [class^="text-emerald-"], [class*=" text-emerald-"],
+  [class^="dark:text-green-"], [class*=" dark:text-green-"],
+  [class^="dark:text-emerald-"], [class*=" dark:text-emerald-"]
+) {
+  color: var(--operator-success);
+}
+
+body[data-operator-console] :is(
+  [class^="text-amber-"], [class*=" text-amber-"],
+  [class^="text-orange-"], [class*=" text-orange-"],
+  [class^="text-yellow-"], [class*=" text-yellow-"],
+  [class^="dark:text-amber-"], [class*=" dark:text-amber-"],
+  [class^="dark:text-orange-"], [class*=" dark:text-orange-"],
+  [class^="dark:text-yellow-"], [class*=" dark:text-yellow-"]
+) {
+  color: var(--operator-warning);
+}
+
+body[data-operator-console] :is(
+  [class^="text-red-"], [class*=" text-red-"],
+  [class^="text-rose-"], [class*=" text-rose-"],
+  [class^="dark:text-red-"], [class*=" dark:text-red-"],
+  [class^="dark:text-rose-"], [class*=" dark:text-rose-"]
+) {
+  color: var(--operator-destructive);
+}
+
+.dark body[data-operator-console] .btn-danger {
+  border-color: color-mix(in oklch, var(--operator-destructive) 65%, black);
+  background: color-mix(in oklch, var(--operator-destructive) 65%, black);
+  color: white;
+}
+
+/* Replace the inherited primary accent inside operator/auth surfaces and portals. */
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is([class^="text-primary-"], [class*=" text-primary-"]) {
+  color: var(--operator-primary);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class~="bg-primary-500"], [class~="bg-primary-600"], [class~="bg-primary-700"]
+) {
+  background-color: var(--operator-primary);
+  color: var(--operator-primary-foreground);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class~="bg-primary-50"], [class~="bg-primary-100"], [class~="bg-primary-50/40"],
+  [class*="dark:bg-primary-900/"]
+) {
+  background-color: color-mix(in oklch, var(--operator-primary) 10%, transparent);
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class^="border-primary-"], [class*=" border-primary-"], [class*="dark:border-primary-"]
+) {
+  border-color: color-mix(in oklch, var(--operator-primary) 55%, var(--operator-border));
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) [class*="hover:text-primary-"]:hover {
+  color: color-mix(in oklch, var(--operator-primary) 85%, black);
+}
+
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) [class*="dark:text-primary-"] {
+  color: var(--operator-primary);
+}
+
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:bg-dark-800"], [class*="dark:bg-dark-900"], [class*="dark:bg-dark-950"]
+) {
+  background-color: var(--operator-card);
+}
+
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:bg-dark-500"], [class*="dark:bg-dark-600"], [class*="dark:bg-dark-700"]
+) {
+  background-color: var(--operator-muted);
+}
+
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:border-dark-"], [class*="dark:border-primary-"]
+) {
+  border-color: var(--operator-border);
+}
+
+body[data-operator-console] .modal-overlay,
+body:has(.auth-codex-shell) .modal-overlay {
+  background: oklch(0 0 0 / 0.5);
+  backdrop-filter: none;
+}
+
+body[data-operator-console] .modal-content,
+body:has(.auth-codex-shell) .modal-content,
+body[data-operator-console] .dialog-container,
+body:has(.auth-codex-shell) .dialog-container {
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-card);
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.18);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog {
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select
+) {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(input, textarea)::placeholder {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(input[type="checkbox"], input[type="radio"]) {
+  border-color: var(--operator-border);
+  background-color: var(--operator-card);
+  color: var(--operator-primary);
+  accent-color: var(--operator-primary);
+}
+
+body[data-operator-console] .operator-dialog :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select
+):focus {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] .modal-header,
+body[data-operator-console] .modal-footer,
+body[data-operator-console] .dialog-header,
+body[data-operator-console] .dialog-footer,
+body:has(.auth-codex-shell) .modal-header,
+body:has(.auth-codex-shell) .modal-footer {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+}
+
+body[data-operator-console] :is(.operator-dialog-header, .operator-dialog-footer) {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+}
+
+body[data-operator-console] .operator-dialog-body {
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(.modal-title, .operator-dialog-copy) {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close:hover {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 1px;
+}
+
+body[data-operator-console] .operator-callout {
+  border: 1px solid var(--operator-border);
+  border-left: 3px solid var(--operator-muted-foreground);
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+  box-shadow: none;
+}
+
+body[data-operator-console] .operator-callout-warning {
+  border-left-color: var(--operator-warning);
+}
+
+body[data-operator-console] .operator-callout-error {
+  border-left-color: var(--operator-destructive);
+}
+
+body[data-operator-console] .operator-toggle {
+  background: var(--operator-track);
+  box-shadow: none;
+}
+
+body[data-operator-console] .operator-toggle-on {
+  background: var(--operator-success-fill);
+}
+
+body[data-operator-console] .operator-toggle-thumb {
+  background: white;
+}
+
+body[data-operator-console] .operator-toggle:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):has(> span[class*="translate-x-"]) {
+  background: var(--operator-track);
+  box-shadow: none;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):is([class*="bg-primary-"], [class*="bg-blue-"], [class*="bg-green-"], [class*="bg-emerald-"]):has(> span[class*="translate-x-"]) {
+  background: var(--operator-success-fill);
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):has(> span[class*="translate-x-"]):focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:has(> span[class*="translate-x-"]) > span {
+  background: white;
+}
+
+body[data-operator-console] .operator-toast {
+  border: 1px solid var(--operator-border);
+  border-left-width: 3px;
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.18);
+}
+
+body[data-operator-console] .operator-toast[data-tone="success"] { border-left-color: var(--operator-success); }
+body[data-operator-console] .operator-toast[data-tone="warning"] { border-left-color: var(--operator-warning); }
+body[data-operator-console] .operator-toast[data-tone="error"] { border-left-color: var(--operator-destructive); }
+body[data-operator-console] .operator-toast[data-tone="info"] { border-left-color: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast .operator-toast-icon { color: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast[data-tone="success"] .operator-toast-icon { color: var(--operator-success); }
+body[data-operator-console] .operator-toast[data-tone="warning"] .operator-toast-icon { color: var(--operator-warning); }
+body[data-operator-console] .operator-toast[data-tone="error"] .operator-toast-icon { color: var(--operator-destructive); }
+body[data-operator-console] .operator-toast :is(p, .operator-toast-close) { color: var(--operator-foreground); }
+body[data-operator-console] .operator-toast-close:hover { background: var(--operator-muted); }
+body[data-operator-console] .operator-toast-track { background: var(--operator-muted); }
+body[data-operator-console] .operator-toast .toast-progress { background: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast[data-tone="success"] .toast-progress { background: var(--operator-success-fill); }
+body[data-operator-console] .operator-toast[data-tone="warning"] .toast-progress { background: var(--operator-warning-fill); }
+body[data-operator-console] .operator-toast[data-tone="error"] .toast-progress { background: var(--operator-destructive-fill); }
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control,
+body:has(.auth-codex-shell) .operator-control {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:hover,
+body:has(.auth-codex-shell) .operator-control:hover {
+  border-color: color-mix(in oklch, var(--operator-border) 65%, var(--operator-foreground));
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:is(:focus-visible, .operator-control-open),
+body:has(.auth-codex-shell) .operator-control:is(:focus-visible, .operator-control-open) {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:disabled,
+body:has(.auth-codex-shell) .operator-control:disabled {
+  cursor: not-allowed;
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  opacity: 0.65;
+}
+
+.dark body[data-operator-console] .operator-menu,
+.dark body:has(.auth-codex-shell) .operator-menu,
+body[data-operator-console] .operator-menu,
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-menu,
+body:has(.auth-codex-shell) .operator-menu {
+  --operator-popup-surface: #171717;
+  --operator-popup-search: #141414;
+  --operator-popup-hover: #202020;
+  --operator-popup-selected: #252525;
+  --operator-popup-border: #3a3a3a;
+  --operator-popup-foreground: #f5f5f5;
+  --operator-popup-muted: #a3a3a3;
+  --operator-popup-scrollbar: #525252;
+  --operator-popup-shadow: 0 12px 28px rgb(0 0 0 / 0.42);
+  border: 1px solid var(--operator-popup-border, var(--operator-border));
+  border-radius: var(--operator-radius);
+  background: var(--operator-popup-surface, var(--operator-card));
+  box-shadow: var(--operator-popup-shadow, 0 8px 24px oklch(0 0 0 / 0.14));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  scrollbar-color: var(--operator-popup-scrollbar, var(--operator-border)) var(--operator-popup-search, var(--operator-card));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search, .select-option-group, .operator-menu-divider) {
+  border-color: var(--operator-popup-border, var(--operator-border));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-divider {
+  background: var(--operator-popup-search, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu .select-search {
+  background: var(--operator-popup-search, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu .select-options {
+  background: var(--operator-popup-surface, var(--operator-card));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu > [class~="overflow-y-auto"] {
+  background: var(--operator-popup-surface, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu .select-option-group {
+  background: var(--operator-popup-search, var(--operator-card));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+}
+
+body[data-operator-console] .operator-menu [class*="text-gray-"],
+body[data-operator-console] .operator-menu [class*="text-dark-"] {
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search-input, .select-empty) {
+  background: var(--operator-popup-search, var(--operator-card));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+  font-size: 0.875rem;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-control {
+  border-color: var(--operator-popup-border, var(--operator-border));
+  background: var(--operator-popup-search, var(--operator-card));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item {
+  min-height: 2.5rem;
+  background: var(--operator-popup-surface, var(--operator-card));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+  font-size: 0.875rem;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) .operator-menu-item {
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) :is(
+  .date-picker-label,
+  .date-picker-separator
+) {
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
+  :hover,
+  :focus-visible,
+  .select-option-focused
+) {
+  background: var(--operator-popup-hover, var(--operator-muted));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
+  .select-option-selected,
+  .date-picker-preset-active,
+  [aria-selected="true"],
+  [aria-current="true"],
+  [aria-pressed="true"]
+) {
+  background: var(--operator-popup-selected, var(--operator-muted));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar-track {
+  background: var(--operator-popup-search, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar-thumb {
+  border: 2px solid var(--operator-popup-search, var(--operator-card));
+  border-radius: 999px;
+  background: var(--operator-popup-scrollbar, var(--operator-border));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item-recovery {
+  color: var(--operator-success);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item-caution {
+  color: var(--operator-warning);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item:disabled,
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+  opacity: 0.55;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-check {
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .account-tools-menu-icon {
+  background: var(--operator-popup-selected, var(--operator-muted));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-count {
+  background: var(--operator-popup-selected, var(--operator-muted));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-checkbox {
+  border-color: var(--operator-popup-border, var(--operator-border));
+  background: var(--operator-popup-surface, var(--operator-card));
+  color: var(--operator-primary-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) :is(
+  .operator-menu-item[aria-selected="true"],
+  .operator-menu-item.select-option-selected
+) .operator-menu-checkbox {
+  border-color: var(--operator-primary);
+  background: var(--operator-primary);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-checkbox svg {
+  color: inherit;
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-primary {
+  background: var(--operator-primary);
+  color: var(--operator-primary-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-primary:hover {
+  background: color-mix(in oklch, var(--operator-primary) 88%, var(--operator-card));
+}
+
+body[data-operator-console] ::selection {
+  background: color-mix(in oklch, var(--operator-foreground) 18%, transparent);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(
+  [class*="hover:bg-blue-"], [class*="hover:bg-cyan-"], [class*="hover:bg-teal-"],
+  [class*="hover:bg-sky-"], [class*="hover:bg-indigo-"], [class*="hover:bg-violet-"],
+  [class*="hover:bg-purple-"]
+):hover {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class*="hover:text-blue-"], [class*="hover:text-cyan-"], [class*="hover:text-teal-"],
+  [class*="hover:text-sky-"], [class*="hover:text-indigo-"], [class*="hover:text-violet-"],
+  [class*="hover:text-purple-"]
+):hover {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(
+  [class*="ring-primary-"], [class*="ring-blue-"], [class*="ring-cyan-"],
+  [class*="ring-teal-"], [class*="ring-sky-"], [class*="ring-indigo-"],
+  [class*="ring-violet-"], [class*="ring-purple-"]
+) {
+  --tw-ring-color: color-mix(in oklch, var(--operator-focus) 55%, transparent);
+}
+
+body[data-operator-console] [class*="bg-gradient-"],
+body[data-operator-console] [class*="from-blue-"],
+body[data-operator-console] [class*="from-indigo-"],
+body[data-operator-console] [class*="from-purple-"] {
+  background-image: none;
+}
+
+body[data-operator-console] [class~="rounded-3xl"] {
+  border-radius: 0.75rem;
+}
+
+.auth-codex-shell {
+  display: flex;
+  min-height: 100dvh;
+  padding: 2rem 1rem;
+  align-items: center;
+  justify-content: center;
+  background: var(--operator-background);
+}
+
+.auth-review-banner {
+  position: fixed;
+  top: 0.75rem;
+  left: 50%;
+  z-index: 10;
+  padding: 0.375rem 0.625rem;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in oklch, var(--operator-primary) 35%, var(--operator-border));
+  border-radius: var(--operator-radius);
+  background: color-mix(in oklch, var(--operator-primary) 8%, var(--operator-card));
+  color: var(--operator-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.auth-codex-frame {
+  width: min(100%, 25rem);
+}
+
+.auth-codex-brand {
+  margin-bottom: 1.75rem;
+  text-align: center;
+}
+
+.auth-codex-logo {
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 0 auto 0.75rem;
+  padding: 0.625rem;
+  place-items: center;
+  border: 1px solid color-mix(in oklch, var(--operator-primary) 18%, var(--operator-border));
+  border-radius: 0.875rem;
+  background: color-mix(in oklch, var(--operator-primary) 7%, var(--operator-card));
+  box-shadow: inset 0 0 0 3px color-mix(in oklch, var(--operator-card) 72%, transparent);
+}
+
+.auth-codex-brand h1 {
+  color: var(--operator-foreground);
+  font-size: 1.5rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.auth-codex-brand p {
+  margin-top: 0.375rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.auth-codex-card {
+  padding: 1.75rem;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.75rem;
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-sm);
+}
+
+.auth-form-heading {
+  text-align: left;
+}
+
+.auth-form-heading h2 {
+  color: var(--operator-foreground);
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.auth-form-heading p {
+  margin-top: 0.375rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.auth-codex-shell .input {
+  min-height: 2.625rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  font-size: 0.875rem;
+}
+
+.auth-codex-shell .btn {
+  min-height: 2.625rem;
+}
+
+.auth-codex-footer {
+  margin-top: 1rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.auth-codex-copyright {
+  margin-top: 1.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.6875rem;
+  text-align: center;
+}
+
+@media (max-width: 1279px) {
+  .operator-primary-link {
+    padding-right: 0.625rem;
+    padding-left: 0.625rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .operator-header-inner {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .operator-primary-nav {
+    display: none;
+  }
+
+  .operator-content-shell {
+    padding-top: 1.25rem;
+  }
+
+  .operator-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .operator-header-inner,
+  .operator-status-inner {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .operator-brand {
+    gap: 0.5rem;
+  }
+
+  .operator-header-secondary-action {
+    display: none;
+  }
+
+  .operator-content-shell {
+    padding: 1.125rem 1rem 1rem;
+  }
+
+  .operator-page-heading {
+    margin-bottom: 1rem;
+  }
+
+  .operator-page-heading h1 {
+    font-size: 1.5rem;
+  }
+
+  .operator-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operator-stat-card {
+    min-height: 0;
+  }
+
+  .operator-status-inner {
+    gap: 0.75rem;
+    overflow-x: auto;
+  }
+
+  .operator-status-secondary {
+    margin-left: 0;
+  }
+
+  .auth-codex-shell {
+    align-items: flex-start;
+    padding-top: 4.5rem;
+  }
+
+  .auth-codex-card {
+    padding: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .operator-console *,
+  .auth-codex-shell * {
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

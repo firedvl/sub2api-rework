@@ -60,6 +60,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Operator console browser tests
+        working-directory: frontend
+        run: pnpm test:e2e
 
   golangci-lint:
     runs-on: ubuntu-latest

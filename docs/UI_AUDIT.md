@@ -2,8 +2,10 @@
 
 ## Status
 
-Complete for the operator-console foundation phase. This audit changes no
-frontend route, API, store, or production behavior.
+Complete for the foundation phase and updated for the operator-console
+implementation. The implementation changes the shell and presentation on existing
+routes; it does not replace backend APIs, page-owned request lifecycles, stores, or
+production behavior.
 
 ## Scope and Evidence
 
@@ -19,10 +21,38 @@ credentials or production data were used.
 | `/login` | 1280 x 720 | 390 x 844 | Default sign-in form |
 | `/admin/dashboard` | 1440 x 1247 | 390 x 1835 | Automatic onboarding overlay, dismissed dashboard, populated summary metrics, empty charts |
 
-The rendered pass did not exercise write operations, full keyboard navigation,
-200% zoom, reduced motion, translated long text, or live service failures. Source
-inspection identifies the affected contracts, but it does not replace browser
-qualification of those states during implementation.
+A one-off local implementation pass used fixture-only Playwright coverage for all
+five areas at 1440, 1280, 1024, 768, and 390 pixels in light and dark mode. It also
+checked document overflow, a 640-pixel reflow proxy with reduced motion, and
+Overview failure and retry. The retained CI suite covers navigation history and
+deep links, the narrow navigation drawer, table and long-page scroll geometry,
+compact Activity geometry, simple-mode visibility, guard authority, and
+account-dialog focus trapping and restoration. The pass did not exercise live
+services, write operations, every inherited dialog, actual browser zoom, or
+translated long text.
+
+## Implementation Update
+
+- The sidebar now uses Overview, Accounts, Models & Routing, Activity, and Settings
+  as its operator top level. Existing secondary routes remain under `More`, the
+  personal section, or area-local navigation.
+- Models & Routing and Activity use route-aware local navigation. Feature and
+  simple-mode filtering still affect visibility, while production router guards
+  remain authoritative.
+- Overview now leads with gateway traffic state, account exceptions, direct area
+  links, and compact traffic and cost context. Empty chart regions no longer
+  dominate the page, and snapshot failure has an inline Retry action.
+- Accounts keeps its existing data and modal ownership while adding a labelled
+  schedulability switch, clearer column sizing, a task-specific empty state, and a
+  wrapping bulk-action bar.
+- Settings keeps its bulk save, secret, step-up, web-search, and store-refresh
+  contracts while using a flatter task-tab treatment with explicit tab and panel
+  relationships.
+- `BaseDialog` now traps focus in the top dialog, restores focus, handles Escape
+  only at the top of the stack, and keeps body scroll locked until the last dialog
+  closes.
+- The production router has direct Vitest coverage, and the operator shell has a
+  maintained Chromium Playwright suite in CI.
 
 ## System Inventory
 
@@ -71,6 +101,9 @@ Impact: an operator must know which backend module owns a model, route, request,
 or health signal before acting. The five-area top level should group existing
 routes without changing their contracts.
 
+Implementation outcome: resolved in the operator shell. The five areas own the
+primary navigation, while local navigation and `More` preserve secondary routes.
+
 ### 2. Overview does not lead with exceptions or a clear narrow-page identity
 
 Evidence: the dashboard starts with eight equally weighted metric cards, followed
@@ -82,6 +115,10 @@ Impact: active account errors compete with totals, costs, and user metrics. On a
 narrow viewport the operator sees no visible page title. A reworked Overview
 should lead with service state and actionable exceptions, then traffic and cost
 context.
+
+Implementation outcome: resolved. The header keeps a visible page title at narrow
+widths, and Overview now leads with gateway state, account exceptions, direct area
+links, and compact operational context.
 
 ### 3. Page-owned workflow logic makes route replacement high risk
 
@@ -127,6 +164,9 @@ scroll while another remains open. This is a pre-existing issue, not a regressio
 from this audit. Fix it before moving more sensitive account or settings actions
 onto the shared primitive.
 
+Implementation outcome: resolved in `BaseDialog` with stack-aware focus, Escape,
+focus restoration, listener cleanup, and body scroll locking.
+
 ### 6. Existing tests do not protect a navigation migration end to end
 
 Evidence: the repository has Vitest coverage for API modules and components, but
@@ -137,6 +177,10 @@ found.
 Impact: route behavior can drift while tests remain green. The first
 implementation slice should test the real router and add browser coverage for the
 primary operator path before changing navigation.
+
+Implementation outcome: resolved for the migration boundary. Tests now import the
+production router, and the maintained Playwright suite covers the operator shell,
+deep links, history, narrow navigation, guard authority, and dialog focus.
 
 ### 7. English-first needs a precise compatibility rule
 
@@ -156,7 +200,7 @@ copy; other locales may translate it or fall back to English.
 | Overview | `/admin/dashboard`; `api/admin/dashboard.ts`; `DashboardView.vue`; operational summaries from `/admin/ops` | Dashboard snapshot and chart loading, partial and empty data, date range and granularity, links into detail views, feature-aware quick actions | Recompose existing read APIs into health, exceptions, traffic, and cost sections. Keep `/admin/dashboard` and its detail links. |
 | Accounts | `/admin/accounts`; `api/admin/accounts.ts`; `AccountsView.vue`; `components/account/` | Filters, paging, sorting, ETag refresh, quota and billing refresh, OAuth and reauthorization, create/edit/bulk actions, testing, temporary unschedulable state, destructive confirmation | Keep the existing page owner and dialogs. First change navigation and table hierarchy, then extract only proven repeated presentation units. |
 | Models & Routing | `/admin/groups`, `/admin/channels/pricing`, `/admin/channels/monitor`; group, channel, and monitor API modules | Superseded-request cancellation, pricing and limit normalization, platform-specific controls, model and reasoning mappings, composite-route priority/preview CRUD, monitor feature state | Present the three existing routes as one area with local subnavigation. Do not merge their state or payload builders in the first pass. |
-| Activity | `/admin/ops`, `/admin/usage`, `/admin/audit-logs`; ops, usage, and audit API modules | URL-synchronized filters, stale-request cancellation, auto refresh, deferred panels, export cancellation, partial failures, error drill-down, audit pagination | Share navigation and filter language first. Keep each route's query keys and request lifecycle until browser tests cover equivalence. |
+| Activity | `/admin/ops`, `/admin/usage`, `/admin/audit-logs`; ops, usage, and audit API modules | Ops URL synchronization, stale-request cancellation, auto refresh, deferred panels, error drill-down; Usage initial query hydration plus list and export cancellation; audit pagination and step-up-gated actions | Share navigation and filter language first. Keep each route's query keys and request lifecycle until browser tests cover equivalence. |
 | Settings | `/admin/settings`; `api/admin/settings.ts`; `SettingsView.vue`; `adminSettings` and `app` stores; step-up dialog | Bulk load/save normalization, configured-secret flags and secret clearing, step-up authentication and cancellation, separate web-search save, store refresh, feature toggles that affect routing/navigation | Reorganize the existing form into operator task sections without splitting the save contract. Split ownership only after backend contracts support independent saves. |
 
 ## Migration Constraints

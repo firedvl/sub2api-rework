@@ -96,8 +96,10 @@
     class="table-wrapper"
     :class="{
       'actions-expanded': actionsExpanded,
-      'is-scrollable': isScrollable
+      'is-scrollable': isScrollable,
+      'is-scrolled-left': isScrolledLeft
     }"
+    @scroll="handleTableScroll"
   >
     <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
@@ -105,7 +107,10 @@
           <th
             v-if="selectable"
             scope="col"
-            class="sticky-header-cell w-11 min-w-11 px-3 py-3 text-center"
+            :class="[
+              'sticky-header-cell w-11 min-w-11 px-3 py-3 text-center',
+              stickyFirstColumn && 'sticky-col sticky-col-left-first'
+            ]"
           >
             <input
               type="checkbox"
@@ -169,7 +174,13 @@
       <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
         <!-- Loading skeleton -->
         <tr v-if="loading" v-for="i in 5" :key="i">
-          <td v-if="selectable" class="w-11 min-w-11 px-3 py-4">
+          <td
+            v-if="selectable"
+            :class="[
+              'w-11 min-w-11 px-3 py-4',
+              stickyFirstColumn && 'sticky-col sticky-col-left-first'
+            ]"
+          >
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
@@ -183,20 +194,26 @@
         <tr v-else-if="!data || data.length === 0">
           <td
             :colspan="tableColumnCount"
-            :class="['py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+            class="p-0 text-center text-gray-500 dark:text-dark-400"
           >
-            <slot name="empty">
-              <div class="flex flex-col items-center">
-                <Icon
-                  name="inbox"
-                  size="xl"
-                  class="mb-4 h-12 w-12 text-gray-400 dark:text-dark-500"
-                />
-                <p class="text-lg font-medium text-gray-900 dark:text-gray-100">
-                  {{ t('empty.noData') }}
-                </p>
-              </div>
-            </slot>
+            <div
+              data-test="desktop-empty-state"
+              class="sticky left-0 py-12"
+              :style="{ width: tableViewportWidth ? `${tableViewportWidth}px` : '100%' }"
+            >
+              <slot name="empty">
+                <div class="flex flex-col items-center">
+                  <Icon
+                    name="inbox"
+                    size="xl"
+                    class="mb-4 h-12 w-12 text-gray-400 dark:text-dark-500"
+                  />
+                  <p class="text-lg font-medium text-gray-900 dark:text-gray-100">
+                    {{ t('empty.noData') }}
+                  </p>
+                </div>
+              </slot>
+            </div>
           </td>
         </tr>
 
@@ -220,7 +237,13 @@
             }"
             @click="clickableRows && emit('rowClick', item.row)"
           >
-            <td v-if="selectable" class="w-11 min-w-11 px-3 py-4 text-center">
+            <td
+              v-if="selectable"
+              :class="[
+                'w-11 min-w-11 px-3 py-4 text-center',
+                stickyFirstColumn && 'sticky-col sticky-col-left-first'
+              ]"
+            >
               <input
                 type="checkbox"
                 class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
@@ -285,7 +308,9 @@ const emit = defineEmits<{
 
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
+const tableViewportWidth = ref(0)
 const isScrollable = ref(false)
+const isScrolledLeft = ref(false)
 const actionsColumnNeedsExpanding = ref(false)
 
 // --- 虚拟滚动「整表空白」根治 ---
@@ -312,8 +337,15 @@ const observeElementRectNonZero = (
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
+    tableViewportWidth.value = tableWrapperRef.value.clientWidth
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    isScrolledLeft.value = tableWrapperRef.value.scrollLeft > 0
   }
+}
+
+const handleTableScroll = () => {
+  if (!tableWrapperRef.value) return
+  isScrolledLeft.value = tableWrapperRef.value.scrollLeft > 0
 }
 
 // 检查操作列是否需要展开
@@ -857,8 +889,12 @@ const getStickyColumnClass = (column: Column, index: number) => {
   const classes: string[] = []
 
   if (props.stickyFirstColumn) {
+    if (props.selectable) {
+      if (index === 0) {
+        classes.push('sticky-col sticky-col-left-second')
+      }
     // 如果第一列是勾选列，固定前两列（勾选+名称）
-    if (hasSelectColumn.value) {
+    } else if (hasSelectColumn.value) {
       if (index === 0) {
         classes.push('sticky-col sticky-col-left-first')
       } else if (index === 1) {
@@ -953,7 +989,7 @@ defineExpose({
 <style scoped>
 /* 表格横向滚动 */
 .table-wrapper {
-  --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
+  --select-col-width: 44px;
   position: relative;
   overflow-x: auto;
   overflow-y: auto;
@@ -967,11 +1003,11 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 200;
-  background-color: rgb(249 250 251);
+  background-color: var(--table-header-background, rgb(249 250 251));
 }
 
 .dark .table-wrapper .table-header {
-  background-color: rgb(31 41 55);
+  background-color: var(--table-header-background, rgb(31 41 55));
 }
 
 /* 表体保持在表头下方 */
@@ -985,11 +1021,11 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 210; /* 必须高于所有表体内容 */
-  background-color: rgb(249 250 251);
+  background-color: var(--table-header-background, rgb(249 250 251));
 }
 
 .dark .sticky-header-cell {
-  background-color: rgb(31 41 55);
+  background-color: var(--table-header-background, rgb(31 41 55));
 }
 
 /* Sticky 列基础样式 */
@@ -1006,6 +1042,9 @@ defineExpose({
 /* 双列固定（有勾选列时）：第一列（勾选） */
 .sticky-col-left-first {
   left: 0;
+  width: var(--select-col-width);
+  min-width: var(--select-col-width);
+  max-width: var(--select-col-width);
 }
 
 /* 双列固定（有勾选列时）：第二列（名称） */
@@ -1025,25 +1064,25 @@ defineExpose({
 
 /* 表体 sticky 列背景 */
 tbody .sticky-col {
-  background-color: white;
+  background-color: var(--table-body-background, white);
 }
 
 .dark tbody .sticky-col {
-  background-color: rgb(17 24 39);
+  background-color: var(--table-body-background, rgb(17 24 39));
 }
 
 /* hover 状态保持 */
 tbody tr:hover .sticky-col {
-  background-color: rgb(249 250 251);
+  background-color: var(--table-row-hover-background, rgb(249 250 251));
 }
 
 .dark tbody tr:hover .sticky-col {
-  background-color: rgb(31 41 55);
+  background-color: var(--table-row-hover-background, rgb(31 41 55));
 }
 
 /* 阴影只在可滚动时显示 */
 /* 单列固定右侧阴影 */
-.is-scrollable .sticky-col-left::after {
+.is-scrollable.is-scrolled-left .sticky-col-left::after {
   content: '';
   position: absolute;
   top: 0;
@@ -1056,7 +1095,7 @@ tbody tr:hover .sticky-col {
 }
 
 /* 双列固定：只在第二列显示阴影 */
-.is-scrollable .sticky-col-left-second::after {
+.is-scrollable.is-scrolled-left .sticky-col-left-second::after {
   content: '';
   position: absolute;
   top: 0;
@@ -1082,8 +1121,8 @@ tbody tr:hover .sticky-col {
 }
 
 /* 暗色模式阴影 */
-.dark .is-scrollable .sticky-col-left::after,
-.dark .is-scrollable .sticky-col-left-second::after {
+.dark .is-scrollable.is-scrolled-left .sticky-col-left::after,
+.dark .is-scrollable.is-scrolled-left .sticky-col-left-second::after {
   background: linear-gradient(to right, rgba(0, 0, 0, 0.2), transparent);
 }
 

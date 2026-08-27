@@ -2,9 +2,16 @@
 
 ## Status
 
-Planned. The inherited UI remains active. No production route is replaced by this
-document. See [UI_AUDIT.md](UI_AUDIT.md) for the current architecture, findings,
-and route-preservation matrix.
+Implemented on `ui/operator-console-implementation` for human review. The shell
+recomposes existing routes and page owners; no backend contract was replaced and
+no production deployment was performed. See [UI_AUDIT.md](UI_AUDIT.md) for the
+architecture, evidence, and route-preservation matrix.
+
+The current visual system is a Vue port and adaptation of codex-lb's operator UI
+at commit `b311aea760aa639fd96f63bd118f775e9b4a89f9` (`v1.24.0-beta.4`). It keeps
+Sub2API's routes, data contracts, and provider-specific controls. See
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) for attribution and license
+terms.
 
 ## Purpose
 
@@ -119,16 +126,17 @@ the first operator map.
   status.
 - Keep control dimensions stable so loading labels, counts, status text, and long
   model names do not shift the layout.
-- Before broader reuse, update `BaseDialog` to trap focus, restore focus, close only
-  the topmost eligible dialog with Escape, and use a stack-aware body scroll lock.
+- `BaseDialog` traps and restores focus, lets only the top dialog handle Escape,
+  and uses a stack-aware body scroll lock.
 
 ## Data and State Contracts
 
 - Use `src/api/client.ts` for all HTTP work so auth, refresh, locale, timezone,
   cancellation, response unwrapping, and structured errors stay consistent.
-- Treat URL query parameters as the source of truth for shareable Activity filters
-  and any existing filtered route that already supports refresh and back/forward
-  navigation.
+- Treat URL query parameters as the source of truth only where the existing route
+  already supports refresh and back/forward navigation. Ops does; Usage currently
+  reads `start_date`, `end_date`, and `user_id` on mount but does not write or watch
+  query state.
 - Preserve account ETag refresh and stable object references.
 - Preserve Groups request cancellation and every existing payload transform,
   including model routing and composite routes.
@@ -140,31 +148,33 @@ the first operator map.
 - Do not infer access from navigation visibility. Route guards and backend
   authorization remain authoritative.
 
-## Migration Strategy
+## Implemented Migration
 
-1. Protect the boundary. Test the production router guards directly and add a
-   browser smoke path for login, admin access, navigation, and a visible page
-   heading at narrow and wide widths.
-2. Change the shell. Introduce the five-area navigation while every link still
-   opens its current route and view. Keep secondary legacy destinations reachable.
-3. Recompose Overview. Use existing read APIs and link exceptions into current
-   detail routes. Do not change write behavior.
-4. Refine Accounts. Preserve the current page owner and dialogs while improving
-   hierarchy, scanning, filters, and responsive behavior.
-5. Join Models & Routing through navigation and shared terminology. Keep Groups,
-   Channels, and Monitor state and payload builders separate.
-6. Join Activity through navigation and filter language. Retain each route's query
-   and cancellation lifecycle.
-7. Reorganize Settings last. Keep the single save contract and security behavior
-   until the backend provides smaller independent contracts.
-
-Each step is a separate reviewable change. Do not move to the next workflow until
-the current one passes its parity checks.
+1. Production-router tests cover setup, authentication, admin access, simple and
+   backend modes, compliance, feature-disabled routes, unknown feature state, and
+   protected deep links.
+2. The shell presents five operator areas while preserving secondary and personal
+   routes. Area-local links share active state with their primary sidebar owner.
+3. Overview uses existing dashboard calls to show traffic state, account
+   exceptions, direct area links, compact usage and cost context, optional charts,
+   and inline snapshot recovery.
+4. Accounts keeps its ETag refresh, stable row references, paging, filters, sorting,
+   quota and billing work, OAuth, reauthorization, tests, bulk actions, and dialogs.
+   Presentation changes improve schedulability, scan order, bulk-action wrapping,
+   and the empty state.
+5. Models & Routing joins Groups, Channel Pricing, and Channel Monitor through
+   local navigation. Each route still owns its state, cancellation, and payloads.
+6. Activity joins Ops, Usage, and Audit Logs through local navigation. Ops keeps
+   query and history synchronization; Usage retains initial query hydration and its
+   existing cancellation behavior.
+7. Settings keeps one normalized save lifecycle, configured-secret handling,
+   step-up authentication, separate web-search saving, and store refresh. Its task
+   tabs now expose explicit tab and panel semantics with a flatter hierarchy.
 
 ## Legacy Coexistence
 
-- Before migration, the new shell links to the current view. It does not create a
-  duplicate implementation.
+- The shell links to the current views. It does not create duplicate workflow
+  implementations.
 - A migrated view takes over its existing route only after it covers the same data,
   permissions, actions, validation, pending states, failures, cancellation,
   recovery, and direct links.
@@ -259,6 +269,15 @@ Browser evidence must name the routes, widths, states, and interactions actually
 checked. A build, screenshot, click path, and accessibility pass prove different
 things and must not be reported as interchangeable.
 
+A one-off local browser qualification covered all five areas at 1440, 1280, 1024,
+768, and 390 pixels in light and dark mode, plus document overflow, a 640-pixel
+reduced-motion reflow proxy, and Overview failure and retry. The retained CI suite
+covers navigation, active state, deep links, history, the narrow drawer, table and
+long-page scroll geometry, compact Activity geometry, simple-mode visibility,
+route-guard authority, and account-dialog focus. Live services, writes, actual
+browser zoom, translated long text, and every inherited dialog remain outside
+this fixture-only work.
+
 ## Workflow Definition of Done
 
 A workflow can replace its inherited view only when it:
@@ -273,8 +292,9 @@ A workflow can replace its inherited view only when it:
 - remains usable with keyboard, narrow and wide layouts, zoom, reflow, long text,
   dark mode, and reduced motion.
 
-## First Implementation Slice
+## Review Boundary
 
-Start with real-router tests and shell/browser coverage. Then add the five-area
-navigation while it still points to the inherited views. This is the smallest
-change that improves orientation without duplicating page-owned behavior.
+This branch is the first reviewable operator-console implementation. It changes
+information architecture and presentation while retaining existing route and
+workflow owners. Production adoption still requires human UI review and any
+deployment-specific qualification; this branch does not deploy itself.

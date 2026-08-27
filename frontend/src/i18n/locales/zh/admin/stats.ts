@@ -1,0 +1,31 @@
+export default {
+  stats: {
+    title: '统计',
+    description: '账号容量、供应商额度窗口与网关用量',
+    updatedAt: '更新于 {time}',
+    capacity: {
+      title: '容量',
+      description: '按账号归一化供应商容量；未知额度不参与计算。',
+      coverage: '{known} 个已知，{unknown} 个未知',
+      windows: '额度窗口',
+      windowCoverage: '{known} 个已知，{unknown} 个无此窗口',
+      windowContributions: '{window} 账号贡献',
+      snapshotFailed: '被动额度快照不可用',
+    },
+    usage: {
+      title: '网关用量',
+      description: '当前请求、Token、成本和响应时间统计。',
+      loading: '正在加载网关用量...',
+      loadFailed: '网关用量不可用',
+      requests: '请求',
+      tokens: 'Token',
+      actualCost: '实际成本',
+      accountCost: '账号成本',
+      today: '今日',
+      averageLatency: '平均响应',
+      averageLatencyDescription: '已完成请求',
+      requestTrend: '请求趋势',
+      recentPeriods: '最近 {count} 个时段',
+    },
+  },
+}

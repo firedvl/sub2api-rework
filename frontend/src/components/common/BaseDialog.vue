@@ -3,7 +3,7 @@
     <Transition name="modal">
       <div
         v-if="show"
-        class="modal-overlay"
+        class="modal-overlay operator-dialog-overlay"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         role="dialog"
@@ -11,16 +11,16 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" :class="['modal-content operator-dialog', widthClasses]" tabindex="-1" @click.stop>
           <!-- Header -->
-          <div class="modal-header">
+          <div class="modal-header operator-dialog-header">
             <h3 :id="dialogId" class="modal-title">
               {{ title }}
             </h3>
             <button
               v-if="showCloseButton"
               @click="emit('close')"
-              class="-mr-2 rounded-xl p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300 dark:focus-visible:ring-offset-dark-900"
+              class="operator-dialog-close -mr-2 rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300"
               aria-label="Close modal"
             >
               <Icon name="x" size="md" />
@@ -28,12 +28,12 @@
           </div>
 
           <!-- Body -->
-          <div ref="modalBodyRef" class="modal-body">
+          <div ref="modalBodyRef" class="modal-body operator-dialog-body">
             <slot></slot>
           </div>
 
           <!-- Footer -->
-          <div v-if="$slots.footer" class="modal-footer">
+          <div v-if="$slots.footer" class="modal-footer operator-dialog-footer">
             <slot name="footer"></slot>
           </div>
         </div>
@@ -42,18 +42,37 @@
   </Teleport>
 </template>
 
+<script lang="ts">
+let dialogIdCounter = 0
+interface OpenDialog {
+  element: () => HTMLElement | null
+  restoreTarget: HTMLElement | null
+}
+
+const openDialogs: OpenDialog[] = []
+const focusableSelector =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+const updateScrollLock = () => {
+  document.body.classList.toggle('modal-open', openDialogs.length > 0)
+}
+</script>
+
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
 import Icon from '@/components/icons/Icon.vue'
 
 // 生成唯一ID以避免多个对话框时ID冲突
-let dialogIdCounter = 0
 const dialogId = `modal-title-${++dialogIdCounter}`
 
 // 焦点管理
 const dialogRef = ref<HTMLElement | null>(null)
 const modalBodyRef = ref<HTMLElement | null>(null)
-let previousActiveElement: HTMLElement | null = null
+const dialogEntry: OpenDialog = {
+  element: () => dialogRef.value,
+  restoreTarget: null
+}
+let isOpen = false
 
 type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 
@@ -107,51 +126,102 @@ const handleClose = () => {
 }
 
 const handleEscape = (event: KeyboardEvent) => {
-  if (props.show && props.closeOnEscape && event.key === 'Escape') {
+  if (isTopmost() && props.closeOnEscape && event.key === 'Escape') {
     emit('close')
   }
+}
+
+const isTopmost = () => openDialogs.at(-1) === dialogEntry
+
+const getFocusableElements = () =>
+  Array.from(dialogRef.value?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter(
+    element => !element.hasAttribute('disabled') && element.tabIndex >= 0
+  )
+
+const focusInitialElement = () => {
+  const [firstFocusable] = getFocusableElements()
+  const focusTarget = firstFocusable ?? dialogRef.value
+  focusTarget?.focus()
+}
+
+const handleTab = (event: KeyboardEvent) => {
+  if (event.key !== 'Tab' || !isTopmost()) return
+
+  const focusableElements = getFocusableElements()
+  if (focusableElements.length === 0) {
+    event.preventDefault()
+    dialogRef.value?.focus()
+    return
+  }
+
+  const firstFocusable = focusableElements[0]
+  const lastFocusable = focusableElements[focusableElements.length - 1]
+  const activeElement = document.activeElement
+
+  if (event.shiftKey && (activeElement === firstFocusable || !dialogRef.value?.contains(activeElement))) {
+    event.preventDefault()
+    lastFocusable.focus()
+  } else if (!event.shiftKey && (activeElement === lastFocusable || !dialogRef.value?.contains(activeElement))) {
+    event.preventDefault()
+    firstFocusable.focus()
+  }
+}
+
+const handleKeydown = (event: KeyboardEvent) => {
+  handleEscape(event)
+  handleTab(event)
+}
+
+const removeFromStack = () => {
+  const index = openDialogs.lastIndexOf(dialogEntry)
+  if (index === -1) return false
+
+  const wasTopmost = index === openDialogs.length - 1
+  const [removedDialog] = openDialogs.splice(index, 1)
+  const dialogAbove = openDialogs[index]
+  if (dialogAbove && removedDialog.element()?.contains(dialogAbove.restoreTarget)) {
+    dialogAbove.restoreTarget = removedDialog.restoreTarget
+  }
+  updateScrollLock()
+  return wasTopmost
+}
+
+const restoreFocus = (shouldRestore: boolean) => {
+  const target = dialogEntry.restoreTarget
+  if (shouldRestore && target?.isConnected && typeof target.focus === 'function') {
+    target.focus()
+  }
+  dialogEntry.restoreTarget = null
 }
 
 // Prevent body scroll when modal is open and manage focus
 watch(
   () => props.show,
-  async (isOpen) => {
-    if (isOpen) {
-      // 保存当前焦点元素
-      previousActiveElement = document.activeElement as HTMLElement
-      // 使用CSS类而不是直接操作style,更易于管理多个对话框
-      document.body.classList.add('modal-open')
+  async (shouldOpen) => {
+    if (shouldOpen && !isOpen) {
+      isOpen = true
+      dialogEntry.restoreTarget = document.activeElement as HTMLElement
+      openDialogs.push(dialogEntry)
+      updateScrollLock()
 
-      // 等待DOM更新后设置焦点到对话框
       await nextTick()
-      if (modalBodyRef.value) {
-        modalBodyRef.value.scrollTop = 0
-      }
-      if (dialogRef.value) {
-        const firstFocusable = dialogRef.value.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-        firstFocusable?.focus()
-      }
-    } else {
-      document.body.classList.remove('modal-open')
-      // 恢复之前的焦点
-      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-        previousActiveElement.focus()
-      }
-      previousActiveElement = null
+      if (!props.show || !isTopmost()) return
+      if (modalBodyRef.value) modalBodyRef.value.scrollTop = 0
+      focusInitialElement()
+    } else if (!shouldOpen && isOpen) {
+      isOpen = false
+      restoreFocus(removeFromStack())
     }
   },
   { immediate: true }
 )
 
 onMounted(() => {
-  document.addEventListener('keydown', handleEscape)
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleEscape)
-  // 确保组件卸载时移除滚动锁定
-  document.body.classList.remove('modal-open')
+  document.removeEventListener('keydown', handleKeydown)
+  restoreFocus(removeFromStack())
 })
 </script>

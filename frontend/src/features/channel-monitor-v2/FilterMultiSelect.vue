@@ -7,9 +7,9 @@
     <button
       ref="triggerRef"
       type="button"
-      class="select-trigger flex cursor-pointer list-none items-center justify-between gap-1.5 text-left"
+      class="select-trigger operator-control flex cursor-pointer list-none items-center justify-between gap-1.5 text-left"
       :class="[
-        isOpen ? 'select-trigger-open' : '',
+        isOpen ? 'select-trigger-open operator-control-open' : '',
         compact ? 'h-8 rounded-lg !px-2 !py-1 text-xs' : 'h-[42px]',
       ]"
       :aria-expanded="isOpen"
@@ -33,7 +33,7 @@
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal dropdown filter-dropdown"
+          class="select-dropdown-portal dropdown filter-dropdown operator-menu"
           :class="[instanceId]"
           :style="dropdownStyle"
           role="listbox"
@@ -43,11 +43,13 @@
         >
           <button
             type="button"
-            class="dropdown-item select-option select-option-group flex w-full items-center justify-between border-b border-gray-100 px-4 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-700"
+            role="option"
+            class="dropdown-item select-option select-option-group operator-menu-item flex w-full items-center justify-between border-b border-gray-100 px-4 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-700"
+            :aria-selected="modelValue.length === 0"
             @click="clear"
           >
             <span>{{ allLabel }}</span>
-            <Icon v-if="modelValue.length === 0" name="check" size="sm" class="text-primary-500" />
+            <Icon v-if="modelValue.length === 0" name="check" size="sm" class="operator-menu-check" />
           </button>
 
           <button
@@ -55,17 +57,17 @@
             :key="option.value"
             type="button"
             role="option"
-            class="dropdown-item select-option flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+            class="dropdown-item select-option operator-menu-item flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
             :class="modelValue.includes(option.value) ? 'select-option-selected' : ''"
             :aria-selected="modelValue.includes(option.value)"
             @click="toggle(option.value)"
           >
             <span class="flex min-w-0 flex-1 items-center gap-2">
               <span
-                class="checkbox flex h-4 w-4 items-center justify-center rounded border border-gray-300 bg-white text-primary-500 dark:border-dark-600 dark:bg-dark-900"
+                class="checkbox operator-menu-checkbox flex h-4 w-4 items-center justify-center rounded border border-gray-300 bg-white text-primary-500 dark:border-dark-600 dark:bg-dark-900"
                 :class="modelValue.includes(option.value) ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30' : ''"
               >
-                <Icon v-if="modelValue.includes(option.value)" name="check" size="sm" class="text-primary-500" />
+                <Icon v-if="modelValue.includes(option.value)" name="check" size="sm" />
               </span>
               <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
             </span>

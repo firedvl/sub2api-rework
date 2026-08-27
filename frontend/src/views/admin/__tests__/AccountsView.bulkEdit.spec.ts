@@ -6,6 +6,7 @@ import AccountsView from '../AccountsView.vue'
 const {
   listAccounts,
   listWithEtag,
+  getBatchUsage,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
+  getBatchUsage: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       listWithEtag,
+      getBatchUsage,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
@@ -127,6 +130,7 @@ describe('admin AccountsView bulk edit scope', () => {
 
     listAccounts.mockReset()
     listWithEtag.mockReset()
+    getBatchUsage.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
@@ -148,6 +152,7 @@ describe('admin AccountsView bulk edit scope', () => {
       etag: null,
       data: null
     })
+    getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
@@ -350,9 +355,13 @@ describe('admin AccountsView bulk edit scope', () => {
       created_at: '2026-07-13T00:00:00Z',
       updated_at: '2026-07-13T00:00:00Z'
     })
-    listAccounts
-      .mockResolvedValueOnce({ items: [account(7)], total: 2, page: 1, page_size: 1, pages: 2 })
-      .mockResolvedValueOnce({ items: [account(11)], total: 2, page: 2, page_size: 1, pages: 2 })
+    listAccounts.mockImplementation((page: number, pageSize: number) => {
+      if (pageSize === 1000) {
+        return Promise.resolve({ items: [account(7), account(11)], total: 2, page: 1, page_size: 1000, pages: 1 })
+      }
+      const row = page === 2 ? account(11) : account(7)
+      return Promise.resolve({ items: [row], total: 2, page, page_size: pageSize, pages: 2 })
+    })
 
     const wrapper = mount(AccountsView, {
       global: {
@@ -412,10 +421,20 @@ describe('admin AccountsView bulk edit scope', () => {
       created_at: '2026-07-13T00:00:00Z',
       updated_at: '2026-07-13T00:00:00Z'
     })
-    listAccounts
-      .mockResolvedValueOnce({ items: [account(7, 0.25)], total: 2, page: 1, page_size: 1, pages: 2 })
-      .mockResolvedValueOnce({ items: [account(11, 0.25)], total: 2, page: 2, page_size: 1, pages: 2 })
-      .mockResolvedValueOnce({ items: [account(11, 0.065)], total: 2, page: 2, page_size: 1, pages: 2 })
+    listAccounts.mockImplementation((page: number, pageSize: number) => {
+      const rate = probeUpstreamBillingBatch.mock.calls.length ? 0.065 : 0.25
+      if (pageSize === 1000) {
+        return Promise.resolve({
+          items: [account(7, rate), account(11, rate)],
+          total: 2,
+          page: 1,
+          page_size: 1000,
+          pages: 1
+        })
+      }
+      const row = page === 2 ? account(11, rate) : account(7, rate)
+      return Promise.resolve({ items: [row], total: 2, page, page_size: pageSize, pages: 2 })
+    })
     probeUpstreamBillingBatch.mockResolvedValue([
       {
         account_id: 11,
@@ -471,8 +490,9 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([11])
-    expect(listAccounts).toHaveBeenCalledTimes(3)
-    expect(listAccounts.mock.calls[2]?.[0]).toBe(2)
+    const tableCalls = listAccounts.mock.calls.filter(([, pageSize]) => pageSize === 20)
+    expect(tableCalls).toHaveLength(3)
+    expect(tableCalls.at(-1)?.[0]).toBe(2)
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 
@@ -488,9 +508,16 @@ describe('admin AccountsView bulk edit scope', () => {
       created_at: '2026-07-13T00:00:00Z',
       updated_at: '2026-07-13T00:00:00Z'
     }
-    listAccounts
-      .mockResolvedValueOnce({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
-      .mockRejectedValueOnce(new Error('refresh failed'))
+    let tableCallCount = 0
+    listAccounts.mockImplementation((page: number, pageSize: number) => {
+      if (pageSize === 1000) {
+        return Promise.resolve({ items: [account], total: 1, page: 1, page_size: 1000, pages: 1 })
+      }
+      tableCallCount += 1
+      return tableCallCount === 1
+        ? Promise.resolve({ items: [account], total: 1, page, page_size: pageSize, pages: 1 })
+        : Promise.reject(new Error('refresh failed'))
+    })
     probeUpstreamBillingBatch.mockResolvedValue([
       {
         account_id: 7,
@@ -562,9 +589,10 @@ describe('admin AccountsView bulk edit scope', () => {
       created_at: '2026-07-13T00:00:00Z',
       updated_at: '2026-07-13T00:00:00Z'
     })
-    listAccounts
-      .mockResolvedValueOnce({ items: [account(0.25)], total: 1, page: 1, page_size: 20, pages: 1 })
-      .mockResolvedValueOnce({ items: [account(0.065)], total: 1, page: 1, page_size: 20, pages: 1 })
+    listAccounts.mockImplementation((page: number, pageSize: number) => {
+      const rate = probeUpstreamBilling.mock.calls.length ? 0.065 : 0.25
+      return Promise.resolve({ items: [account(rate)], total: 1, page, page_size: pageSize, pages: 1 })
+    })
     probeUpstreamBilling.mockResolvedValue({
       account_id: 7,
       snapshot: {
@@ -615,7 +643,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBilling).toHaveBeenCalledWith(7)
-    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(listAccounts.mock.calls.filter(([, pageSize]) => pageSize === 20)).toHaveLength(2)
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 })

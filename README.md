@@ -20,7 +20,7 @@ known limitations.
 | OpenAI-compatible gateway | Experimental | Preserves upstream Responses and Chat Completions paths |
 | Codex client tools | Experimental | Antigravity forwarding reuses shared namespace and custom-tool adaptation |
 | Standalone Codex web search | Experimental | Uses a separate, configurable `alpha_search` Composite route |
-| Operator console | Planned | The current UI remains in place while the replacement is designed |
+| Operator console | In review | The Vue UI ports codex-lb's visual system while preserving Sub2API workflows |
 
 No stable rework release exists yet.
 

@@ -9,6 +9,10 @@ interface ImportMeta {
   readonly env: ImportMetaEnv
 }
 
+interface Window {
+  __OPERATOR_REVIEW_MODE__?: boolean
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
   const component: DefineComponent<{}, {}, any>

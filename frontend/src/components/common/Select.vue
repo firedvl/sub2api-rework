@@ -11,8 +11,9 @@
       :aria-label="ariaLabel ?? 'Select option'"
       :aria-describedby="ariaDescribedby"
       :class="[
-        'select-trigger',
+        'select-trigger operator-control',
         isOpen && 'select-trigger-open',
+        isOpen && 'operator-control-open',
         error && 'select-trigger-error',
         disabled && 'select-trigger-disabled'
       ]"
@@ -51,7 +52,7 @@
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal"
+          class="select-dropdown-portal operator-select-menu operator-menu"
           :class="[instanceId]"
           :style="dropdownStyle"
           role="listbox"
@@ -84,7 +85,7 @@
               @click.stop="!isOptionDisabled(option) && selectOption(option)"
               @mouseenter="handleOptionMouseEnter(option, index)"
               :class="[
-                'select-option',
+                'select-option operator-menu-item',
                 isGroupHeaderOption(option) && 'select-option-group',
                 isSelected(option) && 'select-option-selected',
                 isOptionDisabled(option) && !isGroupHeaderOption(option) && 'select-option-disabled',
@@ -103,7 +104,7 @@
                   v-if="isSelected(option)"
                   name="check"
                   size="sm"
-                  class="text-primary-500"
+                  class="operator-menu-check"
                   :stroke-width="2"
                 />
               </slot>
@@ -507,17 +508,28 @@ onUnmounted(() => {
 .select-trigger {
   @apply flex w-full items-center justify-between gap-2;
   @apply rounded-xl px-4 py-2.5 text-sm;
-  @apply bg-white dark:bg-dark-800;
-  @apply border border-gray-200 dark:border-dark-600;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply transition-all duration-200;
-  @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
-  @apply hover:border-gray-300 dark:hover:border-dark-500;
+  border: 1px solid var(--operator-border, #e5e7eb);
+  background: var(--operator-card, #fff);
+  color: var(--operator-foreground, #111827);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   @apply cursor-pointer;
 }
 
+.dark .select-trigger {
+  border-color: var(--operator-border, #475569);
+  background: var(--operator-card, #1e293b);
+  color: var(--operator-foreground, #f3f4f6);
+}
+
+.select-trigger:hover {
+  border-color: color-mix(in oklch, var(--operator-border, #e5e7eb) 65%, var(--operator-foreground, #111827));
+}
+
+.select-trigger:focus-visible,
 .select-trigger-open {
-  @apply border-primary-500 ring-2 ring-primary-500/30;
+  border-color: var(--operator-focus, #14b8a6);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus, #14b8a6) 20%, transparent);
 }
 
 .select-trigger-error {
@@ -525,7 +537,12 @@ onUnmounted(() => {
 }
 
 .select-trigger-disabled {
-  @apply cursor-not-allowed bg-gray-100 opacity-60 dark:bg-dark-900;
+  @apply cursor-not-allowed opacity-60;
+  background: var(--operator-muted, #f3f4f6);
+}
+
+.dark .select-trigger-disabled {
+  background: var(--operator-muted, #0f172a);
 }
 
 .select-value {
@@ -533,7 +550,8 @@ onUnmounted(() => {
 }
 
 .select-icon {
-  @apply flex-shrink-0 text-gray-400 dark:text-dark-400;
+  @apply flex-shrink-0;
+  color: var(--operator-muted-foreground, #9ca3af);
 }
 
 .select-clear {
@@ -544,72 +562,119 @@ onUnmounted(() => {
 </style>
 
 <style>
-.select-dropdown-portal {
+.select-dropdown-portal.operator-select-menu {
   @apply w-max min-w-[200px];
-  @apply bg-white dark:bg-dark-800;
   @apply rounded-xl;
-  @apply border border-gray-200 dark:border-dark-700;
-  @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
+  border: 1px solid var(--operator-popup-border, var(--operator-border, #e5e7eb));
+  background: var(--operator-popup-surface, var(--operator-card, #fff));
+  box-shadow: var(--operator-popup-shadow, 0 8px 24px rgb(0 0 0 / 0.14));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
   pointer-events: auto !important;
 }
 
-.select-dropdown-portal .select-search {
+.dark .select-dropdown-portal.operator-select-menu {
+  border-color: var(--operator-popup-border, var(--operator-border, #334155));
+  background: var(--operator-popup-surface, var(--operator-card, #1e293b));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #f3f4f6));
+}
+
+.select-dropdown-portal.operator-select-menu .select-search {
   @apply flex items-center gap-2 px-3 py-2;
-  @apply border-b border-gray-100 dark:border-dark-700;
+  border-bottom: 1px solid var(--operator-popup-border, var(--operator-border, #f3f4f6));
+  background: var(--operator-popup-search, var(--operator-card, #fff));
 }
 
-.select-dropdown-portal .select-search-input {
+.dark .select-dropdown-portal.operator-select-menu .select-search {
+  border-color: var(--operator-popup-border, var(--operator-border, #334155));
+  background: var(--operator-popup-search, var(--operator-card, #1e293b));
+}
+
+.select-dropdown-portal.operator-select-menu .select-search-input {
   @apply flex-1 bg-transparent text-sm;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
   @apply focus:outline-none;
+  background: var(--operator-popup-search, transparent);
+  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
 }
 
-.select-dropdown-portal .select-options {
+.dark .select-dropdown-portal.operator-select-menu .select-search-input {
+  color: var(--operator-popup-foreground, var(--operator-foreground, #f3f4f6));
+}
+
+.select-dropdown-portal.operator-select-menu .select-search-input::placeholder {
+  color: var(--operator-popup-muted, var(--operator-muted-foreground, #9ca3af));
+}
+
+.select-dropdown-portal.operator-select-menu .select-options {
   @apply max-h-80 overflow-y-auto py-1 outline-none;
+  background: var(--operator-popup-surface, var(--operator-card, #fff));
 }
 
-.select-dropdown-portal .select-option {
+.select-dropdown-portal.operator-select-menu .select-option {
   @apply flex items-center justify-between gap-2;
   @apply px-4 py-2.5 text-sm;
-  @apply text-gray-700 dark:text-gray-300;
   @apply cursor-pointer transition-colors duration-150;
-  @apply hover:bg-gray-50 dark:hover:bg-dark-700;
+  background: var(--operator-popup-surface, transparent);
+  color: var(--operator-popup-foreground, var(--operator-foreground, #374151));
   pointer-events: auto !important;
 }
 
-.select-dropdown-portal .select-option-selected {
-  @apply bg-primary-50 dark:bg-primary-900/20;
-  @apply text-primary-700 dark:text-primary-300;
+.dark .select-dropdown-portal.operator-select-menu .select-option {
+  color: var(--operator-popup-foreground, var(--operator-foreground, #d1d5db));
 }
 
-.select-dropdown-portal .select-option-focused {
-  @apply bg-gray-100 dark:bg-dark-700;
+.select-dropdown-portal.operator-select-menu .select-option:hover,
+.select-dropdown-portal.operator-select-menu .select-option-focused {
+  background: var(--operator-popup-hover, var(--operator-muted, #f3f4f6));
 }
 
-.select-dropdown-portal .select-option-disabled {
+.dark .select-dropdown-portal.operator-select-menu .select-option:hover,
+.dark .select-dropdown-portal.operator-select-menu .select-option-focused {
+  background: var(--operator-popup-hover, var(--operator-muted, #334155));
+}
+
+.select-dropdown-portal.operator-select-menu .select-option-selected {
+  background: var(--operator-popup-selected, var(--operator-muted, #f0fdfa));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #0f766e));
+}
+
+.dark .select-dropdown-portal.operator-select-menu .select-option-selected {
+  background: var(--operator-popup-selected, var(--operator-muted, rgb(19 78 74 / 0.2)));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #5eead4));
+}
+
+.select-dropdown-portal.operator-select-menu .select-option-disabled {
   @apply cursor-not-allowed opacity-40;
 }
 
-.select-dropdown-portal .select-option-group {
+.select-dropdown-portal.operator-select-menu .select-option-group {
   @apply cursor-default select-none;
-  @apply bg-gray-50 dark:bg-dark-900;
   @apply text-[11px] font-bold uppercase tracking-wider;
-  @apply text-gray-500 dark:text-gray-400;
+  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
 }
 
-.select-dropdown-portal .select-option-group:hover {
-  @apply bg-gray-50 dark:bg-dark-900;
+.dark .select-dropdown-portal.operator-select-menu .select-option-group {
+  background: var(--operator-popup-search, var(--operator-muted, #0f172a));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground, #9ca3af));
 }
 
-.select-dropdown-portal .select-option-label {
+.select-dropdown-portal.operator-select-menu .select-option-group:hover {
+  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
+}
+
+.dark .select-dropdown-portal.operator-select-menu .select-option-group:hover {
+  background: var(--operator-popup-search, var(--operator-muted, #0f172a));
+}
+
+.select-dropdown-portal.operator-select-menu .select-option-label {
   @apply flex-1 min-w-0 truncate text-left;
 }
 
-.select-dropdown-portal .select-empty {
+.select-dropdown-portal.operator-select-menu .select-empty {
   @apply px-4 py-8 text-center text-sm;
-  @apply text-gray-500 dark:text-dark-400;
+  background: var(--operator-popup-surface, transparent);
+  color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
 }
 
 .select-dropdown-enter-active,

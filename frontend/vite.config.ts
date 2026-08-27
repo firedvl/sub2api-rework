@@ -2,6 +2,15 @@ import { defineConfig, loadEnv, Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
+import type { ServerResponse } from 'node:http'
+import {
+  getOperatorFixtureData,
+  isOperatorFixtureReadRequest,
+  operatorFixturePublicSettings,
+  operatorFixtureUser,
+  OPERATOR_FIXTURE_ACCOUNTS_ETAG,
+  OPERATOR_FIXTURE_TOKEN,
+} from './e2e/fixtures/operatorData'
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -77,9 +86,90 @@ function injectPublicSettings(backendUrl: string): Plugin {
   }
 }
 
+function sendReviewJson(response: ServerResponse, status: number, payload: unknown): void {
+  response.statusCode = status
+  response.setHeader('Content-Type', 'application/json')
+  response.setHeader('Cache-Control', 'no-store')
+  response.setHeader('X-Sub2API-Fixture-Review', 'true')
+  response.end(JSON.stringify(payload))
+}
+
+function operatorReviewFixtures(): Plugin {
+  const fixtureUser = operatorFixtureUser()
+  const appConfig = JSON.stringify(operatorFixturePublicSettings)
+  const sessionUser = JSON.stringify(fixtureUser)
+  const reviewInitScript = `<script>(()=>{window.__OPERATOR_REVIEW_MODE__=true;window.__APP_CONFIG__=${appConfig};const keys=['auth_token','auth_user','refresh_token','token_expires_at'];localStorage.setItem('admin_guide_1_admin_v4_interactive','true');if(location.pathname==='/login'){keys.forEach((key)=>localStorage.removeItem(key));return;}localStorage.setItem('auth_token',${JSON.stringify(OPERATOR_FIXTURE_TOKEN)});localStorage.setItem('auth_user',${JSON.stringify(sessionUser)});})();</script>`
+
+  return {
+    name: 'operator-review-fixtures',
+    apply: 'serve',
+    transformIndexHtml(html) {
+      return injectBranding(html, operatorFixturePublicSettings).replace(
+        '</head>',
+        `${reviewInitScript}\n</head>`,
+      )
+    },
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const url = new URL(request.url || '/', 'http://operator-review.local')
+        const pathname = url.pathname
+        const method = (request.method || 'GET').toUpperCase()
+
+        if (pathname === '/' && String(request.headers.accept || '').includes('text/html')) {
+          response.statusCode = 302
+          response.setHeader('Location', '/admin/dashboard')
+          response.end()
+          return
+        }
+
+        if (pathname === '/setup/status') {
+          sendReviewJson(response, 200, { data: { needs_setup: false, step: 'complete' } })
+          return
+        }
+
+        if (!pathname.startsWith('/api/v1/')) {
+          next()
+          return
+        }
+
+        if (!isOperatorFixtureReadRequest(method, pathname)) {
+          sendReviewJson(response, 405, {
+            code: 405,
+            message: 'Local fixture review is read-only',
+            data: { fixture_review: true, read_only: true },
+          })
+          return
+        }
+
+        if (
+          pathname === '/api/v1/admin/accounts' &&
+          request.headers['if-none-match'] === OPERATOR_FIXTURE_ACCOUNTS_ETAG
+        ) {
+          response.statusCode = 304
+          response.setHeader('ETag', OPERATOR_FIXTURE_ACCOUNTS_ETAG)
+          response.setHeader('Cache-Control', 'no-store')
+          response.setHeader('X-Sub2API-Fixture-Review', 'true')
+          response.end()
+          return
+        }
+
+        if (pathname === '/api/v1/admin/accounts') {
+          response.setHeader('ETag', OPERATOR_FIXTURE_ACCOUNTS_ETAG)
+        }
+        sendReviewJson(response, 200, {
+          code: 0,
+          message: 'ok',
+          data: getOperatorFixtureData(pathname),
+        })
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
+  const isOperatorReview = mode === 'operator-review'
   const backendUrl = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080'
   const devPort = Number(env.VITE_DEV_PORT || 3000)
 
@@ -89,7 +179,7 @@ export default defineConfig(({ mode }) => {
       checker({
         vueTsc: true
       }),
-      injectPublicSettings(backendUrl)
+      isOperatorReview ? operatorReviewFixtures() : injectPublicSettings(backendUrl)
     ],
   resolve: {
     alias: {
@@ -155,9 +245,10 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
-      host: '0.0.0.0',
-      port: devPort,
-      proxy: {
+      host: isOperatorReview ? '127.0.0.1' : '0.0.0.0',
+      port: isOperatorReview ? 4174 : devPort,
+      strictPort: isOperatorReview,
+      proxy: isOperatorReview ? undefined : {
         '/api': {
           target: backendUrl,
           changeOrigin: true
