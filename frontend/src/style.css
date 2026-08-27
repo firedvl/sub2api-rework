@@ -2077,55 +2077,110 @@ body:has(.auth-codex-shell) .operator-control:disabled {
   opacity: 0.65;
 }
 
+.dark body[data-operator-console] .operator-menu {
+  --operator-popup-surface: #171717;
+  --operator-popup-search: #141414;
+  --operator-popup-hover: #202020;
+  --operator-popup-selected: #252525;
+  --operator-popup-border: #3a3a3a;
+  --operator-popup-foreground: #f5f5f5;
+  --operator-popup-muted: #a3a3a3;
+  --operator-popup-scrollbar: #525252;
+  border-color: var(--operator-popup-border);
+  background: var(--operator-popup-surface);
+  color: var(--operator-popup-foreground);
+}
+
 body[data-operator-console] .operator-menu,
 body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-menu,
 body:has(.auth-codex-shell) .operator-menu {
-  border: 1px solid var(--operator-border);
+  border: 1px solid var(--operator-popup-border, var(--operator-border));
   border-radius: var(--operator-radius);
-  background: var(--operator-card);
+  background: var(--operator-popup-surface, var(--operator-card));
   box-shadow: 0 8px 24px oklch(0 0 0 / 0.14);
-  color: var(--operator-foreground);
+  color: var(--operator-popup-foreground, var(--operator-foreground));
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  scrollbar-color: var(--operator-popup-scrollbar, var(--operator-border)) var(--operator-popup-search, var(--operator-card));
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search, .select-option-group, .operator-menu-divider) {
-  border-color: var(--operator-border);
+  border-color: var(--operator-popup-border, var(--operator-border));
+}
+
+body[data-operator-console] .operator-menu .select-search {
+  background: var(--operator-popup-search, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu .select-options {
+  background: var(--operator-popup-surface, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu .select-option-group {
+  background: var(--operator-popup-search, var(--operator-card));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
+}
+
+body[data-operator-console] .operator-menu [class*="text-gray-"],
+body[data-operator-console] .operator-menu [class*="text-dark-"] {
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu :is(.select-search-input, .select-empty) {
-  color: var(--operator-foreground);
+  color: var(--operator-popup-foreground, var(--operator-foreground));
   font-size: 0.875rem;
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item {
   min-height: 2.5rem;
   background: transparent;
-  color: var(--operator-foreground);
+  color: var(--operator-popup-foreground, var(--operator-foreground));
   font-size: 0.875rem;
 }
 
 body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) .operator-menu-item {
-  color: var(--operator-foreground);
+  color: var(--operator-popup-foreground, var(--operator-foreground));
 }
 
 body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) :is(
   .date-picker-label,
   .date-picker-separator
 ) {
-  color: var(--operator-muted-foreground);
+  color: var(--operator-popup-muted, var(--operator-muted-foreground));
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
   :hover,
   :focus-visible,
-  .select-option-focused,
+  .select-option-focused
+) {
+  background: var(--operator-popup-hover, var(--operator-muted));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
   .select-option-selected,
+  .date-picker-preset-active,
   [aria-selected="true"],
   [aria-current="true"],
   [aria-pressed="true"]
 ) {
-  background: var(--operator-muted);
-  color: var(--operator-foreground);
+  background: var(--operator-popup-selected, var(--operator-muted));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar-track {
+  background: var(--operator-popup-search, var(--operator-card));
+}
+
+body[data-operator-console] .operator-menu ::-webkit-scrollbar-thumb {
+  border: 2px solid var(--operator-popup-search, var(--operator-card));
+  border-radius: 999px;
+  background: var(--operator-popup-scrollbar, var(--operator-border));
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item-recovery {
@@ -2151,12 +2206,12 @@ body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-m
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-check {
-  color: var(--operator-foreground);
+  color: var(--operator-popup-foreground, var(--operator-foreground));
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-checkbox {
-  border-color: var(--operator-border);
-  background: var(--operator-card);
+  border-color: var(--operator-popup-border, var(--operator-border));
+  background: var(--operator-popup-surface, var(--operator-card));
   color: var(--operator-primary-foreground);
 }
 

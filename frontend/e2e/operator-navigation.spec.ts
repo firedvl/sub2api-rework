@@ -18,21 +18,27 @@ const fidelityViewports = [
   { width: 768, height: 900 },
 ]
 
-async function expectNeutralOperatorMenu(page: Page, menu: Locator, emphasizedItem: Locator) {
+const operatorPopupPalette = {
+  surface: 'rgb(23, 23, 23)',
+  search: 'rgb(20, 20, 20)',
+  hover: 'rgb(32, 32, 32)',
+  selected: 'rgb(37, 37, 37)',
+  border: 'rgb(58, 58, 58)',
+  foreground: 'rgb(245, 245, 245)',
+  muted: 'rgb(163, 163, 163)',
+}
+
+async function expectNeutralOperatorMenu(
+  page: Page,
+  menu: Locator,
+  emphasizedItem: Locator,
+  state: 'hover' | 'selected' = 'hover',
+) {
   await expect(menu).toBeVisible()
   await expect(emphasizedItem).toBeVisible()
-  await emphasizedItem.hover()
+  if (state === 'hover') await emphasizedItem.hover()
   await page.waitForTimeout(200)
 
-  const tokens = await page.locator('.operator-console').evaluate((element) => {
-    const style = getComputedStyle(element)
-    return {
-      card: style.getPropertyValue('--operator-card').trim(),
-      border: style.getPropertyValue('--operator-border').trim(),
-      muted: style.getPropertyValue('--operator-muted').trim(),
-      foreground: style.getPropertyValue('--operator-foreground').trim(),
-    }
-  })
   const menuColors = await menu.evaluate((element) => {
     const style = getComputedStyle(element)
     return { background: style.backgroundColor, border: style.borderColor }
@@ -42,8 +48,14 @@ async function expectNeutralOperatorMenu(page: Page, menu: Locator, emphasizedIt
     return { background: style.backgroundColor, color: style.color }
   })
 
-  expect(menuColors).toEqual({ background: tokens.card, border: tokens.border })
-  expect(itemColors).toEqual({ background: tokens.muted, color: tokens.foreground })
+  expect(menuColors).toEqual({
+    background: operatorPopupPalette.surface,
+    border: operatorPopupPalette.border,
+  })
+  expect(itemColors).toEqual({
+    background: operatorPopupPalette[state],
+    color: operatorPopupPalette.foreground,
+  })
 }
 
 async function operatorTokens(page: Page) {
@@ -386,18 +398,44 @@ test.describe('operator console navigation', () => {
       color: selectTokens.foreground,
     })
     const selectedOption = page.locator('.select-dropdown-portal .select-option-selected')
-    await expectNeutralOperatorMenu(page, page.locator('.select-dropdown-portal'), selectedOption)
+    const popup = page.locator('.select-dropdown-portal')
+    await expectNeutralOperatorMenu(page, popup, selectedOption, 'selected')
+    const popupColors = await popup.evaluate((element) => {
+      const search = element.querySelector('.select-search') as HTMLElement
+      const options = element.querySelector('.select-options') as HTMLElement
+      const normal = element.querySelector('.select-option:not(.select-option-selected)') as HTMLElement
+      const selected = element.querySelector('.select-option-selected') as HTMLElement
+      return {
+        search: getComputedStyle(search).backgroundColor,
+        searchBorder: getComputedStyle(search).borderBottomColor,
+        options: getComputedStyle(options).backgroundColor,
+        scrollbar: getComputedStyle(options).scrollbarColor,
+        normal: getComputedStyle(normal).backgroundColor,
+        selected: getComputedStyle(selected).backgroundColor,
+      }
+    })
+    expect(popupColors).toEqual({
+      search: operatorPopupPalette.search,
+      searchBorder: operatorPopupPalette.border,
+      options: operatorPopupPalette.surface,
+      scrollbar: 'rgb(82, 82, 82) rgb(20, 20, 20)',
+      normal: 'rgba(0, 0, 0, 0)',
+      selected: operatorPopupPalette.selected,
+    })
     const checkColor = await selectedOption.locator('svg').evaluate((element) => getComputedStyle(element).color)
-    const expectedForeground = await page.locator('.operator-console').evaluate(
-      (element) => getComputedStyle(element).getPropertyValue('--operator-foreground').trim(),
-    )
-    expect(checkColor).toBe(expectedForeground)
+    expect(checkColor).toBe(operatorPopupPalette.foreground)
     await page.keyboard.press('Escape')
 
     const moreActionsButton = page.getByRole('button', { name: 'More Actions' })
     await moreActionsButton.click()
     const moreActionsMenu = page.locator('.account-tools-menu')
     await expectNeutralOperatorMenu(page, moreActionsMenu, moreActionsMenu.locator('.operator-menu-item').first())
+    expect(await moreActionsMenu.locator('.operator-menu-divider').first().evaluate(
+      (element) => getComputedStyle(element).borderTopColor,
+    )).toBe(operatorPopupPalette.border)
+    expect(await moreActionsMenu.locator('.text-xs.font-semibold.uppercase').first().evaluate(
+      (element) => getComputedStyle(element).color,
+    )).toBe(operatorPopupPalette.muted)
     const [moreActionsBox, moreActionsStatusBarBox] = await Promise.all([
       moreActionsMenu.boundingBox(),
       page.locator('.operator-status-bar').boundingBox(),
@@ -447,13 +485,14 @@ test.describe('operator console navigation', () => {
       page,
       page.locator('.date-picker-dropdown'),
       page.locator('.date-picker-preset-active'),
+      'selected',
     )
     expect(await page.locator('.date-picker-preset:not(.date-picker-preset-active)').first().evaluate(
       (element) => getComputedStyle(element).color,
-    )).toBe(activityTokens.foreground)
+    )).toBe(operatorPopupPalette.foreground)
     expect(await page.locator('.date-picker-label').first().evaluate(
       (element) => getComputedStyle(element).color,
-    )).toBe(activityTokens.mutedForeground)
+    )).toBe(operatorPopupPalette.muted)
     await page.keyboard.press('Escape')
 
     await page.goto('/admin/ops')
@@ -479,7 +518,7 @@ test.describe('operator console navigation', () => {
     )).toBe(groupsTokens.border)
     await page.getByRole('button', { name: 'Column Settings' }).click()
     const groupsMenu = page.locator('.operator-menu:visible')
-    await expectNeutralOperatorMenu(page, groupsMenu, groupsMenu.locator('[aria-pressed="true"]').first())
+    await expectNeutralOperatorMenu(page, groupsMenu, groupsMenu.locator('[aria-pressed="true"]').first(), 'selected')
 
     await page.goto('/admin/settings')
     const settingsTokens = await operatorTokens(page)
