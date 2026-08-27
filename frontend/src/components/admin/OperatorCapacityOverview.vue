@@ -385,6 +385,19 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   box-shadow: var(--operator-shadow-xs);
 }
 
+.operator-capacity:not(.operator-capacity-compact) {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.operator-capacity:not(.operator-capacity-compact) .operator-capacity-header {
+  padding: 0 0 1rem;
+  border-bottom: 0;
+}
+
 .operator-capacity-header,
 .operator-capacity-provider-header,
 .operator-capacity-account-heading,
@@ -526,11 +539,19 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 
 .operator-capacity-summary > .btn { justify-self: end; }
 
-.operator-capacity-providers { border-top: 1px solid var(--operator-border); }
-.operator-capacity-provider + .operator-capacity-provider { border-top: 1px solid var(--operator-border); }
+.operator-capacity-providers {
+  display: grid;
+  gap: 1.5rem;
+}
+.operator-capacity-provider + .operator-capacity-provider {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--operator-border-subtle);
+}
 .operator-capacity-provider-header {
   padding: 0;
-  background: var(--operator-muted);
+  border-top: 1px solid var(--operator-border-subtle);
+  border-bottom: 1px solid var(--operator-border-subtle);
+  background: color-mix(in oklch, var(--operator-muted) 58%, transparent);
 }
 .operator-capacity-provider-name { font-size: 1rem; }
 .operator-capacity-provider-identity > span > span {
@@ -547,7 +568,7 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.875rem 1.5rem;
+  padding: 0.875rem 1rem;
   color: var(--operator-foreground);
   text-align: left;
   transition: background-color 150ms ease;
@@ -603,9 +624,9 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 
 .operator-capacity-account-list {
   display: grid;
-  padding: 0.625rem;
-  background: var(--operator-muted);
-  gap: 0.625rem;
+  padding: 0.75rem 0 0;
+  background: transparent;
+  gap: 0.75rem;
 }
 
 .operator-capacity-account {

@@ -152,7 +152,7 @@
                         </span>
                         <span
                           v-if="selIds.length"
-                          class="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                          class="operator-menu-count rounded-full px-2 py-0.5 text-xs font-medium"
                         >
                           {{ t('admin.accounts.selectedCount', { count: selIds.length }) }}
                         </span>
@@ -382,12 +382,12 @@
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center">
               <button
                 role="switch"
                 :aria-checked="row.schedulable"
-                :aria-label="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
-                :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                :aria-label="`${row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')}: ${row.name}`"
+                :title="`${row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')}: ${row.name}`"
                 :disabled="togglingSchedulable === row.id"
                 class="operator-scheduling-switch relative inline-flex flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 :class="row.schedulable ? 'is-enabled' : 'is-disabled'"
@@ -395,9 +395,6 @@
               >
                 <span class="pointer-events-none inline-block transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" />
               </button>
-              <span class="text-sm text-gray-600 dark:text-gray-300">
-                {{ row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled') }}
-              </span>
             </div>
           </template>
           <template #cell-today_stats="{ row }">
@@ -408,7 +405,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCell :groups="row.groups" :max-display="4" />
+            <AccountGroupsCell class="operator-account-routing-groups" :groups="row.groups" :max-display="4" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -1590,11 +1587,15 @@ const updateAccountToolsDropdownPosition = () => {
   const trigger = accountToolsTriggerRef.value
   if (!trigger) return
 
+  const viewportHeight = window.innerHeight
+  const statusBarTop = document.querySelector<HTMLElement>('.operator-status-bar')?.getBoundingClientRect().top
+  const usableHeight = Math.min(viewportHeight, statusBarTop ?? viewportHeight)
   const position = getFloatingPanelPosition(
     trigger.getBoundingClientRect(),
     document.documentElement.clientWidth || window.innerWidth,
-    window.innerHeight
+    usableHeight
   )
+  if (position.bottom !== null) position.bottom += viewportHeight - usableHeight
   Object.assign(accountToolsDropdownPosition, position)
 }
 
@@ -1877,7 +1878,7 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false, class: 'min-w-[10rem]' },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false, class: 'min-w-[11rem]' },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true, class: 'min-w-[10rem]' },
-    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true, class: 'min-w-[11rem]' },
+    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true, class: 'min-w-[7rem]' },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false, class: 'min-w-[10rem]' }
   ]
   if (!authStore.isSimpleMode) {
@@ -2703,16 +2704,16 @@ onUnmounted(() => {
 .operator-account-view-tabs {
   display: inline-flex;
   width: fit-content;
-  padding: 0.125rem;
+  padding: 0.1875rem;
   border: 1px solid var(--operator-border);
   border-radius: 0.5rem;
   background: var(--operator-muted);
 }
 
 .operator-account-view-tab {
-  min-width: 6.5rem;
-  min-height: 2.375rem;
-  padding: 0.5rem 0.875rem;
+  min-width: 6.25rem;
+  min-height: 2.25rem;
+  padding: 0.4375rem 0.75rem;
   border-radius: var(--operator-radius);
   color: var(--operator-muted-foreground);
   font-size: 0.875rem;
@@ -2726,7 +2727,7 @@ onUnmounted(() => {
 
 .operator-account-view-tab.is-active {
   background: var(--operator-card);
-  box-shadow: var(--operator-shadow-xs);
+  box-shadow: 0 0 0 1px var(--operator-border-subtle), var(--operator-shadow-xs);
   color: var(--operator-foreground);
 }
 
@@ -2783,6 +2784,27 @@ onUnmounted(() => {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+.operator-account-technical-shell :deep(.table-header),
+.operator-account-technical-shell :deep(.sticky-header-cell) {
+  background: var(--operator-raised);
+}
+
+.operator-account-technical-shell :deep(.table-wrapper > table > :not([hidden]) ~ :not([hidden])),
+.operator-account-technical-shell :deep(.table-body > :not([hidden]) ~ :not([hidden])) {
+  border-color: var(--operator-border-subtle) !important;
+}
+
+.operator-account-technical-shell :deep(th[aria-sort="ascending"]),
+.operator-account-technical-shell :deep(th[aria-sort="descending"]) {
+  color: var(--operator-foreground);
+}
+
+.operator-account-routing-groups :deep(.group-badge),
+.operator-account-routing-groups :deep(button) {
+  background: var(--operator-muted) !important;
+  color: var(--operator-muted-foreground) !important;
 }
 
 .operator-account-table {
@@ -2856,6 +2878,11 @@ onUnmounted(() => {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
   background: var(--operator-muted);
   color: var(--operator-muted-foreground);
+}
+
+.operator-menu-count {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
 }
 
 @media (max-width: 639px) {

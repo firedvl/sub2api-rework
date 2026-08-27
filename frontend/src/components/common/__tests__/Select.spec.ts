@@ -73,6 +73,9 @@ describe('Select dropdown viewport constraints', () => {
     const dropdown = await openSelect()
 
     expect(dropdown).not.toBeNull()
+    expect(dropdown?.classList).toContain('operator-select-menu')
+    expect(dropdown?.classList).toContain('operator-menu')
+    expect(dropdown?.parentElement).toBe(document.body)
     expect(dropdown?.style.left).toBe('20px')
     expect(dropdown?.style.minWidth).toBe('200px')
     expect(dropdown?.style.maxWidth).toBe('996px')

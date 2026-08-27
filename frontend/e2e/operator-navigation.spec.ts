@@ -53,6 +53,7 @@ async function operatorTokens(page: Page) {
       background: style.getPropertyValue('--operator-background').trim(),
       card: style.getPropertyValue('--operator-card').trim(),
       border: style.getPropertyValue('--operator-border').trim(),
+      borderSubtle: style.getPropertyValue('--operator-border-subtle').trim(),
       muted: style.getPropertyValue('--operator-muted').trim(),
       mutedForeground: style.getPropertyValue('--operator-muted-foreground').trim(),
       foreground: style.getPropertyValue('--operator-foreground').trim(),
@@ -330,6 +331,10 @@ test.describe('operator console navigation', () => {
     const disabledSwitch = page.locator('.operator-scheduling-switch[aria-checked="false"]').first()
     await expect(enabledSwitch).toBeVisible()
     await expect(disabledSwitch).toBeVisible()
+    await expect(enabledSwitch).toHaveAttribute('aria-label', 'Scheduling enabled: Codex Team West')
+    await expect(disabledSwitch).toHaveAttribute('aria-label', /Scheduling disabled: /)
+    await expect(enabledSwitch).toHaveText('')
+    await expect(disabledSwitch).toHaveText('')
     const switchColors = await page.evaluate(() => {
       const root = document.querySelector('.operator-console') as HTMLElement
       const enabled = document.querySelector('.operator-scheduling-switch[aria-checked="true"]') as HTMLElement
@@ -345,6 +350,20 @@ test.describe('operator console navigation', () => {
     expect(switchColors.enabled).toBe(switchColors.success)
     expect(switchColors.disabled).toBe(switchColors.track)
 
+    const secondTechnicalRow = page.locator('.operator-account-table .table-body tr[data-index="1"]')
+    expect(await secondTechnicalRow.evaluate((element) => getComputedStyle(element).borderTopColor))
+      .toBe((await operatorTokens(page)).borderSubtle)
+
+    const routingGroup = page.locator('.operator-account-routing-groups .group-badge').first()
+    const routingGroupColors = await routingGroup.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, color: style.color }
+    })
+    expect(routingGroupColors).toEqual({
+      background: (await operatorTokens(page)).muted,
+      color: (await operatorTokens(page)).mutedForeground,
+    })
+
     const platformSelect = page.locator('.select-trigger').first()
     const selectTokens = await operatorTokens(page)
     const closedSelectColors = await platformSelect.evaluate((element) => {
@@ -357,6 +376,7 @@ test.describe('operator console navigation', () => {
       color: selectTokens.foreground,
     })
     await platformSelect.click()
+    await expect(page.locator('body > .select-dropdown-portal.operator-select-menu.operator-menu')).toBeVisible()
     await expect.poll(() => platformSelect.evaluate((element) => {
       const style = getComputedStyle(element)
       return { background: style.backgroundColor, border: style.borderColor, color: style.color }
@@ -378,6 +398,13 @@ test.describe('operator console navigation', () => {
     await moreActionsButton.click()
     const moreActionsMenu = page.locator('.account-tools-menu')
     await expectNeutralOperatorMenu(page, moreActionsMenu, moreActionsMenu.locator('.operator-menu-item').first())
+    const [moreActionsBox, moreActionsStatusBarBox] = await Promise.all([
+      moreActionsMenu.boundingBox(),
+      page.locator('.operator-status-bar').boundingBox(),
+    ])
+    expect(moreActionsBox).not.toBeNull()
+    expect(moreActionsStatusBarBox).not.toBeNull()
+    expect(moreActionsBox!.y + moreActionsBox!.height).toBeLessThanOrEqual(moreActionsStatusBarBox!.y)
     await moreActionsButton.click()
 
     const moreButton = page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'More' }).first()
