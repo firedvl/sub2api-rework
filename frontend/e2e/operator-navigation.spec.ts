@@ -67,6 +67,48 @@ async function expectNeutralOperatorMenu(
   })
 }
 
+async function openNeutralOperatorSelect(page: Page, trigger: Locator) {
+  await trigger.scrollIntoViewIfNeeded()
+  await trigger.click()
+
+  const popup = page.locator('body > .select-dropdown-portal.operator-select-menu.operator-menu')
+  await expect(popup).toBeVisible()
+  const layers = await popup.evaluate((element) => {
+    const background = (selector: string) => {
+      const layer = element.querySelector(selector)
+      return layer ? getComputedStyle(layer).backgroundColor : null
+    }
+    return {
+      root: getComputedStyle(element).backgroundColor,
+      border: getComputedStyle(element).borderColor,
+      search: background('.select-search'),
+      searchInput: background('.select-search-input'),
+      list: background('.select-options'),
+      normal: background('.select-option:not(.select-option-selected)'),
+      selected: background('.select-option-selected'),
+    }
+  })
+
+  expect(layers.root).toBe(operatorPopupPalette.surface)
+  expect(layers.border).toBe(operatorPopupPalette.border)
+  if (layers.search !== null) expect(layers.search).toBe(operatorPopupPalette.search)
+  if (layers.searchInput !== null) expect(layers.searchInput).toBe(operatorPopupPalette.search)
+  expect(layers.list).toBe(operatorPopupPalette.surface)
+  expect(layers.normal).toBe(operatorPopupPalette.surface)
+  expect(layers.selected).toBe(operatorPopupPalette.selected)
+
+  const normalOption = popup.locator('.select-option:not(.select-option-selected)').first()
+  const selectedOption = popup.locator('.select-option-selected').first()
+  await normalOption.hover()
+  await expect.poll(() => normalOption.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe(operatorPopupPalette.hover)
+  expect(await selectedOption.evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe(operatorPopupPalette.selected)
+
+  await trigger.click()
+  await expect(popup).toHaveCount(0)
+}
+
 async function operatorTokens(page: Page) {
   return page.locator('.operator-console').evaluate((element) => {
     const style = getComputedStyle(element)
@@ -220,6 +262,65 @@ test.describe('operator console navigation', () => {
       await empty.evaluate((element) => getComputedStyle(element).backgroundColor),
       'empty state',
     )
+  })
+
+  test('keeps operator popup colors stable through same-context route lifecycles', async ({ page }) => {
+    test.setTimeout(90_000)
+    await page.addInitScript(() => localStorage.setItem('theme', 'light'))
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    const navigate = async (path: string) => {
+      await page.locator(`.operator-primary-nav a[href="${path}"]`).click()
+      await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`))
+      await expect(page.locator('body')).toHaveAttribute('data-operator-console', '')
+      await expect(page.locator('.operator-console')).toBeVisible()
+      await expect(page.locator('body > .select-dropdown-portal')).toHaveCount(0)
+    }
+    const openLocaleMenu = async () => {
+      const trigger = page.locator('.operator-header-secondary-action > button').last()
+      await trigger.click()
+      const menu = page.locator('.operator-header .operator-menu')
+      await expectNeutralOperatorMenu(page, menu, menu.locator('[aria-current="true"]'), 'selected')
+      await trigger.click()
+      await expect(menu).toHaveCount(0)
+    }
+
+    await page.goto('/admin/accounts')
+    await expect(page.locator('html')).not.toHaveClass(/dark/)
+    await expect(page.locator('body')).toHaveAttribute('data-operator-console', '')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+
+    await navigate('/admin/usage')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').filter({ hasText: 'Hour' }))
+
+    await navigate('/admin/accounts')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+    const moreActionsButton = page.getByRole('button', { name: 'More Actions' })
+    await moreActionsButton.click()
+    const moreActionsMenu = page.locator('.account-tools-menu')
+    await expectNeutralOperatorMenu(page, moreActionsMenu, moreActionsMenu.locator('.operator-menu-item').first())
+    await moreActionsButton.click()
+    await expect(moreActionsMenu).toHaveCount(0)
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').nth(2))
+
+    await navigate('/admin/stats')
+    await openLocaleMenu()
+    await navigate('/admin/groups')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+    await navigate('/admin/usage')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').filter({ hasText: 'Hour' }))
+    await navigate('/admin/settings')
+    await page.getByRole('tab', { name: 'Gateway' }).click()
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger:visible').first())
+    await navigate('/admin/accounts')
+    await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      await navigate('/admin/groups')
+      await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+      await navigate('/admin/accounts')
+      await openNeutralOperatorSelect(page, page.locator('.select-trigger').first())
+    }
   })
 
   test('switches Accounts views without stacking or refetching', async ({ page }) => {

@@ -44,7 +44,7 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores'
@@ -83,16 +83,8 @@ const { replayTour } = useOnboardingTour({
 
 const onboardingStore = useOnboardingStore()
 
-watch(isOperatorConsole, (enabled) => {
-  document.body.toggleAttribute('data-operator-console', enabled)
-}, { immediate: true })
-
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)
-})
-
-onUnmounted(() => {
-  document.body.removeAttribute('data-operator-console')
 })
 
 defineExpose({ replayTour })
