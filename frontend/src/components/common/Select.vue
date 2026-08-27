@@ -566,10 +566,10 @@ onUnmounted(() => {
   @apply w-max min-w-[200px];
   @apply rounded-xl;
   @apply overflow-hidden;
-  border: 1px solid var(--operator-border, #e5e7eb);
-  background: var(--operator-card, #fff);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
-  color: var(--operator-foreground, #111827);
+  border: 1px solid var(--operator-popup-border, var(--operator-border, #e5e7eb));
+  background: var(--operator-popup-surface, var(--operator-card, #fff));
+  box-shadow: var(--operator-popup-shadow, 0 8px 24px rgb(0 0 0 / 0.14));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
   pointer-events: auto !important;
 }
 
@@ -581,7 +581,8 @@ onUnmounted(() => {
 
 .select-dropdown-portal.operator-select-menu .select-search {
   @apply flex items-center gap-2 px-3 py-2;
-  border-bottom: 1px solid var(--operator-border, #f3f4f6);
+  border-bottom: 1px solid var(--operator-popup-border, var(--operator-border, #f3f4f6));
+  background: var(--operator-popup-search, var(--operator-card, #fff));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-search {
@@ -592,7 +593,8 @@ onUnmounted(() => {
 .select-dropdown-portal.operator-select-menu .select-search-input {
   @apply flex-1 bg-transparent text-sm;
   @apply focus:outline-none;
-  color: var(--operator-foreground, #111827);
+  background: var(--operator-popup-search, transparent);
+  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-search-input {
@@ -612,7 +614,8 @@ onUnmounted(() => {
   @apply flex items-center justify-between gap-2;
   @apply px-4 py-2.5 text-sm;
   @apply cursor-pointer transition-colors duration-150;
-  color: var(--operator-foreground, #374151);
+  background: var(--operator-popup-surface, transparent);
+  color: var(--operator-popup-foreground, var(--operator-foreground, #374151));
   pointer-events: auto !important;
 }
 
@@ -622,7 +625,7 @@ onUnmounted(() => {
 
 .select-dropdown-portal.operator-select-menu .select-option:hover,
 .select-dropdown-portal.operator-select-menu .select-option-focused {
-  background: var(--operator-muted, #f3f4f6);
+  background: var(--operator-popup-hover, var(--operator-muted, #f3f4f6));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-option:hover,
@@ -631,8 +634,8 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal.operator-select-menu .select-option-selected {
-  background: var(--operator-muted, #f0fdfa);
-  color: var(--operator-foreground, #0f766e);
+  background: var(--operator-popup-selected, var(--operator-muted, #f0fdfa));
+  color: var(--operator-popup-foreground, var(--operator-foreground, #0f766e));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-option-selected {
@@ -647,8 +650,8 @@ onUnmounted(() => {
 .select-dropdown-portal.operator-select-menu .select-option-group {
   @apply cursor-default select-none;
   @apply text-[11px] font-bold uppercase tracking-wider;
-  background: var(--operator-muted, #f9fafb);
-  color: var(--operator-muted-foreground, #6b7280);
+  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
+  color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-option-group {
@@ -657,7 +660,7 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal.operator-select-menu .select-option-group:hover {
-  background: var(--operator-muted, #f9fafb);
+  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
 }
 
 .dark .select-dropdown-portal.operator-select-menu .select-option-group:hover {
@@ -670,6 +673,7 @@ onUnmounted(() => {
 
 .select-dropdown-portal.operator-select-menu .select-empty {
   @apply px-4 py-8 text-center text-sm;
+  background: var(--operator-popup-surface, transparent);
   color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
 }
 

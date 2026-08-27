@@ -412,11 +412,16 @@ onUnmounted(() => {
   @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
 }
 
-:global(body[data-operator-console] .select-trigger.operator-control),
-:global(body[data-operator-console] .select-dropdown.operator-menu) {
+:global(body[data-operator-console] .select-trigger.operator-control) {
   border-color: var(--operator-border);
   background: var(--operator-card);
   color: var(--operator-foreground);
+}
+
+:global(body[data-operator-console] .select-dropdown.operator-menu) {
+  border-color: var(--operator-popup-border, var(--operator-border));
+  background: var(--operator-popup-surface, var(--operator-card));
+  color: var(--operator-popup-foreground, var(--operator-foreground));
 }
 
 /* Dropdown animation */

@@ -28,6 +28,15 @@ const operatorPopupPalette = {
   muted: 'rgb(163, 163, 163)',
 }
 
+function expectDarkNeutralSurface(color: string, label: string) {
+  expect(color, `${label} must resolve to an RGB color`).toMatch(/^rgba?\(/)
+  const channels = color.match(/[\d.]+/g)?.map(Number) ?? []
+  const [red, green, blue, alpha = 1] = channels
+  expect(alpha, `${label} must be opaque`).toBe(1)
+  expect(Math.max(red, green, blue), `${label} must stay dark`).toBeLessThan(70)
+  expect(Math.max(red, green, blue) - Math.min(red, green, blue), `${label} must stay neutral`).toBeLessThanOrEqual(8)
+}
+
 async function expectNeutralOperatorMenu(
   page: Page,
   menu: Locator,
@@ -163,6 +172,54 @@ test.describe('operator console navigation', () => {
     await page.goto('/keys')
 
     await expect(page.locator('.operator-console')).toHaveCount(0)
+  })
+
+  test('keeps teleported operator popup layers dark neutral without the global dark theme', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('theme', 'light'))
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/accounts')
+    await expect(page.locator('html')).not.toHaveClass(/dark/)
+
+    await page.locator('.select-trigger').first().click()
+    const popup = page.locator('body > .select-dropdown-portal.operator-select-menu.operator-menu')
+    await expect(popup).toBeVisible()
+
+    const normalOption = popup.locator('.select-option:not(.select-option-selected)').first()
+    const selectedOption = popup.locator('.select-option-selected')
+    const initialColors = await popup.evaluate((element) => {
+      const color = (selector: string) => getComputedStyle(element.querySelector(selector) as HTMLElement).backgroundColor
+      return {
+        root: getComputedStyle(element).backgroundColor,
+        rootBorder: getComputedStyle(element).borderColor,
+        search: color('.select-search'),
+        searchBorder: getComputedStyle(element.querySelector('.select-search') as HTMLElement).borderBottomColor,
+        searchInput: color('.select-search-input'),
+        list: color('.select-options'),
+        normal: color('.select-option:not(.select-option-selected)'),
+        selected: color('.select-option-selected'),
+      }
+    })
+    for (const [label, color] of Object.entries(initialColors)) {
+      expectDarkNeutralSurface(color, label)
+    }
+
+    await normalOption.hover()
+    expectDarkNeutralSurface(
+      await normalOption.evaluate((element) => getComputedStyle(element).backgroundColor),
+      'hovered option',
+    )
+    expectDarkNeutralSurface(
+      await selectedOption.evaluate((element) => getComputedStyle(element).backgroundColor),
+      'selected option after another option is highlighted',
+    )
+
+    await popup.locator('.select-search-input').fill('__no_platform_match__')
+    const empty = popup.locator('.select-empty')
+    await expect(empty).toBeVisible()
+    expectDarkNeutralSurface(
+      await empty.evaluate((element) => getComputedStyle(element).backgroundColor),
+      'empty state',
+    )
   })
 
   test('switches Accounts views without stacking or refetching', async ({ page }) => {
@@ -419,7 +476,7 @@ test.describe('operator console navigation', () => {
       searchBorder: operatorPopupPalette.border,
       options: operatorPopupPalette.surface,
       scrollbar: 'rgb(82, 82, 82) rgb(20, 20, 20)',
-      normal: 'rgba(0, 0, 0, 0)',
+      normal: operatorPopupPalette.surface,
       selected: operatorPopupPalette.selected,
     })
     const checkColor = await selectedOption.locator('svg').evaluate((element) => getComputedStyle(element).color)
