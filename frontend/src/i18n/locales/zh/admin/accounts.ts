@@ -1,7 +1,12 @@
 export default {
     accounts: {
-      title: '账号管理',
+      title: '账号',
       description: '管理 AI 平台账号和 Cookie',
+      viewSwitcher: '账号视图',
+      capacityView: '容量',
+      technicalView: '技术',
+      technicalDetails: '账号技术详情与操作',
+      technicalDetailsHint: '账号 ID、用量诊断、路由指标、代理与高级操作',
       createAccount: '添加账号',
       autoRefresh: '自动刷新',
       enableAutoRefresh: '启用自动刷新',

@@ -3,7 +3,7 @@
     <button
       type="button"
       @click="toggle"
-      :class="['date-picker-trigger', isOpen && 'date-picker-trigger-open']"
+      :class="['date-picker-trigger operator-control', isOpen && 'date-picker-trigger-open operator-control-open']"
     >
       <span class="date-picker-icon">
         <Icon name="calendar" size="sm" />
@@ -21,20 +21,21 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+      <div v-if="isOpen" class="date-picker-dropdown operator-menu">
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
             v-for="preset in presets"
             :key="preset.value"
             @click="selectPreset(preset)"
-            :class="['date-picker-preset', isPresetActive(preset) && 'date-picker-preset-active']"
+            :aria-pressed="isPresetActive(preset)"
+            :class="['date-picker-preset operator-menu-item', isPresetActive(preset) && 'date-picker-preset-active']"
           >
             {{ t(preset.labelKey) }}
           </button>
         </div>
 
-        <div class="date-picker-divider"></div>
+        <div class="date-picker-divider operator-menu-divider"></div>
 
         <!-- Custom date range inputs -->
         <div class="date-picker-custom">
@@ -44,7 +45,7 @@
               type="date"
               v-model="localStartDate"
               :max="localEndDate || tomorrow"
-              class="date-picker-input"
+              class="date-picker-input operator-control"
               @change="onDateChange"
             />
           </div>
@@ -58,7 +59,7 @@
               v-model="localEndDate"
               :min="localStartDate"
               :max="tomorrow"
-              class="date-picker-input"
+              class="date-picker-input operator-control"
               @change="onDateChange"
             />
           </div>
@@ -66,7 +67,7 @@
 
         <!-- Apply button -->
         <div class="date-picker-actions">
-          <button @click="apply" class="date-picker-apply">
+          <button @click="apply" class="date-picker-apply operator-menu-primary">
             {{ t('dates.apply') }}
           </button>
         </div>

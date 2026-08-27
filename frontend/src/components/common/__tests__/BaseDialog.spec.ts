@@ -13,6 +13,28 @@ describe('BaseDialog', () => {
     document.body.classList.remove('modal-open')
   })
 
+  it('exposes the operator dialog theme contract', async () => {
+    const wrapper = mount(BaseDialog, {
+      attachTo: document.body,
+      props: { show: true, title: 'Details' },
+      slots: {
+        default: '<input aria-label="Name" />',
+        footer: '<button>Save</button>'
+      },
+      global: { stubs: { Icon: true } }
+    })
+
+    await nextTick()
+
+    expect(document.body.querySelector('.modal-overlay')?.classList).toContain('operator-dialog-overlay')
+    expect(document.body.querySelector('.modal-content')?.classList).toContain('operator-dialog')
+    expect(document.body.querySelector('.modal-header')?.classList).toContain('operator-dialog-header')
+    expect(document.body.querySelector('.modal-body')?.classList).toContain('operator-dialog-body')
+    expect(document.body.querySelector('.modal-footer')?.classList).toContain('operator-dialog-footer')
+    expect(document.body.querySelector('[aria-label="Close modal"]')?.classList).toContain('operator-dialog-close')
+    wrapper.unmount()
+  })
+
   it('resets body scroll position when reopened', async () => {
     const wrapper = mount(BaseDialog, {
       attachTo: document.body,

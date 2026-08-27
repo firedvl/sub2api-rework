@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto w-full min-w-0 max-w-6xl space-y-6">
+    <div class="mx-auto w-full min-w-0 max-w-none space-y-6">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -9,7 +9,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form v-else @submit.prevent="saveSettings" class="operator-settings-form space-y-6" novalidate>
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav
@@ -12921,8 +12921,11 @@ watch(
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {
-  @apply sticky z-20 -mx-1 border-b border-gray-200 bg-gray-50/95 px-1 dark:border-dark-700 dark:bg-dark-950/95;
+  @apply sticky z-20 -mx-1 px-1;
   top: 0;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-muted);
 }
 
 .settings-tabs-scroll {
@@ -12958,11 +12961,16 @@ watch(
 }
 
 .settings-tab:focus-visible {
-  @apply ring-2 ring-primary-500/50 ring-offset-1 ring-offset-gray-50 dark:ring-offset-dark-950;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
 }
 
 .settings-tab-active {
-  @apply text-primary-700 dark:text-primary-300;
+  color: var(--operator-foreground);
+}
+
+.dark .settings-tab-active {
+  color: var(--operator-foreground);
 }
 
 .settings-tab-active::after {
@@ -12972,7 +12980,11 @@ watch(
   left: 0.75rem;
   height: 2px;
   content: "";
-  @apply bg-primary-600 dark:bg-primary-400;
+  background: var(--operator-foreground);
+}
+
+.dark .settings-tab-active::after {
+  background: var(--operator-foreground);
 }
 
 .settings-tab-icon {
@@ -12985,7 +12997,11 @@ watch(
 }
 
 .settings-tab-active .settings-tab-icon {
-  @apply text-primary-600 dark:text-primary-300;
+  color: var(--operator-foreground);
+}
+
+.dark .settings-tab-active .settings-tab-icon {
+  color: var(--operator-foreground);
 }
 
 .settings-tab-label {

@@ -4,7 +4,10 @@
     <div class="relative mb-3">
       <div
         @click="toggleDropdown"
-        class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-dark-500 dark:bg-dark-700"
+        :class="[
+          'operator-control cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 dark:border-dark-500 dark:bg-dark-700',
+          showDropdown && 'operator-control-open',
+        ]"
       >
         <div class="grid grid-cols-2 gap-1.5">
           <span
@@ -35,13 +38,13 @@
       <!-- Dropdown List -->
       <div
         v-if="showDropdown"
-        class="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-700"
+        class="operator-menu absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-700"
       >
-        <div class="sticky top-0 border-b border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-700">
+        <div class="operator-menu-divider sticky top-0 border-b border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-700">
           <input
             v-model="searchQuery"
             type="text"
-            class="input w-full text-sm"
+            class="input operator-control w-full text-sm"
             :placeholder="t('admin.accounts.searchModels')"
             @click.stop
           />
@@ -51,7 +54,10 @@
             v-for="model in filteredModels"
             :key="model.value"
             data-testid="model-option"
-            class="group flex items-center hover:bg-gray-100 dark:hover:bg-dark-600"
+            :class="[
+              'operator-menu-item group flex items-center hover:bg-gray-100 dark:hover:bg-dark-600',
+              modelValue.includes(model.value) && 'select-option-selected',
+            ]"
           >
             <button
               type="button"
@@ -62,12 +68,13 @@
               <span
                 :class="[
                   'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+                  'operator-menu-checkbox',
                   modelValue.includes(model.value)
                     ? 'border-primary-500 bg-primary-500 text-white'
                     : 'border-gray-300 dark:border-dark-500'
                 ]"
               >
-                <svg v-if="modelValue.includes(model.value)" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg v-if="modelValue.includes(model.value)" class="operator-menu-check h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
                 </svg>
               </span>

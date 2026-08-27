@@ -172,6 +172,8 @@ docs/screenshots/operator-ui/*
 !docs/screenshots/operator-ui/before-settings.png
 !docs/screenshots/operator-ui/after-settings.png
 !docs/screenshots/operator-ui/reference-settings.jpg
+!docs/screenshots/codex-lb-fidelity/
+!docs/screenshots/codex-lb-fidelity/**
 .serena/
 .codex/
 frontend/coverage/

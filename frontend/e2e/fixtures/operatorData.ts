@@ -1,7 +1,7 @@
 export type SessionRole = 'admin' | 'user'
 export type RunMode = 'standard' | 'simple'
 
-export const OPERATOR_FIXTURE_ACCOUNTS_ETAG = '"operator-review-accounts-v1"'
+export const OPERATOR_FIXTURE_ACCOUNTS_ETAG = '"operator-review-accounts-v2"'
 export const OPERATOR_FIXTURE_TOKEN = 'operator-review-session'
 
 const createdAt = '2026-08-01T09:00:00Z'
@@ -263,6 +263,13 @@ export const operatorFixtureAccounts = [
     group_ids: [11],
     groups: accountGroup(11),
   }),
+  makeAccount(106, 'Gemini Healthy', 'gemini', 'oauth', {
+    credentials: { email: 'gemini-healthy@example.test', tier_id: 'google_ai_pro' },
+    credentials_status: { has_access_token: true, has_refresh_token: true },
+    current_concurrency: 0,
+    group_ids: [13],
+    groups: accountGroup(13),
+  }),
 ]
 
 const todayStats = {
@@ -271,6 +278,7 @@ const todayStats = {
   '103': { requests: 294, tokens: 682_000, cost: 2.31, standard_cost: 2.89, user_cost: 2.31 },
   '104': { requests: 34, tokens: 76_000, cost: 0.26, standard_cost: 0.31, user_cost: 0.26 },
   '105': { requests: 0, tokens: 0, cost: 0, standard_cost: 0, user_cost: 0 },
+  '106': { requests: 186, tokens: 412_000, cost: 1.18, standard_cost: 1.44, user_cost: 1.18 },
 }
 
 const usageProgress = (utilization: number, resetsAt: string) => ({
@@ -292,7 +300,7 @@ const accountUsage = {
     updated_at: updatedAt,
     five_hour: usageProgress(61, '2026-08-25T21:00:00Z'),
     seven_day: usageProgress(37, '2026-08-30T00:00:00Z'),
-    seven_day_sonnet: usageProgress(28, '2026-08-30T00:00:00Z'),
+    seven_day_sonnet: usageProgress(96, '2026-08-30T00:00:00Z'),
   },
   '103': {
     source: 'passive',
@@ -311,7 +319,7 @@ const accountUsage = {
     five_hour: null,
     seven_day: null,
     seven_day_sonnet: null,
-    gemini_shared_daily: usageProgress(19, '2026-08-26T00:00:00Z'),
+    gemini_shared_daily: null,
     error: 'Fixture: reauthorization required',
   },
   '105': {
@@ -320,6 +328,14 @@ const accountUsage = {
     five_hour: null,
     seven_day: null,
     seven_day_sonnet: null,
+  },
+  '106': {
+    source: 'passive',
+    updated_at: updatedAt,
+    five_hour: null,
+    seven_day: null,
+    seven_day_sonnet: null,
+    gemini_shared_daily: usageProgress(0, '2026-08-27T00:00:00Z'),
   },
 }
 
@@ -332,11 +348,11 @@ const dashboardStats = {
   stats_stale: false,
   total_api_keys: 26,
   active_api_keys: 23,
-  total_accounts: 8,
-  normal_accounts: 5,
-  error_accounts: 1,
-  ratelimit_accounts: 1,
-  overload_accounts: 1,
+  total_accounts: operatorFixtureAccounts.length,
+  normal_accounts: operatorFixtureAccounts.filter((account) => account.status === 'active' && account.schedulable).length,
+  error_accounts: operatorFixtureAccounts.filter((account) => account.status === 'error').length,
+  ratelimit_accounts: operatorFixtureAccounts.filter((account) => account.rate_limited_at).length,
+  overload_accounts: operatorFixtureAccounts.filter((account) => account.overload_until).length,
   total_requests: 1_284_920,
   total_input_tokens: 812_400_000,
   total_output_tokens: 191_600_000,
@@ -480,6 +496,61 @@ export const operatorFixtureChannels = [
     model_mapping: {},
     apply_pricing_to_account_stats: false,
     account_stats_pricing_rules: [],
+    created_at: createdAt,
+    updated_at: updatedAt,
+  },
+]
+
+export const operatorFixtureProxies = [
+  {
+    id: 41,
+    name: 'US West relay',
+    protocol: 'https',
+    host: 'proxy-west.example.test',
+    port: 8443,
+    username: null,
+    status: 'active',
+    account_count: 3,
+    latency_ms: 86,
+    latency_status: 'success',
+    ip_address: '192.0.2.41',
+    country: 'United States',
+    country_code: 'US',
+    region: 'Oregon',
+    city: 'Portland',
+    quality_status: 'healthy',
+    quality_score: 94,
+    quality_grade: 'A',
+    expires_at: null,
+    fallback_mode: 'direct',
+    backup_proxy_id: null,
+    expiry_warn_days: 7,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  },
+  {
+    id: 42,
+    name: 'EU standby relay',
+    protocol: 'socks5',
+    host: 'proxy-eu.example.test',
+    port: 1080,
+    username: 'review',
+    status: 'active',
+    account_count: 1,
+    latency_ms: 132,
+    latency_status: 'success',
+    ip_address: '198.51.100.42',
+    country: 'Germany',
+    country_code: 'DE',
+    region: 'Hesse',
+    city: 'Frankfurt',
+    quality_status: 'healthy',
+    quality_score: 88,
+    quality_grade: 'B',
+    expires_at: null,
+    fallback_mode: 'none',
+    backup_proxy_id: null,
+    expiry_warn_days: 7,
     created_at: createdAt,
     updated_at: updatedAt,
   },
@@ -716,10 +787,14 @@ export function getOperatorFixtureData(
   }
   if (pathname === '/api/v1/admin/groups/live-capability') return { supported: true }
   if (pathname === '/api/v1/admin/channels') return paginated(operatorFixtureChannels)
-  if (pathname === '/api/v1/admin/proxies/all') return []
+  if (pathname === '/api/v1/admin/proxies') return paginated(operatorFixtureProxies)
+  if (pathname === '/api/v1/admin/proxies/all') return operatorFixtureProxies
 
   if (pathname === '/api/v1/admin/usage') return paginated(usageLogs)
   if (pathname === '/api/v1/admin/usage/stats') return usageStats
+  if (pathname === '/api/v1/admin/usage/search-users') {
+    return [{ id: 2, email: 'member@example.test', deleted: false }]
+  }
   if (pathname === '/api/v1/admin/audit-logs') {
     return paginated([
       { id: 1, user_id: 1, action: 'account.test', resource_type: 'account', resource_id: '101', details: { result: 'healthy' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-25T18:42:00Z', user: operatorFixtureUser() },

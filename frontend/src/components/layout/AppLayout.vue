@@ -1,7 +1,11 @@
 <template>
   <div
-    class="min-h-screen bg-gray-50 dark:bg-dark-950"
-    :class="{ 'operator-console': isOperatorConsole, 'fixture-review-mode': isFixtureReview }"
+    class="min-h-screen"
+    :class="{
+      'operator-console': isOperatorConsole,
+      'fixture-review-mode': isFixtureReview,
+      'bg-gray-50 dark:bg-dark-950': !isOperatorConsole
+    }"
   >
     <!-- Background Decoration -->
     <div v-if="!isOperatorConsole" class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>

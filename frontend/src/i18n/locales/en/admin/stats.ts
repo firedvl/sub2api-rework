@@ -1,0 +1,31 @@
+export default {
+  stats: {
+    title: 'Stats',
+    description: 'Account capacity, provider quota windows, and gateway usage',
+    updatedAt: 'Updated {time}',
+    capacity: {
+      title: 'Capacity',
+      description: 'Normalized provider capacity by account. Unknown quotas stay outside the calculation.',
+      coverage: '{known} known, {unknown} unknown',
+      windows: 'Quota windows',
+      windowCoverage: '{known} known, {unknown} without this window',
+      windowContributions: '{window} account contributions',
+      snapshotFailed: 'Passive quota snapshot unavailable',
+    },
+    usage: {
+      title: 'Gateway usage',
+      description: 'Current request, token, cost, and response-time statistics.',
+      loading: 'Loading gateway usage...',
+      loadFailed: 'Gateway usage is unavailable',
+      requests: 'Requests',
+      tokens: 'Tokens',
+      actualCost: 'Actual cost',
+      accountCost: 'Account cost',
+      today: 'Today',
+      averageLatency: 'Average response',
+      averageLatencyDescription: 'Across completed requests',
+      requestTrend: 'Request trend',
+      recentPeriods: 'Latest {count} periods',
+    },
+  },
+}

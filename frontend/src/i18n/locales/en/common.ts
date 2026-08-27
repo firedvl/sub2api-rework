@@ -159,6 +159,7 @@ export default {
   nav: {
     operatorConsole: 'Operator console',
     overview: 'Overview',
+    stats: 'Stats',
     modelsRouting: 'Models & Routing',
     activity: 'Activity',
     more: 'More',

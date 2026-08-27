@@ -2,7 +2,7 @@
   <footer class="operator-status-bar">
     <div class="operator-status-inner">
       <span v-if="isFixtureReview" class="operator-review-status">
-        <span class="operator-status-dot bg-blue-500" />
+        <span class="operator-status-dot bg-gray-500" />
         Local fixture review · no production connection
       </span>
       <span v-else class="operator-status-item">
