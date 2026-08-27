@@ -159,6 +159,7 @@ export default {
   nav: {
     operatorConsole: '运营控制台',
     overview: '概览',
+    stats: '统计',
     modelsRouting: '模型与路由',
     activity: '活动',
     more: '更多',

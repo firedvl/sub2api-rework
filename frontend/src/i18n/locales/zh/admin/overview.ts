@@ -91,6 +91,7 @@ export default {
       viewRouting: '查看路由',
       activity: '活动',
       viewActivity: '查看活动',
+      viewStats: '查看统计',
       traffic: '流量',
       failedToLoad: '加载仪表盘数据失败',
       retry: '重试',

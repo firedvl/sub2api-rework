@@ -91,6 +91,7 @@ export default {
       viewRouting: 'View routing',
       activity: 'Activity',
       viewActivity: 'View activity',
+      viewStats: 'View Stats',
       traffic: 'Traffic',
       failedToLoad: 'Failed to load dashboard statistics',
       retry: 'Retry',

@@ -1,4 +1,4 @@
-export type OperatorAreaId = 'overview' | 'accounts' | 'models-routing' | 'activity' | 'settings'
+export type OperatorAreaId = 'overview' | 'stats' | 'accounts' | 'models-routing' | 'activity' | 'settings'
 export type OperatorRouteGate = 'channel-monitor' | 'ops-monitoring' | 'risk-control'
 
 export interface OperatorSection {
@@ -22,6 +22,12 @@ export const operatorAreas: OperatorArea[] = [
     labelKey: 'nav.overview',
     primaryPath: '/admin/dashboard',
     sections: [{ path: '/admin/dashboard', labelKey: 'nav.overview' }],
+  },
+  {
+    id: 'stats',
+    labelKey: 'nav.stats',
+    primaryPath: '/admin/stats',
+    sections: [{ path: '/admin/stats', labelKey: 'nav.stats' }],
   },
   {
     id: 'accounts',

@@ -61,6 +61,25 @@ export interface OperatorPoolCapacity extends OperatorNormalizedCapacityAggregat
   unknownAccounts: OperatorAccountCapacity[]
 }
 
+export interface OperatorWindowCapacitySegment {
+  summary: OperatorAccountCapacity
+  remainingPercent: number
+  contributionPercent: number
+}
+
+export interface OperatorWindowCapacity {
+  key: string
+  label: string
+  kind: OperatorCapacityWindow['kind']
+  remainingPercent: number | null
+  usedPercent: number | null
+  knownCount: number
+  unknownCount: number
+  nextReset: string | null
+  segments: OperatorWindowCapacitySegment[]
+  unknownAccounts: OperatorAccountCapacity[]
+}
+
 const PLATFORM_ORDER: AccountPlatform[] = [
   'openai',
   'anthropic',
@@ -416,4 +435,67 @@ export function buildNormalizedPoolCapacity(
     segments,
     unknownAccounts,
   }
+}
+
+export function buildWindowCapacities(
+  accounts: OperatorAccountCapacity[],
+  now = new Date(),
+): OperatorWindowCapacity[] {
+  const windowsByKey = new Map<string, { label: string; kind: OperatorCapacityWindow['kind'] }>()
+
+  for (const summary of accounts) {
+    for (const window of summary.windows) {
+      if (!windowsByKey.has(window.key)) {
+        windowsByKey.set(window.key, { label: window.label, kind: window.kind })
+      }
+    }
+  }
+
+  return Array.from(windowsByKey.entries()).map(([key, definition]) => {
+    const known = accounts.flatMap((summary) => {
+      const window = summary.windows.find((candidate) => candidate.key === key)
+      return window ? [{ summary, window }] : []
+    })
+    const knownAccountIDs = new Set(known.map(({ summary }) => summary.account.id))
+    const unknownAccounts = accounts.filter((summary) => !knownAccountIDs.has(summary.account.id))
+
+    if (!known.length) {
+      return {
+        key,
+        ...definition,
+        remainingPercent: null,
+        usedPercent: null,
+        knownCount: 0,
+        unknownCount: accounts.length,
+        nextReset: null,
+        segments: [],
+        unknownAccounts,
+      }
+    }
+
+    const remainingPercent = known.reduce(
+      (total, { window }) => total + window.remainingPercent,
+      0,
+    ) / known.length
+    const nextReset = known
+      .map(({ window }) => window.resetsAt)
+      .filter((value): value is string => isFuture(value, now))
+      .sort((left, right) => new Date(left).getTime() - new Date(right).getTime())[0] ?? null
+
+    return {
+      key,
+      ...definition,
+      remainingPercent,
+      usedPercent: 100 - remainingPercent,
+      knownCount: known.length,
+      unknownCount: unknownAccounts.length,
+      nextReset,
+      segments: known.map(({ summary, window }) => ({
+        summary,
+        remainingPercent: window.remainingPercent,
+        contributionPercent: window.remainingPercent / known.length,
+      })),
+      unknownAccounts,
+    }
+  })
 }

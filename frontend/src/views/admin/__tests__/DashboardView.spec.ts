@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { Account, DashboardStats } from '@/types'
+import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import DashboardView from '../DashboardView.vue'
 
 const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, listAccounts, getBatchUsage, showError } = vi.hoisted(() => ({
@@ -190,7 +191,9 @@ describe('admin DashboardView', () => {
 
     expect(showError).toHaveBeenCalledWith('admin.dashboard.failedToLoad')
     expect(wrapper.get('[data-testid="dashboard-load-error"]').text()).toContain('admin.dashboard.failedToLoad')
-    expect(wrapper.text()).toContain('Persisted capacity account')
+    expect(wrapper.getComponent(OperatorCapacityOverview).props('accounts')).toEqual([
+      expect.objectContaining({ name: 'Persisted capacity account' })
+    ])
 
     await wrapper.get('[data-testid="dashboard-load-error"] button').trigger('click')
     await flushPromises()
@@ -221,8 +224,10 @@ describe('admin DashboardView', () => {
 
     expect(listAccounts).toHaveBeenNthCalledWith(1, 1, 1000, { include_scheduler_score: '0' })
     expect(listAccounts).toHaveBeenNthCalledWith(2, 2, 1000, { include_scheduler_score: '0' })
-    expect(wrapper.text()).toContain('First persisted account')
-    expect(wrapper.text()).toContain('Second persisted account')
+    expect(wrapper.getComponent(OperatorCapacityOverview).props('accounts')).toEqual([
+      expect.objectContaining({ name: 'First persisted account' }),
+      expect.objectContaining({ name: 'Second persisted account' })
+    ])
     expect(getBatchUsage).toHaveBeenCalledWith([1, 2], false)
   })
 
@@ -247,7 +252,9 @@ describe('admin DashboardView', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="capacity-load-error"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Recovered capacity account')
+    expect(wrapper.getComponent(OperatorCapacityOverview).props('accounts')).toEqual([
+      expect.objectContaining({ name: 'Recovered capacity account' })
+    ])
     expect(getBatchUsage).toHaveBeenCalledWith([3], false)
   })
 })

@@ -78,7 +78,7 @@ describe('OperatorCapacityOverview', () => {
         },
       },
       global: {
-        stubs: { LoadingSpinner: true }
+        stubs: { LoadingSpinner: true, RouterLink: true }
       }
     })
 
@@ -113,25 +113,24 @@ describe('OperatorCapacityOverview', () => {
         },
       },
       global: {
-        stubs: { LoadingSpinner: true }
+        stubs: {
+          LoadingSpinner: true,
+          RouterLink: {
+            props: ['to'],
+            template: '<a :href="to"><slot /></a>',
+          },
+        }
       }
     })
 
     const pool = wrapper.get('[data-testid="account-pool-capacity"]')
-    expect(pool.get('svg[role="img"]').attributes('aria-label')).toContain('admin.dashboard.capacity.poolTitle')
-    expect(pool.findAll('[data-testid="account-pool-segment"]')).toHaveLength(2)
-    expect(pool.text()).toContain('Account 1')
+    expect(pool.get('[role="progressbar"]').attributes('aria-label')).toContain('admin.dashboard.capacity.poolTitle')
+    expect(pool.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('60')
+    expect(pool.text()).toContain('60%')
+    expect(pool.text()).toContain('admin.dashboard.capacity.knownCount:2')
+    expect(pool.text()).toContain('admin.dashboard.capacity.unknownCount:1')
     expect(pool.text()).toContain('Account 2')
-    expect(pool.text()).toContain('Account 3')
-    expect(pool.text()).toContain('admin.dashboard.capacity.poolUnknownExcluded:1')
-
-    const openAIProvider = wrapper.get('[data-testid="provider-capacity-openai"]')
-    expect(openAIProvider.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('60')
-    expect(openAIProvider.text()).toContain('admin.dashboard.capacity.knownCount:2')
-    expect(openAIProvider.text()).toContain('admin.dashboard.capacity.unknownCount:0')
-
-    const geminiProvider = wrapper.get('[data-testid="provider-capacity-gemini"]')
-    expect(geminiProvider.get('[role="progressbar"]').attributes('aria-valuenow')).toBeUndefined()
-    expect(geminiProvider.text()).toContain('admin.dashboard.capacity.quotaUnknown')
+    expect(pool.get('a').attributes('href')).toBe('/admin/stats')
+    expect(wrapper.find('.operator-capacity-providers').exists()).toBe(false)
   })
 })

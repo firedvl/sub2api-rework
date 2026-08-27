@@ -1,7 +1,7 @@
 export type SessionRole = 'admin' | 'user'
 export type RunMode = 'standard' | 'simple'
 
-export const OPERATOR_FIXTURE_ACCOUNTS_ETAG = '"operator-review-accounts-v1"'
+export const OPERATOR_FIXTURE_ACCOUNTS_ETAG = '"operator-review-accounts-v2"'
 export const OPERATOR_FIXTURE_TOKEN = 'operator-review-session'
 
 const createdAt = '2026-08-01T09:00:00Z'
@@ -263,6 +263,13 @@ export const operatorFixtureAccounts = [
     group_ids: [11],
     groups: accountGroup(11),
   }),
+  makeAccount(106, 'Gemini Healthy', 'gemini', 'oauth', {
+    credentials: { email: 'gemini-healthy@example.test', tier_id: 'google_ai_pro' },
+    credentials_status: { has_access_token: true, has_refresh_token: true },
+    current_concurrency: 0,
+    group_ids: [13],
+    groups: accountGroup(13),
+  }),
 ]
 
 const todayStats = {
@@ -271,6 +278,7 @@ const todayStats = {
   '103': { requests: 294, tokens: 682_000, cost: 2.31, standard_cost: 2.89, user_cost: 2.31 },
   '104': { requests: 34, tokens: 76_000, cost: 0.26, standard_cost: 0.31, user_cost: 0.26 },
   '105': { requests: 0, tokens: 0, cost: 0, standard_cost: 0, user_cost: 0 },
+  '106': { requests: 186, tokens: 412_000, cost: 1.18, standard_cost: 1.44, user_cost: 1.18 },
 }
 
 const usageProgress = (utilization: number, resetsAt: string) => ({
@@ -320,6 +328,14 @@ const accountUsage = {
     five_hour: null,
     seven_day: null,
     seven_day_sonnet: null,
+  },
+  '106': {
+    source: 'passive',
+    updated_at: updatedAt,
+    five_hour: null,
+    seven_day: null,
+    seven_day_sonnet: null,
+    gemini_shared_daily: usageProgress(0, '2026-08-27T00:00:00Z'),
   },
 }
 

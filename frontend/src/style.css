@@ -1163,6 +1163,10 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
   font-weight: 500;
 }
 
+body[data-operator-console] .operator-status-dot.bg-gray-500 {
+  background: var(--operator-muted-foreground);
+}
+
 .operator-console .card,
 .operator-console .glass,
 .operator-console .glass-card,
@@ -1193,8 +1197,7 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
   box-shadow: none;
 }
 
-.operator-console .btn,
-.auth-codex-shell .btn {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn {
   min-height: 2.5rem;
   padding: 0.5rem 0.875rem;
   border-radius: var(--operator-radius);
@@ -1206,20 +1209,19 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
   transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
 }
 
-.operator-console .btn-sm {
+:is(body[data-operator-console], .operator-console) .btn-sm {
   min-height: 2.25rem;
   padding: 0.375rem 0.75rem;
   border-radius: var(--operator-radius);
   font-size: 0.8125rem;
 }
 
-.operator-console .btn-icon {
+:is(body[data-operator-console], .operator-console) .btn-icon {
   width: 2.5rem;
   padding: 0;
 }
 
-.operator-console .btn-primary,
-.auth-codex-shell .btn-primary {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-primary {
   border: 1px solid var(--operator-primary);
   background: var(--operator-primary);
   color: var(--operator-primary-foreground);
@@ -1227,39 +1229,31 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
   background-image: none;
 }
 
-.operator-console .btn-primary:hover,
-.auth-codex-shell .btn-primary:hover {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-primary:hover {
   background: color-mix(in oklch, var(--operator-primary) 88%, black);
   box-shadow: var(--operator-shadow-xs);
 }
 
-.operator-console .btn-secondary,
-.auth-codex-shell .btn-secondary {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .btn-secondary {
   border: 1px solid var(--operator-border);
   background: var(--operator-card);
   color: var(--operator-foreground);
   box-shadow: var(--operator-shadow-xs);
 }
 
-.operator-console .btn-secondary:hover,
-.auth-codex-shell .btn-secondary:hover,
-.operator-console .btn-ghost:hover {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.btn-secondary, .btn-ghost):hover {
   border-color: var(--operator-border);
   background: var(--operator-muted);
 }
 
-.operator-console .btn-danger {
+:is(body[data-operator-console], .operator-console) .btn-danger {
   border: 1px solid var(--operator-destructive);
   background: var(--operator-destructive);
   box-shadow: var(--operator-shadow-xs);
   background-image: none;
 }
 
-.operator-console .input,
-.auth-codex-shell .input,
-.operator-console .select-trigger,
-.operator-console select,
-.operator-console textarea {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input, .select-trigger, select, textarea) {
   min-height: 2.5rem;
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
@@ -1270,7 +1264,7 @@ body[data-operator-console] :is(button, a, input, select, textarea):focus-visibl
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-body[data-operator-console] .operator-console .select-trigger {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger {
   min-height: 2.5rem;
   padding: 0.5rem 0.875rem;
   border: 1px solid var(--operator-border);
@@ -1281,52 +1275,60 @@ body[data-operator-console] .operator-console .select-trigger {
   font-size: 0.875rem;
 }
 
-body[data-operator-console] .operator-console .select-trigger:hover {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger:hover {
   border-color: color-mix(in oklch, var(--operator-border) 65%, var(--operator-foreground));
 }
 
-body[data-operator-console] .operator-console .select-trigger-open,
-body[data-operator-console] .operator-console .select-trigger:focus-visible {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger.select-trigger-open,
+body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger:focus-visible {
   border-color: var(--operator-focus);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
 }
 
-.operator-console .input,
-.auth-codex-shell .input {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .input {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
 
-.operator-console .input:focus,
-.auth-codex-shell .input:focus,
-.operator-console .select-trigger:focus-visible,
-.operator-console select:focus,
-.operator-console textarea:focus {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input:focus, .select-trigger:focus-visible, select:focus, textarea:focus) {
   border-color: var(--operator-focus);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
 }
 
-.operator-console .input-label,
-.auth-codex-shell .input-label {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) .input-label {
   margin-bottom: 0.375rem;
   color: var(--operator-foreground);
   font-size: 0.875rem;
   font-weight: 500;
 }
 
-.operator-console .input-hint,
-.operator-console .input-error-text,
-.auth-codex-shell .input-hint,
-.auth-codex-shell .input-error-text {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(.input-hint, .input-error-text) {
   font-size: 0.8125rem;
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) :is(.input-hint, .input-error-text) {
+  color: var(--operator-muted-foreground);
 }
 
 .operator-console .badge {
   border-radius: var(--operator-radius);
   padding: 0.25rem 0.5625rem;
   font-size: 0.8125rem;
+}
+
+body[data-operator-console] .operator-console .badge-gray {
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-console :is(.table-body, tbody[class*="divide-"]) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--operator-border);
+}
+
+body[data-operator-console] .operator-console tbody.table-body[class*="divide-"] {
+  border-color: var(--operator-border);
 }
 
 .operator-console .progress {
@@ -1405,9 +1407,9 @@ body[data-operator-console] .operator-console .select-trigger:focus-visible {
   margin-bottom: 1.25rem;
   margin-left: 0;
   padding: 0.125rem;
-  border: 1px solid color-mix(in oklch, var(--operator-border) 70%, transparent);
+  border: 1px solid var(--operator-border);
   border-radius: 0.5rem;
-  background: color-mix(in oklch, var(--operator-muted) 70%, var(--operator-background));
+  background: var(--operator-muted);
 }
 
 .operator-console .operator-content-shell .settings-tab {
@@ -1429,7 +1431,7 @@ body[data-operator-console] .operator-console .select-trigger:focus-visible {
   display: none;
 }
 
-.operator-console .operator-content-shell .settings-tab-icon {
+body[data-operator-console] .operator-console .operator-content-shell .settings-tab-icon {
   width: 1rem;
   height: 1rem;
   color: inherit;
@@ -1717,6 +1719,27 @@ body[data-operator-console] :is(
   border-color: var(--operator-border);
 }
 
+body[data-operator-console] :is(
+  [class^="text-slate-"], [class*=" text-slate-"],
+  [class^="dark:text-slate-"], [class*=" dark:text-slate-"]
+) {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] :is(
+  [class^="bg-slate-"], [class*=" bg-slate-"],
+  [class^="dark:bg-slate-"], [class*=" dark:bg-slate-"]
+) {
+  background-color: var(--operator-muted);
+}
+
+body[data-operator-console] :is(
+  [class^="border-slate-"], [class*=" border-slate-"],
+  [class^="dark:border-slate-"], [class*=" dark:border-slate-"]
+) {
+  border-color: var(--operator-border);
+}
+
 /* Legacy utility shades are too faint on the neutral operator surfaces. */
 body[data-operator-console] :is(
   [class~="text-gray-300"], [class~="text-gray-400"], [class~="text-gray-500"], [class~="text-gray-600"],
@@ -1736,6 +1759,30 @@ body[data-operator-console] [class~="bg-gray-900"] :is(
 
 body[data-operator-console] .select-value {
   color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) :is(
+  .select-icon,
+  .select-clear,
+  .date-picker-icon,
+  .date-picker-chevron
+) {
+  color: var(--operator-muted-foreground);
+}
+
+.dark body[data-operator-console] :is(
+  [class*="dark:bg-gray-500"],
+  [class*="dark:bg-gray-600"],
+  [class*="dark:bg-gray-700"]
+) {
+  background-color: var(--operator-muted);
+}
+
+.dark body[data-operator-console] :is(
+  [class*="dark:bg-gray-800"],
+  [class*="dark:bg-gray-900"]
+) {
+  background-color: var(--operator-card);
 }
 
 body[data-operator-console] :is(
@@ -1773,48 +1820,54 @@ body[data-operator-console] :is(
   color: white;
 }
 
-/* Replace the inherited primary accent only inside the operator/auth surfaces. */
-.operator-console :is([class~="text-primary-300"], [class~="text-primary-400"], [class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"], [class~="text-primary-900"]),
-.auth-codex-shell :is([class~="text-primary-300"], [class~="text-primary-400"], [class~="text-primary-500"], [class~="text-primary-600"], [class~="text-primary-700"], [class~="text-primary-800"], [class~="text-primary-900"]) {
+/* Replace the inherited primary accent inside operator/auth surfaces and portals. */
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is([class^="text-primary-"], [class*=" text-primary-"]) {
   color: var(--operator-primary);
 }
 
-.operator-console :is([class~="bg-primary-500"], [class~="bg-primary-600"], [class~="bg-primary-700"]),
-.auth-codex-shell :is([class~="bg-primary-500"], [class~="bg-primary-600"], [class~="bg-primary-700"]) {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class~="bg-primary-500"], [class~="bg-primary-600"], [class~="bg-primary-700"]
+) {
   background-color: var(--operator-primary);
+  color: var(--operator-primary-foreground);
 }
 
-.operator-console :is([class~="bg-primary-50"], [class~="bg-primary-100"], [class~="bg-primary-50/40"]),
-.auth-codex-shell :is([class~="bg-primary-50"], [class~="bg-primary-100"]) {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class~="bg-primary-50"], [class~="bg-primary-100"], [class~="bg-primary-50/40"],
+  [class*="dark:bg-primary-900/"]
+) {
   background-color: color-mix(in oklch, var(--operator-primary) 10%, transparent);
 }
 
-.operator-console :is([class~="border-primary-200"], [class~="border-primary-300"], [class~="border-primary-500"], [class~="border-primary-600"]),
-.auth-codex-shell :is([class~="border-primary-200"], [class~="border-primary-300"], [class~="border-primary-500"], [class~="border-primary-600"]) {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class^="border-primary-"], [class*=" border-primary-"], [class*="dark:border-primary-"]
+) {
   border-color: color-mix(in oklch, var(--operator-primary) 55%, var(--operator-border));
 }
 
-.operator-console [class~="hover:text-primary-700"]:hover,
-.operator-console [class~="hover:text-primary-800"]:hover,
-.auth-codex-shell [class~="hover:text-primary-500"]:hover {
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) [class*="hover:text-primary-"]:hover {
   color: color-mix(in oklch, var(--operator-primary) 85%, black);
 }
 
-.dark .operator-console :is([class~="dark:text-primary-200"], [class~="dark:text-primary-300"], [class~="dark:text-primary-400"]),
-.dark .auth-codex-shell :is([class~="dark:text-primary-200"], [class~="dark:text-primary-300"], [class~="dark:text-primary-400"]) {
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) [class*="dark:text-primary-"] {
   color: var(--operator-primary);
 }
 
-.dark .operator-console :is([class~="dark:bg-dark-700"], [class~="dark:bg-dark-800"], [class~="dark:bg-dark-800/50"], [class~="dark:bg-dark-900"]),
-.dark .auth-codex-shell :is([class~="dark:bg-dark-700"], [class~="dark:bg-dark-800"], [class~="dark:bg-dark-900"]) {
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:bg-dark-800"], [class*="dark:bg-dark-900"], [class*="dark:bg-dark-950"]
+) {
   background-color: var(--operator-card);
 }
 
-.dark .operator-console :is([class~="dark:bg-dark-600"], [class~="dark:bg-primary-900/10"], [class~="dark:bg-primary-900/20"], [class~="dark:bg-primary-900/30"], [class~="dark:bg-primary-900/40"]) {
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:bg-dark-500"], [class*="dark:bg-dark-600"], [class*="dark:bg-dark-700"]
+) {
   background-color: var(--operator-muted);
 }
 
-.dark .operator-console :is([class~="dark:border-dark-500"], [class~="dark:border-dark-600"], [class~="dark:border-dark-700"], [class~="dark:border-dark-800"], [class~="dark:border-primary-800"], [class~="dark:border-primary-900/50"]) {
+.dark :is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(
+  [class*="dark:border-dark-"], [class*="dark:border-primary-"]
+) {
   border-color: var(--operator-border);
 }
 
@@ -1835,6 +1888,43 @@ body:has(.auth-codex-shell) .dialog-container {
   color: var(--operator-foreground);
 }
 
+body[data-operator-console] .operator-dialog {
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select
+) {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(input, textarea)::placeholder {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(input[type="checkbox"], input[type="radio"]) {
+  border-color: var(--operator-border);
+  background-color: var(--operator-card);
+  color: var(--operator-primary);
+  accent-color: var(--operator-primary);
+}
+
+body[data-operator-console] .operator-dialog :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select
+):focus {
+  border-color: var(--operator-focus);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
+  --tw-ring-color: transparent;
+}
+
 body[data-operator-console] .modal-header,
 body[data-operator-console] .modal-footer,
 body[data-operator-console] .dialog-header,
@@ -1845,31 +1935,151 @@ body:has(.auth-codex-shell) .modal-footer {
   background: var(--operator-card);
 }
 
-:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control {
+body[data-operator-console] :is(.operator-dialog-header, .operator-dialog-footer) {
+  border-color: var(--operator-border);
+  background: var(--operator-card);
+}
+
+body[data-operator-console] .operator-dialog-body {
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog :is(.modal-title, .operator-dialog-copy) {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close {
+  color: var(--operator-muted-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close:hover {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] .operator-dialog-close:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 1px;
+}
+
+body[data-operator-console] .operator-callout {
+  border: 1px solid var(--operator-border);
+  border-left: 3px solid var(--operator-muted-foreground);
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+  box-shadow: none;
+}
+
+body[data-operator-console] .operator-callout-warning {
+  border-left-color: var(--operator-warning);
+}
+
+body[data-operator-console] .operator-callout-error {
+  border-left-color: var(--operator-destructive);
+}
+
+body[data-operator-console] .operator-toggle {
+  background: var(--operator-track);
+  box-shadow: none;
+}
+
+body[data-operator-console] .operator-toggle-on {
+  background: var(--operator-success-fill);
+}
+
+body[data-operator-console] .operator-toggle-thumb {
+  background: white;
+}
+
+body[data-operator-console] .operator-toggle:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):has(> span[class*="translate-x-"]) {
+  background: var(--operator-track);
+  box-shadow: none;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):is([class*="bg-primary-"], [class*="bg-blue-"], [class*="bg-green-"], [class*="bg-emerald-"]):has(> span[class*="translate-x-"]) {
+  background: var(--operator-success-fill);
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:is(
+  [class*="w-9"], [class*="w-11"], [class*="w-12"]
+):has(> span[class*="translate-x-"]):focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+  --tw-ring-color: transparent;
+}
+
+body[data-operator-console] button[class*="inline-flex"][class*="rounded-full"]:has(> span[class*="translate-x-"]) > span {
+  background: white;
+}
+
+body[data-operator-console] .operator-toast {
+  border: 1px solid var(--operator-border);
+  border-left-width: 3px;
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: 0 8px 24px oklch(0 0 0 / 0.18);
+}
+
+body[data-operator-console] .operator-toast[data-tone="success"] { border-left-color: var(--operator-success); }
+body[data-operator-console] .operator-toast[data-tone="warning"] { border-left-color: var(--operator-warning); }
+body[data-operator-console] .operator-toast[data-tone="error"] { border-left-color: var(--operator-destructive); }
+body[data-operator-console] .operator-toast[data-tone="info"] { border-left-color: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast .operator-toast-icon { color: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast[data-tone="success"] .operator-toast-icon { color: var(--operator-success); }
+body[data-operator-console] .operator-toast[data-tone="warning"] .operator-toast-icon { color: var(--operator-warning); }
+body[data-operator-console] .operator-toast[data-tone="error"] .operator-toast-icon { color: var(--operator-destructive); }
+body[data-operator-console] .operator-toast :is(p, .operator-toast-close) { color: var(--operator-foreground); }
+body[data-operator-console] .operator-toast-close:hover { background: var(--operator-muted); }
+body[data-operator-console] .operator-toast-track { background: var(--operator-muted); }
+body[data-operator-console] .operator-toast .toast-progress { background: var(--operator-muted-foreground); }
+body[data-operator-console] .operator-toast[data-tone="success"] .toast-progress { background: var(--operator-success-fill); }
+body[data-operator-console] .operator-toast[data-tone="warning"] .toast-progress { background: var(--operator-warning-fill); }
+body[data-operator-console] .operator-toast[data-tone="error"] .toast-progress { background: var(--operator-destructive-fill); }
+
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control,
+body:has(.auth-codex-shell) .operator-control {
   border-color: var(--operator-border);
   background: var(--operator-card);
   color: var(--operator-foreground);
 }
 
-:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:hover {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:hover,
+body:has(.auth-codex-shell) .operator-control:hover {
   border-color: color-mix(in oklch, var(--operator-border) 65%, var(--operator-foreground));
 }
 
-:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:is(:focus-visible, .operator-control-open) {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:is(:focus-visible, .operator-control-open),
+body:has(.auth-codex-shell) .operator-control:is(:focus-visible, .operator-control-open) {
   border-color: var(--operator-focus);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus) 20%, transparent);
   --tw-ring-color: transparent;
 }
 
-:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-control:disabled {
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-control:disabled,
+body:has(.auth-codex-shell) .operator-control:disabled {
   cursor: not-allowed;
   background: var(--operator-muted);
   color: var(--operator-muted-foreground);
   opacity: 0.65;
 }
 
-:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu {
+body[data-operator-console] .operator-menu,
+body[data-operator-console] :is(.operator-console, .operator-dialog) .operator-menu,
+body:has(.auth-codex-shell) .operator-menu {
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
   background: var(--operator-card);
@@ -1894,6 +2104,17 @@ body:has(.auth-codex-shell) .modal-footer {
   font-size: 0.875rem;
 }
 
+body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) .operator-menu-item {
+  color: var(--operator-foreground);
+}
+
+body[data-operator-console] :is(.operator-console, .operator-dialog, .operator-menu) :is(
+  .date-picker-label,
+  .date-picker-separator
+) {
+  color: var(--operator-muted-foreground);
+}
+
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu .operator-menu-item:is(
   :hover,
   :focus-visible,
@@ -1905,6 +2126,14 @@ body:has(.auth-codex-shell) .modal-footer {
 ) {
   background: var(--operator-muted);
   color: var(--operator-foreground);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item-recovery {
+  color: var(--operator-success);
+}
+
+:is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item-caution {
+  color: var(--operator-warning);
 }
 
 :is(body[data-operator-console], body:has(.auth-codex-shell)) .operator-menu-item:focus-visible {
@@ -1958,80 +2187,33 @@ body[data-operator-console] ::selection {
 }
 
 body[data-operator-console] :is(
-  [class^="text-blue-"], [class*=" text-blue-"],
-  [class^="text-sky-"], [class*=" text-sky-"],
-  [class^="text-indigo-"], [class*=" text-indigo-"],
-  [class^="text-cyan-"], [class*=" text-cyan-"],
-  [class^="text-purple-"], [class*=" text-purple-"]
-) {
-  color: var(--operator-muted-foreground);
-}
-
-body[data-operator-console] :is(
-  [class^="bg-blue-"], [class*=" bg-blue-"],
-  [class^="bg-sky-"], [class*=" bg-sky-"],
-  [class^="bg-indigo-"], [class*=" bg-indigo-"],
-  [class^="bg-cyan-"], [class*=" bg-cyan-"],
-  [class^="bg-purple-"], [class*=" bg-purple-"]
-) {
-  background-color: var(--operator-muted);
-}
-
-body[data-operator-console] :is(
-  [class^="border-blue-"], [class*=" border-blue-"],
-  [class^="border-sky-"], [class*=" border-sky-"],
-  [class^="border-indigo-"], [class*=" border-indigo-"],
-  [class^="border-cyan-"], [class*=" border-cyan-"],
-  [class^="border-purple-"], [class*=" border-purple-"]
-) {
-  border-color: var(--operator-border);
-}
-
-body[data-operator-console] :is(
-  [class*="hover:bg-blue-"], [class*="hover:bg-sky-"], [class*="hover:bg-indigo-"],
-  [class*="hover:bg-cyan-"], [class*="hover:bg-purple-"]
+  [class*="hover:bg-blue-"], [class*="hover:bg-cyan-"], [class*="hover:bg-teal-"],
+  [class*="hover:bg-sky-"], [class*="hover:bg-indigo-"], [class*="hover:bg-violet-"],
+  [class*="hover:bg-purple-"]
 ):hover {
   background-color: var(--operator-muted);
 }
 
 body[data-operator-console] :is(
-  [class*="hover:text-blue-"], [class*="hover:text-sky-"], [class*="hover:text-indigo-"],
-  [class*="hover:text-cyan-"], [class*="hover:text-purple-"]
+  [class*="hover:text-blue-"], [class*="hover:text-cyan-"], [class*="hover:text-teal-"],
+  [class*="hover:text-sky-"], [class*="hover:text-indigo-"], [class*="hover:text-violet-"],
+  [class*="hover:text-purple-"]
 ):hover {
   color: var(--operator-foreground);
 }
 
-.dark body[data-operator-console] :is(
-  [class^="dark:text-blue-"], [class*=" dark:text-blue-"],
-  [class^="dark:text-sky-"], [class*=" dark:text-sky-"],
-  [class^="dark:text-indigo-"], [class*=" dark:text-indigo-"],
-  [class^="dark:text-cyan-"], [class*=" dark:text-cyan-"],
-  [class^="dark:text-purple-"], [class*=" dark:text-purple-"]
+body[data-operator-console] :is(
+  [class*="ring-primary-"], [class*="ring-blue-"], [class*="ring-cyan-"],
+  [class*="ring-teal-"], [class*="ring-sky-"], [class*="ring-indigo-"],
+  [class*="ring-violet-"], [class*="ring-purple-"]
 ) {
-  color: var(--operator-muted-foreground);
-}
-
-.dark body[data-operator-console] :is(
-  [class^="dark:bg-blue-"], [class*=" dark:bg-blue-"],
-  [class^="dark:bg-sky-"], [class*=" dark:bg-sky-"],
-  [class^="dark:bg-indigo-"], [class*=" dark:bg-indigo-"],
-  [class^="dark:bg-cyan-"], [class*=" dark:bg-cyan-"],
-  [class^="dark:bg-purple-"], [class*=" dark:bg-purple-"]
-) {
-  background-color: var(--operator-muted);
-}
-
-body[data-operator-console] [class*="ring-blue-"],
-body[data-operator-console] [class*="ring-sky-"],
-body[data-operator-console] [class*="ring-indigo-"],
-body[data-operator-console] [class*="ring-cyan-"],
-body[data-operator-console] [class*="ring-purple-"] {
   --tw-ring-color: color-mix(in oklch, var(--operator-focus) 55%, transparent);
 }
 
 body[data-operator-console] [class*="bg-gradient-"],
 body[data-operator-console] [class*="from-blue-"],
-body[data-operator-console] [class*="from-indigo-"] {
+body[data-operator-console] [class*="from-indigo-"],
+body[data-operator-console] [class*="from-purple-"] {
   background-image: none;
 }
 

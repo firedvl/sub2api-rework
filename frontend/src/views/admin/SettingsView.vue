@@ -12921,8 +12921,11 @@ watch(
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {
-  @apply sticky z-20 -mx-1 border-b border-gray-200 bg-gray-50/95 px-1 dark:border-dark-700 dark:bg-dark-950/95;
+  @apply sticky z-20 -mx-1 px-1;
   top: 0;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-muted);
 }
 
 .settings-tabs-scroll {
@@ -12958,15 +12961,16 @@ watch(
 }
 
 .settings-tab:focus-visible {
-  @apply ring-2 ring-primary-500/50 ring-offset-1 ring-offset-gray-50 dark:ring-offset-dark-950;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
 }
 
 .settings-tab-active {
-  color: var(--operator-foreground, #0f766e);
+  color: var(--operator-foreground);
 }
 
 .dark .settings-tab-active {
-  color: var(--operator-foreground, #5eead4);
+  color: var(--operator-foreground);
 }
 
 .settings-tab-active::after {
@@ -12976,11 +12980,11 @@ watch(
   left: 0.75rem;
   height: 2px;
   content: "";
-  background: var(--operator-foreground, #0d9488);
+  background: var(--operator-foreground);
 }
 
 .dark .settings-tab-active::after {
-  background: var(--operator-foreground, #2dd4bf);
+  background: var(--operator-foreground);
 }
 
 .settings-tab-icon {
@@ -12993,11 +12997,11 @@ watch(
 }
 
 .settings-tab-active .settings-tab-icon {
-  color: var(--operator-foreground, #0d9488);
+  color: var(--operator-foreground);
 }
 
 .dark .settings-tab-active .settings-tab-icon {
-  color: var(--operator-foreground, #5eead4);
+  color: var(--operator-foreground);
 }
 
 .settings-tab-label {

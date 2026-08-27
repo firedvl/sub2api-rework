@@ -46,169 +46,45 @@
     <template v-else-if="accounts.length">
       <section
         v-if="compact"
-        class="operator-pool-capacity"
+        class="operator-capacity-summary"
         data-testid="account-pool-capacity"
         :aria-labelledby="poolTitleId"
       >
-        <div class="operator-pool-heading">
+        <div class="operator-capacity-summary-value">
+          <span :id="poolTitleId">{{ t('admin.dashboard.capacity.poolTitle') }}</span>
+          <strong>
+            {{ normalizedPool.remainingPercent === null
+              ? t('common.unknown')
+              : `${formatPercent(normalizedPool.remainingPercent)}%` }}
+          </strong>
+          <small>{{ t('admin.dashboard.capacity.poolAvailable') }}</small>
+        </div>
+        <div
+          class="operator-capacity-summary-track"
+          role="progressbar"
+          :aria-label="poolAriaLabel"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="normalizedPool.remainingPercent === null ? undefined : Math.round(normalizedPool.remainingPercent)"
+        >
+          <span
+            v-if="normalizedPool.remainingPercent !== null"
+            :style="{ width: `${normalizedPool.remainingPercent}%` }"
+          />
+        </div>
+        <dl class="operator-capacity-summary-meta">
           <div>
-            <h3 :id="poolTitleId">{{ t('admin.dashboard.capacity.poolTitle') }}</h3>
-            <p>{{ t('admin.dashboard.capacity.poolDescription') }}</p>
+            <dt>{{ t('admin.dashboard.capacity.knownCount', { count: normalizedPool.knownCount }) }}</dt>
+            <dd>{{ t('admin.dashboard.capacity.unknownCount', { count: normalizedPool.unknownCount }) }}</dd>
           </div>
-          <span v-if="normalizedPool.unknownCount" class="operator-pool-unknown-count">
-            {{ t('admin.dashboard.capacity.poolUnknownExcluded', { count: normalizedPool.unknownCount }) }}
-          </span>
-        </div>
-
-        <div class="operator-pool-layout">
-          <div class="operator-pool-chart">
-            <svg
-              viewBox="0 0 120 120"
-              role="img"
-              :aria-label="poolAriaLabel"
-            >
-              <title>{{ poolAriaLabel }}</title>
-              <circle
-                class="operator-pool-ring"
-                :class="normalizedPool.usedPercent === null ? 'is-unknown' : 'is-used'"
-                cx="60"
-                cy="60"
-                r="46"
-                pathLength="100"
-                tabindex="0"
-              >
-                <title>
-                  {{ normalizedPool.usedPercent === null
-                    ? t('admin.dashboard.capacity.quotaUnknown')
-                    : t('admin.dashboard.capacity.poolUsedValue', { value: formatPercent(normalizedPool.usedPercent) }) }}
-                </title>
-              </circle>
-              <circle
-                v-for="segment in poolChartSegments"
-                :key="segment.summary.account.id"
-                class="operator-pool-ring operator-pool-segment"
-                :class="segmentTone(segment.index)"
-                cx="60"
-                cy="60"
-                r="46"
-                pathLength="100"
-                tabindex="0"
-                data-testid="account-pool-segment"
-                :style="{
-                  strokeDasharray: `${segment.contributionPercent} ${100 - segment.contributionPercent}`,
-                  strokeDashoffset: `${-segment.offset}`,
-                }"
-              >
-                <title>
-                  {{ segment.summary.account.name }}:
-                  {{ t('admin.dashboard.capacity.remaining', { value: formatPercent(segment.summary.lowestRemaining) }) }},
-                  {{ t('admin.dashboard.capacity.poolContribution', { value: formatPercent(segment.contributionPercent) }) }}
-                </title>
-              </circle>
-            </svg>
-            <div class="operator-pool-chart-label" aria-hidden="true">
-              <strong>
-                {{ normalizedPool.remainingPercent === null
-                  ? t('common.unknown')
-                  : `${formatPercent(normalizedPool.remainingPercent)}%` }}
-              </strong>
-              <span>{{ t('admin.dashboard.capacity.poolAvailable') }}</span>
-            </div>
+          <div v-if="normalizedPool.lowestAccount && normalizedPool.lowestRemaining !== null">
+            <dt>{{ t('admin.dashboard.capacity.lowestRemaining') }}</dt>
+            <dd>{{ normalizedPool.lowestAccount.account.name }} · {{ formatPercent(normalizedPool.lowestRemaining) }}%</dd>
           </div>
-
-          <ul class="operator-pool-legend" :aria-label="t('admin.dashboard.capacity.poolLegend')">
-            <li v-if="normalizedPool.usedPercent !== null">
-              <span class="operator-pool-swatch is-used" aria-hidden="true" />
-              <span class="operator-pool-legend-label">
-                <strong>{{ t('admin.dashboard.capacity.poolUsed') }}</strong>
-                <small>{{ t('admin.dashboard.capacity.poolNormalized') }}</small>
-              </span>
-              <strong>{{ formatPercent(normalizedPool.usedPercent) }}%</strong>
-            </li>
-            <li v-for="segment in poolChartSegments" :key="`legend-${segment.summary.account.id}`">
-              <span
-                class="operator-pool-swatch"
-                :class="segmentTone(segment.index)"
-                aria-hidden="true"
-              />
-              <span class="operator-pool-legend-label">
-                <strong>{{ segment.summary.account.name }}</strong>
-                <small>{{ providerLabel(segment.summary.account.platform) }}</small>
-              </span>
-              <span class="operator-pool-legend-value">
-                <strong>{{ formatPercent(segment.summary.lowestRemaining) }}%</strong>
-                <small>
-                  {{ t('admin.dashboard.capacity.poolContribution', { value: formatPercent(segment.contributionPercent) }) }}
-                </small>
-              </span>
-            </li>
-          </ul>
-        </div>
-
-        <p v-if="normalizedPool.unknownAccounts.length" class="operator-pool-unknown-list">
-          <strong>{{ t('admin.dashboard.capacity.quotaUnknown') }}:</strong>
-          {{ normalizedPool.unknownAccounts.map((summary) => summary.account.name).join(', ') }}
-        </p>
-      </section>
-
-      <section v-if="compact" class="operator-capacity-fleet" data-testid="provider-capacity-overview">
-        <div class="operator-capacity-section-heading">
-          <h3>{{ t('admin.dashboard.capacity.byProvider') }}</h3>
-          <span v-if="unknownCount">
-            {{ t('admin.dashboard.capacity.unknownCount', { count: unknownCount }) }}
-          </span>
-        </div>
-        <div class="operator-capacity-fleet-grid">
-          <article
-            v-for="provider in providers"
-            :key="`fleet-${provider.platform}`"
-            class="operator-capacity-fleet-provider"
-            :data-testid="`provider-capacity-${provider.platform}`"
-          >
-            <div class="operator-capacity-fleet-label">
-              <div>
-                <strong>{{ providerLabel(provider.platform) }}</strong>
-                <span>{{ normalizedRemainingLabel(provider.remainingPercent) }}</span>
-              </div>
-              <strong :class="capacityTone(provider.remainingPercent)">
-                {{ provider.remainingPercent === null ? t('common.unknown') : `${formatPercent(provider.remainingPercent)}%` }}
-              </strong>
-            </div>
-            <div
-              class="operator-capacity-track"
-              :class="{ 'is-unknown': provider.remainingPercent === null }"
-              role="progressbar"
-              :aria-label="providerAriaLabel(provider)"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="provider.remainingPercent === null ? undefined : Math.round(provider.remainingPercent)"
-            >
-              <span
-                v-if="provider.remainingPercent !== null"
-                :class="capacityTone(provider.remainingPercent)"
-                :style="{ width: `${provider.remainingPercent}%` }"
-              />
-            </div>
-            <ul class="operator-provider-capacity-meta">
-              <li>
-                {{ t('admin.dashboard.capacity.knownCount', { count: provider.knownCount }) }}
-                <span aria-hidden="true">&middot;</span>
-                {{ t('admin.dashboard.capacity.unknownCount', { count: provider.unknownCount }) }}
-                <span aria-hidden="true">&middot;</span>
-                {{ t('admin.dashboard.capacity.schedulableCount', { count: provider.schedulableCount }) }}
-              </li>
-              <li v-if="provider.lowestAccount && provider.lowestRemaining !== null">
-                {{ t('admin.dashboard.capacity.lowestAccountRemaining', {
-                  value: formatPercent(provider.lowestRemaining),
-                  account: provider.lowestAccount.account.name,
-                }) }}
-              </li>
-              <li v-if="provider.nextReset">
-                {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(provider.nextReset) }) }}
-              </li>
-            </ul>
-          </article>
-        </div>
+        </dl>
+        <RouterLink class="btn btn-secondary" to="/admin/stats">
+          {{ t('admin.dashboard.viewStats') }}
+        </RouterLink>
       </section>
 
       <div v-if="!compact" class="operator-capacity-providers">
@@ -364,7 +240,6 @@ import {
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
   type OperatorAccountHealth,
-  type OperatorProviderCapacity,
 } from '@/utils/operatorCapacity'
 import type { Account, AccountPlatform, AccountType, AccountUsageInfo } from '@/types'
 
@@ -394,14 +269,6 @@ const providers = computed(() => buildProviderCapacity(
 ))
 const summaries = computed(() => providers.value.flatMap((provider) => provider.accounts))
 const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value))
-const poolChartSegments = computed(() => {
-  let offset = 0
-  return normalizedPool.value.segments.map((segment, index) => {
-    const chartSegment = { ...segment, index, offset }
-    offset += segment.contributionPercent
-    return chartSegment
-  })
-})
 const accountCount = computed(() => props.totalCount ?? props.accounts.length)
 const schedulableCount = computed(() => summaries.value.filter((summary) => summary.account.schedulable).length)
 const unavailableCount = computed(() => summaries.value.filter(
@@ -412,7 +279,6 @@ const warningCount = computed(() => summaries.value.filter((summary) => (
   && summary.health !== 'error'
   && summary.health !== 'inactive'
 ) || (summary.lowestRemaining !== null && summary.lowestRemaining <= 20)).length)
-const unknownCount = computed(() => providers.value.reduce((total, provider) => total + provider.unknownCount, 0))
 const poolTitleId = 'operator-account-pool-title'
 const PROVIDER_COLLAPSE_STORAGE_KEY = 'operator-capacity-collapsed-providers'
 
@@ -486,9 +352,7 @@ const accountTypeLabel = (type: AccountType) => ({
 
 const healthLabel = (health: OperatorAccountHealth) => t(`admin.dashboard.capacity.health.${health}`)
 
-const formatPercent = (value: number) => Number.isInteger(value)
-  ? String(value)
-  : value.toFixed(1).replace(/\.0$/, '')
+const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 
 const percentLabel = (value: number | null) => value === null
   ? t('common.unknown')
@@ -498,16 +362,6 @@ const normalizedRemainingLabel = (value: number | null) => value === null
   ? t('admin.dashboard.capacity.quotaUnknown')
   : t('admin.dashboard.capacity.normalizedRemaining', { value: formatPercent(value) })
 
-const providerAriaLabel = (provider: OperatorProviderCapacity) => t(
-  'admin.dashboard.capacity.providerCapacityAria',
-  {
-    provider: providerLabel(provider.platform),
-    remaining: normalizedRemainingLabel(provider.remainingPercent),
-    known: provider.knownCount,
-    unknown: provider.unknownCount,
-  },
-)
-
 const capacityTone = (value: number | null) => {
   if (value === null) return 'is-unknown'
   if (value <= 20) return 'is-critical'
@@ -515,7 +369,6 @@ const capacityTone = (value: number | null) => {
   return 'is-healthy'
 }
 
-const segmentTone = (index: number) => `is-segment-${index % 5}`
 const poolAriaLabel = computed(() => normalizedPool.value.remainingPercent === null
   ? `${t('admin.dashboard.capacity.poolTitle')}: ${t('admin.dashboard.capacity.quotaUnknown')}`
   : `${t('admin.dashboard.capacity.poolTitle')}: ${formatPercent(normalizedPool.value.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}, ${formatPercent(normalizedPool.value.usedPercent as number)}% ${t('admin.dashboard.capacity.poolUsed')}`)
@@ -536,9 +389,7 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 .operator-capacity-provider-header,
 .operator-capacity-account-heading,
 .operator-capacity-window-label,
-.operator-capacity-window-detail,
-.operator-capacity-fleet-label,
-.operator-capacity-section-heading {
+.operator-capacity-window-detail {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -551,7 +402,6 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 }
 
 .operator-capacity-header h2,
-.operator-capacity-section-heading h3,
 .operator-capacity-provider-name,
 .operator-capacity-account h4 {
   color: var(--operator-foreground);
@@ -614,257 +464,67 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   font-size: 0.875rem;
 }
 
-.operator-pool-capacity {
-  padding: 1.25rem 1.5rem 1.5rem;
-  border-bottom: 1px solid var(--operator-border);
-}
-
-.operator-pool-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.operator-pool-heading h3 {
-  color: var(--operator-foreground);
-  font-size: 1rem;
-  font-weight: 650;
-}
-
-.operator-pool-heading p {
-  max-width: 52rem;
-  margin-top: 0.25rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-
-.operator-pool-unknown-count {
-  flex: 0 0 auto;
-  padding: 0.3125rem 0.5625rem;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius);
-  background: var(--operator-muted);
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-}
-
-.operator-pool-layout {
+.operator-capacity-summary {
   display: grid;
-  margin-top: 1.125rem;
-  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  grid-template-columns: minmax(9rem, 0.45fr) minmax(12rem, 1.25fr) minmax(12rem, 0.9fr) auto;
   align-items: center;
-  gap: 1.5rem 2rem;
+  gap: 1rem 1.5rem;
+  padding: 1.25rem 1.5rem;
 }
 
-.operator-pool-chart {
-  position: relative;
-  width: min(100%, 14rem);
-  aspect-ratio: 1;
-  justify-self: center;
-}
-
-.operator-pool-chart svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  transform: rotate(-90deg);
-}
-
-.operator-pool-ring {
-  fill: none;
-  stroke-width: 16;
-}
-
-.operator-pool-ring.is-used {
-  stroke: color-mix(in oklch, var(--operator-muted-foreground) 55%, var(--operator-track));
-}
-
-.operator-pool-ring.is-unknown {
-  stroke: var(--operator-track);
-  stroke-dasharray: 2 3;
-}
-
-.operator-pool-segment {
-  transition: stroke-width 150ms ease;
-}
-
-.operator-pool-segment:hover,
-.operator-pool-segment:focus-visible {
-  stroke-width: 19;
-  outline: none;
-}
-
-.operator-pool-segment:focus-visible {
-  filter: drop-shadow(0 0 2px var(--operator-focus));
-}
-
-.operator-pool-chart-label {
-  position: absolute;
-  inset: 25%;
+.operator-capacity-summary-value {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  min-width: 0;
   flex-direction: column;
-  text-align: center;
 }
 
-.operator-pool-chart-label strong {
+.operator-capacity-summary-value > span,
+.operator-capacity-summary-value > small,
+.operator-capacity-summary-meta {
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-capacity-summary-value > strong {
+  margin: 0.125rem 0;
   color: var(--operator-foreground);
   font-size: 1.75rem;
   font-weight: 700;
   line-height: 1.1;
 }
 
-.operator-pool-chart-label span {
-  margin-top: 0.25rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-}
-
-.operator-pool-legend {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.375rem 1.5rem;
-}
-
-.operator-pool-legend li {
-  display: grid;
-  min-width: 0;
-  min-height: 3rem;
-  padding: 0.5rem 0;
-  grid-template-columns: 0.75rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.625rem;
-  border-bottom: 1px solid var(--operator-border-subtle);
-}
-
-.operator-pool-swatch {
-  width: 0.75rem;
-  height: 0.75rem;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.operator-pool-swatch.is-used {
-  color: color-mix(in oklch, var(--operator-muted-foreground) 55%, var(--operator-track));
-}
-
-.is-segment-0 { color: var(--operator-success-fill); stroke: var(--operator-success-fill); }
-.is-segment-1 {
-  color: color-mix(in oklch, var(--operator-success-fill) 62%, var(--operator-foreground));
-  stroke: color-mix(in oklch, var(--operator-success-fill) 62%, var(--operator-foreground));
-}
-.is-segment-2 { color: var(--operator-warning-fill); stroke: var(--operator-warning-fill); }
-.is-segment-3 {
-  color: color-mix(in oklch, var(--operator-foreground) 68%, var(--operator-border));
-  stroke: color-mix(in oklch, var(--operator-foreground) 68%, var(--operator-border));
-}
-.is-segment-4 {
-  color: color-mix(in oklch, var(--operator-warning-fill) 55%, var(--operator-foreground));
-  stroke: color-mix(in oklch, var(--operator-warning-fill) 55%, var(--operator-foreground));
-}
-
-.operator-pool-legend-label,
-.operator-pool-legend-value {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.operator-pool-legend-label strong {
+.operator-capacity-summary-track {
+  height: 0.625rem;
   overflow: hidden;
+  border-radius: 999px;
+  background: var(--operator-track);
+}
+
+.operator-capacity-summary-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--operator-success-fill);
+}
+
+.operator-capacity-summary-meta {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.operator-capacity-summary-meta > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+}
+
+.operator-capacity-summary-meta dd {
   color: var(--operator-foreground);
-  font-size: 0.875rem;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.operator-pool-legend small {
-  margin-top: 0.125rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.75rem;
-  line-height: 1.25;
-}
-
-.operator-pool-legend-value {
-  align-items: flex-end;
   text-align: right;
 }
 
-.operator-pool-legend-value > strong,
-.operator-pool-legend > li > strong {
-  color: var(--operator-foreground);
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-.operator-pool-unknown-list {
-  margin-top: 0.875rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.45;
-}
-
-.operator-pool-unknown-list strong {
-  color: var(--operator-foreground);
-  font-weight: 600;
-}
-
-.operator-capacity-fleet { padding: 1.25rem 1.5rem 1.5rem; }
-.operator-capacity-section-heading { margin-bottom: 0.875rem; }
-.operator-capacity-section-heading h3 { font-size: 1rem; }
-.operator-capacity-section-heading > span,
-.operator-capacity-fleet-label > div span {
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-}
-
-.operator-capacity-fleet-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.operator-capacity-fleet-provider {
-  min-width: 0;
-  padding: 0.875rem;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius);
-  background: var(--operator-raised);
-}
-
-.operator-capacity-fleet-label > div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.operator-capacity-fleet-label strong {
-  color: var(--operator-foreground);
-  font-size: 0.875rem;
-  font-weight: 650;
-}
-.operator-capacity-fleet-label > strong { flex: 0 0 auto; }
-
-.operator-provider-capacity-meta {
-  display: flex;
-  margin-top: 0.75rem;
-  padding-top: 0.625rem;
-  flex-direction: column;
-  border-top: 1px solid var(--operator-border);
-  gap: 0.25rem;
-}
-.operator-provider-capacity-meta li {
-  overflow-wrap: anywhere;
-  color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.4;
-}
+.operator-capacity-summary > .btn { justify-self: end; }
 
 .operator-capacity-providers { border-top: 1px solid var(--operator-border); }
 .operator-capacity-provider + .operator-capacity-provider { border-top: 1px solid var(--operator-border); }
@@ -1108,8 +768,6 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   font-size: 0.8125rem;
   line-height: 1.4;
 }
-.operator-capacity-compact .operator-capacity-fleet { padding-bottom: 1.25rem; }
-
 @media (max-width: 1023px) {
   .operator-capacity-header,
   .operator-capacity-account-heading {
@@ -1125,31 +783,28 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
     margin-left: auto;
   }
   .operator-capacity-account-body { grid-template-columns: 1fr; }
-  .operator-pool-legend { grid-template-columns: 1fr; }
-  .operator-capacity-fleet-grid { grid-template-columns: 1fr; }
+  .operator-capacity-summary { grid-template-columns: minmax(0, 1fr) minmax(12rem, 1fr); }
+  .operator-capacity-summary > .btn { justify-self: start; }
 }
 
 @media (max-width: 639px) {
   .operator-capacity-header,
-  .operator-pool-heading,
   .operator-capacity-provider-toggle {
     align-items: flex-start;
     flex-direction: column;
   }
   .operator-capacity-account,
   .operator-capacity-header,
-  .operator-capacity-fleet,
-  .operator-pool-capacity {
+  .operator-capacity-summary {
     padding-right: 1rem;
     padding-left: 1rem;
   }
+  .operator-capacity-summary { grid-template-columns: 1fr; }
+  .operator-capacity-summary-meta dd { text-align: left; }
   .operator-capacity-provider-toggle {
     padding-right: 1rem;
     padding-left: 1rem;
   }
-  .operator-pool-layout { grid-template-columns: 1fr; }
-  .operator-pool-chart { width: min(100%, 12rem); }
-  .operator-pool-unknown-count { white-space: normal; }
   .operator-capacity-provider-summary {
     width: 100%;
     align-items: flex-start;

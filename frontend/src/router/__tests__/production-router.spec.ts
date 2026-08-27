@@ -55,6 +55,7 @@ vi.mock('@/views/auth/LoginView.vue', () => ({ default: view }))
 vi.mock('@/views/user/DashboardView.vue', () => ({ default: view }))
 vi.mock('@/views/user/PaymentView.vue', () => ({ default: view }))
 vi.mock('@/views/admin/DashboardView.vue', () => ({ default: view }))
+vi.mock('@/views/admin/StatsView.vue', () => ({ default: view }))
 vi.mock('@/views/admin/AccountsView.vue', () => ({ default: view }))
 vi.mock('@/views/admin/GroupsView.vue', () => ({ default: view }))
 vi.mock('@/views/admin/SettingsView.vue', () => ({ default: view }))
@@ -119,6 +120,21 @@ describe('production router navigation', () => {
 
     expect((await navigate('/admin/accounts')).path).toBe('/admin/accounts')
     expect(stores.compliance.fetchStatus).toHaveBeenCalledOnce()
+  })
+
+  it('allows an authenticated admin to open Stats', async () => {
+    stores.auth.isAuthenticated = true
+    stores.auth.isAdmin = true
+
+    const route = await navigate('/admin/stats')
+
+    expect(route.path).toBe('/admin/stats')
+    expect(route.meta).toMatchObject({
+      requiresAuth: true,
+      requiresAdmin: true,
+      titleKey: 'admin.stats.title',
+      descriptionKey: 'admin.stats.description',
+    })
   })
 
   it('redirects an authenticated admin away from login', async () => {

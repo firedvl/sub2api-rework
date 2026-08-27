@@ -3,6 +3,7 @@ import type { Account, AccountUsageInfo } from '@/types'
 import {
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
+  buildWindowCapacities,
   normalizeAccountCapacity,
 } from '../operatorCapacity'
 
@@ -198,5 +199,40 @@ describe('operator capacity normalization', () => {
     expect(pool.remainingPercent).toBeCloseTo(providerWeightedAverage)
     expect(pool.remainingPercent).toBe(50)
     expect(pool.unknownCount).toBe(1)
+  })
+
+  it('aggregates matching windows across known accounts and excludes missing windows', () => {
+    const first = normalizeAccountCapacity(account(1), usage({
+      five_hour: { utilization: 20, resets_at: '2026-08-25T22:00:00Z', remaining_seconds: 3600 },
+      seven_day: { utilization: 60, resets_at: '2026-08-30T00:00:00Z', remaining_seconds: 360000 },
+    }))
+    const second = normalizeAccountCapacity(account(2), usage({
+      five_hour: { utilization: 50, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 1800 },
+    }))
+    const unknown = normalizeAccountCapacity(account(3))
+
+    const windows = buildWindowCapacities(
+      [first, second, unknown],
+      new Date('2026-08-25T18:00:00Z'),
+    )
+
+    expect(windows.find((window) => window.key === 'five_hour')).toMatchObject({
+      remainingPercent: 65,
+      usedPercent: 35,
+      knownCount: 2,
+      unknownCount: 1,
+      nextReset: '2026-08-25T21:00:00Z',
+      segments: [
+        { remainingPercent: 80, contributionPercent: 40 },
+        { remainingPercent: 50, contributionPercent: 25 },
+      ],
+    })
+    expect(windows.find((window) => window.key === 'seven_day')).toMatchObject({
+      remainingPercent: 40,
+      usedPercent: 60,
+      knownCount: 1,
+      unknownCount: 2,
+      segments: [{ remainingPercent: 40, contributionPercent: 40 }],
+    })
   })
 })

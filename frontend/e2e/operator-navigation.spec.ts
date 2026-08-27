@@ -3,13 +3,14 @@ import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
 
 const primaryLinks = [
   { href: '/admin/dashboard', target: '/admin/dashboard' },
+  { href: '/admin/stats', target: '/admin/stats' },
   { href: '/admin/accounts', target: '/admin/accounts' },
   { href: '/admin/groups', target: '/admin/groups' },
   { href: '/admin/usage', target: '/admin/usage' },
   { href: '/admin/settings', target: '/admin/settings' },
 ]
 
-const fidelityAdminRoutes = ['/admin/dashboard', '/admin/accounts', '/admin/groups', '/admin/usage', '/admin/settings']
+const fidelityAdminRoutes = ['/admin/dashboard', '/admin/stats', '/admin/accounts', '/admin/groups', '/admin/usage', '/admin/settings']
 const fidelityViewports = [
   { width: 1440, height: 900 },
   { width: 1280, height: 800 },
@@ -45,13 +46,60 @@ async function expectNeutralOperatorMenu(page: Page, menu: Locator, emphasizedIt
   expect(itemColors).toEqual({ background: tokens.muted, color: tokens.foreground })
 }
 
+async function operatorTokens(page: Page) {
+  return page.locator('.operator-console').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      background: style.getPropertyValue('--operator-background').trim(),
+      card: style.getPropertyValue('--operator-card').trim(),
+      border: style.getPropertyValue('--operator-border').trim(),
+      muted: style.getPropertyValue('--operator-muted').trim(),
+      mutedForeground: style.getPropertyValue('--operator-muted-foreground').trim(),
+      foreground: style.getPropertyValue('--operator-foreground').trim(),
+      focus: style.getPropertyValue('--operator-focus').trim(),
+      track: style.getPropertyValue('--operator-track').trim(),
+    }
+  })
+}
+
+async function expectNeutralOperatorDialog(page: Page, dialog: Locator) {
+  const tokens = await operatorTokens(page)
+  const shell = dialog.locator('.operator-dialog')
+  const colors = await shell.evaluate((element) => {
+    const header = element.querySelector('.operator-dialog-header') as HTMLElement
+    const body = element.querySelector('.operator-dialog-body') as HTMLElement
+    const footer = element.querySelector('.operator-dialog-footer') as HTMLElement | null
+    return {
+      shell: getComputedStyle(element).backgroundColor,
+      border: getComputedStyle(element).borderColor,
+      header: getComputedStyle(header).backgroundColor,
+      headerBorder: getComputedStyle(header).borderBottomColor,
+      body: getComputedStyle(body).backgroundColor,
+      footer: footer ? getComputedStyle(footer).backgroundColor : null,
+      footerBorder: footer ? getComputedStyle(footer).borderTopColor : null,
+    }
+  })
+
+  expect(colors).toMatchObject({
+    shell: tokens.card,
+    border: tokens.border,
+    header: tokens.card,
+    headerBorder: tokens.border,
+    body: tokens.card,
+  })
+  if (colors.footer !== null) {
+    expect(colors.footer).toBe(tokens.card)
+    expect(colors.footerBorder).toBe(tokens.border)
+  }
+}
+
 test.describe('operator console navigation', () => {
   test.beforeEach(async ({ page }) => {
     await seedSession(page)
     await installOperatorApiMock(page)
   })
 
-  test('reaches all five areas and keeps history and deep-link state', async ({ page }) => {
+  test('reaches all six areas and keeps history and deep-link state', async ({ page }) => {
     test.setTimeout(60_000)
     await page.goto('/admin/dashboard')
     await expect(page.locator('.operator-primary-nav a[href="/admin/dashboard"]')).toHaveClass(/operator-primary-link-active/)
@@ -203,24 +251,45 @@ test.describe('operator console navigation', () => {
     }
   })
 
-  test('shows normalized pool capacity and keeps unknown quota separate', async ({ page }) => {
+  test('keeps Overview compact and shows normalized global and provider capacity on Stats', async ({ page }) => {
     await page.goto('/admin/dashboard')
 
-    const pool = page.getByTestId('account-pool-capacity')
-    await expect(pool).toBeVisible()
-    await expect(pool.locator('[data-testid="account-pool-segment"]')).toHaveCount(4)
-    await expect(pool).toContainText('41.4%')
-    await expect(pool).toContainText('Gemini Recovery')
-    await expect(pool).toContainText('1 unknown excluded')
-    await expect(pool.locator('svg[role="img"]')).toHaveAttribute('aria-label', /41\.4% available, 58\.6% Used capacity/)
+    const summary = page.getByTestId('account-pool-capacity')
+    await expect(summary).toBeVisible()
+    await expect(summary).toContainText('53.12%')
+    await expect(summary.locator('[data-testid="capacity-account-segment"]')).toHaveCount(0)
+    await expect(summary.getByRole('link', { name: 'View Stats' })).toHaveAttribute('href', '/admin/stats')
 
-    const providerOverview = page.getByTestId('provider-capacity-overview')
-    await expect(providerOverview).toBeVisible()
-    await expect(page.getByTestId('provider-capacity-openai')).toContainText('66.8% normalized remaining')
-    await expect(page.getByTestId('provider-capacity-anthropic')).toContainText('4% normalized remaining')
-    await expect(page.getByTestId('provider-capacity-antigravity')).toContainText('28% normalized remaining')
-    await expect(page.getByTestId('provider-capacity-gemini')).toContainText('Quota unknown')
-    await expect(page.getByTestId('provider-capacity-openai').getByRole('progressbar')).toHaveAttribute('aria-valuenow', '67')
+    await summary.getByRole('link', { name: 'View Stats' }).click()
+    await expect(page).toHaveURL(/\/admin\/stats$/)
+
+    const global = page.getByTestId('global-capacity-donut')
+    await expect(global).toContainText('53.12%')
+    await expect(global.locator('[data-testid="capacity-account-segment"]')).toHaveCount(5)
+    await expect(global.locator('svg[role="img"]')).toHaveAttribute('aria-label', /53\.12% available, 46\.88% Used capacity/)
+    await expect(global).toContainText('Gemini Recovery')
+
+    const openAI = page.getByTestId('provider-capacity-openai')
+    await expect(openAI).toContainText('66.8%')
+    await expect(openAI).toContainText('5h')
+    await expect(openAI).toContainText('7d')
+    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-account-segment"]')).toHaveCount(2)
+    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-used-segment"]')).toBeVisible()
+
+    const anthropic = page.getByTestId('provider-capacity-anthropic')
+    await expect(anthropic).toContainText('4%')
+    await expect(anthropic.getByTestId('provider-capacity-donut-anthropic').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
+
+    const antigravity = page.getByTestId('provider-capacity-antigravity')
+    await expect(antigravity).toContainText('28%')
+    await expect(antigravity.getByTestId('provider-capacity-donut-antigravity').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
+
+    const gemini = page.getByTestId('provider-capacity-gemini')
+    await expect(gemini).toContainText('100%')
+    await expect(gemini).toContainText('Gemini Healthy')
+    await expect(gemini).toContainText('Gemini Recovery')
+    await expect(gemini).toContainText('1 unknown')
+    await expect(gemini.getByTestId('provider-capacity-donut-gemini').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
   })
 
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
@@ -277,7 +346,25 @@ test.describe('operator console navigation', () => {
     expect(switchColors.disabled).toBe(switchColors.track)
 
     const platformSelect = page.locator('.select-trigger').first()
+    const selectTokens = await operatorTokens(page)
+    const closedSelectColors = await platformSelect.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color }
+    })
+    expect(closedSelectColors).toEqual({
+      background: selectTokens.card,
+      border: selectTokens.border,
+      color: selectTokens.foreground,
+    })
     await platformSelect.click()
+    await expect.poll(() => platformSelect.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color }
+    })).toEqual({
+      background: selectTokens.card,
+      border: selectTokens.focus,
+      color: selectTokens.foreground,
+    })
     const selectedOption = page.locator('.select-dropdown-portal .select-option-selected')
     await expectNeutralOperatorMenu(page, page.locator('.select-dropdown-portal'), selectedOption)
     const checkColor = await selectedOption.locator('svg').evaluate((element) => getComputedStyle(element).color)
@@ -286,6 +373,12 @@ test.describe('operator console navigation', () => {
     )
     expect(checkColor).toBe(expectedForeground)
     await page.keyboard.press('Escape')
+
+    const moreActionsButton = page.getByRole('button', { name: 'More Actions' })
+    await moreActionsButton.click()
+    const moreActionsMenu = page.locator('.account-tools-menu')
+    await expectNeutralOperatorMenu(page, moreActionsMenu, moreActionsMenu.locator('.operator-menu-item').first())
+    await moreActionsButton.click()
 
     const moreButton = page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'More' }).first()
     await moreButton.click()
@@ -302,6 +395,40 @@ test.describe('operator console navigation', () => {
     await expectNeutralOperatorMenu(page, menu, firstAction)
     await page.keyboard.press('Escape')
 
+    await page.goto('/admin/usage')
+    const activityTokens = await operatorTokens(page)
+    const dateRange = page.locator('.date-picker-trigger')
+    await expect(dateRange).toBeVisible()
+    expect(await dateRange.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color }
+    })).toEqual({
+      background: activityTokens.card,
+      border: activityTokens.border,
+      color: activityTokens.foreground,
+    })
+    await dateRange.click()
+    await expect.poll(() => dateRange.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color }
+    })).toEqual({
+      background: activityTokens.card,
+      border: activityTokens.focus,
+      color: activityTokens.foreground,
+    })
+    await expectNeutralOperatorMenu(
+      page,
+      page.locator('.date-picker-dropdown'),
+      page.locator('.date-picker-preset-active'),
+    )
+    expect(await page.locator('.date-picker-preset:not(.date-picker-preset-active)').first().evaluate(
+      (element) => getComputedStyle(element).color,
+    )).toBe(activityTokens.foreground)
+    expect(await page.locator('.date-picker-label').first().evaluate(
+      (element) => getComputedStyle(element).color,
+    )).toBe(activityTokens.mutedForeground)
+    await page.keyboard.press('Escape')
+
     await page.goto('/admin/ops')
     const activitySelect = page.locator('.select-trigger').first()
     await activitySelect.click()
@@ -314,11 +441,36 @@ test.describe('operator console navigation', () => {
     await page.keyboard.press('Escape')
 
     await page.goto('/admin/groups')
+    const groupsTokens = await operatorTokens(page)
+    const neutralBadge = page.locator('.badge-gray').first()
+    expect(await neutralBadge.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, color: style.color }
+    })).toEqual({ background: groupsTokens.muted, color: groupsTokens.mutedForeground })
+    expect(await page.locator('.table-body > tr + tr').first().evaluate(
+      (element) => getComputedStyle(element).borderTopColor,
+    )).toBe(groupsTokens.border)
     await page.getByRole('button', { name: 'Column Settings' }).click()
     const groupsMenu = page.locator('.operator-menu:visible')
     await expectNeutralOperatorMenu(page, groupsMenu, groupsMenu.locator('[aria-pressed="true"]').first())
 
     await page.goto('/admin/settings')
+    const settingsTokens = await operatorTokens(page)
+    const settingsTheme = await page.locator('.settings-tabs-shell').evaluate((element) => {
+      const active = element.querySelector('.settings-tab-active') as HTMLElement
+      return {
+        background: getComputedStyle(element).backgroundColor,
+        border: getComputedStyle(element).borderColor,
+        activeBackground: getComputedStyle(active).backgroundColor,
+        activeColor: getComputedStyle(active).color,
+      }
+    })
+    expect(settingsTheme).toEqual({
+      background: settingsTokens.muted,
+      border: settingsTokens.border,
+      activeBackground: settingsTokens.background,
+      activeColor: settingsTokens.foreground,
+    })
     await page.getByRole('tab', { name: 'Gateway' }).click()
     await page.locator('.select-trigger:visible').first().click()
     await page.keyboard.press('ArrowDown')
@@ -327,6 +479,47 @@ test.describe('operator console navigation', () => {
       page.locator('.select-dropdown-portal'),
       page.locator('.select-dropdown-portal .select-option-focused'),
     )
+  })
+
+  test('uses neutral Create, Edit, and Bulk Edit dialog surfaces and callouts', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
+    await page.goto('/admin/accounts')
+
+    const createTrigger = page.getByRole('button', { name: 'Create Account', exact: true }).first()
+    await createTrigger.click()
+    const createDialog = page.getByRole('dialog', { name: 'Create Account' })
+    await expectNeutralOperatorDialog(page, createDialog)
+    const tokens = await operatorTokens(page)
+    expect(await createDialog.locator('.input-hint').first().evaluate(
+      (element) => getComputedStyle(element).color,
+    )).toBe(tokens.mutedForeground)
+    await page.keyboard.press('Escape')
+
+    await page.getByRole('tab', { name: 'Technical' }).click()
+    await page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'Edit' }).first().click()
+    const editDialog = page.getByRole('dialog', { name: 'Edit Account' })
+    await expectNeutralOperatorDialog(page, editDialog)
+    await page.keyboard.press('Escape')
+
+    await page.locator('.operator-account-table tbody input[type="checkbox"]').first().check()
+    await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+    const bulkDialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
+    await expectNeutralOperatorDialog(page, bulkDialog)
+
+    const callout = bulkDialog.locator('.operator-callout-info').first()
+    const calloutColors = await callout.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { background: style.backgroundColor, borderLeft: style.borderLeftColor }
+    })
+    expect(calloutColors).toEqual({
+      background: tokens.muted,
+      borderLeft: tokens.mutedForeground,
+    })
+
+    const toggle = bulkDialog.locator('button[role="switch"]').first()
+    await expect(toggle).toBeVisible()
+    expect(await toggle.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(tokens.track)
   })
 
   test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {
