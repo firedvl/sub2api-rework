@@ -653,6 +653,44 @@ export default {
         hideCcsImportButton: 'Hide CCS Import Button',
         hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
       },
+      updates: {
+        title: 'Software Updates',
+        description: 'Check approved rework releases and ask the local updater to prepare, install, or roll back.',
+        check: 'Check updates',
+        loading: 'Checking approved releases...',
+        loadFailed: 'Failed to check updates',
+        operationAccepted: 'The updater accepted the operation.',
+        operationFailed: 'The updater operation failed',
+        currentVersion: 'Installed: {version}',
+        upstreamBaseline: 'Upstream baseline',
+        latestUpstream: 'Latest upstream',
+        availableVersion: 'Approved release',
+        preparedVersion: 'Prepared release',
+        channel: 'Update channel',
+        checkedAt: 'Checked',
+        updater: 'Updater: {state}',
+        notes: 'Release notes',
+        noteLabels: {
+          upstream: 'Upstream changes',
+          rework: 'Rework changes',
+          compatibility: 'Compatibility',
+          migrations: 'Migrations',
+          rollback: 'Rollback'
+        },
+        prepare: 'Prepare',
+        install: 'Install',
+        rollback: 'Roll back',
+        installConfirm: 'Installing replaces the running release after the updater verifies the prepared image.',
+        rollbackConfirm: 'Rolling back restores the updater-recorded previous release.',
+        confirmationLabel: 'Type {value} to confirm',
+        confirmationMismatch: 'The confirmation text does not match.',
+        states: {
+          up_to_date: 'Up to date', upstream_available: 'Upstream release available', compatibility_pending: 'Compatibility review pending', rework_build_available: 'Rework build available', update_ready: 'Approved update ready', update_blocked: 'Update blocked', update_failed: 'Update check failed'
+        },
+        updaterStates: {
+          unavailable: 'Unavailable', idle: 'Idle', preparing: 'Preparing', prepared: 'Prepared', installing: 'Installing', rolling_back: 'Rolling back', succeeded: 'Succeeded', failed: 'Failed', critical: 'Critical'
+        }
+      },
       purchase: {
         title: 'Recharge / Subscription Page',
         description: 'Show a "Recharge / Subscription" entry in the sidebar and open the configured URL in an iframe',

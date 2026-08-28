@@ -3,14 +3,14 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
-baseline_file="$repo_dir/docs/UPSTREAM_SYNC.md"
+metadata_file="$repo_dir/backend/internal/releaseinfo/metadata.json"
 upstream_ref=refs/remotes/upstream/main
 
-baseline_tag=$(sed -n 's/^UPSTREAM_BASELINE_TAG=//p' "$baseline_file")
-baseline_sha=$(sed -n 's/^UPSTREAM_BASELINE_SHA=//p' "$baseline_file")
+baseline_tag=$(sed -n 's/^[[:space:]]*"upstream_baseline":[[:space:]]*"\([^"]*\)",[[:space:]]*$/\1/p' "$metadata_file")
+baseline_sha=$(sed -n 's/^[[:space:]]*"upstream_baseline_sha":[[:space:]]*"\([^"]*\)",[[:space:]]*$/\1/p' "$metadata_file")
 
 if [ -z "$baseline_tag" ] || [ -z "$baseline_sha" ]; then
-	printf '%s\n' "unable to read the documented upstream baseline" >&2
+	printf '%s\n' "unable to read the canonical upstream baseline" >&2
 	exit 1
 fi
 if ! git -C "$repo_dir" show-ref --verify --quiet "$upstream_ref"; then
@@ -32,7 +32,7 @@ fi
 
 printf '%s\n' \
 	"documented_baseline=$baseline_tag" \
-	"documented_baseline_sha=$baseline_sha" \
+	"canonical_baseline_sha=$baseline_sha" \
 	"resolved_baseline_sha=$resolved_sha" \
 	"baseline_matches=$baseline_matches" \
 	"latest_fetched_upstream_tag=$latest_tag" \

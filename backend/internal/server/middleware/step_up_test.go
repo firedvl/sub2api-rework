@@ -15,10 +15,18 @@ import (
 
 type stubStepUpGrantChecker struct {
 	granted bool
+	grants  map[string]bool
 	err     error
+	called  *bool
 }
 
 func (s stubStepUpGrantChecker) HasStepUpGrant(ctx context.Context, userID int64, sessionKey string) (bool, error) {
+	if s.called != nil {
+		*s.called = true
+	}
+	if s.grants != nil {
+		return s.grants[sessionKey], s.err
+	}
 	return s.granted, s.err
 }
 
@@ -48,6 +56,7 @@ func newStepUpTestContext(t *testing.T) (*gin.Context, *httptest.ResponseRecorde
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/sensitive", nil)
+	c.Set(ContextKeySessionID, "session-1")
 	return c, rec
 }
 
@@ -103,6 +112,34 @@ func TestEnforceStepUpRequiresGrant(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Contains(t, rec.Body.String(), "STEP_UP_REQUIRED")
+}
+
+func TestEnforceStepUpRejectsMissingSessionWithoutGrantLookup(t *testing.T) {
+	c, rec := newStepUpTestContext(t)
+	c.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+	c.Set(ContextKeySessionID, "")
+	called := false
+
+	ok := enforceStepUp(c, stubStepUpGrantChecker{granted: true, called: &called}, stubStepUpUserReader{user: &service.User{ID: 1, TotpEnabled: true}}, stepUpEnabled)
+
+	require.False(t, ok)
+	require.False(t, called)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Contains(t, rec.Body.String(), "STEP_UP_SESSION_REQUIRED")
+}
+
+func TestEnforceStepUpKeepsSessionGrantsIsolated(t *testing.T) {
+	checker := stubStepUpGrantChecker{grants: map[string]bool{"session-1": true}}
+	user := stubStepUpUserReader{user: &service.User{ID: 1, TotpEnabled: true}}
+	first, _ := newStepUpTestContext(t)
+	first.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+	second, secondRec := newStepUpTestContext(t)
+	second.Set(string(ContextKeyUser), AuthSubject{UserID: 1})
+	second.Set(ContextKeySessionID, "session-2")
+
+	require.True(t, enforceStepUp(first, checker, user, stepUpEnabled))
+	require.False(t, enforceStepUp(second, checker, user, stepUpEnabled))
+	require.Contains(t, secondRec.Body.String(), "STEP_UP_REQUIRED")
 }
 
 func TestEnforceStepUpPassesWithGrant(t *testing.T) {

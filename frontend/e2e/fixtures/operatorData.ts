@@ -38,6 +38,43 @@ export const operatorFixturePublicSettings = {
   custom_menu_items: [],
 }
 
+export const operatorFixtureUpdateStatus = {
+  schema_version: 1,
+  current_version: '0.1.183-rework.1',
+  current_git_commit: '4668fed9458d0b442c60e09efacac7f69b4d07eb',
+  build_date: updatedAt,
+  build_type: 'fixture',
+  update_channel: 'stable',
+  update_policy: 'manual',
+  upstream_baseline: 'v0.1.183',
+  upstream_baseline_sha: 'e8cb019fabf8b55199436229044cbf9aa7a82564',
+  latest_upstream: 'v0.1.184',
+  latest_upstream_url: 'https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.184',
+  state: 'compatibility_pending',
+  installable: false,
+  release_notes: {
+    upstream: '<strong>Untrusted release text stays text.</strong>',
+    rework: '',
+    compatibility: 'Compatibility review is pending.',
+    migrations: '',
+    rollback: '',
+  },
+  checked_at: updatedAt,
+  cached: false,
+  updater: {
+    schema_version: 1,
+    updater_version: '1.0.0',
+    healthy: true,
+    state: 'idle',
+    busy: false,
+    installed_version: '0.1.183-rework.1',
+    prepared_version: '',
+    rollback_version: '',
+    current_migration: 232,
+    updated_at: updatedAt,
+  },
+}
+
 const paginated = <T>(items: T[], pageSize = 20) => ({
   items,
   total: items.length,
@@ -707,6 +744,7 @@ export function getOperatorFixtureData(
     }
   }
   if (pathname === '/api/v1/admin/settings') return adminSettings
+  if (pathname === '/api/v1/admin/system/check-updates') return operatorFixtureUpdateStatus
   if (pathname === '/api/v1/admin/payment/config') {
     return {
       enabled: false,

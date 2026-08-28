@@ -13,10 +13,14 @@ import (
 func TestProvideServiceBuildInfo(t *testing.T) {
 	in := handler.BuildInfo{
 		Version:   "v-test",
+		Commit:    "abc123",
+		Date:      "2026-08-28T12:00:00Z",
 		BuildType: "release",
 	}
 	out := provideServiceBuildInfo(in)
 	require.Equal(t, in.Version, out.Version)
+	require.Equal(t, in.Commit, out.Commit)
+	require.Equal(t, in.Date, out.Date)
 	require.Equal(t, in.BuildType, out.BuildType)
 }
 

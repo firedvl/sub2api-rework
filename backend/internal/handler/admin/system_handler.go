@@ -2,264 +2,208 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/updatecontract"
+	"github.com/Wei-Shaw/sub2api/internal/updaterclient"
 
 	"github.com/gin-gonic/gin"
 )
 
-// SystemHandler handles system-related operations
-type SystemHandler struct {
-	updateSvc systemUpdateService
-	lockSvc   *service.SystemOperationLockService
-}
+const maxUpdaterRequestBytes = 4 * 1024
 
-// systemUpdateTimeout bounds a full in-place update or rollback: the release
-// manifest fetch plus a large binary download over slow links. It must stay
-// above the GitHub download client timeout (10 minutes) so the download owns
-// its own deadline.
-const systemUpdateTimeout = 15 * time.Minute
-
-// systemUpdateContext detaches a long-running update/rollback from the HTTP
-// request lifetime. Browsers and reverse proxies commonly abort idle requests
-// after 30-60s (axios default, nginx proxy_read_timeout), which canceled
-// c.Request.Context() mid-download and killed the update with
-// "download failed: context canceled" (#4504). The swap keeps running after a
-// client disconnect; a later retry then hits the system operation lock or
-// reports "Already up to date".
-func systemUpdateContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	base := context.Background()
-	if ctx != nil {
-		base = context.WithoutCancel(ctx)
-	}
-	return context.WithTimeout(base, systemUpdateTimeout)
-}
-
-type systemUpdateService interface {
+type systemReleaseWatcher interface {
 	CheckUpdate(ctx context.Context, force bool) (*service.UpdateInfo, error)
-	PerformUpdate(ctx context.Context) error
-	Rollback() error
-	ListRollbackVersions(ctx context.Context) ([]service.RollbackVersion, error)
-	RollbackToVersion(ctx context.Context, version string) error
 }
 
-// NewSystemHandler creates a new SystemHandler
-func NewSystemHandler(updateSvc systemUpdateService, lockSvc *service.SystemOperationLockService) *SystemHandler {
-	return &SystemHandler{
-		updateSvc: updateSvc,
-		lockSvc:   lockSvc,
-	}
+type systemUpdater interface {
+	Status(ctx context.Context) (*updatecontract.UpdaterStatus, error)
+	Prepare(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
+	Install(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
+	Rollback(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 }
 
-// GetVersion returns the current version
-// GET /api/v1/admin/system/version
+type SystemHandler struct {
+	watcher systemReleaseWatcher
+	updater systemUpdater
+}
+
+func NewSystemHandler(watcher systemReleaseWatcher, updater systemUpdater) *SystemHandler {
+	return &SystemHandler{watcher: watcher, updater: updater}
+}
+
 func (h *SystemHandler) GetVersion(c *gin.Context) {
-	info, _ := h.updateSvc.CheckUpdate(c.Request.Context(), false)
+	info, err := h.watcher.CheckUpdate(c.Request.Context(), false)
+	if err != nil || info == nil {
+		response.InternalError(c, "Failed to read release metadata")
+		return
+	}
 	response.Success(c, gin.H{
-		"version": info.CurrentVersion,
+		"version": info.CurrentVersion, "git_commit": info.CurrentGitCommit,
+		"build_date": info.BuildDate, "build_type": info.BuildType,
+		"upstream_baseline": info.UpstreamBaseline, "upstream_baseline_sha": info.UpstreamBaselineSHA,
+		"update_channel": info.UpdateChannel, "update_policy": info.UpdatePolicy,
 	})
 }
 
-// CheckUpdates checks for available updates
-// GET /api/v1/admin/system/check-updates
 func (h *SystemHandler) CheckUpdates(c *gin.Context) {
-	force := c.Query("force") == "true"
-	info, err := h.updateSvc.CheckUpdate(c.Request.Context(), force)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+	info, err := h.watcher.CheckUpdate(c.Request.Context(), c.Query("force") == "true")
+	if err != nil || info == nil {
+		response.InternalError(c, "Failed to check releases")
 		return
 	}
-	response.Success(c, info)
+	updaterStatus := h.updaterStatus(c.Request.Context())
+	combined := *info
+	if updaterStatus.State == updatecontract.UpdaterStateFailed || updaterStatus.State == updatecontract.UpdaterStateCritical {
+		combined.State = service.ReleaseStateUpdateFailed
+		combined.Installable = false
+	}
+	response.Success(c, struct {
+		*service.UpdateInfo
+		Updater updatecontract.UpdaterStatus `json:"updater"`
+	}{UpdateInfo: &combined, Updater: updaterStatus})
 }
 
-// PerformUpdate downloads and applies the update
-// POST /api/v1/admin/system/update
-func (h *SystemHandler) PerformUpdate(c *gin.Context) {
-	operationID := buildSystemOperationID(c, "update")
-	payload := gin.H{"operation_id": operationID}
-	executeAdminIdempotentJSON(c, "admin.system.update", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		lock, release, err := h.acquireSystemLock(ctx, operationID)
-		if err != nil {
-			return nil, err
-		}
-		var releaseReason string
-		succeeded := false
-		defer func() {
-			release(releaseReason, succeeded)
-		}()
-
-		updateCtx, cancel := systemUpdateContext(ctx)
-		defer cancel()
-
-		if err := h.updateSvc.PerformUpdate(updateCtx); err != nil {
-			if errors.Is(err, service.ErrNoUpdateAvailable) {
-				info, checkErr := h.updateSvc.CheckUpdate(updateCtx, false)
-				if checkErr != nil {
-					releaseReason = "SYSTEM_UPDATE_FAILED"
-					return nil, checkErr
-				}
-				succeeded = true
-				return gin.H{
-					"message":            "Already up to date",
-					"already_up_to_date": true,
-					"current_version":    info.CurrentVersion,
-					"latest_version":     info.LatestVersion,
-					"operation_id":       lock.OperationID(),
-				}, nil
-			}
-			releaseReason = "SYSTEM_UPDATE_FAILED"
-			return nil, err
-		}
-		succeeded = true
-
-		return gin.H{
-			"message":      "Update completed. Please restart the service.",
-			"need_restart": true,
-			"operation_id": lock.OperationID(),
-		}, nil
+func (h *SystemHandler) Prepare(c *gin.Context) {
+	req, ok := decodeUpdaterRequest(c)
+	if !ok || !h.requireReadyRelease(c, req.Version) {
+		return
+	}
+	middleware2.SetAuditAction(c, "admin.system.update.prepare")
+	h.start(c, updatecontract.OperationPrepare, req, func(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+		return h.updater.Prepare(ctx, request)
 	})
 }
 
-// GetRollbackVersions lists versions available for rollback
-// GET /api/v1/admin/system/rollback-versions
-func (h *SystemHandler) GetRollbackVersions(c *gin.Context) {
-	versions, err := h.updateSvc.ListRollbackVersions(c.Request.Context())
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+func (h *SystemHandler) Install(c *gin.Context) {
+	req, ok := decodeUpdaterRequest(c)
+	if !ok || !h.requireReadyRelease(c, req.Version) {
 		return
 	}
-	response.Success(c, gin.H{
-		"versions": versions,
+	if req.Confirmation != "INSTALL "+req.Version {
+		response.BadRequest(c, "Explicit install confirmation does not match the requested version")
+		return
+	}
+	middleware2.SetAuditAction(c, "admin.system.update.install")
+	h.start(c, updatecontract.OperationInstall, req, func(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+		return h.updater.Install(ctx, request)
 	})
 }
 
-// Rollback restores a previous version.
-// Without a body (or with an empty version) it restores the local .backup binary
-// left by the last in-place update. With {"version": "x.y.z"} it downloads and
-// installs that specific release (must be one of the recent rollback versions).
-// POST /api/v1/admin/system/rollback
 func (h *SystemHandler) Rollback(c *gin.Context) {
-	var req struct {
-		Version string `json:"version"`
+	req, ok := decodeUpdaterRequest(c)
+	if !ok {
+		return
 	}
-	if c.Request.Body != nil && c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			response.Error(c, http.StatusBadRequest, "invalid request body")
-			return
-		}
-	}
-	targetVersion := strings.TrimSpace(req.Version)
-
-	operation := "rollback"
-	if targetVersion != "" {
-		operation = "rollback:" + targetVersion
-	}
-	operationID := buildSystemOperationID(c, operation)
-	payload := gin.H{"operation_id": operationID, "version": targetVersion}
-	executeAdminIdempotentJSON(c, "admin.system.rollback", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		lock, release, err := h.acquireSystemLock(ctx, operationID)
-		if err != nil {
-			return nil, err
-		}
-		var releaseReason string
-		succeeded := false
-		defer func() {
-			release(releaseReason, succeeded)
-		}()
-
-		if targetVersion != "" {
-			// 指定版本回退同样要下载完整二进制，与更新一样和请求生命周期解耦。
-			rollbackCtx, cancel := systemUpdateContext(ctx)
-			defer cancel()
-			err = h.updateSvc.RollbackToVersion(rollbackCtx, targetVersion)
-		} else {
-			err = h.updateSvc.Rollback()
-		}
-		if err != nil {
-			releaseReason = "SYSTEM_ROLLBACK_FAILED"
-			return nil, err
-		}
-		succeeded = true
-
-		return gin.H{
-			"message":      "Rollback completed. Please restart the service.",
-			"need_restart": true,
-			"version":      targetVersion,
-			"operation_id": lock.OperationID(),
-		}, nil
-	})
-}
-
-// RestartService restarts the systemd service
-// POST /api/v1/admin/system/restart
-func (h *SystemHandler) RestartService(c *gin.Context) {
-	operationID := buildSystemOperationID(c, "restart")
-	payload := gin.H{"operation_id": operationID}
-	executeAdminIdempotentJSON(c, "admin.system.restart", payload, service.DefaultSystemOperationIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		lock, release, err := h.acquireSystemLock(ctx, operationID)
-		if err != nil {
-			return nil, err
-		}
-		succeeded := false
-		defer func() {
-			release("", succeeded)
-		}()
-
-		// Schedule service restart in background after sending response
-		// This ensures the client receives the success response before the service restarts
-		go func() {
-			// Wait a moment to ensure the response is sent
-			time.Sleep(500 * time.Millisecond)
-			sysutil.RestartServiceAsync()
-		}()
-		succeeded = true
-		return gin.H{
-			"message":      "Service restart initiated",
-			"operation_id": lock.OperationID(),
-		}, nil
-	})
-}
-
-func (h *SystemHandler) acquireSystemLock(
-	ctx context.Context,
-	operationID string,
-) (*service.SystemOperationLock, func(string, bool), error) {
-	if h.lockSvc == nil {
-		return nil, nil, service.ErrIdempotencyStoreUnavail
-	}
-	lock, err := h.lockSvc.Acquire(ctx, operationID)
+	status, err := h.updater.Status(c.Request.Context())
 	if err != nil {
-		return nil, nil, err
+		h.updaterError(c, err)
+		return
 	}
-	release := func(reason string, succeeded bool) {
-		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = h.lockSvc.Release(releaseCtx, lock, succeeded, reason)
+	if status == nil || status.RollbackVersion == "" || req.Version != status.RollbackVersion {
+		response.BadRequest(c, "Requested version is not the updater's recorded rollback target")
+		return
 	}
-	return lock, release, nil
+	if req.Confirmation != "ROLLBACK "+req.Version {
+		response.BadRequest(c, "Explicit rollback confirmation does not match the recorded target")
+		return
+	}
+	middleware2.SetAuditAction(c, "admin.system.update.rollback")
+	h.start(c, updatecontract.OperationRollback, req, func(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+		return h.updater.Rollback(ctx, request)
+	})
 }
 
-func buildSystemOperationID(c *gin.Context, operation string) string {
-	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
-	if key == "" {
-		return "sysop-" + operation + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+type updaterWebRequest struct {
+	Version      string `json:"version"`
+	Confirmation string `json:"confirmation,omitempty"`
+}
+
+func decodeUpdaterRequest(c *gin.Context) (updaterWebRequest, bool) {
+	var request updaterWebRequest
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUpdaterRequestBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		response.BadRequest(c, "Invalid updater request")
+		return request, false
 	}
-	actorScope := "admin:0"
-	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
-		actorScope = "admin:" + strconv.FormatInt(subject.UserID, 10)
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "Invalid updater request")
+		return request, false
 	}
-	seed := operation + "|" + actorScope + "|" + c.FullPath() + "|" + key
-	hash := service.HashIdempotencyKey(seed)
-	if len(hash) > 24 {
-		hash = hash[:24]
+	request.Version = strings.TrimSpace(request.Version)
+	request.Confirmation = strings.TrimSpace(request.Confirmation)
+	if !updatecontract.IsReworkVersion(request.Version) {
+		response.BadRequest(c, "Invalid rework version")
+		return request, false
 	}
-	return "sysop-" + hash
+	return request, true
+}
+
+func (h *SystemHandler) requireReadyRelease(c *gin.Context, version string) bool {
+	info, err := h.watcher.CheckUpdate(c.Request.Context(), false)
+	if err != nil || info == nil {
+		response.InternalError(c, "Failed to verify the approved release")
+		return false
+	}
+	if !info.Installable || info.State != service.ReleaseStateUpdateReady || info.LatestCompatibleRework != version {
+		response.Error(c, http.StatusConflict, "Requested release is not approved and ready")
+		return false
+	}
+	return true
+}
+
+func (h *SystemHandler) start(
+	c *gin.Context,
+	action updatecontract.Operation,
+	request updaterWebRequest,
+	call func(context.Context, updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error),
+) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "Administrator session required")
+		return
+	}
+	accepted, err := call(c.Request.Context(), updatecontract.OperationRequest{
+		Version: request.Version, Confirmation: request.Confirmation,
+		Actor: fmt.Sprintf("admin:%d", subject.UserID),
+	})
+	if err != nil {
+		h.updaterError(c, err)
+		return
+	}
+	middleware2.SetAuditExtra(c, map[string]any{
+		"action": string(action), "target_version": request.Version, "operation_id": accepted.OperationID,
+	})
+	response.Accepted(c, accepted)
+}
+
+func (h *SystemHandler) updaterStatus(ctx context.Context) updatecontract.UpdaterStatus {
+	status, err := h.updater.Status(ctx)
+	if err == nil && status != nil {
+		return *status
+	}
+	return updatecontract.UpdaterStatus{
+		SchemaVersion: 1, Healthy: false, State: updatecontract.UpdaterStateUnavailable,
+		LastError: "Updater service is unavailable.", UpdatedAt: time.Now().UTC(),
+	}
+}
+
+func (h *SystemHandler) updaterError(c *gin.Context, err error) {
+	if errors.Is(err, updaterclient.ErrUnavailable) {
+		response.Error(c, http.StatusServiceUnavailable, "Updater service is unavailable")
+		return
+	}
+	response.Error(c, http.StatusConflict, "Updater rejected the operation")
 }

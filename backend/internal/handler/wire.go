@@ -5,6 +5,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/updaterclient"
 
 	"github.com/google/wire"
 )
@@ -150,9 +151,9 @@ func ProvideBatchImageHandler(
 	return h
 }
 
-// ProvideSystemHandler creates admin.SystemHandler with UpdateService
-func ProvideSystemHandler(updateService *service.UpdateService, lockService *service.SystemOperationLockService) *admin.SystemHandler {
-	return admin.NewSystemHandler(updateService, lockService)
+// ProvideSystemHandler creates the read-only watcher and fixed Unix-socket updater bridge.
+func ProvideSystemHandler(updateService *service.UpdateService) *admin.SystemHandler {
+	return admin.NewSystemHandler(updateService, updaterclient.New())
 }
 
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo

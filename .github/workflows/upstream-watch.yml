@@ -1,0 +1,55 @@
+name: Upstream Release Watch
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-release-watch
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch canonical upstream
+        run: |
+          git remote add upstream https://github.com/Wei-Shaw/sub2api.git
+          git fetch upstream main --tags
+
+      - name: Report newer upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          STATUS=$(./scripts/upstream-status.sh)
+          printf '%s\n' "$STATUS"
+          LATEST=$(printf '%s\n' "$STATUS" | sed -n 's/^latest_fetched_upstream_tag=//p')
+          NEWER=$(printf '%s\n' "$STATUS" | sed -n 's/^newer_upstream_release=//p')
+          BASELINE=$(printf '%s\n' "$STATUS" | sed -n 's/^documented_baseline=//p')
+          if [ "$NEWER" != "true" ]; then
+            exit 0
+          fi
+
+          TITLE="Upstream ${LATEST} compatibility review"
+          BODY=$(printf '%s\n\n%s\n%s\n%s\n' \
+            "A newer Wei-Shaw/sub2api release was detected. This notice does not approve or deploy it." \
+            "Current qualified baseline: ${BASELINE}" \
+            "Detected upstream release: ${LATEST}" \
+            "Next step: create a sync branch, review conflicts and migrations, run compatibility CI, then publish a qualified rework artifact.")
+          NUMBER=$(gh issue list --state open --search "${TITLE} in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$NUMBER" ]; then
+            gh issue edit "$NUMBER" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi

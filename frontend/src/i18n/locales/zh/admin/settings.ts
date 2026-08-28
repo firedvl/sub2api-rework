@@ -648,6 +648,44 @@ export default {
         hideCcsImportButton: '隐藏 CCS 导入按钮',
         hideCcsImportButtonHint: '启用后将在 API Keys 页面隐藏"导入 CCS"按钮'
       },
+      updates: {
+        title: '软件更新',
+        description: '检查已批准的 rework 发布，并请求本机更新器准备、安装或回滚。',
+        check: '检查更新',
+        loading: '正在检查已批准的发布...',
+        loadFailed: '检查更新失败',
+        operationAccepted: '更新器已接受该操作。',
+        operationFailed: '更新器操作失败',
+        currentVersion: '当前安装：{version}',
+        upstreamBaseline: '上游基线',
+        latestUpstream: '最新上游',
+        availableVersion: '已批准发布',
+        preparedVersion: '已准备发布',
+        channel: '更新通道',
+        checkedAt: '检查时间',
+        updater: '更新器：{state}',
+        notes: '发布说明',
+        noteLabels: {
+          upstream: '上游变更',
+          rework: 'Rework 变更',
+          compatibility: '兼容性',
+          migrations: '数据库迁移',
+          rollback: '回滚'
+        },
+        prepare: '准备',
+        install: '安装',
+        rollback: '回滚',
+        installConfirm: '更新器验证已准备的镜像后，安装将替换正在运行的发布。',
+        rollbackConfirm: '回滚将恢复更新器记录的上一版本。',
+        confirmationLabel: '输入 {value} 以确认',
+        confirmationMismatch: '确认文本不匹配。',
+        states: {
+          up_to_date: '已是最新版本', upstream_available: '上游有新版本', compatibility_pending: '等待兼容性审查', rework_build_available: '有可用 rework 构建', update_ready: '已批准更新，可安装', update_blocked: '更新被阻止', update_failed: '检查更新失败'
+        },
+        updaterStates: {
+          unavailable: '不可用', idle: '空闲', preparing: '准备中', prepared: '已准备', installing: '安装中', rolling_back: '回滚中', succeeded: '已成功', failed: '失败', critical: '严重错误'
+        }
+      },
       purchase: {
         title: '充值/订阅页面',
         description: '在侧边栏展示“充值/订阅”入口，并在页面内通过 iframe 打开指定链接',

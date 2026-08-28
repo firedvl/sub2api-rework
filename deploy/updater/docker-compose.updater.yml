@@ -1,0 +1,10 @@
+services:
+  sub2api:
+    group_add:
+      - "${SUB2API_UPDATER_GID:?SUB2API_UPDATER_GID is required}"
+    volumes:
+      - type: bind
+        source: /run/sub2api-rework-updater
+        target: /run/sub2api-rework-updater
+    environment:
+      - SUB2API_UPDATER_SOCKET=/run/sub2api-rework-updater/updater.sock

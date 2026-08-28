@@ -25,6 +25,7 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 | `install-datamanagementd.sh` | datamanagementd 一键安装脚本 |
 | `sub2api.service` | Systemd service unit file |
 | `sub2api-datamanagementd.service` | datamanagementd systemd service unit file |
+| `updater/` | Restricted updater policy, Compose override, and hardened systemd unit examples |
 | `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
 | `config.example.yaml` | Example configuration file |
 | `EDGE_SECURITY.md` | Reverse proxy, CDN/WAF, trusted proxy, and ingress hardening guide |
@@ -239,6 +240,7 @@ docker compose down -v
 | `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
+| `SUB2API_IMAGE` | No | `weishaw/sub2api:latest` | Application image; the restricted updater pins this to an approved digest. |
 | `GEMINI_OAUTH_CLIENT_ID` | No | *(builtin)* | Google OAuth client ID (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_CLIENT_SECRET` | No | *(builtin)* | Google OAuth client secret (Gemini OAuth). Leave empty to use the built-in Gemini CLI client. |
 | `GEMINI_OAUTH_SCOPES` | No | *(default)* | OAuth scopes (Gemini OAuth) |
