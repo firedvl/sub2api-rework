@@ -92,7 +92,9 @@ These steps are examples for a staging host. This pull request does not run them
 
 3. Copy and edit the policy. Keep it root-owned and mode `0600`. Confirm every
    service name, path, initial version, and migration number against the staging
-   deployment.
+   deployment. The configured database user must be able to terminate remaining
+   connections and drop, create, and own the configured database so automatic
+   recovery can replace it from the backup.
 
    ```bash
    sudo install -d -o root -g root -m 0755 /etc/sub2api-rework
@@ -148,10 +150,11 @@ The checks send no provider credentials and no paid model traffic.
 ## Rollback Behavior And Limits
 
 If migration or health validation fails after deployment mutation, the updater
-uses a fresh bounded recovery timeout, stops the application, restores the
-PostgreSQL dump whenever migration execution was attempted, restores the
-previous image/configuration, restarts the service, and reruns all health
-checks. A stop or rollback failure leaves the updater in `critical` state.
+uses a fresh bounded recovery timeout and stops the application. Whenever
+migration execution was attempted, it forcibly disconnects remaining clients,
+recreates the target PostgreSQL database, and restores the pre-update dump. It
+then restores the previous image/configuration, restarts the service, and reruns
+all health checks. A stop or rollback failure leaves the updater in `critical` state.
 Prepare and install remain blocked in that state. A matching recorded rollback
 may be retried, but a failed or interrupted recovery attempt remains `critical`
 and preserves the recorded backup.
@@ -161,10 +164,11 @@ only while the database migration number still equals the backup's source
 migration. It is blocked after schema advancement because substituting an older
 application without restoring the database is not generally safe.
 
-Database restore is destructive and can discard writes made after the backup.
-Use automatic restore only during the bounded failed-install window. Outside
-that window, stop traffic and choose recovery based on the incident timeline;
-do not claim application rollback alone reverses database changes.
+Database recreation is destructive and discards writes made after the backup,
+including objects created by the failed migration. Use automatic restore only
+during the bounded failed-install window. Outside that window, stop traffic and
+choose recovery based on the incident timeline; do not claim application
+rollback alone reverses database changes.
 
 ## Staging Qualification
 
@@ -176,7 +180,8 @@ Before any production installation:
 4. Install an approved test release and verify the digest, migration state,
    frontend assets, PostgreSQL, Redis, and gateway health endpoints.
 5. Force application health failure and confirm automatic image/database
-   recovery and a healthy prior version.
+   recovery, removal of schema objects created only by the failed migration,
+   and a healthy prior version.
 6. Force restore failure and confirm the visible `critical` state and audit.
 7. Send concurrent operations and confirm only one acquires the lock.
 8. Confirm the application container has the updater socket only, never the

@@ -127,11 +127,10 @@ func (s *Service) checkBackupWritable() error {
 }
 
 func (s *Service) pullAndVerify(ctx context.Context, manifest *updatecontract.Manifest) error {
-	immutable := manifest.ImmutableImage()
-	if err := s.runDocker(ctx, nil, io.Discard, "pull", immutable); err != nil {
+	if err := s.runDocker(ctx, nil, io.Discard, "pull", manifest.Image); err != nil {
 		return fmt.Errorf("approved image pull failed")
 	}
-	digests, err := s.imageDigests(ctx, immutable)
+	digests, err := s.imageDigests(ctx, manifest.Image)
 	if err != nil {
 		return fmt.Errorf("approved image digest inspection failed")
 	}
@@ -299,9 +298,13 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 		if err != nil {
 			return err
 		}
+		if err := s.recreateDatabase(ctx); err != nil {
+			_ = dump.Close()
+			return err
+		}
 		restoreErr := s.runDocker(ctx, dump, io.Discard, s.composeArgs(
 			"exec", "-T", s.policy.DatabaseService, "pg_restore", "-U", s.policy.DatabaseUser,
-			"-d", s.policy.DatabaseName, "--clean", "--if-exists", "--no-owner", "--no-privileges",
+			"-d", s.policy.DatabaseName, "--no-owner", "--no-privileges",
 		)...)
 		_ = dump.Close()
 		if restoreErr != nil {
@@ -312,6 +315,24 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 		return err
 	}
 	return s.validateDeployment(ctx, backup.SourceMigration)
+}
+
+func (s *Service) recreateDatabase(ctx context.Context) error {
+	maintenanceDatabase := "postgres"
+	if s.policy.DatabaseName == maintenanceDatabase {
+		maintenanceDatabase = "template1"
+	}
+	database := `"` + s.policy.DatabaseName + `"`
+	owner := `"` + s.policy.DatabaseUser + `"`
+	if err := s.runDocker(ctx, nil, io.Discard, s.composeArgs(
+		"exec", "-T", s.policy.DatabaseService, "psql", "-U", s.policy.DatabaseUser,
+		"-d", maintenanceDatabase, "-v", "ON_ERROR_STOP=1",
+		"-c", "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)",
+		"-c", "CREATE DATABASE "+database+" OWNER "+owner,
+	)...); err != nil {
+		return fmt.Errorf("database recreation failed")
+	}
+	return nil
 }
 
 func (s *Service) restoreApplication(ctx context.Context, backup *backupMetadata) error {

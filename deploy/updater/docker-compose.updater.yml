@@ -8,3 +8,4 @@ services:
         target: /run/sub2api-rework-updater
     environment:
       - SUB2API_UPDATER_SOCKET=/run/sub2api-rework-updater/updater.sock
+      - SUB2API_UPDATER_GID=${SUB2API_UPDATER_GID:?SUB2API_UPDATER_GID is required}
