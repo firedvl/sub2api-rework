@@ -39,6 +39,7 @@ type fakeRunner struct {
 	calls              []string
 	migration          int
 	digestMismatch     bool
+	tagDigestMismatch  bool
 	failDatabase       bool
 	failBackup         bool
 	failRestore        bool
@@ -80,7 +81,7 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 		var digests []string
 		if strings.Contains(image, "ghcr.io/firedvl/sub2api-rework") {
 			digest := "ghcr.io/firedvl/sub2api-rework@" + testTargetDigest
-			if f.digestMismatch {
+			if f.digestMismatch || (f.tagDigestMismatch && !strings.Contains(image, "@")) {
 				digest = "ghcr.io/firedvl/sub2api-rework@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 			}
 			digests = []string{digest}
@@ -253,6 +254,16 @@ func TestPrepareRejectsDigestMismatch(t *testing.T) {
 	require.NotContains(t, string(environment), "SUB2API_IMAGE")
 }
 
+func TestPrepareRejectsDigestFromDifferentTag(t *testing.T) {
+	runner := &fakeRunner{tagDigestMismatch: true}
+	service, _ := newUpdaterTestService(t, runner)
+	_, err := service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: "0.1.184-rework.1", Actor: "admin:1"})
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 3*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateFailed, status.State)
+	require.Contains(t, status.LastError, "digest")
+}
+
 func TestInstallPreflightFailureDoesNotMutateDeployment(t *testing.T) {
 	runner := &fakeRunner{}
 	service, policy := newUpdaterTestService(t, runner)
@@ -363,6 +374,10 @@ func TestHealthFailureRestoresDatabaseAndPreviousImage(t *testing.T) {
 	require.Equal(t, "0.1.183-rework.1", status.InstalledVersion)
 	require.Equal(t, 232, status.CurrentMigration)
 	require.True(t, runner.hasCall(" pg_restore "))
+	databaseReset := runner.callIndex("DROP DATABASE IF EXISTS")
+	require.NotEqual(t, -1, databaseReset)
+	require.Equal(t, databaseReset, runner.callIndex("CREATE DATABASE"))
+	require.Less(t, databaseReset, runner.callIndex(" pg_restore "))
 	environment, err := os.ReadFile(policy.EnvironmentFile)
 	require.NoError(t, err)
 	require.Contains(t, string(environment), "SUB2API_IMAGE="+testSourceDigest)

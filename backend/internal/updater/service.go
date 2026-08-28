@@ -196,7 +196,6 @@ func (s *Service) runOperation(
 	state persistedState,
 	lock *operationLock,
 ) {
-	defer lock.release()
 	ctx, cancel := context.WithTimeout(context.Background(), s.policy.operationTimeout())
 	defer cancel()
 
@@ -209,6 +208,7 @@ func (s *Service) runOperation(
 	case updatecontract.OperationRollback:
 		operationErr = s.rollback(ctx, request.Version, &state)
 	}
+	lock.release()
 	s.finish(summary, operationErr, &state)
 }
 

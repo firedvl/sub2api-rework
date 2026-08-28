@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -110,6 +110,7 @@ const operating = ref(false)
 const error = ref('')
 const confirmation = ref<'install' | 'rollback' | null>(null)
 const confirmationText = ref('')
+let mounted = true
 
 const stateLabel = computed(() => status.value ? t(`admin.settings.updates.states.${status.value.state}`) : '')
 const updaterLabel = computed(() => status.value ? t(`admin.settings.updates.updaterStates.${status.value.updater.state}`) : '')
@@ -131,13 +132,15 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-async function load(force = false) {
+async function load(force = false): Promise<boolean> {
   loading.value = true
   error.value = ''
   try {
     status.value = await checkUpdates(force)
+    return true
   } catch (err) {
     error.value = extractApiErrorMessage(err, t('admin.settings.updates.loadFailed'))
+    return false
   } finally {
     loading.value = false
   }
@@ -174,7 +177,12 @@ async function runOperation(operation: () => Promise<unknown>) {
   try {
     await stepUp.run(operation)
     appStore.showSuccess(t('admin.settings.updates.operationAccepted'))
-    await load(true)
+    let loaded = await load(true)
+    while (mounted && (!loaded || status.value?.updater.busy)) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      if (!mounted) break
+      loaded = await load()
+    }
   } catch (err) {
     if (isStepUpCancelled(err)) return
     if (isStepUpBlocked(err)) {
@@ -188,4 +196,5 @@ async function runOperation(operation: () => Promise<unknown>) {
 }
 
 onMounted(() => load())
+onUnmounted(() => { mounted = false })
 </script>

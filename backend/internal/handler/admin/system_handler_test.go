@@ -110,6 +110,12 @@ func TestSystemHandlerInstallRequiresExactConfirmationAndDerivesActor(t *testing
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 
 	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/install", strings.NewReader(`{"version":"0.1.184-rework.1","confirmation":" INSTALL 0.1.184-rework.1\n"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+
+	recorder = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/install", strings.NewReader(`{"version":"0.1.184-rework.1","confirmation":"INSTALL 0.1.184-rework.1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, req)
@@ -132,6 +138,13 @@ func TestSystemHandlerRollbackOnlyAllowsRecordedTarget(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/rollback", strings.NewReader(`{"version":"0.1.182-rework.1","confirmation":"ROLLBACK 0.1.182-rework.1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, updater.action)
+
+	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/rollback", strings.NewReader(`{"version":"0.1.183-rework.1","confirmation":" ROLLBACK 0.1.183-rework.1\n"}`))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)

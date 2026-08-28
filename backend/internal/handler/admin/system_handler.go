@@ -143,7 +143,6 @@ func decodeUpdaterRequest(c *gin.Context) (updaterWebRequest, bool) {
 		return request, false
 	}
 	request.Version = strings.TrimSpace(request.Version)
-	request.Confirmation = strings.TrimSpace(request.Confirmation)
 	if !updatecontract.IsReworkVersion(request.Version) {
 		response.BadRequest(c, "Invalid rework version")
 		return request, false

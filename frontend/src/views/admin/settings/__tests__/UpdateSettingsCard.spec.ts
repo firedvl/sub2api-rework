@@ -72,6 +72,40 @@ describe('UpdateSettingsCard', () => {
     expect(prepareUpdate).toHaveBeenCalledWith('1.2.3-rework.4')
   })
 
+  it('refreshes an accepted operation until the updater is no longer busy', async () => {
+    vi.useFakeTimers()
+    const preparing = updateStatus('update_ready', 'preparing')
+    preparing.updater.busy = true
+    checkUpdates
+      .mockResolvedValueOnce(updateStatus('update_ready', 'idle'))
+      .mockResolvedValueOnce(preparing)
+      .mockRejectedValueOnce(new Error('application restarting'))
+      .mockResolvedValueOnce(updateStatus('update_ready', 'prepared', '1.2.3-rework.4'))
+    prepareUpdate.mockResolvedValue({ operation_id: 'prepare-1' })
+    const wrapper = mountCard()
+
+    try {
+      await flushPromises()
+      const prepareButton = wrapper.findAll('button').find(button => button.text().includes('admin.settings.updates.prepare'))
+      await prepareButton!.trigger('click')
+      await flushPromises()
+      expect(checkUpdates).toHaveBeenCalledTimes(2)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+      expect(checkUpdates).toHaveBeenCalledTimes(3)
+
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+      expect(checkUpdates).toHaveBeenCalledTimes(4)
+      const installButton = wrapper.findAll('button').find(button => button.text().includes('admin.settings.updates.install'))
+      expect(installButton!.attributes('disabled')).toBeUndefined()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('passes exact install confirmation through the step-up wrapper', async () => {
     checkUpdates.mockResolvedValue(updateStatus('update_ready', 'prepared', '1.2.3-rework.4'))
     installUpdate.mockResolvedValue({ operation_id: 'install-1' })
