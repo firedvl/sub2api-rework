@@ -9,10 +9,11 @@ origin    https://github.com/firedvl/sub2api-rework.git
 upstream  https://github.com/Wei-Shaw/sub2api.git
 ```
 
-The rework baseline is upstream tag `v0.1.181`, whose annotated tag resolves to:
+The accepted rework baseline is:
 
 ```text
-3af5443b224823ae507a50c7b113aa50604409c8
+UPSTREAM_BASELINE_TAG=v0.1.183
+UPSTREAM_BASELINE_SHA=e8cb019fabf8b55199436229044cbf9aa7a82564
 ```
 
 Gateway compatibility changes must remain traceable to that commit until an
@@ -24,7 +25,8 @@ upstream update is reviewed and qualified.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.1.181..main v0.1.181..upstream/main
+git range-diff v0.1.183..main v0.1.183..upstream/main
+./scripts/upstream-status.sh
 ```
 
 Review changes to gateway routes, authentication, account scheduling, protocol
@@ -44,6 +46,59 @@ before adopting a new baseline.
 
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
+
+## v0.1.183 Change Audit
+
+The accepted range is `v0.1.181..v0.1.183` (39 commits, 66 changed files).
+
+| Area | Audit result |
+| --- | --- |
+| Backend | Adopted OpenAI, Antigravity, Kimi, Anthropic, authentication, billing, and channel-monitor fixes. |
+| Frontend | Kept the payment-result balance refresh because that route remains active. The operator console presentation is unchanged. |
+| Migrations | Upstream added none. Published rework migrations `231` and `232` remain unchanged and follow upstream migration `230`. |
+| Gateway routing | No route registrations changed. Kimi detection now covers `k3`, `k3-256k`, and `kimi-code/k3`; one-key and `alpha_search` routing remain intact. |
+| OpenAI OAuth and quota | Added upstream 5-hour/7-day/reset classification for same-account retry decisions. Proven exhaustion still uses rework quota provenance and recovery. |
+| OpenAI Responses | Adopted typed custom-tool/tool-search item ID restoration and the Responses Lite HTTP/WebSocket fixes. |
+| Account scheduling and sessions | Adopted `session-id` affinity and preserved sticky bindings during temporary capacity spillover. |
+| Antigravity and Gemini | Adopted explicit Sonnet 4.5 routing, legacy Sonnet 4.6 mapping, and the 64,000-token compatibility clamp. No direct Gemini implementation changed. |
+| Anthropic | Adopted cache-TTL billing deduplication. |
+| Kimi and other providers | Adopted recoverable Kimi concurrency handling, OpenCode Go reset-duration parsing, and verbatim OpenAI OAuth image prompts. |
+| Authentication | Adopted alias-aware email rebinding and transaction-level concurrency protection. |
+| Configuration | No schema or setting changes. |
+| Deployment and Docker | No changes. |
+| Dependencies | No manifest or lockfile changes. |
+| Tests | Adopted upstream coverage and retained rework gateway, recovery, warm-up, migration, API-contract, and operator-console suites. |
+
+### OpenAI 429 Overlap
+
+Upstream supersedes the old retry decision that treated every OpenAI OAuth 429
+as transient. It complements, but does not replace, the rework recovery path:
+upstream does not persist block provenance, refresh authoritative quota while a
+block is active, or recover before a predicted reset.
+
+The merged fast path marks its in-memory block as quota-owned only when a 5-hour
+or 7-day window is proven exhausted, or the body is exactly
+`usage_limit_reached`, and no `Retry-After` is present. Generic 429,
+`Retry-After`, authentication failure, and manual disable remain outside early
+quota recovery. This ownership rule lets authoritative recovery clear the exact
+quota block without clearing a newer generic block.
+
+### Sync Strategy and Touch Points
+
+The sync merges the annotated `v0.1.183` tag so upstream authorship and ancestry
+remain visible. Sponsor-only README/logo churn was left out; the build version
+is `0.1.183-rework.1`.
+
+Future syncs must review these combined boundaries:
+
+- `internal/service/openai_account_runtime_block_fastpath.go`: upstream 429
+  classification plus rework quota-owned runtime generations;
+- `internal/service/ratelimit_service.go`: upstream provider classification plus
+  rework quota provenance persistence;
+- `internal/pkg/apicompat/responses_client_tools.go`: typed item IDs plus rework
+  Antigravity lowering/restoration;
+- `internal/service/antigravity_gateway_compat.go`: client tools, standalone
+  search compatibility, and the upstream token clamp.
 
 ## Rework Patch: Automatic Quota Recovery
 
