@@ -14,6 +14,9 @@ type OptionalJWTAuthMiddleware gin.HandlerFunc
 // AdminAuthMiddleware 管理员认证中间件类型
 type AdminAuthMiddleware gin.HandlerFunc
 
+// StrictStepUpAuthMiddleware always requires a recent TOTP-verified JWT session.
+type StrictStepUpAuthMiddleware gin.HandlerFunc
+
 // APIKeyAuthMiddleware API Key 认证中间件类型
 type APIKeyAuthMiddleware gin.HandlerFunc
 
@@ -25,4 +28,5 @@ var ProviderSet = wire.NewSet(
 	NewAPIKeyAuthMiddleware,
 	NewAuditLogMiddleware,
 	NewStepUpAuthMiddleware,
+	NewStrictStepUpAuthMiddleware,
 )

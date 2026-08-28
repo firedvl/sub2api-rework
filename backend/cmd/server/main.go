@@ -4,9 +4,10 @@ package main
 
 import (
 	"context"
-	_ "embed"
+	"database/sql"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,15 +20,15 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/releaseinfo"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 )
-
-//go:embed VERSION
-var embeddedVersion string
 
 // Build-time variables (can be set by ldflags)
 var (
@@ -43,11 +44,7 @@ func init() {
 		return
 	}
 
-	// 默认从 embedded VERSION 文件读取版本号（编译期打包进二进制）。
-	Version = strings.TrimSpace(embeddedVersion)
-	if Version == "" {
-		Version = "0.0.0-dev"
-	}
+	Version = releaseinfo.Current().ReworkVersion
 }
 
 // initLogger configures the default slog handler based on gin.Mode().
@@ -58,6 +55,7 @@ func main() {
 
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
+	migrateMode := flag.Bool("migrate", false, "Apply database migrations and exit")
 	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
 
@@ -71,6 +69,13 @@ func main() {
 		if err := setup.RunCLI(); err != nil {
 			log.Fatalf("Setup failed: %v", err)
 		}
+		return
+	}
+	if *migrateMode {
+		if err := runMigrations(); err != nil {
+			log.Fatalf("Migrations failed: %v", err)
+		}
+		log.Println("Migrations completed")
 		return
 	}
 
@@ -92,6 +97,21 @@ func main() {
 
 	// Normal server mode
 	runMainServer()
+}
+
+func runMigrations() error {
+	cfg, err := config.LoadForBootstrap()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := sql.Open("postgres", cfg.Database.DSN())
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	return repository.ApplyMigrations(ctx, db)
 }
 
 func runSetupServer() {
@@ -145,6 +165,8 @@ func runMainServer() {
 
 	buildInfo := handler.BuildInfo{
 		Version:   Version,
+		Commit:    Commit,
+		Date:      Date,
 		BuildType: BuildType,
 	}
 

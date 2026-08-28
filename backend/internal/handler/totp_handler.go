@@ -209,6 +209,11 @@ func (h *TotpHandler) StepUp(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
+	sessionKey, ok := middleware2.StepUpSessionKey(c)
+	if !ok {
+		middleware2.AbortWithError(c, 401, "STEP_UP_SESSION_REQUIRED", "Sign in again before verifying this operation")
+		return
+	}
 
 	var req TotpStepUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -216,7 +221,6 @@ func (h *TotpHandler) StepUp(c *gin.Context) {
 		return
 	}
 
-	sessionKey := middleware2.StepUpSessionKey(c, subject.UserID)
 	ttl, err := h.totpService.VerifyStepUp(c.Request.Context(), subject.UserID, sessionKey, req.Code)
 	if err != nil {
 		response.ErrorFrom(c, err)

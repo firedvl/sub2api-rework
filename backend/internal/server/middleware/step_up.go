@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -27,13 +27,10 @@ type stepUpSettingReader interface {
 	IsStepUpEnabled(ctx context.Context) bool
 }
 
-// StepUpSessionKey 计算 step-up 授权的会话键：
-// 优先绑定当前会话（refresh token family），无会话 ID 的旧 token 退化为用户级键。
-func StepUpSessionKey(c *gin.Context, userID int64) string {
-	if sid := c.GetString(ContextKeySessionID); sid != "" {
-		return sid
-	}
-	return fmt.Sprintf("u%d", userID)
+// StepUpSessionKey returns the current refresh-token family identifier.
+func StepUpSessionKey(c *gin.Context) (string, bool) {
+	sid := c.GetString(ContextKeySessionID)
+	return sid, sid != "" && strings.TrimSpace(sid) == sid
 }
 
 // NewStepUpAuthMiddleware 创建敏感操作 step-up 2FA 门控中间件。
@@ -51,6 +48,14 @@ func NewStepUpAuthMiddleware(
 	settingService *service.SettingService,
 ) StepUpAuthMiddleware {
 	return StepUpAuthMiddleware(stepUpAuth(totpService, userService, stepUpSettingsOrNil(settingService)))
+}
+
+// NewStrictStepUpAuthMiddleware ignores the feature flag and fails closed.
+func NewStrictStepUpAuthMiddleware(
+	totpService *service.TotpService,
+	userService *service.UserService,
+) StrictStepUpAuthMiddleware {
+	return StrictStepUpAuthMiddleware(stepUpAuth(totpService, userService, nil))
 }
 
 // stepUpSettingsOrNil 将可能为 nil 的具体指针归一化为接口，
@@ -112,6 +117,11 @@ func enforceStepUp(c *gin.Context, grantChecker stepUpGrantChecker, userReader s
 		AbortWithError(c, 401, "UNAUTHORIZED", "Authorization required")
 		return false
 	}
+	sessionKey, ok := StepUpSessionKey(c)
+	if !ok {
+		AbortWithError(c, 401, "STEP_UP_SESSION_REQUIRED", "Sign in again before verifying this operation")
+		return false
+	}
 
 	user, err := userReader.GetByID(c.Request.Context(), subject.UserID)
 	if err != nil {
@@ -124,7 +134,6 @@ func enforceStepUp(c *gin.Context, grantChecker stepUpGrantChecker, userReader s
 		return false
 	}
 
-	sessionKey := StepUpSessionKey(c, subject.UserID)
 	granted, err := grantChecker.HasStepUpGrant(c.Request.Context(), subject.UserID, sessionKey)
 	if err != nil {
 		// 安全门控故障时选择 fail-closed。

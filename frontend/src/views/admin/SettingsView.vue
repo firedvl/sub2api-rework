@@ -6239,6 +6239,7 @@
 
         <!-- Tab: General -->
         <div id="settings-panel-general" v-show="activeTab === 'general'" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" class="space-y-6">
+          <UpdateSettingsCard />
           <!-- Site Settings -->
           <div class="card">
             <div
@@ -8804,6 +8805,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import UpdateSettingsCard from "@/views/admin/settings/UpdateSettingsCard.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,

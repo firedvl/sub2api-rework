@@ -43,6 +43,17 @@ response conversion, streaming, and usage accounting
 - `frontend/src/views` and `frontend/src/components` render the inherited UI.
 - `deploy` contains self-hosting assets and examples.
 
+## Release And Update Boundary
+
+The application performs read-only GitHub release discovery. Security-sensitive
+prepare, install, and rollback requests cross a local Unix socket to a separate
+host updater. Only that host service can use Docker; the application and
+frontend never receive `/var/run/docker.sock`.
+
+The updater accepts fixed operations and version identifiers, then independently
+retrieves and validates the release manifest, image repository, and digest. See
+[UPDATER.md](UPDATER.md) for the trust model, installation, and rollback limits.
+
 ## Provider and Credential Boundary
 
 Downstream clients authenticate to Sub2API. Provider OAuth tokens and API keys

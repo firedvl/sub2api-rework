@@ -1,0 +1,51 @@
+[Unit]
+Description=Sub2API Rework restricted host updater
+Documentation=https://github.com/firedvl/sub2api-rework/blob/main/docs/UPDATER.md
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=sub2api-updater
+ExecStart=/usr/local/sbin/sub2api-rework-updater --config /etc/sub2api-rework/updater.json
+Restart=on-failure
+RestartSec=5s
+UMask=0007
+
+RuntimeDirectory=sub2api-rework-updater
+RuntimeDirectoryMode=0750
+StateDirectory=sub2api-rework-updater
+StateDirectoryMode=0700
+LogsDirectory=sub2api-rework-updater
+LogsDirectoryMode=0700
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+DevicePolicy=closed
+ReadWritePaths=/run/sub2api-rework-updater
+ReadWritePaths=/var/lib/sub2api-rework-updater
+ReadWritePaths=/var/log/sub2api-rework-updater
+ReadWritePaths=/opt/sub2api-rework/deploy
+ReadWritePaths=/var/run/docker.sock
+
+[Install]
+WantedBy=multi-user.target

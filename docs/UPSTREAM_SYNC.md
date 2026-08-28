@@ -9,15 +9,22 @@ origin    https://github.com/firedvl/sub2api-rework.git
 upstream  https://github.com/Wei-Shaw/sub2api.git
 ```
 
-The accepted rework baseline is:
+The accepted rework baseline is defined once in
+`backend/internal/releaseinfo/metadata.json`:
 
 ```text
-UPSTREAM_BASELINE_TAG=v0.1.183
-UPSTREAM_BASELINE_SHA=e8cb019fabf8b55199436229044cbf9aa7a82564
+"upstream_baseline": "v0.1.183"
+"upstream_baseline_sha": "e8cb019fabf8b55199436229044cbf9aa7a82564"
 ```
 
+This document explains the baseline; scripts and builds consume the JSON record.
 Gateway compatibility changes must remain traceable to that commit until an
 upstream update is reviewed and qualified.
+
+The scheduled upstream watcher opens or updates a tracking issue when a newer
+tag appears. That issue means compatibility review is pending. It does not make
+the upstream tag installable, create an approved manifest, merge changes, or
+deploy anything.
 
 ## Inspect an Upstream Update
 
@@ -42,7 +49,8 @@ before adopting a new baseline.
 4. Run focused tests, backend tests, frontend checks when affected, and a secret
    scan.
 5. Record the new upstream commit and tag in this file and the README only after
-   acceptance passes.
+   acceptance passes. Update `backend/internal/releaseinfo/metadata.json` in the
+   same reviewed change; it is the machine-readable source of truth.
 
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
