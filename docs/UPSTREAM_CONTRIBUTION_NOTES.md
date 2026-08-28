@@ -5,8 +5,10 @@ not an upstream issue or pull request.
 
 ## Baseline
 
-- Upstream release: `v0.1.181`
-- Base commit: `3af5443b224823ae507a50c7b113aa50604409c8`
+- Current revalidation release: `v0.1.183`
+- Current base commit: `e8cb019fabf8b55199436229044cbf9aa7a82564`
+- Original implementation release: `v0.1.181`
+- Original base commit: `3af5443b224823ae507a50c7b113aa50604409c8`
 - Public context: [Wei-Shaw/sub2api issue #5843](https://github.com/Wei-Shaw/sub2api/issues/5843)
 
 ## Responses Client Tools in Antigravity

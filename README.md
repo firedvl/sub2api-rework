@@ -15,7 +15,7 @@ known limitations.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Upstream baseline | Supported | Pinned to upstream `v0.1.181` (`3af5443b224823ae507a50c7b113aa50604409c8`) |
+| Upstream baseline | Supported | Pinned to upstream `v0.1.183` (`e8cb019fabf8b55199436229044cbf9aa7a82564`) |
 | One-key multi-provider routing | Experimental | Uses inherited API-key, group, account-pool, and composite-routing behavior |
 | OpenAI-compatible gateway | Experimental | Preserves upstream Responses and Chat Completions paths |
 | Codex client tools | Experimental | Antigravity forwarding reuses shared namespace and custom-tool adaptation |

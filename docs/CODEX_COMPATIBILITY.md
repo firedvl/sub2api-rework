@@ -10,7 +10,7 @@ selected provider transport.
 
 | Capability | Status | Boundary |
 | --- | --- | --- |
-| Codex Responses through OpenAI-compatible accounts | Experimental | Inherited from upstream `v0.1.181` |
+| Codex Responses through OpenAI-compatible accounts | Experimental | Inherited from upstream `v0.1.183` |
 | Ordinary function and shell tools | Experimental | Requires normal Responses tool conversion |
 | Namespace and custom client tools through Antigravity | Experimental | Antigravity-specific Responses forwarding reuses shared lowering and restoration |
 | Native hosted web search plus custom functions through Antigravity | Known limitation | The observed `v1internal` transport rejects `googleSearch` with `functionDeclarations` in one request |
