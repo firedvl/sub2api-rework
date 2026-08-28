@@ -2326,6 +2326,29 @@
         <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
       </div>
 
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+        class="space-y-2 border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="auto-warmup-settings"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <label class="input-label mb-0">{{ t('admin.accounts.autoWarmup.title') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.autoWarmup.hint') }}
+            </p>
+          </div>
+          <Toggle
+            v-model="autoWarmupEnabled"
+            :aria-label="t('admin.accounts.autoWarmup.title')"
+            data-testid="auto-warmup-enabled"
+          />
+        </div>
+        <p v-if="autoWarmupLastAttempt" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt">
+          {{ autoWarmupLastAttemptLabel }}
+        </p>
+      </div>
+
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
       <div
         v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
@@ -2885,7 +2908,7 @@ import {
   type CnNativeApiProtocol,
   type HeaderOverrideRow
 } from '@/components/account/credentialsBuilder'
-import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
+import { formatDateTime, formatDateTimeLocalInput, formatRelativeTime, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
@@ -3161,6 +3184,18 @@ const autoPause7dDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
+const autoWarmupEnabled = ref(false)
+const autoWarmupLastAttempt = computed(() => props.account?.extra?.codex_auto_warmup_state)
+const autoWarmupLastAttemptLabel = computed(() => {
+  const attempt = autoWarmupLastAttempt.value
+  if (!attempt) return ''
+  const knownStatuses = ['pending', 'succeeded', 'failed']
+  const rawStatus = attempt.status?.trim() || 'unknown'
+  const status = t(`admin.accounts.autoWarmup.status.${knownStatuses.includes(rawStatus) ? rawStatus : 'unknown'}`)
+  const timestamp = attempt.completed_at || attempt.attempted_at
+  const time = timestamp ? formatRelativeTime(timestamp) : t('admin.accounts.autoWarmup.unknownTime')
+  return t('admin.accounts.autoWarmup.lastAttempt', { status, time })
+})
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
@@ -3694,6 +3729,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold * 100 : 100
 	autoResetCredit7dThreshold.value =
 		typeof extra?.auto_reset_credit_7d_threshold === 'number' ? extra.auto_reset_credit_7d_threshold * 100 : 100
+	autoWarmupEnabled.value = extra?.auto_warmup_enabled === true
 	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
@@ -5161,9 +5197,11 @@ const handleSubmit = async () => {
 			newExtra.auto_reset_credit_enabled = autoResetCreditEnabled.value
 			newExtra.auto_reset_credit_5h_threshold = autoResetCredit5hThreshold.value / 100
 			newExtra.auto_reset_credit_7d_threshold = autoResetCredit7dThreshold.value / 100
+			newExtra.auto_warmup_enabled = autoWarmupEnabled.value
 		}
 		// 运行态只允许后端服务更新，账号编辑不得回写旧状态。
 		delete newExtra.codex_auto_reset_credit_state
+		delete newExtra.codex_auto_warmup_state
 
 		delete newExtra.codex_image_generation_bridge_enabled
       switch (codexImageToolMode.value) {

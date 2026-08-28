@@ -746,6 +746,51 @@ test.describe('operator console navigation', () => {
     expect(await toggle.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(tokens.track)
   })
 
+  test('keeps Auto Warm-up controls accessible and responsive', async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/settings')
+    await page.getByRole('tab', { name: 'Gateway' }).click()
+
+    const globalSwitch = page.getByRole('switch', { name: 'OpenAI automatic warm-up' })
+    await globalSwitch.scrollIntoViewIfNeeded()
+    await expect(globalSwitch).toBeVisible()
+    await expect(globalSwitch).toHaveAttribute('aria-checked', 'false')
+    await globalSwitch.focus()
+    await page.keyboard.press('Space')
+    await expect(globalSwitch).toHaveAttribute('aria-checked', 'true')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(globalSwitch).toBeVisible()
+    const settingsOverflow = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }))
+    expect(settingsOverflow.scrollWidth).toBeLessThanOrEqual(settingsOverflow.clientWidth + 1)
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/accounts')
+    await page.getByRole('tab', { name: 'Technical' }).click()
+    const accountRow = page.locator('.operator-account-table tr').filter({ hasText: 'Codex Team West' })
+    await accountRow.locator('.operator-table-row-action').filter({ hasText: 'Edit' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Edit Account' })
+    const accountSwitch = dialog.getByRole('switch', { name: 'Automatic warm-up' })
+    await accountSwitch.scrollIntoViewIfNeeded()
+    await expect(accountSwitch).toHaveAttribute('aria-checked', 'true')
+    await expect(dialog.getByTestId('auto-warmup-last-attempt')).toContainText('Last attempt: Succeeded')
+    await accountSwitch.focus()
+    await page.keyboard.press('Space')
+    await expect(accountSwitch).toHaveAttribute('aria-checked', 'false')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(accountSwitch).toBeVisible()
+    const dialogOverflow = await dialog.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }))
+    expect(dialogOverflow.scrollWidth).toBeLessThanOrEqual(dialogOverflow.clientWidth + 1)
+  })
+
   test('keeps fidelity pages inside the comparison viewports', async ({ page, browser }) => {
     test.setTimeout(60_000)
     const anonymous = await browser.newContext()

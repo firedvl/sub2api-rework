@@ -52,6 +52,33 @@ func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
 	require.Equal(t, 0, offset)
 }
 
+func TestAccountHandlerListETagTracksAutoWarmupState(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	now := time.Now().UTC()
+	adminSvc.accounts = []service.Account{{
+		ID: 41, Name: "oauth-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, CreatedAt: now, UpdatedAt: now,
+		Extra: map[string]any{"auto_warmup_enabled": true},
+	}}
+
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil))
+	require.Equal(t, http.StatusOK, first.Code)
+	firstETag := first.Header().Get("ETag")
+	require.NotEmpty(t, firstETag)
+
+	adminSvc.accounts[0].Extra["codex_auto_warmup_state"] = map[string]any{
+		"status": "succeeded", "attempted_at": now.Format(time.RFC3339),
+	}
+	second := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?page=1&page_size=20", nil)
+	request.Header.Set("If-None-Match", firstETag)
+	router.ServeHTTP(second, request)
+
+	require.Equal(t, http.StatusOK, second.Code)
+	require.NotEqual(t, firstETag, second.Header().Get("ETag"))
+}
+
 func TestAccountHandlerListReturnsSchedulerScoresPerGroup(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 	now := time.Now().UTC()

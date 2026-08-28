@@ -1146,6 +1146,17 @@ export interface Account {
       last_result_at?: string
       error_code?: string
     }
+    auto_warmup_enabled?: boolean
+    codex_auto_warmup_state?: {
+      status?: string
+      attempted_at?: string
+      completed_at?: string
+      error_code?: string
+      model?: string
+      request_id?: string
+      reset_at?: string
+      window_type?: string
+    }
   } & Record<string, unknown>)
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null

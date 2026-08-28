@@ -64,3 +64,51 @@ During an upstream rebase, review these touch points:
 - `internal/service/openai_quota_auto_reset.go`: restart-safe refresh scan;
 - `internal/repository/account_repo.go`: marker persistence, compare-and-set
   clear, scheduler outbox, and snapshot refresh.
+
+## Rework Patch: OpenAI Auto Warm-up
+
+Design reference: `Soju06/codex-lb` commit
+[`2268f8caf1fe9d74a8734bd3f9cd8bd5152b5d3f`](https://github.com/Soju06/codex-lb/commit/2268f8caf1fe9d74a8734bd3f9cd8bd5152b5d3f),
+distributed under the MIT License. This patch adopts its warm-up behavior and
+safety concepts while implementing them in the existing Go/PostgreSQL service
+boundaries rather than porting its Python architecture.
+
+OpenAI OAuth parent accounts can opt into a global-and-account-gated maintenance
+request after the existing quota worker confirms a genuinely new primary quota
+window. The worker claims `account + 5h reset` in PostgreSQL before network I/O,
+treats reset timestamps within 60 seconds as the same window, and records the
+result as `source=auto_warmup` and `request_kind=warmup`. Failed and pending
+attempts remain deduplicated for that window; a later window remains eligible.
+
+The sender refreshes OAuth credentials, resolves a current Codex model through
+the account's normal route, preserves proxy and identity behavior, and sends a
+non-streaming Responses request with no tools and a four-token output limit.
+Idle-window initialization is not attempted because current provider quota data
+does not identify that state reliably enough to act without guessing.
+
+Data and API additions:
+
+- `migrations/232_openai_auto_warmup_attempts.sql`: durable attempt, outcome,
+  request identity, latency, and token-usage history;
+- account `extra.auto_warmup_enabled`: per-account switch, default false;
+- account `extra.codex_auto_warmup_state`: service-owned last-attempt status;
+- `openai_auto_warmup_enabled`: global setting, default false, exposed through
+  the existing settings API;
+- Accounts edit modal and Gateway settings panel: existing toggle controls and
+  lightweight last-attempt status.
+
+During an upstream rebase, review these touch points:
+
+- `internal/service/openai_quota_auto_reset.go`: lifecycle hook after usage
+  refresh and quota recovery;
+- `internal/service/openai_auto_warmup*.go`: window evidence, safety checks,
+  bounded sends, model resolution, routing, and observability;
+- `internal/repository/openai_auto_warmup_repo.go`: advisory-lock claim and
+  reset-jitter deduplication;
+- admin account normalization and settings DTO/service/handler wiring;
+- `frontend/src/components/account/EditAccountModal.vue` and
+  `frontend/src/views/admin/SettingsView.vue`.
+
+Revalidate provider quota semantics, Codex manifest and Responses request
+compatibility, auth/proxy transport behavior, multi-replica claim tests, admin
+ETags, and both default-off switches before accepting an upstream sync.

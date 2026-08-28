@@ -1386,6 +1386,32 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     }
   })
 
+  it('shows and saves Auto Warm-up only for OpenAI OAuth parent accounts', async () => {
+    const parent = buildOpenAIOAuthParentAccount()
+    parent.extra = { codex_auto_warmup_state: { status: 'succeeded' } }
+    updateAccountMock.mockResolvedValue(parent)
+    const wrapper = mountModal(parent)
+
+    expect(wrapper.find('[data-testid="auto-warmup-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="auto-warmup-last-attempt"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="auto-warmup-enabled"]').attributes('aria-label')).toBe(
+      'admin.accounts.autoWarmup.title'
+    )
+    await wrapper.get('[data-testid="auto-warmup-enabled"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({ auto_warmup_enabled: true })
+    expect(extra).not.toHaveProperty('codex_auto_warmup_state')
+    wrapper.unmount()
+
+    for (const account of [buildAccount(), buildOpenAISetupTokenAccount(), buildOpenAISparkShadowAccount(), buildGrokOAuthAccount()]) {
+      const unsupported = mountModal(account)
+      expect(unsupported.find('[data-testid="auto-warmup-settings"]').exists()).toBe(false)
+      unsupported.unmount()
+    }
+  })
+
   it('独立保存两个阈值，并禁止把运行态回写到管理请求', async () => {
     const account = buildOpenAIOAuthParentAccount()
     account.extra = {

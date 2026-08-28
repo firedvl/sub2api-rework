@@ -15,6 +15,8 @@ const (
 	OpenAIAutoResetCredit5hThresholdExtraKey = "auto_reset_credit_5h_threshold"
 	OpenAIAutoResetCredit7dThresholdExtraKey = "auto_reset_credit_7d_threshold"
 	OpenAIAutoResetCreditStateExtraKey       = "codex_auto_reset_credit_state"
+	OpenAIAutoWarmupEnabledExtraKey          = "auto_warmup_enabled"
+	OpenAIAutoWarmupStateExtraKey            = "codex_auto_warmup_state"
 
 	openAIAutoResetCreditDefaultThreshold = 1.0
 	openAIAutoResetCreditMinimumThreshold = 0.001
@@ -52,6 +54,10 @@ func isOpenAIAutoResetCreditAccount(account *Account) bool {
 	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow()
 }
 
+func ResolveOpenAIAutoWarmupEnabled(account *Account) bool {
+	return isOpenAIAutoResetCreditAccount(account) && resolveAccountExtraBool(account.Extra, OpenAIAutoWarmupEnabledExtraKey)
+}
+
 // normalizeOpenAIAutoResetCreditExtra 校验管理请求中的配置并剥离服务运行态。
 // enabled=true 时补齐两个 100% 默认阈值；关闭时保留已设置阈值，方便再次开启。
 func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow bool, extra map[string]any) (map[string]any, error) {
@@ -60,11 +66,13 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	}
 	normalized := cloneOpenAIAutoResetExtra(extra)
 	delete(normalized, OpenAIAutoResetCreditStateExtraKey)
+	delete(normalized, OpenAIAutoWarmupStateExtraKey)
 
 	_, hasEnabled := normalized[OpenAIAutoResetCreditEnabledExtraKey]
 	_, has5h := normalized[OpenAIAutoResetCredit5hThresholdExtraKey]
 	_, has7d := normalized[OpenAIAutoResetCredit7dThresholdExtraKey]
-	if !hasEnabled && !has5h && !has7d {
+	_, hasWarmup := normalized[OpenAIAutoWarmupEnabledExtraKey]
+	if !hasEnabled && !has5h && !has7d && !hasWarmup {
 		return normalized, nil
 	}
 	if platform != PlatformOpenAI || accountType != AccountTypeOAuth || isShadow {
@@ -95,6 +103,11 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 		}
 		normalized[key] = value
 	}
+	if hasWarmup {
+		if _, ok := normalized[OpenAIAutoWarmupEnabledExtraKey].(bool); !ok {
+			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_AUTO_WARMUP_ENABLED_INVALID", "auto_warmup_enabled must be a boolean")
+		}
+	}
 	return normalized, nil
 }
 
@@ -103,10 +116,12 @@ func stripOpenAIAutoResetCreditManagedExtra(extra map[string]any, stripConfig bo
 		return nil
 	}
 	delete(extra, OpenAIAutoResetCreditStateExtraKey)
+	delete(extra, OpenAIAutoWarmupStateExtraKey)
 	if stripConfig {
 		delete(extra, OpenAIAutoResetCreditEnabledExtraKey)
 		delete(extra, OpenAIAutoResetCredit5hThresholdExtraKey)
 		delete(extra, OpenAIAutoResetCredit7dThresholdExtraKey)
+		delete(extra, OpenAIAutoWarmupEnabledExtraKey)
 	}
 	return extra
 }

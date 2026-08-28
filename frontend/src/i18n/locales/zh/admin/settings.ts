@@ -430,6 +430,10 @@ export default {
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。'
       },
+      openaiAutoWarmup: {
+        title: 'OpenAI 自动预热',
+        description: 'OpenAI 配额窗口恢复后，为单独开启的 OAuth 账号发送一个小请求；默认关闭。'
+      },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',
         description: '定期获取 API Key 账号所连接上游 Sub2API 站点声明的计费倍率；只有另行开启“同步上游声明倍率”的账号才会更新账号倍率。',
