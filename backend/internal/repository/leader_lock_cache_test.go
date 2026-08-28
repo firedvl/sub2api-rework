@@ -77,3 +77,46 @@ func TestLeaderLockCache_TTLExpires(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "lock should be re-acquirable after the TTL expires")
 }
+
+func TestLeaderLockCache_ScanCursorPersistsWithoutTTL(t *testing.T) {
+	cache, mr := newLeaderLockTestCache(t)
+	ctx := context.Background()
+	const key = "jobs:openai-quota-recovery"
+
+	cursor, err := cache.LoadScanCursor(ctx, key)
+	require.NoError(t, err)
+	require.Zero(t, cursor)
+
+	ok, err := cache.TryAcquireLeaderLock(ctx, key, "A", time.Minute)
+	require.NoError(t, err)
+	require.True(t, ok)
+	stored, err := cache.StoreScanCursorIfLeader(ctx, key, key, "A", 100)
+	require.NoError(t, err)
+	require.True(t, stored)
+	mr.FastForward(24 * time.Hour)
+
+	cursor, err = cache.LoadScanCursor(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, int64(100), cursor)
+	ttl, err := cache.rdb.TTL(ctx, scanCursorKeyPrefix+key).Result()
+	require.NoError(t, err)
+	require.Less(t, ttl, time.Duration(0), "scan cursor must not expire")
+}
+
+func TestLeaderLockCache_StaleLeaderCannotRegressScanCursor(t *testing.T) {
+	cache, _ := newLeaderLockTestCache(t)
+	ctx := context.Background()
+	const key = "jobs:openai-quota-recovery"
+
+	require.NoError(t, cache.rdb.Set(ctx, leaderLockKeyPrefix+key, "B", time.Minute).Err())
+	stored, err := cache.StoreScanCursorIfLeader(ctx, key, key, "B", 200)
+	require.NoError(t, err)
+	require.True(t, stored)
+
+	stored, err = cache.StoreScanCursorIfLeader(ctx, key, key, "A", 100)
+	require.NoError(t, err)
+	require.False(t, stored)
+	cursor, err := cache.LoadScanCursor(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, int64(200), cursor)
+}

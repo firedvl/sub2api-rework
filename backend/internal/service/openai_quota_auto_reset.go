@@ -25,8 +25,11 @@ const (
 	openAIAutoResetBatchSize     = 100
 	openAIAutoResetWorkerCount   = 4
 	openAIAutoResetQueueCapacity = 1024
+	openAIQuotaRecoveryWorkers   = 1
+	openAIQuotaRecoveryQueueSize = 1024
 	openAIAutoResetAttemptTTL    = 8 * 24 * time.Hour
 	openAIAutoResetLeaderLockKey = "jobs:openai-auto-reset-credit"
+	openAIQuotaRecoveryCursorKey = "jobs:openai-quota-recovery"
 )
 
 const (
@@ -55,6 +58,15 @@ type openAIAutoResetQuota interface {
 	QueryUsage(ctx context.Context, accountID int64) (*OpenAIQuotaUsage, error)
 	CacheResetCreditsSnapshot(ctx context.Context, accountID int64, credits *OpenAIRateLimitResetCredits) error
 	ResetCreditTargeted(ctx context.Context, accountID int64, creditID, redeemRequestID string) (*OpenAIQuotaResetResult, error)
+}
+
+type quotaRecoveryCandidatePager interface {
+	ListQuotaRecoveryCandidates(ctx context.Context, afterID int64, limit int) ([]Account, error)
+}
+
+type quotaRecoveryScanCursorStore interface {
+	LoadScanCursor(ctx context.Context, key string) (int64, error)
+	StoreScanCursorIfLeader(ctx context.Context, cursorKey, leaderKey, owner string, cursor int64) (bool, error)
 }
 
 type openAIAutoResetContextKey struct{}
@@ -89,14 +101,16 @@ type OpenAIQuotaAutoResetService struct {
 	settings    *SettingService
 	leaderLock  LeaderLockCache
 
-	ctx     context.Context
-	cancel  context.CancelFunc
-	queue   chan int64
-	pending sync.Map
-	owner   string
-	start   sync.Once
-	stop    sync.Once
-	wg      sync.WaitGroup
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	queue               chan int64
+	recoveryQueue       chan int64
+	pending             sync.Map
+	recoveryScanAfterID int64
+	owner               string
+	start               sync.Once
+	stop                sync.Once
+	wg                  sync.WaitGroup
 }
 
 func NewOpenAIQuotaAutoResetService(
@@ -110,17 +124,18 @@ func NewOpenAIQuotaAutoResetService(
 ) *OpenAIQuotaAutoResetService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &OpenAIQuotaAutoResetService{
-		accountRepo: accountRepo,
-		quota:       quota,
-		recoverer:   recoverer,
-		idempotency: idempotency,
-		audit:       audit,
-		settings:    settings,
-		leaderLock:  leaderLock,
-		ctx:         ctx,
-		cancel:      cancel,
-		queue:       make(chan int64, openAIAutoResetQueueCapacity),
-		owner:       uuid.NewString(),
+		accountRepo:   accountRepo,
+		quota:         quota,
+		recoverer:     recoverer,
+		idempotency:   idempotency,
+		audit:         audit,
+		settings:      settings,
+		leaderLock:    leaderLock,
+		ctx:           ctx,
+		cancel:        cancel,
+		queue:         make(chan int64, openAIAutoResetQueueCapacity),
+		recoveryQueue: make(chan int64, openAIQuotaRecoveryQueueSize),
+		owner:         uuid.NewString(),
 	}
 }
 
@@ -132,7 +147,11 @@ func (s *OpenAIQuotaAutoResetService) Start() {
 		setOpenAIAutoResetNotifier(s)
 		for range openAIAutoResetWorkerCount {
 			s.wg.Add(1)
-			go s.runWorker()
+			go s.runWorker(s.queue, "openai_auto_reset_evaluate_failed")
+		}
+		for range openAIQuotaRecoveryWorkers {
+			s.wg.Add(1)
+			go s.runWorker(s.recoveryQueue, "openai_quota_recovery_evaluate_failed")
 		}
 		s.wg.Add(1)
 		go s.runScanner()
@@ -169,16 +188,16 @@ func (s *OpenAIQuotaAutoResetService) Notify(accountID int64) {
 	}
 }
 
-func (s *OpenAIQuotaAutoResetService) runWorker() {
+func (s *OpenAIQuotaAutoResetService) runWorker(queue <-chan int64, failureEvent string) {
 	defer s.wg.Done()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case accountID := <-s.queue:
+		case accountID := <-queue:
 			ctx, cancel := context.WithTimeout(s.ctx, 50*time.Second)
 			if err := s.evaluateAccount(ctx, accountID); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Warn("openai_auto_reset_evaluate_failed", "account_id", accountID, "error_code", infraerrors.Reason(err))
+				slog.Warn(failureEvent, "account_id", accountID, "error_code", infraerrors.Reason(err))
 			}
 			cancel()
 			s.pending.Delete(accountID)
@@ -194,7 +213,7 @@ func (s *OpenAIQuotaAutoResetService) runScanner() {
 	case <-s.ctx.Done():
 		return
 	case <-timer.C:
-		s.scanEnabledAccounts(s.ctx)
+		s.scanEligibleAccounts(s.ctx)
 	}
 	ticker := time.NewTicker(openAIAutoResetScanInterval)
 	defer ticker.Stop()
@@ -203,19 +222,24 @@ func (s *OpenAIQuotaAutoResetService) runScanner() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			s.scanEnabledAccounts(s.ctx)
+			s.scanEligibleAccounts(s.ctx)
 		}
 	}
 }
 
-func (s *OpenAIQuotaAutoResetService) scanEnabledAccounts(ctx context.Context) {
-	release, scan := s.tryAcquireScanLock(ctx)
+func (s *OpenAIQuotaAutoResetService) scanEligibleAccounts(ctx context.Context) {
+	release, scan, coordinated := s.tryAcquireScanLock(ctx)
 	if !scan {
 		return
 	}
 	if release != nil {
 		defer release()
 	}
+	s.scanQuotaRecoveryAccounts(ctx, coordinated)
+	s.scanAutoResetCreditAccounts(ctx)
+}
+
+func (s *OpenAIQuotaAutoResetService) scanAutoResetCreditAccounts(ctx context.Context) {
 	for page := 1; ; page++ {
 		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page: page, PageSize: openAIAutoResetBatchSize,
@@ -226,7 +250,8 @@ func (s *OpenAIQuotaAutoResetService) scanEnabledAccounts(ctx context.Context) {
 		}
 		for i := range accounts {
 			account := &accounts[i]
-			if account.Schedulable && ResolveOpenAIAutoResetCreditConfig(account).Enabled {
+			if _, recoverable := quotaRateLimitBlockFromAccount(account); !recoverable &&
+				account.Schedulable && ResolveOpenAIAutoResetCreditConfig(account).Enabled {
 				s.Notify(account.ID)
 			}
 		}
@@ -236,25 +261,87 @@ func (s *OpenAIQuotaAutoResetService) scanEnabledAccounts(ctx context.Context) {
 	}
 }
 
+func (s *OpenAIQuotaAutoResetService) scanQuotaRecoveryAccounts(ctx context.Context, useSharedCursor bool) {
+	repo, ok := s.accountRepo.(quotaRecoveryCandidatePager)
+	if !ok {
+		return
+	}
+	afterID := s.recoveryScanAfterID
+	cursorStore, hasSharedCursor := s.leaderLock.(quotaRecoveryScanCursorStore)
+	hasSharedCursor = hasSharedCursor && useSharedCursor
+	if hasSharedCursor {
+		var err error
+		afterID, err = cursorStore.LoadScanCursor(ctx, openAIQuotaRecoveryCursorKey)
+		if err != nil {
+			slog.Warn("openai_quota_recovery_cursor_load_failed", "error", err)
+			return
+		}
+	}
+	accounts, err := repo.ListQuotaRecoveryCandidates(ctx, afterID, openAIAutoResetBatchSize)
+	if err != nil {
+		slog.Warn("openai_quota_recovery_scan_failed", "after_id", afterID, "error", err)
+		return
+	}
+	nextAfterID := int64(0)
+	if len(accounts) >= openAIAutoResetBatchSize {
+		nextAfterID = accounts[len(accounts)-1].ID
+	}
+	if hasSharedCursor {
+		stored, err := cursorStore.StoreScanCursorIfLeader(ctx, openAIQuotaRecoveryCursorKey, openAIAutoResetLeaderLockKey, s.owner, nextAfterID)
+		if err != nil {
+			slog.Warn("openai_quota_recovery_cursor_store_failed", "after_id", nextAfterID, "error", err)
+			return
+		}
+		if !stored {
+			slog.Warn("openai_quota_recovery_cursor_store_skipped", "after_id", nextAfterID, "reason", "leader_lease_lost")
+			return
+		}
+	} else {
+		s.recoveryScanAfterID = nextAfterID
+	}
+	for i := range accounts {
+		if _, recoverable := quotaRateLimitBlockFromAccount(&accounts[i]); recoverable {
+			s.NotifyQuotaRecovery(accounts[i].ID)
+		}
+	}
+}
+
+func (s *OpenAIQuotaAutoResetService) NotifyQuotaRecovery(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	if _, loaded := s.pending.LoadOrStore(accountID, struct{}{}); loaded {
+		return
+	}
+	select {
+	case <-s.ctx.Done():
+		s.pending.Delete(accountID)
+	case s.recoveryQueue <- accountID:
+	default:
+		s.pending.Delete(accountID)
+		slog.Warn("openai_quota_recovery_queue_full", "account_id", accountID)
+	}
+}
+
 // Redis 锁异常时允许重复扫描，避免协调设施故障导致所有实例同时停止补偿；
 // 消费唯一性由数据库幂等记录负责，扫描锁只用于削减重复查询。
-func (s *OpenAIQuotaAutoResetService) tryAcquireScanLock(ctx context.Context) (func(), bool) {
+func (s *OpenAIQuotaAutoResetService) tryAcquireScanLock(ctx context.Context) (func(), bool, bool) {
 	if s.leaderLock == nil {
-		return func() {}, true
+		return func() {}, true, false
 	}
 	ok, err := s.leaderLock.TryAcquireLeaderLock(ctx, openAIAutoResetLeaderLockKey, s.owner, 55*time.Second)
 	if err != nil {
 		slog.Warn("openai_auto_reset_leader_lock_unavailable", "error", err)
-		return func() {}, true
+		return func() {}, true, false
 	}
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 	return func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = s.leaderLock.ReleaseLeaderLock(releaseCtx, openAIAutoResetLeaderLockKey, s.owner)
-	}, true
+	}, true, true
 }
 
 type openAIAutoResetAssessment struct {
@@ -280,14 +367,27 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return nil
 	}
 	config := ResolveOpenAIAutoResetCreditConfig(account)
-	if !config.Enabled || !account.IsActive() || !account.Schedulable {
+	_, recoverable := quotaRateLimitBlockFromAccount(account)
+	if !account.IsActive() || !account.Schedulable || (!config.Enabled && !recoverable) {
 		return nil
+	}
+	if !config.Enabled {
+		now := time.Now()
+		usage, queryErr := s.quota.QueryUsage(ctx, accountID)
+		if queryErr != nil || usage == nil {
+			return queryErr
+		}
+		if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {
+			return err
+		}
+		_, err = s.tryRecoverQuotaBlock(ctx, account, usage, now)
+		return err
 	}
 
 	now := time.Now()
 	assessment := s.assessExtra(account, config, now)
 	state := openAIAutoResetStateFromExtra(account.Extra)
-	needsQuery := openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached
+	needsQuery := recoverable || openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
 	}
@@ -323,6 +423,9 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	}
 	if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {
 		return s.failState(ctx, accountID, checking, "USAGE_SNAPSHOT_WRITE_FAILED", err)
+	}
+	if _, err := s.tryRecoverQuotaBlock(ctx, account, usage, now); err != nil {
+		return err
 	}
 	if usage.RateLimitResetCredits == nil {
 		return s.failState(ctx, accountID, checking, "RESET_CREDIT_DETAILS_UNAVAILABLE", nil)
@@ -587,6 +690,9 @@ func (s *OpenAIQuotaAutoResetService) persistFreshUsage(ctx context.Context, acc
 			return err
 		}
 	}
+	if usage.RateLimitResetCredits == nil {
+		return nil
+	}
 	return s.quota.CacheResetCreditsSnapshot(ctx, accountID, usage.RateLimitResetCredits)
 }
 
@@ -800,6 +906,15 @@ func notifyOpenAIAutoReset(accountID int64) {
 	openAIAutoResetNotifierRegistry.RUnlock()
 	if service != nil {
 		service.Notify(accountID)
+	}
+}
+
+func notifyOpenAIQuotaRecovery(accountID int64) {
+	openAIAutoResetNotifierRegistry.RLock()
+	service := openAIAutoResetNotifierRegistry.service
+	openAIAutoResetNotifierRegistry.RUnlock()
+	if service != nil {
+		service.NotifyQuotaRecovery(accountID)
 	}
 }
 

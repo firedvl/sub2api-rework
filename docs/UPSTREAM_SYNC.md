@@ -44,3 +44,23 @@ before adopting a new baseline.
 
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
+
+## Rework Patch: Automatic Quota Recovery
+
+OpenAI OAuth accounts persist a `quota_rate_limit_block` marker only when a 429
+proves quota exhaustion. The existing OpenAI quota worker keeps refreshing
+`/wham/usage` while that marker is active and clears the exact observed block
+when fresh data confirms usable capacity. The repository update also clears the
+marker and publishes the scheduler change in one transaction.
+
+This patch does not recover generic 429 or `Retry-After` cooldowns. Gemini stays
+timed-only. Antigravity and Anthropic remain unsupported until their rate-limit
+writes preserve the exact quota window or model that caused each durable block.
+
+During an upstream rebase, review these touch points:
+
+- `internal/service/ratelimit_service.go`: OpenAI 429 cause detection;
+- `internal/service/quota_recovery.go`: provider evidence and safety floor;
+- `internal/service/openai_quota_auto_reset.go`: restart-safe refresh scan;
+- `internal/repository/account_repo.go`: marker persistence, compare-and-set
+  clear, scheduler outbox, and snapshot refresh.

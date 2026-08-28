@@ -486,6 +486,47 @@ func TestOpenAIRuntimeBlock_ClearAccountSchedulingBlock(t *testing.T) {
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
+func TestOpenAIQuotaRuntimeBlock_ClearExactGeneration(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 48, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	generation := svc.BlockQuotaAccountScheduling(account, time.Now().Add(time.Minute))
+	require.NotZero(t, generation)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+
+	svc.ClearQuotaAccountSchedulingBlock(account.ID, generation)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAIQuotaRuntimeBlock_PreservesNewerGenericBlock(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 49, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	quotaGeneration := svc.BlockQuotaAccountScheduling(account, time.Now().Add(time.Minute))
+	require.NotZero(t, quotaGeneration)
+	svc.BlockAccountScheduling(account, time.Now().Add(time.Hour), "429")
+
+	svc.ClearQuotaAccountSchedulingBlock(account.ID, quotaGeneration)
+	svc.ClearQuotaRecoveryRuntimeBlock(account.ID)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAIQuotaRuntimeBlock_DoesNotExtendExistingGenericBlock(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 50, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	genericUntil := time.Now().Add(time.Minute)
+
+	svc.BlockAccountScheduling(account, genericUntil, "429")
+	generation := svc.BlockQuotaAccountScheduling(account, time.Now().Add(time.Hour))
+
+	require.Zero(t, generation)
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	actualUntil, ok := value.(time.Time)
+	require.True(t, ok)
+	require.WithinDuration(t, genericUntil, actualUntil, time.Second)
+}
+
 func TestShouldStopOpenAIOAuth429Failover_AfterBoundedFullWindows(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
