@@ -261,6 +261,33 @@ func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until ti
 	mu.Lock()
 	defer mu.Unlock()
 	_, _ = s.blockAccountSchedulingLocked(account, until, reason)
+	s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
+}
+
+func (s *OpenAIGatewayService) BlockQuotaAccountScheduling(account *Account, until time.Time) uint64 {
+	if s == nil || !isOpenAIOAuthAccount(account) {
+		return 0
+	}
+	mu := s.openAIAccountRuntimeBlockLock(account.ID)
+	mu.Lock()
+	defer mu.Unlock()
+	previousGenerationValue, hasPreviousGeneration := s.openaiAccountRuntimeBlockGeneration.Load(account.ID)
+	previousQuotaGenerationValue, hasPreviousQuotaGeneration := s.openaiAccountQuotaBlockGeneration.Load(account.ID)
+	previousGeneration, validPreviousGeneration := previousGenerationValue.(uint64)
+	previousQuotaGeneration, validPreviousQuotaGeneration := previousQuotaGenerationValue.(uint64)
+	quotaOwned := hasPreviousGeneration && hasPreviousQuotaGeneration && validPreviousGeneration && validPreviousQuotaGeneration && previousGeneration == previousQuotaGeneration
+	if current, ok := s.openaiAccountRuntimeBlockUntil.Load(account.ID); ok {
+		if currentUntil, valid := current.(time.Time); valid && time.Now().Before(currentUntil) && !quotaOwned {
+			return 0
+		}
+	}
+	generation, changed := s.blockAccountSchedulingLocked(account, until, "quota_429")
+	if !changed && !quotaOwned {
+		s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
+		return 0
+	}
+	s.openaiAccountQuotaBlockGeneration.Store(account.ID, generation)
+	return generation
 }
 
 func (s *OpenAIGatewayService) openAIAccountRuntimeBlockLock(accountID int64) *sync.Mutex {
@@ -317,6 +344,49 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 	defer mu.Unlock()
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
 	s.openaiOAuth429RetryStartedAt.Delete(accountID)
+	s.openaiAccountQuotaBlockGeneration.Delete(accountID)
+	s.openaiAccountRuntimeBlockGeneration.Store(accountID, s.openaiAccountRuntimeBlockSequence.Add(1))
+}
+
+func (s *OpenAIGatewayService) ClearQuotaAccountSchedulingBlock(accountID int64, generation uint64) {
+	if s == nil || accountID <= 0 || generation == 0 {
+		return
+	}
+	mu := s.openAIAccountRuntimeBlockLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	s.clearQuotaAccountSchedulingBlockLocked(accountID, generation)
+}
+
+func (s *OpenAIGatewayService) ClearQuotaRecoveryRuntimeBlock(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	mu := s.openAIAccountRuntimeBlockLock(accountID)
+	mu.Lock()
+	defer mu.Unlock()
+	generation, ok := s.openaiAccountQuotaBlockGeneration.Load(accountID)
+	if !ok {
+		return
+	}
+	typedGeneration, ok := generation.(uint64)
+	if !ok {
+		return
+	}
+	s.clearQuotaAccountSchedulingBlockLocked(accountID, typedGeneration)
+}
+
+func (s *OpenAIGatewayService) clearQuotaAccountSchedulingBlockLocked(accountID int64, expected uint64) {
+	generationValue, ok := s.openaiAccountRuntimeBlockGeneration.Load(accountID)
+	quotaGenerationValue, quotaOK := s.openaiAccountQuotaBlockGeneration.Load(accountID)
+	generation, validGeneration := generationValue.(uint64)
+	quotaGeneration, validQuotaGeneration := quotaGenerationValue.(uint64)
+	if !ok || !quotaOK || !validGeneration || !validQuotaGeneration || generation != expected || quotaGeneration != expected {
+		return
+	}
+	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
+	s.openaiOAuth429RetryStartedAt.Delete(accountID)
+	s.openaiAccountQuotaBlockGeneration.Delete(accountID)
 	s.openaiAccountRuntimeBlockGeneration.Store(accountID, s.openaiAccountRuntimeBlockSequence.Add(1))
 }
 
@@ -334,6 +404,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) b
 	cooldownUntil, ok := value.(time.Time)
 	if !ok || cooldownUntil.IsZero() {
 		s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
+		s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
 		s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
 		return false
 	}
@@ -341,6 +412,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) b
 		return true
 	}
 	s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
+	s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
 	s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
 	return false
 }

@@ -1035,6 +1035,35 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
 }
 
+func (r *accountRepository) ListQuotaRecoveryCandidates(ctx context.Context, afterID int64, limit int) ([]service.Account, error) {
+	q := r.client.Account.Query().Where(
+		dbaccount.PlatformEQ(service.PlatformOpenAI),
+		dbaccount.TypeEQ(service.AccountTypeOAuth),
+		dbaccount.StatusEQ(service.StatusActive),
+		dbaccount.SchedulableEQ(true),
+		dbaccount.RateLimitedAtNotNil(),
+		dbaccount.RateLimitResetAtNotNil(),
+		dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(sqljson.HasKey(dbaccount.FieldExtra, sqljson.Path(service.QuotaRateLimitBlockExtraKey)))
+		}),
+	)
+	if afterID > 0 {
+		q = q.Where(dbaccount.IDGT(afterID))
+	}
+	accounts, err := q.
+		Order(dbent.Asc(dbaccount.FieldID)).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.accountsToService(ctx, accounts)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *accountRepository) ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {
 	accounts, err := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).All(ctx)
 	if err != nil {
@@ -2156,11 +2185,15 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 
 func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	now := time.Now()
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetRateLimitedAt(now).
-		SetRateLimitResetAt(resetAt).
-		Save(ctx)
+	client := clientFromContext(ctx, r.client)
+	_, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = $1,
+			rate_limit_reset_at = $2,
+			extra = COALESCE(extra, '{}'::jsonb) - $4::text,
+			updated_at = NOW()
+		WHERE id = $3 AND deleted_at IS NULL
+	`, now, resetAt, id, service.QuotaRateLimitBlockExtraKey)
 	if err != nil {
 		return err
 	}
@@ -2169,6 +2202,75 @@ func (r *accountRepository) SetRateLimited(ctx context.Context, id int64, resetA
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return nil
+}
+
+// SetQuotaRateLimited persists the quota provenance with the exact cooldown
+// generation. It does not replace an active unmarked cooldown, so a concurrent
+// generic 429 or Retry-After remains authoritative.
+func (r *accountRepository) SetQuotaRateLimited(ctx context.Context, id int64, resetAt time.Time, block service.QuotaRateLimitBlock) (bool, error) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	resetAt = resetAt.UTC().Truncate(time.Microsecond)
+	block.BlockedAt = now
+	block.ResetAt = resetAt
+	payload, err := json.Marshal(block)
+	if err != nil {
+		return false, err
+	}
+
+	baseCtx := ctx
+	contextTx := dbent.TxFromContext(ctx)
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if contextTx == nil {
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return false, err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+
+	result, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = $1,
+			rate_limit_reset_at = $2,
+			extra = jsonb_set(COALESCE(extra, '{}'::jsonb), ARRAY[$3]::text[], $4::jsonb, true),
+			updated_at = NOW()
+		WHERE id = $5 AND deleted_at IS NULL
+			AND (
+				rate_limit_reset_at IS NULL
+				OR rate_limit_reset_at <= NOW()
+				OR COALESCE(extra, '{}'::jsonb) ? $3::text
+			)
+	`, now, resetAt, service.QuotaRateLimitBlockExtraKey, string(payload), id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		if contextTx == nil {
+			r.syncSchedulerAccountSnapshot(baseCtx, id)
+		}
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		return false, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+	}
+	if contextTx == nil {
+		r.syncSchedulerAccountSnapshot(baseCtx, id)
+	}
+	return true, nil
 }
 
 // SetRateLimitedIfLater atomically extends an account-level rate limit. Grok
@@ -2229,6 +2331,77 @@ func (r *accountRepository) ClearRateLimitIfObserved(ctx context.Context, id int
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue observed rate-limit clear failed: account=%d err=%v", id, err)
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
+// ClearQuotaRateLimitIfObserved clears only the active, manually schedulable
+// OpenAI OAuth generation whose persisted quota evidence was evaluated.
+func (r *accountRepository) ClearQuotaRateLimitIfObserved(ctx context.Context, id int64, block service.QuotaRateLimitBlock) (bool, error) {
+	payload, err := json.Marshal(block)
+	if err != nil {
+		return false, err
+	}
+
+	baseCtx := ctx
+	contextTx := dbent.TxFromContext(ctx)
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if contextTx == nil {
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return false, err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+
+	result, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = NULL,
+			rate_limit_reset_at = NULL,
+			extra = COALESCE(extra, '{}'::jsonb) - $1::text,
+			updated_at = NOW()
+		WHERE id = $2
+			AND deleted_at IS NULL
+			AND platform = $3
+			AND type = $4
+			AND status = $5
+			AND schedulable = TRUE
+			AND rate_limited_at = $6
+			AND rate_limit_reset_at = $7
+			AND COALESCE(extra -> $1::text, 'null'::jsonb) = $8::jsonb
+	`, service.QuotaRateLimitBlockExtraKey, id, service.PlatformOpenAI, service.AccountTypeOAuth,
+		service.StatusActive, block.BlockedAt, block.ResetAt, string(payload))
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		if contextTx == nil {
+			r.syncSchedulerAccountSnapshot(baseCtx, id)
+		}
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		return false, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+	}
+	if contextTx == nil {
+		r.syncSchedulerAccountSnapshot(baseCtx, id)
+	}
 	return true, nil
 }
 
@@ -2392,12 +2565,15 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 }
 
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		ClearRateLimitedAt().
-		ClearRateLimitResetAt().
-		ClearOverloadUntil().
-		Save(ctx)
+	_, err := clientFromContext(ctx, r.client).ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = NULL,
+			rate_limit_reset_at = NULL,
+			overload_until = NULL,
+			extra = COALESCE(extra, '{}'::jsonb) - $2::text,
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id, service.QuotaRateLimitBlockExtraKey)
 	if err != nil {
 		return err
 	}

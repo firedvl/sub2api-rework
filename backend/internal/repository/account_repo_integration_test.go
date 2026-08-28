@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -941,8 +942,149 @@ func (s *AccountRepoSuite) TestClearRateLimitIfObservedProtectsRearmed429Generat
 	s.Require().WithinDuration(rearmedReset, *retyped.RateLimitResetAt, time.Second)
 }
 
+func (s *AccountRepoSuite) TestQuotaRateLimitRecoveryCASRestoresSchedulability() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "acc-quota-recovery",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+	})
+	cacheRecorder := &schedulerCacheRecorder{}
+	s.repo.schedulerCache = cacheRecorder
+	block := service.QuotaRateLimitBlock{
+		Provider:            service.PlatformOpenAI,
+		Reason:              "quota_exhausted",
+		Source:              "integration_test",
+		LimitingWindows:     []string{"5h"},
+		ObservedUtilization: map[string]float64{"5h": 100},
+	}
+	firstReset := time.Now().Add(4 * time.Hour).UTC().Truncate(time.Microsecond)
+	applied, err := s.repo.SetQuotaRateLimited(s.ctx, account.ID, firstReset, block)
+	s.Require().NoError(err)
+	s.Require().True(applied)
+
+	first, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(first.RateLimitedAt)
+	s.Require().NotNil(first.RateLimitResetAt)
+	s.Require().False(first.IsSchedulable())
+	staleBlock := decodeQuotaRateLimitBlock(s.T(), first.Extra[service.QuotaRateLimitBlockExtraKey])
+	s.Require().Equal(first.RateLimitedAt.UTC(), staleBlock.BlockedAt.UTC())
+	s.Require().Equal(first.RateLimitResetAt.UTC(), staleBlock.ResetAt.UTC())
+
+	newReset := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Microsecond)
+	applied, err = s.repo.SetQuotaRateLimited(s.ctx, account.ID, newReset, block)
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	newer, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	newerBlock := decodeQuotaRateLimitBlock(s.T(), newer.Extra[service.QuotaRateLimitBlockExtraKey])
+
+	cleared, err := s.repo.ClearQuotaRateLimitIfObserved(s.ctx, account.ID, staleBlock)
+	s.Require().NoError(err)
+	s.Require().False(cleared, "a stale recovery must not clear a newer quota block")
+
+	_, err = s.client.Account.UpdateOneID(account.ID).SetStatus(service.StatusError).Save(s.ctx)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearQuotaRateLimitIfObserved(s.ctx, account.ID, newerBlock)
+	s.Require().NoError(err)
+	s.Require().False(cleared, "quota evidence must not clear an authentication/error state")
+
+	_, err = s.client.Account.UpdateOneID(account.ID).SetStatus(service.StatusActive).SetSchedulable(false).Save(s.ctx)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearQuotaRateLimitIfObserved(s.ctx, account.ID, newerBlock)
+	s.Require().NoError(err)
+	s.Require().False(cleared, "quota evidence must not override a manual disable")
+
+	_, err = s.client.Account.UpdateOneID(account.ID).SetSchedulable(true).Save(s.ctx)
+	s.Require().NoError(err)
+	cleared, err = s.repo.ClearQuotaRateLimitIfObserved(s.ctx, account.ID, newerBlock)
+	s.Require().NoError(err)
+	s.Require().True(cleared)
+
+	recovered, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Nil(recovered.RateLimitedAt)
+	s.Require().Nil(recovered.RateLimitResetAt)
+	s.Require().NotContains(recovered.Extra, service.QuotaRateLimitBlockExtraKey)
+	s.Require().True(recovered.IsSchedulable())
+	s.Require().NotEmpty(cacheRecorder.setAccounts)
+	s.Require().True(cacheRecorder.setAccounts[len(cacheRecorder.setAccounts)-1].IsSchedulable())
+}
+
+func (s *AccountRepoSuite) TestListQuotaRecoveryCandidatesExcludesGenericCooldowns() {
+	marked := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "quota-recovery-candidate", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Schedulable: true,
+	})
+	generic := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "generic-cooldown", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Schedulable: true,
+	})
+	resetAt := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	applied, err := s.repo.SetQuotaRateLimited(s.ctx, marked.ID, resetAt, service.QuotaRateLimitBlock{
+		Provider: service.PlatformOpenAI, Reason: "quota_exhausted", Source: "integration_test",
+		LimitingWindows: []string{"5h"}, ObservedUtilization: map[string]float64{"5h": 100},
+	})
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, generic.ID, resetAt))
+
+	accounts, err := s.repo.ListQuotaRecoveryCandidates(s.ctx, 0, 100)
+	s.Require().NoError(err)
+	s.Require().Contains(idsOfAccounts(accounts), marked.ID)
+	s.Require().NotContains(idsOfAccounts(accounts), generic.ID)
+
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, marked.ID, resetAt.Add(time.Hour)))
+	superseded, err := s.repo.GetByID(s.ctx, marked.ID)
+	s.Require().NoError(err)
+	s.Require().NotContains(superseded.Extra, service.QuotaRateLimitBlockExtraKey)
+}
+
+func (s *AccountRepoSuite) TestQuotaRateLimitDoesNotReplaceGenericCooldown() {
+	block := service.QuotaRateLimitBlock{
+		Provider: service.PlatformOpenAI, Reason: "quota_exhausted", Source: "integration_test",
+		LimitingWindows: []string{"5h"}, ObservedUtilization: map[string]float64{"5h": 100},
+	}
+	genericFirst := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "generic-before-quota", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+	})
+	genericReset := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	quotaReset := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Microsecond)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, genericFirst.ID, genericReset))
+	applied, err := s.repo.SetQuotaRateLimited(s.ctx, genericFirst.ID, quotaReset, block)
+	s.Require().NoError(err)
+	s.Require().False(applied)
+
+	got, err := s.repo.GetByID(s.ctx, genericFirst.ID)
+	s.Require().NoError(err)
+	s.Require().WithinDuration(genericReset, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().NotContains(got.Extra, service.QuotaRateLimitBlockExtraKey)
+
+	quotaFirst := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "quota-before-generic", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+	})
+	applied, err = s.repo.SetQuotaRateLimited(s.ctx, quotaFirst.ID, quotaReset, block)
+	s.Require().NoError(err)
+	s.Require().True(applied)
+	s.Require().NoError(s.repo.SetRateLimited(s.ctx, quotaFirst.ID, genericReset))
+
+	got, err = s.repo.GetByID(s.ctx, quotaFirst.ID)
+	s.Require().NoError(err)
+	s.Require().WithinDuration(genericReset, *got.RateLimitResetAt, time.Microsecond)
+	s.Require().NotContains(got.Extra, service.QuotaRateLimitBlockExtraKey)
+}
+
+func decodeQuotaRateLimitBlock(t *testing.T, value any) service.QuotaRateLimitBlock {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	require.NoError(t, err)
+	var block service.QuotaRateLimitBlock
+	require.NoError(t, json.Unmarshal(raw, &block))
+	return block
+}
+
 func (s *AccountRepoSuite) TestClearRateLimit() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-clear"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "acc-clear", Extra: map[string]any{service.QuotaRateLimitBlockExtraKey: map[string]any{"reason": "quota_exhausted"}},
+	})
 	until := time.Now().Add(1 * time.Hour)
 	s.Require().NoError(s.repo.SetOverloaded(s.ctx, account.ID, until))
 	s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, until))
@@ -954,6 +1096,7 @@ func (s *AccountRepoSuite) TestClearRateLimit() {
 	s.Require().Nil(got.RateLimitedAt)
 	s.Require().Nil(got.RateLimitResetAt)
 	s.Require().Nil(got.OverloadUntil)
+	s.Require().NotContains(got.Extra, service.QuotaRateLimitBlockExtraKey)
 }
 
 func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs() {

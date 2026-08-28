@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -45,14 +46,64 @@ type OpenAIRateLimitWindow struct {
 	LimitWindowSeconds int64   `json:"limit_window_seconds"`
 	ResetAfterSeconds  int64   `json:"reset_after_seconds"`
 	ResetAt            int64   `json:"reset_at"`
+	usedPercentPresent bool
+}
+
+func (w *OpenAIRateLimitWindow) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		UsedPercent        *float64 `json:"used_percent"`
+		LimitWindowSeconds int64    `json:"limit_window_seconds"`
+		ResetAfterSeconds  int64    `json:"reset_after_seconds"`
+		ResetAt            int64    `json:"reset_at"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*w = OpenAIRateLimitWindow{
+		LimitWindowSeconds: decoded.LimitWindowSeconds,
+		ResetAfterSeconds:  decoded.ResetAfterSeconds,
+		ResetAt:            decoded.ResetAt,
+		usedPercentPresent: decoded.UsedPercent != nil,
+	}
+	if decoded.UsedPercent != nil {
+		w.UsedPercent = *decoded.UsedPercent
+	}
+	return nil
 }
 
 // OpenAIRateLimit is a rate-limit envelope (primary + optional secondary window).
 type OpenAIRateLimit struct {
-	Allowed         bool                   `json:"allowed"`
-	LimitReached    bool                   `json:"limit_reached"`
-	PrimaryWindow   *OpenAIRateLimitWindow `json:"primary_window,omitempty"`
-	SecondaryWindow *OpenAIRateLimitWindow `json:"secondary_window,omitempty"`
+	Allowed             bool                   `json:"allowed"`
+	LimitReached        bool                   `json:"limit_reached"`
+	PrimaryWindow       *OpenAIRateLimitWindow `json:"primary_window,omitempty"`
+	SecondaryWindow     *OpenAIRateLimitWindow `json:"secondary_window,omitempty"`
+	allowedPresent      bool
+	limitReachedPresent bool
+}
+
+func (r *OpenAIRateLimit) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		Allowed         *bool                  `json:"allowed"`
+		LimitReached    *bool                  `json:"limit_reached"`
+		PrimaryWindow   *OpenAIRateLimitWindow `json:"primary_window"`
+		SecondaryWindow *OpenAIRateLimitWindow `json:"secondary_window"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = OpenAIRateLimit{
+		PrimaryWindow:       decoded.PrimaryWindow,
+		SecondaryWindow:     decoded.SecondaryWindow,
+		allowedPresent:      decoded.Allowed != nil,
+		limitReachedPresent: decoded.LimitReached != nil,
+	}
+	if decoded.Allowed != nil {
+		r.Allowed = *decoded.Allowed
+	}
+	if decoded.LimitReached != nil {
+		r.LimitReached = *decoded.LimitReached
+	}
+	return nil
 }
 
 // OpenAIAdditionalRateLimit describes a per-feature rate limit (e.g. Codex Spark).

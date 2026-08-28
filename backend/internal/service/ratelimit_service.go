@@ -1109,13 +1109,21 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
 		notifyOpenAIAutoReset(account.ID)
-		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
-			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+		analysis := analyzeOpenAI429Headers(headers)
+		if analysis.resetAt != nil {
+			var err error
+			if account.IsOpenAIOAuth() && strings.TrimSpace(headers.Get("Retry-After")) == "" && len(analysis.exhaustedUtilization) > 0 {
+				generation := s.notifyQuotaAccountSchedulingBlocked(account, *analysis.resetAt)
+				err = s.setOpenAIQuotaRateLimited(ctx, account, *analysis.resetAt, newOpenAIQuotaRateLimitBlock("codex_headers", analysis.exhaustedUtilization), generation)
+			} else {
+				s.notifyAccountSchedulingBlocked(account, *analysis.resetAt, "429")
+				err = s.accountRepo.SetRateLimited(ctx, account.ID, *analysis.resetAt)
+			}
+			if err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 				return
 			}
-			slog.Info("openai_account_rate_limited", "account_id", account.ID, "reset_at", *resetAt)
+			slog.Info("openai_account_rate_limited", "account_id", account.ID, "reset_at", *analysis.resetAt)
 			return
 		}
 	}
@@ -1152,8 +1160,15 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
-				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				var err error
+				if account.IsOpenAIOAuth() && strings.TrimSpace(headers.Get("Retry-After")) == "" && isOpenAIUsageLimitReached(responseBody) {
+					generation := s.notifyQuotaAccountSchedulingBlocked(account, resetTime)
+					err = s.setOpenAIQuotaRateLimited(ctx, account, resetTime, newOpenAIQuotaRateLimitBlock("usage_limit_reached", map[string]float64{"global": 100}), generation)
+				} else {
+					s.notifyAccountSchedulingBlocked(account, resetTime, "429")
+					err = s.accountRepo.SetRateLimited(ctx, account.ID, resetTime)
+				}
+				if err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1262,35 +1277,47 @@ func clampRateLimit429CooldownSeconds(seconds int) int {
 	return seconds
 }
 
-// calculateOpenAI429ResetTime 从 OpenAI 429 响应头计算正确的重置时间
-// 返回 nil 表示无法从响应头中确定重置时间
-func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
+type openAI429HeaderAnalysis struct {
+	resetAt              *time.Time
+	exhaustedUtilization map[string]float64
+}
+
+func analyzeOpenAI429Headers(headers http.Header) openAI429HeaderAnalysis {
 	snapshot := ParseCodexRateLimitHeaders(headers)
 	if snapshot == nil {
-		return nil
+		return openAI429HeaderAnalysis{}
 	}
 
 	normalized := snapshot.Normalize()
 	if normalized == nil {
-		return nil
+		return openAI429HeaderAnalysis{}
 	}
 
 	now := time.Now()
+	result := openAI429HeaderAnalysis{exhaustedUtilization: make(map[string]float64, 2)}
 
 	// 判断哪个限制被触发（used_percent >= 100）
 	is7dExhausted := normalized.Used7dPercent != nil && *normalized.Used7dPercent >= 100
 	is5hExhausted := normalized.Used5hPercent != nil && *normalized.Used5hPercent >= 100
+	if is7dExhausted {
+		result.exhaustedUtilization["7d"] = *normalized.Used7dPercent
+	}
+	if is5hExhausted {
+		result.exhaustedUtilization["5h"] = *normalized.Used5hPercent
+	}
 
 	// 优先使用被触发限制的重置时间
 	if is7dExhausted && normalized.Reset7dSeconds != nil {
 		resetAt := now.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
 		slog.Info("openai_429_7d_limit_exhausted", "reset_after_seconds", *normalized.Reset7dSeconds, "reset_at", resetAt)
-		return &resetAt
+		result.resetAt = &resetAt
+		return result
 	}
 	if is5hExhausted && normalized.Reset5hSeconds != nil {
 		resetAt := now.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
 		slog.Info("openai_429_5h_limit_exhausted", "reset_after_seconds", *normalized.Reset5hSeconds, "reset_at", resetAt)
-		return &resetAt
+		result.resetAt = &resetAt
+		return result
 	}
 
 	// 都未达到100%但收到429，使用较长的重置时间
@@ -1304,10 +1331,15 @@ func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
 	if maxResetSecs > 0 {
 		resetAt := now.Add(time.Duration(maxResetSecs) * time.Second)
 		slog.Info("openai_429_using_max_reset", "max_reset_seconds", maxResetSecs, "reset_at", resetAt)
-		return &resetAt
+		result.resetAt = &resetAt
 	}
+	return result
+}
 
-	return nil
+// calculateOpenAI429ResetTime 从 OpenAI 429 响应头计算正确的重置时间
+// 返回 nil 表示无法从响应头中确定重置时间
+func calculateOpenAI429ResetTime(headers http.Header) *time.Time {
+	return analyzeOpenAI429Headers(headers).resetAt
 }
 
 func (s *RateLimitService) calculateOpenAI429ResetTime(headers http.Header) *time.Time {
@@ -1681,6 +1713,15 @@ func parseOpenAIRateLimitResetTime(body []byte) *int64 {
 	}
 
 	return nil
+}
+
+func isOpenAIUsageLimitReached(body []byte) bool {
+	var parsed struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &parsed) == nil && parsed.Error.Type == "usage_limit_reached"
 }
 
 func parseOpenAIRateLimitPlanType(body []byte) string {

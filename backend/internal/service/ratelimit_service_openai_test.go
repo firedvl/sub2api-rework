@@ -150,6 +150,7 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID      int64
+	quotaBlock         *QuotaRateLimitBlock
 	updatedExtra       map[string]any
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
@@ -158,6 +159,17 @@ type openAI429SnapshotRepo struct {
 func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
 	r.rateLimitedID = id
 	return nil
+}
+
+func (r *openAI429SnapshotRepo) SetQuotaRateLimited(_ context.Context, id int64, _ time.Time, block QuotaRateLimitBlock) (bool, error) {
+	r.rateLimitedID = id
+	copy := block
+	r.quotaBlock = &copy
+	return true, nil
+}
+
+func (r *openAI429SnapshotRepo) ClearQuotaRateLimitIfObserved(context.Context, int64, QuotaRateLimitBlock) (bool, error) {
+	return false, nil
 }
 
 func (r *openAI429SnapshotRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -198,6 +210,86 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
 	}
+	require.NotNil(t, repo.quotaBlock)
+	require.ElementsMatch(t, []string{"5h", "7d"}, repo.quotaBlock.LimitingWindows)
+}
+
+func TestHandle429_OpenAIQuotaProvenance(t *testing.T) {
+	exhaustedHeaders := http.Header{}
+	exhaustedHeaders.Set("x-codex-primary-used-percent", "100")
+	exhaustedHeaders.Set("x-codex-primary-reset-after-seconds", "3600")
+	exhaustedHeaders.Set("x-codex-primary-window-minutes", "300")
+
+	t.Run("proven header exhaustion is tagged", func(t *testing.T) {
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		svc.handle429(context.Background(), &Account{ID: 201, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, exhaustedHeaders.Clone(), nil)
+
+		require.NotNil(t, repo.quotaBlock)
+		require.Equal(t, "codex_headers", repo.quotaBlock.Source)
+		require.Equal(t, []string{"5h"}, repo.quotaBlock.LimitingWindows)
+	})
+
+	t.Run("generic 429 remains untagged", func(t *testing.T) {
+		headers := exhaustedHeaders.Clone()
+		headers.Set("x-codex-primary-used-percent", "50")
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		svc.handle429(context.Background(), &Account{ID: 202, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, headers, nil)
+
+		require.Equal(t, int64(202), repo.rateLimitedID)
+		require.Nil(t, repo.quotaBlock)
+	})
+
+	t.Run("retry after remains untagged", func(t *testing.T) {
+		headers := exhaustedHeaders.Clone()
+		headers.Set("Retry-After", "30")
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		svc.handle429(context.Background(), &Account{ID: 203, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, headers, nil)
+
+		require.Equal(t, int64(203), repo.rateLimitedID)
+		require.Nil(t, repo.quotaBlock)
+	})
+
+	t.Run("exact usage limit body is tagged", func(t *testing.T) {
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		body := []byte(`{"error":{"type":"usage_limit_reached","resets_at":4102444800}}`)
+		svc.handle429(context.Background(), &Account{ID: 204, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, http.Header{}, body)
+
+		require.NotNil(t, repo.quotaBlock)
+		require.Equal(t, "usage_limit_reached", repo.quotaBlock.Source)
+		require.Equal(t, []string{"global"}, repo.quotaBlock.LimitingWindows)
+	})
+
+	t.Run("rate limit exceeded body remains untagged", func(t *testing.T) {
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		body := []byte(`{"error":{"type":"rate_limit_exceeded","resets_at":4102444800}}`)
+		svc.handle429(context.Background(), &Account{ID: 205, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, http.Header{}, body)
+
+		require.Equal(t, int64(205), repo.rateLimitedID)
+		require.Nil(t, repo.quotaBlock)
+	})
+
+	t.Run("api key account remains untagged", func(t *testing.T) {
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		svc.handle429(context.Background(), &Account{ID: 206, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, exhaustedHeaders.Clone(), nil)
+
+		require.Equal(t, int64(206), repo.rateLimitedID)
+		require.Nil(t, repo.quotaBlock)
+	})
+
+	t.Run("setup token account remains untagged", func(t *testing.T) {
+		repo := &openAI429SnapshotRepo{}
+		svc := NewRateLimitService(repo, nil, nil, nil, nil)
+		svc.handle429(context.Background(), &Account{ID: 207, Platform: PlatformOpenAI, Type: AccountTypeSetupToken}, exhaustedHeaders.Clone(), nil)
+
+		require.Equal(t, int64(207), repo.rateLimitedID)
+		require.Nil(t, repo.quotaBlock)
+	})
 }
 
 func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
