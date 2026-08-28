@@ -5031,6 +5031,22 @@
                 />
               </div>
 
+              <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-5 dark:border-dark-700">
+                <div class="min-w-0">
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openaiAutoWarmup.title") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.openaiAutoWarmup.description") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.openai_auto_warmup_enabled"
+                  :aria-label="t('admin.settings.openaiAutoWarmup.title')"
+                  data-testid="openai-auto-warmup-toggle"
+                />
+              </div>
+
               <div
                 v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
@@ -9490,6 +9506,7 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_low_upstream_rate_priority_enabled: boolean;
+  openai_auto_warmup_enabled: boolean;
   openai_oauth_scheduling_rate_multiplier: number;
   openai_advanced_scheduler_enabled: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
@@ -9732,6 +9749,7 @@ const form = reactive<SettingsForm>({
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   openai_low_upstream_rate_priority_enabled: false,
+  openai_auto_warmup_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
@@ -11321,6 +11339,7 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      openai_auto_warmup_enabled: form.openai_auto_warmup_enabled,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,

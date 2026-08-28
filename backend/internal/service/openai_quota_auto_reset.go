@@ -93,13 +93,16 @@ type openAIAutoResetRecovery interface {
 // OpenAIQuotaAutoResetService 通过小型去重队列承接实时信号，并用分钟扫描补偿
 // 重启、漏事件和多实例读取；真正消费仍由 PostgreSQL 幂等记录串行化。
 type OpenAIQuotaAutoResetService struct {
-	accountRepo AccountRepository
-	quota       openAIAutoResetQuota
-	recoverer   openAIAutoResetRecovery
-	idempotency *IdempotencyCoordinator
-	audit       *AuditLogService
-	settings    *SettingService
-	leaderLock  LeaderLockCache
+	accountRepo    AccountRepository
+	quota          openAIAutoResetQuota
+	recoverer      openAIAutoResetRecovery
+	idempotency    *IdempotencyCoordinator
+	audit          *AuditLogService
+	settings       *SettingService
+	leaderLock     LeaderLockCache
+	warmupAttempts OpenAIAutoWarmupAttemptRepository
+	warmupSender   openAIAutoWarmupSender
+	warmupSlots    chan struct{}
 
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -135,8 +138,17 @@ func NewOpenAIQuotaAutoResetService(
 		cancel:        cancel,
 		queue:         make(chan int64, openAIAutoResetQueueCapacity),
 		recoveryQueue: make(chan int64, openAIQuotaRecoveryQueueSize),
+		warmupSlots:   make(chan struct{}, 4),
 		owner:         uuid.NewString(),
 	}
+}
+
+func (s *OpenAIQuotaAutoResetService) SetAutoWarmup(attempts OpenAIAutoWarmupAttemptRepository, sender openAIAutoWarmupSender) {
+	if s == nil {
+		return
+	}
+	s.warmupAttempts = attempts
+	s.warmupSender = sender
 }
 
 func (s *OpenAIQuotaAutoResetService) Start() {
@@ -240,6 +252,7 @@ func (s *OpenAIQuotaAutoResetService) scanEligibleAccounts(ctx context.Context) 
 }
 
 func (s *OpenAIQuotaAutoResetService) scanAutoResetCreditAccounts(ctx context.Context) {
+	warmupEnabled := s.openAIAutoWarmupEnabled(ctx)
 	for page := 1; ; page++ {
 		accounts, pageInfo, err := s.accountRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page: page, PageSize: openAIAutoResetBatchSize,
@@ -251,7 +264,8 @@ func (s *OpenAIQuotaAutoResetService) scanAutoResetCreditAccounts(ctx context.Co
 		for i := range accounts {
 			account := &accounts[i]
 			if _, recoverable := quotaRateLimitBlockFromAccount(account); !recoverable &&
-				account.Schedulable && ResolveOpenAIAutoResetCreditConfig(account).Enabled {
+				account.Schedulable && (ResolveOpenAIAutoResetCreditConfig(account).Enabled ||
+				(warmupEnabled && ResolveOpenAIAutoWarmupEnabled(account))) {
 				s.Notify(account.ID)
 			}
 		}
@@ -367,11 +381,15 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return nil
 	}
 	config := ResolveOpenAIAutoResetCreditConfig(account)
+	warmupEnabled := ResolveOpenAIAutoWarmupEnabled(account) && s.openAIAutoWarmupEnabled(ctx)
 	_, recoverable := quotaRateLimitBlockFromAccount(account)
-	if !account.IsActive() || !account.Schedulable || (!config.Enabled && !recoverable) {
+	if !account.IsActive() || !account.Schedulable || (!config.Enabled && !recoverable && !warmupEnabled) {
 		return nil
 	}
 	if !config.Enabled {
+		if !recoverable && (!warmupEnabled || !account.IsSchedulable() || !openAIAutoResetSnapshotStale(account.Extra, time.Now())) {
+			return nil
+		}
 		now := time.Now()
 		usage, queryErr := s.quota.QueryUsage(ctx, accountID)
 		if queryErr != nil || usage == nil {
@@ -380,8 +398,12 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {
 			return err
 		}
-		_, err = s.tryRecoverQuotaBlock(ctx, account, usage, now)
-		return err
+		recovered, recoverErr := s.tryRecoverQuotaBlock(ctx, account, usage, now)
+		if recoverErr != nil {
+			return recoverErr
+		}
+		s.maybeWarmFreshOpenAIWindow(ctx, account, usage, recovered, now)
+		return nil
 	}
 
 	now := time.Now()
@@ -424,9 +446,11 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {
 		return s.failState(ctx, accountID, checking, "USAGE_SNAPSHOT_WRITE_FAILED", err)
 	}
-	if _, err := s.tryRecoverQuotaBlock(ctx, account, usage, now); err != nil {
+	recovered, err := s.tryRecoverQuotaBlock(ctx, account, usage, now)
+	if err != nil {
 		return err
 	}
+	s.maybeWarmFreshOpenAIWindow(ctx, account, usage, recovered, now)
 	if usage.RateLimitResetCredits == nil {
 		return s.failState(ctx, accountID, checking, "RESET_CREDIT_DETAILS_UNAVAILABLE", nil)
 	}

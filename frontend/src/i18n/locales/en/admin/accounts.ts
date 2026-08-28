@@ -834,6 +834,18 @@ export default {
 	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
 	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
 	  },
+	  autoWarmup: {
+	    title: 'Automatic warm-up',
+	    hint: 'Sends a small Codex request after a recovered quota window. The global switch must also be enabled.',
+	    lastAttempt: 'Last attempt: {status}, {time}',
+	    unknownTime: 'time unavailable',
+	    status: {
+	      pending: 'Pending',
+	      succeeded: 'Succeeded',
+	      failed: 'Failed',
+	      unknown: 'Unknown'
+	    }
+	  },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: 'Quota Control',

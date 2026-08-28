@@ -221,6 +221,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
     "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
     "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.openaiAutoWarmup.title": "OpenAI 自动预热",
+    "admin.settings.openaiAutoWarmup.description": "OpenAI 配额窗口恢复后，为单独开启的 OAuth 账号发送一个小请求；默认关闭。",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 Sub2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -1264,6 +1266,27 @@ describe("admin SettingsView payment visible method controls", () => {
       "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑",
     );
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
+  });
+
+  it("loads and saves the OpenAI automatic warm-up switch", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_auto_warmup_enabled: false,
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="openai-auto-warmup-toggle"]');
+    expect(toggle.attributes('aria-label')).toBe("OpenAI 自动预热");
+    expect(toggle.element.checked).toBe(false);
+    await toggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ openai_auto_warmup_enabled: true }),
+    );
   });
 
   it("summarizes target and other-model actions, then switches to all models", async () => {

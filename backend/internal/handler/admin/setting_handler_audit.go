@@ -500,6 +500,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.PaymentVisibleMethodWxpayEnabled != after.PaymentVisibleMethodWxpayEnabled {
 		changed = append(changed, "payment_visible_method_wxpay_enabled")
 	}
+	if before.OpenAIAutoWarmupEnabled != after.OpenAIAutoWarmupEnabled {
+		changed = append(changed, "openai_auto_warmup_enabled")
+	}
 	if before.OpenAILowUpstreamRatePriorityEnabled != after.OpenAILowUpstreamRatePriorityEnabled {
 		changed = append(changed, "openai_low_upstream_rate_priority_enabled")
 	}

@@ -198,7 +198,11 @@ func ProvideOpenAIQuotaAutoResetService(
 	audit *AuditLogService,
 	settingService *SettingService,
 	leaderLock LeaderLockCache,
+	warmupAttempts OpenAIAutoWarmupAttemptRepository,
+	openAIGatewayService *OpenAIGatewayService,
+	pluginManager *PluginManager,
 ) *OpenAIQuotaAutoResetService {
+	openAIGatewayService.SetPluginManager(pluginManager)
 	service := NewOpenAIQuotaAutoResetService(
 		accountRepo,
 		quotaService,
@@ -208,6 +212,7 @@ func ProvideOpenAIQuotaAutoResetService(
 		settingService,
 		leaderLock,
 	)
+	service.SetAutoWarmup(warmupAttempts, openAIGatewayService)
 	service.Start()
 	return service
 }

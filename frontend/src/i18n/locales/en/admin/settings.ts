@@ -437,6 +437,10 @@ export default {
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.'
       },
+      openaiAutoWarmup: {
+        title: 'OpenAI automatic warm-up',
+        description: 'After a recovered OpenAI quota window, send a small request for individually enabled OAuth accounts. Disabled by default.'
+      },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',
         description: 'Periodically retrieve rates declared by upstream Sub2API sites. Account rates change only when the separate sync switch is enabled.',

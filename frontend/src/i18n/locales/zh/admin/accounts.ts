@@ -906,6 +906,18 @@ export default {
 	    thresholdHint: '两个窗口独立判断，任一达到自身阈值即触发。可填写 0.1–100，默认均为 100。',
 	    thresholdInvalid: '自动使用重置卡阈值必须在 0.1% 到 100% 之间。'
 	  },
+	  autoWarmup: {
+	    title: '自动预热',
+	    hint: '配额窗口恢复后发送一个很小的 Codex 请求；还需要启用全局开关。',
+	    lastAttempt: '最近一次尝试：{status}，{time}',
+	    unknownTime: '时间不可用',
+	    status: {
+	      pending: '等待中',
+	      succeeded: '成功',
+	      failed: '失败',
+	      unknown: '未知'
+	    }
+	  },
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
         title: '配额控制',

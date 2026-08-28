@@ -210,6 +210,14 @@ export const operatorFixtureAccounts = [
     credentials: { email: 'codex-west@example.test', subscription_plan_type: 'team' },
     credentials_status: { has_access_token: true, has_refresh_token: true },
     extra: {
+      auto_warmup_enabled: true,
+      codex_auto_warmup_state: {
+        status: 'succeeded',
+        attempted_at: '2026-08-25T18:40:00Z',
+        completed_at: '2026-08-25T18:40:01Z',
+        reset_at: '2026-08-25T21:00:00Z',
+        window_type: '5h',
+      },
       codex_5h_used_percent: 32,
       codex_5h_reset_after_seconds: 7200,
       codex_7d_used_percent: 48,
@@ -633,6 +641,7 @@ const adminSettings = {
   account_auto_pause_enabled: true,
   account_quota_notify_enabled: true,
   account_quota_notify_emails: ['ops@example.test'],
+  openai_auto_warmup_enabled: false,
   custom_menu_items: [],
   default_subscriptions: [],
   forwarded_client_ip_headers: ['X-Forwarded-For'],
