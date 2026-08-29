@@ -1,13 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "socket_path": "/run/sub2api-rework-updater/updater.sock",
   "state_path": "/var/lib/sub2api-rework-updater/state.json",
   "audit_path": "/var/log/sub2api-rework-updater/audit.jsonl",
   "lock_path": "/run/sub2api-rework-updater/operation.lock",
   "backup_directory": "/var/lib/sub2api-rework-updater/backups",
-  "deployment_directory": "/opt/sub2api-rework/deploy",
-  "compose_file": "/opt/sub2api-rework/deploy/docker-compose.yml",
-  "environment_file": "/opt/sub2api-rework/deploy/.env",
+  "deployment_directory": "/opt/sub2api",
+  "compose_files": [
+    "/opt/sub2api/docker-compose.yml",
+    "/opt/sub2api/docker-compose.updater.yml"
+  ],
+  "environment_file": "/opt/sub2api/.env",
   "docker_binary": "/usr/bin/docker",
   "application_service": "sub2api",
   "database_service": "postgres",
