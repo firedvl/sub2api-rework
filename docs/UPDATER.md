@@ -184,6 +184,80 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
    It accepts an exact `PONG` without incidental client auth, then retries with
    the managed service credential only when Redis requires authentication.
 
+### Replace An Active Updater
+
+When the application already bind-mounts `/run/sub2api-rework-updater`, replace
+the updater without stopping it first. The base unit uses
+`RuntimeDirectoryPreserve=restart`, which keeps the same runtime directory for
+manual and automatic restarts but removes it on an actual stop. Using
+`RuntimeDirectoryPreserve=yes` would also keep it after a stop and is not
+appropriate here.
+
+On restart, systemd leaves the managed directory in place instead of removing
+and recreating it. `ServeUnix` removes the old socket and creates the new socket
+inside that preserved directory, so the application's existing bind mount keeps
+the same directory identity and sees the new socket.
+
+1. Build the reviewed updater and verify its version before installation:
+
+   ```bash
+   cd backend
+   CGO_ENABLED=0 go build -trimpath -o sub2api-rework-updater ./cmd/updater
+   ./sub2api-rework-updater --version
+   ```
+
+2. Confirm the running updater is healthy and idle. Back up the current binary,
+   unit, drop-in, private state, and policy to a root-only directory.
+3. Install the updated base unit, verify the combined unit, and reload systemd
+   while the old updater keeps running:
+
+   ```bash
+   sudo install -o root -g root -m 0644 \
+     ../deploy/updater/sub2api-rework-updater.service \
+     /etc/systemd/system/sub2api-rework-updater.service
+   sudo systemd-analyze verify /etc/systemd/system/sub2api-rework-updater.service
+   sudo systemctl daemon-reload
+   ```
+
+4. Record the runtime directory and container identities before replacement:
+
+   ```bash
+   runtime_before=$(stat -Lc '%d:%i' /run/sub2api-rework-updater)
+   app_before=$(docker compose --project-directory /opt/sub2api \
+     -f /opt/sub2api/docker-compose.yml \
+     -f /opt/sub2api/docker-compose.updater.yml \
+     --env-file /opt/sub2api/.env ps -q sub2api)
+   postgres_before=$(docker compose --project-directory /opt/sub2api \
+     -f /opt/sub2api/docker-compose.yml \
+     -f /opt/sub2api/docker-compose.updater.yml \
+     --env-file /opt/sub2api/.env ps -q postgres)
+   redis_before=$(docker compose --project-directory /opt/sub2api \
+     -f /opt/sub2api/docker-compose.yml \
+     -f /opt/sub2api/docker-compose.updater.yml \
+     --env-file /opt/sub2api/.env ps -q redis)
+   ```
+
+5. Install the new executable beside the active path, rename it over the old
+   executable on the same filesystem, and restart the service:
+
+   ```bash
+   sudo install -o root -g root -m 0755 sub2api-rework-updater \
+     /usr/local/sbin/sub2api-rework-updater.next
+   sudo mv -fT /usr/local/sbin/sub2api-rework-updater.next \
+     /usr/local/sbin/sub2api-rework-updater
+   sudo systemctl restart sub2api-rework-updater.service
+   ```
+
+6. Verify the runtime directory identity is unchanged, updater status is
+   reachable from the application, migration remains `232`, the application has
+   no Docker socket, and the application, PostgreSQL, and Redis container IDs
+   match the recorded values. Do not prepare or install a release until every
+   check passes.
+
+Do not use a separate `systemctl stop` and `systemctl start` for this attached
+socket-directory case. A stop intentionally removes the runtime directory and
+can leave the running application attached to the removed directory.
+
 ### Recover A Partial 1.1.1 Bootstrap
 
 For a healthy `0.1.183-rework.3` deployment at migration `232` where updater
@@ -200,7 +274,7 @@ recreated with socket access:
 4. Verify updater status through its Unix socket.
 5. Recreate only the existing `0.1.183-rework.3` application with the complete
    ordered Compose file set so it receives socket access. Verify health and
-   migration `232` before preparing or installing `0.1.183-rework.6`.
+   migration `232` before preparing or installing `0.1.183-rework.7`.
 
 This recovery does not repeat the completed `231` to `232` migration.
 
@@ -279,25 +353,29 @@ Before any production installation:
    state, audit, and backups under its private state tree, the same ordered set,
    staging-only paths, and a loopback health URL. Verify its systemd drop-in
    permits the configured deployment directory and no broader tree.
-4. With no Redis server password, set stale `REDISCLI_AUTH`. Confirm ordinary
+4. Before prepare, record the runtime directory identity and all three container
+   IDs. Restart the updater while preserving the runtime directory. Confirm the
+   directory and container identities are unchanged, migration remains `232`,
+   the application reaches the new socket, and the Docker socket is absent.
+5. With no Redis server password, set stale `REDISCLI_AUTH`. Confirm ordinary
    `redis-cli` prints an auth failure but exits zero with `PONG`, while updater
    preflight passes. Then require a password and confirm a zero-exit `NOAUTH`
    reply does not fool the updater: correct credentials must pass; missing or
    wrong credentials and a stopped or unhealthy Redis must fail without exposing
    the password in status or audit.
-5. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
-6. Install an approved test release. Inspect the recreated application container
+6. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
+7. Install an approved test release. Inspect the recreated application container
    and verify the updater socket bind mount, supplemental socket GID, image
    digest, migration state, frontend assets, PostgreSQL, Redis, and health
    endpoints. Verify the Docker socket is absent.
-7. Query updater status from the recreated application, then run another
+8. Query updater status from the recreated application, then run another
    prepare/status operation.
-8. Force application health failure and confirm automatic image/database
+9. Force application health failure and confirm automatic image/database
    recovery, removal of schema objects created only by the failed migration, and
    a healthy prior version. Recheck the updater socket mount, supplemental GID,
    Docker socket absence, and updater status after rollback.
-9. Force restore failure and confirm the visible `critical` state and audit.
-10. Send concurrent operations and confirm only one acquires the lock.
+10. Force restore failure and confirm the visible `critical` state and audit.
+11. Send concurrent operations and confirm only one acquires the lock.
 
 ## Emergency Recovery
 

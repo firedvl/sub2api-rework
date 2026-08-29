@@ -27,8 +27,8 @@ import (
 
 const (
 	stagingSourceVersion = "0.1.183-rework.3"
-	stagingTargetVersion = "0.1.183-rework.6"
-	stagingFailedVersion = "0.1.183-rework.7"
+	stagingTargetVersion = "0.1.183-rework.7"
+	stagingFailedVersion = "0.1.183-rework.8"
 	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingSourceVersion
 	stagingFixtureImage  = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
 	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
@@ -198,10 +198,21 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	assertStagingManagedPath(t, policy.BackupDirectory, 0700)
 	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
 
-	serverContext, stopServer := context.WithCancel(context.Background())
-	serverError := make(chan error, 1)
-	go func() { serverError <- ServeUnix(serverContext, policy, service.Handler()) }()
-	t.Cleanup(func() {
+	var stopServer context.CancelFunc
+	var serverError chan error
+	startUpdater := func() {
+		serverContext, cancel := context.WithCancel(context.Background())
+		stopServer = cancel
+		serverError = make(chan error, 1)
+		go func(handler http.Handler, result chan<- error) {
+			result <- ServeUnix(serverContext, policy, handler)
+		}(service.Handler(), serverError)
+		waitForStagingSocket(t, policy.SocketPath)
+	}
+	stopUpdater := func() {
+		if stopServer == nil {
+			return
+		}
 		stopServer()
 		select {
 		case err := <-serverError:
@@ -211,13 +222,43 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Error("updater socket did not stop")
 		}
-	})
-	waitForStagingSocket(t, policy.SocketPath)
+		stopServer = nil
+		serverError = nil
+	}
+	startUpdater()
+	t.Cleanup(stopUpdater)
 	if output, err := runStagingCommand(docker, append(compose, "up", "-d", "--wait", "--wait-timeout", "180")...); err != nil {
 		logs, _ := runStagingCommand(docker, append(compose, "logs", "--no-color", "--tail", "100")...)
 		t.Fatalf("start staging deployment: %v: %s\n%s", err, output, logs)
 	}
 
+	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	runtimeDirectoryBefore, err := os.Stat(socketDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerIDsBefore := stagingContainerIDs(t, docker, compose)
+	stopUpdater()
+	service, err = NewService(policy, runner, stagingManifestFetcher{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
+	startUpdater()
+	runtimeDirectoryAfter, err := os.Stat(socketDirectory)
+	if err != nil || !os.SameFile(runtimeDirectoryBefore, runtimeDirectoryAfter) {
+		t.Fatalf("updater restart replaced its runtime directory: %v", err)
+	}
+	containerIDsAfter := stagingContainerIDs(t, docker, compose)
+	for name, before := range containerIDsBefore {
+		if after := containerIDsAfter[name]; after != before {
+			t.Fatalf("updater restart recreated %s container: before=%s after=%s", name, before, after)
+		}
+	}
+	status, err = service.Status()
+	if err != nil || status.CurrentMigration != 232 {
+		t.Fatalf("updater restart changed migration 232: %+v, %v", status, err)
+	}
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	assertStagingRedisAuthModes(t, docker, compose, service, policy)
 	assertStagingSafeDeploymentReason(t, docker, compose, service, policy, updaterCompose)
@@ -243,6 +284,19 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
 		t.Fatalf("deployment-specific systemd drop-in is invalid: %q, %v", dropIn, err)
 	}
+}
+
+func stagingContainerIDs(t *testing.T, docker string, compose []string) map[string]string {
+	t.Helper()
+	ids := make(map[string]string, 3)
+	for _, name := range []string{"sub2api", "postgres", "redis"} {
+		output, err := runStagingCommand(docker, append(append([]string(nil), compose...), "ps", "-q", name)...)
+		if err != nil || strings.TrimSpace(output) == "" {
+			t.Fatalf("find staging %s container: %v: %s", name, err, output)
+		}
+		ids[name] = strings.TrimSpace(output)
+	}
+	return ids
 }
 
 func configureStagingVarLog(t *testing.T, parent, child string) {

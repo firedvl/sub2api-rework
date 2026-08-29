@@ -616,11 +616,24 @@ func TestBaseSystemdUnitUsesPrivateStateAndRuntimeStorage(t *testing.T) {
 	require.NoError(t, err)
 	unit := string(data)
 
-	require.Contains(t, unit, "ProtectSystem=strict")
+	for _, directive := range []string{
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+		"ProtectHome=yes",
+		"PrivateTmp=yes",
+		"PrivateDevices=yes",
+		"CapabilityBoundingSet=\n",
+		"DevicePolicy=closed",
+	} {
+		require.Contains(t, unit, directive)
+	}
 	require.Contains(t, unit, "StateDirectory=sub2api-rework-updater")
 	require.Contains(t, unit, "StateDirectoryMode=0700")
 	require.Contains(t, unit, "RuntimeDirectory=sub2api-rework-updater")
 	require.Contains(t, unit, "RuntimeDirectoryMode=0750")
+	require.Equal(t, 1, strings.Count(unit, "RuntimeDirectoryPreserve="))
+	require.Contains(t, unit, "\nRuntimeDirectoryPreserve=restart\n")
+	require.NotContains(t, unit, "RuntimeDirectoryPreserve=yes")
 	require.Contains(t, unit, "ReadWritePaths=/var/lib/sub2api-rework-updater")
 	require.Contains(t, unit, "ReadWritePaths=/run/sub2api-rework-updater")
 	require.Contains(t, unit, "ReadWritePaths=/var/run/docker.sock")
