@@ -57,7 +57,13 @@ jobs:
       - name: Production-like updater lifecycle
         working-directory: backend
         run: |
-          sudo -u root -g docker env \
+          docker_gid="$(stat -c '%g' /var/run/docker.sock)"
+          test "$docker_gid" -ne 0
+          sudo -n setpriv \
+            --reuid=0 \
+            --regid="$docker_gid" \
+            --clear-groups \
+            env \
             PATH="$PATH" \
             HOME=/root \
             TMPDIR=/tmp \
