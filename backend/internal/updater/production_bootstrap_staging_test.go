@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -526,6 +527,13 @@ func freeStagingPort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
+func TestRunStagingCommandSeparatesSuccessfulStderr(t *testing.T) {
+	output, err := runStagingCommand("sh", "-c", "printf container-id; printf warning >&2")
+	if err != nil || output != "container-id" {
+		t.Fatalf("successful stderr polluted stdout: %v: %q", err, output)
+	}
+}
+
 func runStagingCommand(name string, args ...string) (string, error) {
 	return runStagingCommandInput("", name, args...)
 }
@@ -533,9 +541,10 @@ func runStagingCommand(name string, args ...string) (string, error) {
 func runStagingCommandInput(input, name string, args ...string) (string, error) {
 	command := exec.Command(name, args...)
 	command.Stdin = strings.NewReader(input)
-	var output bytes.Buffer
-	command.Stdout = &output
-	command.Stderr = &output
-	err := command.Run()
-	return output.String(), err
+	output, err := command.Output()
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		output = append(output, exitError.Stderr...)
+	}
+	return string(output), err
 }
