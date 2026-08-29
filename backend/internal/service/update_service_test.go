@@ -70,9 +70,9 @@ func upstreamRelease(version string) *GitHubRelease {
 	return &GitHubRelease{TagName: version, HTMLURL: "https://github.com/Wei-Shaw/sub2api/releases/tag/" + version}
 }
 
-func reworkRelease() *GitHubRelease {
-	return &GitHubRelease{TagName: "v0.1.184-rework.1", Assets: []GitHubAsset{{
-		Name: manifestAssetName, Size: 1024, BrowserDownloadURL: "https://github.com/firedvl/sub2api-rework/releases/download/v0.1.184-rework.1/release-manifest.json",
+func reworkRelease(tag string) *GitHubRelease {
+	return &GitHubRelease{TagName: tag, Prerelease: true, Assets: []GitHubAsset{{
+		Name: manifestAssetName, Size: 1024, BrowserDownloadURL: "https://github.com/firedvl/sub2api-rework/releases/download/" + tag + "/release-manifest.json",
 	}}}
 }
 
@@ -91,9 +91,18 @@ func TestUpdateWatcherNewUpstreamIsCompatibilityPending(t *testing.T) {
 	require.False(t, info.Installable)
 }
 
+func TestUpdateWatcherPrereleaseUpstreamIsIgnored(t *testing.T) {
+	upstream := upstreamRelease("v0.1.184-beta.1")
+	upstream.Prerelease = true
+	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstream}).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpdateFailed, info.State)
+	require.False(t, info.Installable)
+}
+
 func TestUpdateWatcherApprovedManifestIsReady(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease()},
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
 		manifest: watcherManifest(t, updatecontract.CompatibilityApproved),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -104,7 +113,7 @@ func TestUpdateWatcherApprovedManifestIsReady(t *testing.T) {
 
 func TestUpdateWatcherPendingBuildIsNotInstallable(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease()},
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
 		manifest: watcherManifest(t, updatecontract.CompatibilityPending),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -112,13 +121,90 @@ func TestUpdateWatcherPendingBuildIsNotInstallable(t *testing.T) {
 	require.False(t, info.Installable)
 }
 
-func TestUpdateWatcherMalformedManifestIsBlocked(t *testing.T) {
+func TestUpdateWatcherBlockedBuildIsNotInstallable(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease()}, manifest: []byte(`{"image":"attacker"}`),
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
+		manifest: watcherManifest(t, updatecontract.CompatibilityBlocked),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
 	require.False(t, info.Installable)
+}
+
+func TestUpdateWatcherMissingManifestIsBlocked(t *testing.T) {
+	release := reworkRelease("v0.1.184-rework.1")
+	release.Assets = nil
+	info, err := newWatcher(&updateServiceGitHubStub{
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{release},
+	}).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
+	require.False(t, info.Installable)
+}
+
+func TestUpdateWatcherMalformedManifestIsBlocked(t *testing.T) {
+	info, err := newWatcher(&updateServiceGitHubStub{
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")}, manifest: []byte(`{"image":"attacker"}`),
+	}).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
+	require.False(t, info.Installable)
+}
+
+func TestUpdateWatcherIncompatibleMigrationIsBlocked(t *testing.T) {
+	var manifest updatecontract.Manifest
+	require.NoError(t, json.Unmarshal(watcherManifest(t, updatecontract.CompatibilityApproved), &manifest))
+	manifest.MigrationMin = 233
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	info, err := newWatcher(&updateServiceGitHubStub{
+		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")}, manifest: data,
+	}).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
+	require.False(t, info.Installable)
+}
+
+func TestUpdateWatcherCurrentReworkVersionIsUpToDate(t *testing.T) {
+	info, err := newWatcher(&updateServiceGitHubStub{
+		upstream: upstreamRelease("v0.1.183"), rework: []*GitHubRelease{reworkRelease("v0.1.183-rework.1")},
+	}).CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpToDate, info.State)
+	require.False(t, info.Installable)
+}
+
+func TestNewestReworkReleaseFiltersAndOrdersCandidates(t *testing.T) {
+	draft := reworkRelease("v0.1.184-rework.1")
+	draft.Draft = true
+	tests := []struct {
+		name     string
+		releases []*GitHubRelease
+		want     string
+	}{
+		{name: "draft", releases: []*GitHubRelease{draft}},
+		{name: "arbitrary prereleases", releases: []*GitHubRelease{
+			{TagName: "v0.1.184-beta.1", Prerelease: true},
+			{TagName: "v0.1.184-rc.1", Prerelease: true},
+			{TagName: "random-test", Prerelease: true},
+			{TagName: "nightly", Prerelease: true},
+		}},
+		{name: "newest qualified release", releases: []*GitHubRelease{
+			reworkRelease("v0.1.183-rework.2"),
+			reworkRelease("v0.1.184-rework.1"),
+		}, want: "v0.1.184-rework.1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := newestReworkRelease(test.releases, "0.1.183-rework.1")
+			if test.want == "" {
+				require.Nil(t, candidate)
+				return
+			}
+			require.NotNil(t, candidate)
+			require.Equal(t, test.want, candidate.TagName)
+		})
+	}
 }
 
 func TestUpdateWatcherUsesCachedStatusWhenGitHubFails(t *testing.T) {

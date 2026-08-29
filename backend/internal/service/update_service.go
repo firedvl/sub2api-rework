@@ -218,7 +218,7 @@ func (s *UpdateService) refresh(ctx context.Context, info *UpdateInfo) error {
 func newestReworkRelease(releases []*GitHubRelease, currentVersion string) *GitHubRelease {
 	candidates := make([]*GitHubRelease, 0, len(releases))
 	for _, release := range releases {
-		if release == nil || release.Draft || release.Prerelease {
+		if release == nil || release.Draft {
 			continue
 		}
 		version := strings.TrimPrefix(release.TagName, "v")
