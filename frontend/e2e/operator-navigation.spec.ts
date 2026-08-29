@@ -464,6 +464,7 @@ test.describe('operator console navigation', () => {
   })
 
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
+    await page.clock.setFixedTime('2026-08-26T00:00:00Z')
     await page.goto('/admin/accounts')
 
     const toggle = page.getByTestId('provider-toggle-openai')
