@@ -31,6 +31,8 @@ const (
 	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
 	stagingFailedImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingFailedVersion
 	stagingTargetDigest  = "sha256:978365d39e93ce9dcad460496664e145b4ee98de3041a718f0702e716ff6332f"
+	stagingRedisSecret   = "synthetic-staging-redis-password"
+	stagingWrongSecret   = "synthetic-staging-wrong-redis-password"
 )
 
 type stagingManifestFetcher struct{}
@@ -43,7 +45,7 @@ func (stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte, 
 		}[version], 40),
 		Image: "ghcr.io/firedvl/sub2api-rework:" + version, ImageDigest: stagingTargetDigest,
 		MigrationMin: 232, MigrationMax: 232, ReleaseDate: "2026-08-28T12:00:00Z",
-		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: "1.1.0",
+		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: Version,
 	}
 	if manifest.GitSHA == "" {
 		return nil, fmt.Errorf("unknown staging release")
@@ -191,6 +193,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	}
 
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	assertStagingRedisAuthModes(t, docker, compose, service, policy)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingTargetVersion)
@@ -234,10 +237,22 @@ func writeStagingDeployment(t *testing.T, project string, port int, socketDirect
     environment:
       - SUB2API_UPDATER_SOCKET=%s/updater.sock
       - SUB2API_UPDATER_GID=%d
+
+  redis:
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes", "--appendfsync", "everysec"]
+    environment:
+      - REDISCLI_AUTH=${STAGING_REDIS_CLIENT_PASSWORD:?STAGING_REDIS_CLIENT_PASSWORD is required}
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$$(env -u REDISCLI_AUTH redis-cli --raw ping 2>/dev/null)\" = PONG || test \"$$(redis-cli --raw ping 2>/dev/null)\" = PONG"]
+      interval: 1s
+      timeout: 1s
+      retries: 2
+      start_period: 1s
 `, os.Getgid(), socketDirectory, socketDirectory, socketDirectory, os.Getgid())
 	environment := fmt.Sprintf(`BIND_HOST=127.0.0.1
 SERVER_PORT=%d
 SUB2API_IMAGE=%s
+STAGING_REDIS_CLIENT_PASSWORD=%s
 POSTGRES_USER=sub2api
 POSTGRES_PASSWORD=synthetic-staging-password
 POSTGRES_DB=sub2api
@@ -246,7 +261,7 @@ ADMIN_PASSWORD=synthetic-staging-admin-password
 JWT_SECRET=synthetic-staging-jwt-secret-with-at-least-32-bytes
 TOTP_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
 RUN_MODE=simple
-`, port, stagingSourceImage)
+`, port, stagingSourceImage, stagingRedisSecret)
 	for path, data := range map[string][]byte{
 		basePath: base, overridePath: []byte(override), environmentPath: []byte(environment),
 	} {
@@ -254,6 +269,90 @@ RUN_MODE=simple
 			t.Fatal(err)
 		}
 	}
+}
+
+func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, service *Service, policy Policy) {
+	t.Helper()
+	ordinary := append(append([]string(nil), compose...), "exec", "-T", "redis", "redis-cli", "--raw", "ping")
+	output, err := runStagingCommand(docker, ordinary...)
+	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "PONG") {
+		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit stale-auth diagnostic: %v: %s", err, output)
+	}
+	if err := service.checkRedis(context.Background()); err != nil {
+		t.Fatalf("updater rejected no-auth Redis with stale client auth: %v", err)
+	}
+
+	setStagingRedisPassword(t, docker, compose, stagingRedisSecret, true)
+	waitForStagingRedisHealth(t, docker, compose, "healthy")
+	if err := service.checkRedis(context.Background()); err != nil {
+		t.Fatalf("updater rejected authenticated Redis with correct credentials: %v", err)
+	}
+
+	setStagingRedisPassword(t, docker, compose, stagingWrongSecret, false)
+	waitForStagingRedisHealth(t, docker, compose, "unhealthy")
+	output, err = runStagingCommand(docker, ordinary...)
+	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "NOAUTH") {
+		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit wrong-auth response: %v: %s", err, output)
+	}
+	if err := service.checkRedis(context.Background()); err == nil {
+		t.Fatal("updater accepted Redis with wrong credentials")
+	} else if strings.Contains(err.Error(), stagingRedisSecret) || strings.Contains(err.Error(), stagingWrongSecret) {
+		t.Fatalf("Redis health error exposed a secret: %v", err)
+	}
+	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
+	status := waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, time.Minute)
+	audit, err := os.ReadFile(policy.AuditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := status.LastError + "\n" + string(audit)
+	if strings.Contains(visible, stagingRedisSecret) || strings.Contains(visible, stagingWrongSecret) {
+		t.Fatal("Redis credentials appeared in updater status or audit")
+	}
+
+	if output, err := runStagingCommand(docker, append(append([]string(nil), compose...), "stop", "redis")...); err != nil {
+		t.Fatalf("stop staging Redis: %v: %s", err, output)
+	}
+	if err := service.checkRedis(context.Background()); err == nil {
+		t.Fatal("updater accepted stopped Redis")
+	}
+	if output, err := runStagingCommand(docker, append(append([]string(nil), compose...),
+		"up", "-d", "--force-recreate", "--wait", "--wait-timeout", "60", "redis")...); err != nil {
+		t.Fatalf("recreate staging Redis: %v: %s", err, output)
+	}
+	if err := service.checkRedis(context.Background()); err != nil {
+		t.Fatalf("updater did not recover after Redis recreate: %v", err)
+	}
+}
+
+func setStagingRedisPassword(t *testing.T, docker string, compose []string, password string, withoutClientAuth bool) {
+	t.Helper()
+	args := append(append([]string(nil), compose...), "exec", "-T", "redis")
+	if withoutClientAuth {
+		args = append(args, "env", "-u", "REDISCLI_AUTH")
+	}
+	args = append(args, "redis-cli", "--raw", "-x", "CONFIG", "SET", "requirepass")
+	output, err := runStagingCommandInput(password, docker, args...)
+	if err != nil || strings.TrimSpace(output) != "OK" {
+		t.Fatalf("set staging Redis password: %v: %s", err, output)
+	}
+}
+
+func waitForStagingRedisHealth(t *testing.T, docker string, compose []string, wanted string) {
+	t.Helper()
+	containerID, err := runStagingCommand(docker, append(append([]string(nil), compose...), "ps", "-q", "redis")...)
+	if err != nil || strings.TrimSpace(containerID) == "" {
+		t.Fatalf("find staging Redis container: %v: %s", err, containerID)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		status, _ := runStagingCommand(docker, "inspect", "--format", "{{.State.Health.Status}}", strings.TrimSpace(containerID))
+		if strings.TrimSpace(status) == wanted {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("staging Redis did not become %s", wanted)
 }
 
 func requestStagingOperation(t *testing.T, docker string, compose []string, socketPath string, operation updatecontract.Operation, version string) {
@@ -284,7 +383,7 @@ func assertStagingApplicationAccess(t *testing.T, docker string, compose []strin
 		"http://updater/v1/status",
 	)
 	output, err := runStagingCommand(docker, statusArgs...)
-	if err != nil || !strings.Contains(output, `"updater_version":"1.1.0"`) {
+	if err != nil || !strings.Contains(output, `"updater_version":"`+Version+`"`) {
 		t.Fatalf("application cannot reach updater status: %v: %s", err, output)
 	}
 	containerArgs := append(append([]string(nil), compose...), "ps", "-q", "sub2api")
@@ -367,7 +466,12 @@ func freeStagingPort(t *testing.T) int {
 }
 
 func runStagingCommand(name string, args ...string) (string, error) {
+	return runStagingCommandInput("", name, args...)
+}
+
+func runStagingCommandInput(input, name string, args ...string) (string, error) {
 	command := exec.Command(name, args...)
+	command.Stdin = strings.NewReader(input)
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
