@@ -41,6 +41,51 @@ jobs:
         working-directory: backend
         run: make test-integration
 
+  updater-qualification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Verify Go version
+        run: |
+          go version | grep -q 'go1.27.0'
+      - name: Production-like updater lifecycle
+        working-directory: backend
+        run: |
+          sudo -u root -g docker env \
+            PATH="$PATH" \
+            HOME=/root \
+            TMPDIR=/tmp \
+            go test -tags=staging ./internal/updater \
+              -run '^TestProductionBootstrapPreservesUpdaterAccess$' \
+              -count=1 -timeout=20m
+      - name: Verify updater systemd sandbox
+        working-directory: backend
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o /tmp/sub2api-rework-updater ./cmd/updater
+          sudo install -o root -g root -m 0755 \
+            /tmp/sub2api-rework-updater /usr/local/sbin/sub2api-rework-updater
+          sudo install -D -o root -g root -m 0600 \
+            ../deploy/updater/updater.example.json /etc/sub2api-rework/updater.json
+          sudo install -D -o root -g root -m 0644 \
+            ../deploy/updater/sub2api-rework-updater.service \
+            /etc/systemd/system/sub2api-rework-updater.service
+          sudo install -d -o root -g root -m 0755 \
+            /etc/systemd/system/sub2api-rework-updater.service.d
+          sudo /usr/local/sbin/sub2api-rework-updater \
+            --config /etc/sub2api-rework/updater.json \
+            --print-systemd-drop-in \
+            | sudo tee \
+              /etc/systemd/system/sub2api-rework-updater.service.d/10-deployment.conf \
+              >/dev/null
+          sudo systemd-analyze verify \
+            /etc/systemd/system/sub2api-rework-updater.service
+
   frontend:
     runs-on: ubuntu-latest
     steps:

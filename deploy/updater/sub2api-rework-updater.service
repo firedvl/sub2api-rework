@@ -18,8 +18,6 @@ RuntimeDirectory=sub2api-rework-updater
 RuntimeDirectoryMode=0750
 StateDirectory=sub2api-rework-updater
 StateDirectoryMode=0700
-LogsDirectory=sub2api-rework-updater
-LogsDirectoryMode=0700
 
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -43,7 +41,6 @@ AmbientCapabilities=
 DevicePolicy=closed
 ReadWritePaths=/run/sub2api-rework-updater
 ReadWritePaths=/var/lib/sub2api-rework-updater
-ReadWritePaths=/var/log/sub2api-rework-updater
 ReadWritePaths=/var/run/docker.sock
 
 [Install]

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const Version = "1.1.1"
+const Version = "1.1.2"
 
 var actorPattern = regexp.MustCompile(`^admin:[1-9][0-9]*$`)
 

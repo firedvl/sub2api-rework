@@ -389,16 +389,16 @@ func TestRedisAuthFailureIsRedactedFromStateAndAudit(t *testing.T) {
 	require.NotContains(t, status.LastError, secret)
 }
 
-func TestUpdater111PreparesRework4FromRework3(t *testing.T) {
+func TestUpdater112PreparesRework5FromRework3(t *testing.T) {
 	runner := &fakeRunner{}
 	service, _ := newUpdaterTestServiceWithPolicy(t, runner, func(policy *Policy) {
 		policy.InitialInstalledVersion = "0.1.183-rework.3"
 	})
 	var manifest updatecontract.Manifest
 	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
-	manifest.ReworkVersion = "0.1.183-rework.4"
-	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
-	manifest.MinimumUpdaterVersion = "1.1.1"
+	manifest.ReworkVersion = "0.1.183-rework.5"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.5"
+	manifest.MinimumUpdaterVersion = "1.1.2"
 	manifest.MigrationMax = 232
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)

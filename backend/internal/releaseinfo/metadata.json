@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rework_version": "0.1.183-rework.4",
+  "rework_version": "0.1.183-rework.5",
   "upstream_baseline": "v0.1.183",
   "upstream_baseline_sha": "e8cb019fabf8b55199436229044cbf9aa7a82564",
   "upstream_repository": "Wei-Shaw/sub2api",
@@ -8,7 +8,7 @@
   "artifact_repository": "ghcr.io/firedvl/sub2api-rework",
   "update_channel": "stable",
   "default_policy": "manual",
-  "minimum_updater_version": "1.1.1",
+  "minimum_updater_version": "1.1.2",
   "migration_min": 232,
   "migration_max": 232
 }
