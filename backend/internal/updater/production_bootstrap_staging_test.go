@@ -336,7 +336,7 @@ RUN_MODE=simple
 func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, service *Service, policy Policy) {
 	t.Helper()
 	ordinary := append(append([]string(nil), compose...), "exec", "-T", "redis", "redis-cli", "--raw", "ping")
-	output, err := runStagingCommand(docker, ordinary...)
+	output, err := runStagingCommandCombined(docker, ordinary...)
 	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "PONG") {
 		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit stale-auth diagnostic: %v: %s", err, output)
 	}
@@ -352,7 +352,7 @@ func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, 
 
 	setStagingRedisPassword(t, docker, compose, stagingWrongSecret, false)
 	waitForStagingRedisHealth(t, docker, compose, "unhealthy")
-	output, err = runStagingCommand(docker, ordinary...)
+	output, err = runStagingCommandCombined(docker, ordinary...)
 	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "NOAUTH") {
 		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit wrong-auth response: %v: %s", err, output)
 	}
@@ -527,15 +527,28 @@ func freeStagingPort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
-func TestRunStagingCommandSeparatesSuccessfulStderr(t *testing.T) {
+func TestStagingCommandOutputModes(t *testing.T) {
 	output, err := runStagingCommand("sh", "-c", "printf container-id; printf warning >&2")
 	if err != nil || output != "container-id" {
 		t.Fatalf("successful stderr polluted stdout: %v: %q", err, output)
+	}
+	output, err = runStagingCommandCombined("sh", "-c", "printf PONG; printf 'AUTH failed' >&2")
+	if err != nil || output != "PONGAUTH failed" {
+		t.Fatalf("combined diagnostic output was lost: %v: %q", err, output)
 	}
 }
 
 func runStagingCommand(name string, args ...string) (string, error) {
 	return runStagingCommandInput("", name, args...)
+}
+
+func runStagingCommandCombined(name string, args ...string) (string, error) {
+	command := exec.Command(name, args...)
+	var output bytes.Buffer
+	command.Stdout = &output
+	command.Stderr = &output
+	err := command.Run()
+	return output.String(), err
 }
 
 func runStagingCommandInput(input, name string, args ...string) (string, error) {
