@@ -2,7 +2,7 @@
   "schema_version": 2,
   "socket_path": "/run/sub2api-rework-updater/updater.sock",
   "state_path": "/var/lib/sub2api-rework-updater/state.json",
-  "audit_path": "/var/log/sub2api-rework-updater/audit.jsonl",
+  "audit_path": "/var/lib/sub2api-rework-updater/audit.jsonl",
   "lock_path": "/run/sub2api-rework-updater/operation.lock",
   "backup_directory": "/var/lib/sub2api-rework-updater/backups",
   "deployment_directory": "/opt/sub2api",

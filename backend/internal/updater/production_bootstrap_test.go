@@ -282,6 +282,38 @@ func TestBackupRecordsAndValidatesCompleteComposeSet(t *testing.T) {
 	require.ErrorContains(t, service.validateBackupMetadata(state.Backup), "checksum")
 }
 
+func TestExamplePolicyKeepsTrustedStateInPrivateStorage(t *testing.T) {
+	data, err := os.ReadFile("../../../deploy/updater/updater.example.json")
+	require.NoError(t, err)
+	var policy Policy
+	require.NoError(t, json.Unmarshal(data, &policy))
+
+	const stateDirectory = "/var/lib/sub2api-rework-updater"
+	require.Equal(t, 2, policy.SchemaVersion)
+	require.Equal(t, filepath.Join(stateDirectory, "state.json"), policy.StatePath)
+	require.Equal(t, filepath.Join(stateDirectory, "audit.jsonl"), policy.AuditPath)
+	require.Equal(t, filepath.Join(stateDirectory, "backups"), policy.BackupDirectory)
+	require.Equal(t, "0.1.183-rework.3", policy.InitialInstalledVersion)
+	require.Equal(t, 232, policy.InitialMigration)
+}
+
+func TestBaseSystemdUnitUsesPrivateStateAndRuntimeStorage(t *testing.T) {
+	data, err := os.ReadFile("../../../deploy/updater/sub2api-rework-updater.service")
+	require.NoError(t, err)
+	unit := string(data)
+
+	require.Contains(t, unit, "ProtectSystem=strict")
+	require.Contains(t, unit, "StateDirectory=sub2api-rework-updater")
+	require.Contains(t, unit, "StateDirectoryMode=0700")
+	require.Contains(t, unit, "RuntimeDirectory=sub2api-rework-updater")
+	require.Contains(t, unit, "RuntimeDirectoryMode=0750")
+	require.Contains(t, unit, "ReadWritePaths=/var/lib/sub2api-rework-updater")
+	require.Contains(t, unit, "ReadWritePaths=/run/sub2api-rework-updater")
+	require.Contains(t, unit, "ReadWritePaths=/var/run/docker.sock")
+	require.NotContains(t, unit, "LogsDirectory=")
+	require.NotContains(t, unit, "/var/log/sub2api-rework-updater")
+}
+
 func TestSystemdDropInUsesValidatedDeploymentDirectory(t *testing.T) {
 	tests := []string{
 		"/opt/sub2api",

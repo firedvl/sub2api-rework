@@ -118,6 +118,12 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
    drop, create, and own the database so automatic recovery can replace it from
    the backup.
 
+   Keep trusted updater state, audit records, and backups under the private
+   `/var/lib/sub2api-rework-updater` state tree. Keep the socket and operation
+   lock under `/run/sub2api-rework-updater`. The audit file is updater state and
+   is not the service log; service stdout and stderr remain available through
+   `journalctl -u sub2api-rework-updater.service`.
+
 4. Set `SUB2API_IMAGE` in the deployment `.env`; use the existing image for the
    first start. The merged Compose model must keep `${SUB2API_IMAGE}` as the
    application image, mount only the updater socket directory, and pass the same
@@ -127,6 +133,11 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
    directory or file may be group or world writable; state, audit, lock, backup,
    and environment files must not be accessible to group or world. The updater
    rejects symlinks at managed file paths and rejects unsafe parent directories.
+   It also rejects a custom audit path when any ancestor is owned by an untrusted
+   user or is group or world writable without the safe root-owned sticky-directory
+   condition. Do not change the ownership or permissions of system directories to
+   make a custom path pass; choose a private path whose full ancestor chain meets
+   the validation rules.
 
 5. Install the base unit. Then render its deployment-specific drop-in from the
    validated root-owned policy. The base unit keeps `ProtectSystem=strict`; the
@@ -165,11 +176,31 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
 
    Verify that the application reaches updater status through the Unix socket,
    has the supplemental socket GID, and has no Docker socket mount. Install the
-   corrected updater `1.1.1` and its schema-v2 policy before installing a release
-   whose manifest requires `minimum_updater_version: 1.1.1`. Version `1.1.1`
+   corrected updater `1.1.2` and its schema-v2 policy before installing a release
+   whose manifest requires `minimum_updater_version: 1.1.2`. Version `1.1.2`
    validates the Redis reply instead of trusting `redis-cli`'s zero exit status.
    It accepts an exact `PONG` without incidental client auth, then retries with
    the managed service credential only when Redis requires authentication.
+
+### Recover A Partial 1.1.1 Bootstrap
+
+For a healthy `0.1.183-rework.3` deployment at migration `232` where updater
+`1.1.1` was installed but remains inactive and the application has not yet been
+recreated with socket access:
+
+1. Replace the inactive updater binary with reviewed updater `1.1.2`.
+2. Change `audit_path` in the root-owned schema-v2 policy to
+   `/var/lib/sub2api-rework-updater/audit.jsonl`. Do not rewrite other custom
+   administrator paths. Preserve any audit file at the old configured path as
+   incident evidence before changing it.
+3. Install the updated base unit, regenerate the deployment-specific drop-in,
+   and run `systemd-analyze verify` before enabling and starting the updater.
+4. Verify updater status through its Unix socket.
+5. Recreate only the existing `0.1.183-rework.3` application with the complete
+   ordered Compose file set so it receives socket access. Verify health and
+   migration `232` before preparing or installing `0.1.183-rework.5`.
+
+This recovery does not repeat the completed `231` to `232` migration.
 
 ## Prepare And Install Flow
 
@@ -232,9 +263,11 @@ Before any production installation:
 1. Clone the production Compose topology with synthetic credentials and data in
    a deployment directory other than `/opt/sub2api-rework/deploy`.
 2. Start the application with a base file plus the updater socket override.
-3. Start updater `1.1.1` with the same ordered set, staging-only paths, and a
-   loopback health URL. Verify its systemd drop-in permits the configured
-   deployment directory and no broader tree.
+3. Model a root-owned, non-root-group `/var/log` ancestor with mode `0775`.
+   Confirm a custom audit path below it fails, then start updater `1.1.2` with
+   state, audit, and backups under its private state tree, the same ordered set,
+   staging-only paths, and a loopback health URL. Verify its systemd drop-in
+   permits the configured deployment directory and no broader tree.
 4. With no Redis server password, set stale `REDISCLI_AUTH`. Confirm ordinary
    `redis-cli` prints an auth failure but exits zero with `PONG`, while updater
    preflight passes. Then require a password and confirm a zero-exit `NOAUTH`
@@ -258,9 +291,10 @@ Before any production installation:
 ## Emergency Recovery
 
 If updater state is `critical`, stop automated attempts. Preserve
-`/var/lib/sub2api-rework-updater`, `/var/log/sub2api-rework-updater`, and the
-deployment directory before changing anything. Inspect the bounded updater
-audit and Docker service state locally; raw host logs are not exposed in the UI.
+`/var/lib/sub2api-rework-updater`, any configured audit path outside that tree,
+and the deployment directory before changing anything. Inspect the bounded
+updater audit and Docker service state locally; service logs remain in the
+systemd journal and are not exposed in the UI.
 
 Do not prepare or install another release while state is `critical`. Resolve the
 recorded rollback or complete a reviewed manual recovery first; a new install

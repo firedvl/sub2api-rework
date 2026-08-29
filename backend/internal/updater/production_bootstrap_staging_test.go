@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,13 +26,14 @@ import (
 )
 
 const (
-	stagingSourceVersion = "0.1.183-rework.1"
-	stagingTargetVersion = "0.1.183-rework.2"
-	stagingFailedVersion = "0.1.183-rework.3"
+	stagingSourceVersion = "0.1.183-rework.3"
+	stagingTargetVersion = "0.1.183-rework.5"
+	stagingFailedVersion = "0.1.183-rework.6"
 	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingSourceVersion
+	stagingFixtureImage  = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
 	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
 	stagingFailedImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingFailedVersion
-	stagingTargetDigest  = "sha256:978365d39e93ce9dcad460496664e145b4ee98de3041a718f0702e716ff6332f"
+	stagingTargetDigest  = "sha256:4874cbed4a6bd04edb307af49b13725c31f8da942d0c31b19d1e0d18e5c4dad5"
 	stagingRedisSecret   = "synthetic-staging-redis-password"
 	stagingWrongSecret   = "synthetic-staging-wrong-redis-password"
 )
@@ -61,7 +64,7 @@ type stagingRunner struct {
 }
 
 func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error {
-	if len(args) == 2 && args[0] == "pull" && args[1] == stagingFailedImage {
+	if len(args) == 2 && args[0] == "pull" && (args[1] == stagingTargetImage || args[1] == stagingFailedImage) {
 		return nil
 	}
 	if err := runner.ExecRunner.Run(ctx, stdin, stdout, name, args...); err != nil {
@@ -133,6 +136,8 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	if err := os.MkdirAll(socketDirectory, 0750); err != nil {
 		t.Fatal(err)
 	}
+	unsafeAuditDirectory := filepath.Join(root, "var", "log", "sub2api-rework-updater")
+	configureStagingVarLog(t, filepath.Dir(unsafeAuditDirectory), unsafeAuditDirectory)
 	port := freeStagingPort(t)
 	project := "sub2api-updater-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	baseCompose := filepath.Join(deploymentDirectory, "docker-compose.yml")
@@ -146,15 +151,24 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = runStagingCommand(docker, append(compose, "down", "-v", "--remove-orphans")...)
+		_, _ = runStagingCommand(docker, "image", "rm", stagingTargetImage)
 		_, _ = runStagingCommand(docker, "image", "rm", stagingFailedImage)
 	})
+	// The unpublished target uses qualified fixture bytes under a local-only tag.
+	if output, err := runStagingCommand(docker, "pull", stagingFixtureImage); err != nil {
+		t.Fatalf("pull staging fixture image: %v: %s", err, output)
+	}
+	if output, err := runStagingCommand(docker, "tag", stagingFixtureImage, stagingTargetImage); err != nil {
+		t.Fatalf("tag staging target image: %v: %s", err, output)
+	}
+	stateDirectory := filepath.Join(root, "var", "lib", "sub2api-rework-updater")
 	policy := Policy{
 		SchemaVersion:       2,
 		SocketPath:          filepath.Join(socketDirectory, "updater.sock"),
-		StatePath:           filepath.Join(root, "var", "lib", "sub2api-rework-updater", "state.json"),
-		AuditPath:           filepath.Join(root, "var", "log", "sub2api-rework-updater", "audit.jsonl"),
+		StatePath:           filepath.Join(stateDirectory, "state.json"),
+		AuditPath:           filepath.Join(stateDirectory, "audit.jsonl"),
 		LockPath:            filepath.Join(root, "run", "sub2api-rework-updater", "operation.lock"),
-		BackupDirectory:     filepath.Join(root, "var", "lib", "sub2api-rework-updater", "backups"),
+		BackupDirectory:     filepath.Join(stateDirectory, "backups"),
 		DeploymentDirectory: deploymentDirectory,
 		ComposeFiles:        []string{baseCompose, updaterCompose}, EnvironmentFile: environmentFile,
 		DockerBinary: docker, ApplicationService: "sub2api", DatabaseService: "postgres", RedisService: "redis",
@@ -166,10 +180,22 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		InitialInstalledVersion: stagingSourceVersion, InitialMigration: 232,
 	}
 	runner := &stagingRunner{ExecRunner: ExecRunner{Directory: deploymentDirectory}}
+	unsafePolicy := policy
+	unsafePolicy.AuditPath = filepath.Join(unsafeAuditDirectory, "audit.jsonl")
+	if _, err := NewService(unsafePolicy, runner, stagingManifestFetcher{}); err == nil || !strings.Contains(err.Error(), "unsafe parent") {
+		t.Fatalf("unsafe /var/log-style audit path was not rejected: %v", err)
+	}
 	service, err := NewService(policy, runner, stagingManifestFetcher{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	status, err := service.Status()
+	if err != nil || status.UpdaterVersion != Version || status.InstalledVersion != stagingSourceVersion || status.CurrentMigration != 232 {
+		t.Fatalf("unexpected staging bootstrap status: %+v, %v", status, err)
+	}
+	assertStagingManagedPath(t, stateDirectory, 0700)
+	assertStagingManagedPath(t, policy.StatePath, 0600)
+	assertStagingManagedPath(t, policy.BackupDirectory, 0700)
 	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
 
 	serverContext, stopServer := context.WithCancel(context.Background())
@@ -194,6 +220,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	assertStagingRedisAuthModes(t, docker, compose, service, policy)
+	assertStagingManagedPath(t, policy.AuditPath, 0600)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingTargetVersion)
@@ -207,13 +234,48 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	runner.failNextApplicationHealth()
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingFailedVersion)
-	status := waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, 5*time.Minute)
+	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, 5*time.Minute)
 	if status.InstalledVersion != stagingTargetVersion || status.LastAttempt == nil || status.LastAttempt.RollbackResult != "succeeded" {
 		t.Fatalf("automatic rollback did not restore %s: %+v", stagingTargetVersion, status)
 	}
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
 		t.Fatalf("deployment-specific systemd drop-in is invalid: %q, %v", dropIn, err)
+	}
+}
+
+func configureStagingVarLog(t *testing.T, parent, child string) {
+	t.Helper()
+	if err := os.MkdirAll(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0775); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Chown(parent, 0, 123); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode().Perm() != 0775 || stat.Gid == 0 || (os.Geteuid() == 0 && stat.Uid != 0) {
+		t.Fatalf("staging /var/log model is invalid: mode=%o stat=%+v", info.Mode().Perm(), stat)
+	}
+}
+
+func assertStagingManagedPath(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != mode || stat.Uid != uint32(os.Geteuid()) {
+		t.Fatalf("invalid managed path %s: mode=%v stat=%+v", path, info.Mode(), stat)
 	}
 }
 
@@ -274,7 +336,7 @@ RUN_MODE=simple
 func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, service *Service, policy Policy) {
 	t.Helper()
 	ordinary := append(append([]string(nil), compose...), "exec", "-T", "redis", "redis-cli", "--raw", "ping")
-	output, err := runStagingCommand(docker, ordinary...)
+	output, err := runStagingCommandCombined(docker, ordinary...)
 	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "PONG") {
 		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit stale-auth diagnostic: %v: %s", err, output)
 	}
@@ -290,7 +352,7 @@ func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, 
 
 	setStagingRedisPassword(t, docker, compose, stagingWrongSecret, false)
 	waitForStagingRedisHealth(t, docker, compose, "unhealthy")
-	output, err = runStagingCommand(docker, ordinary...)
+	output, err = runStagingCommandCombined(docker, ordinary...)
 	if err != nil || !strings.Contains(output, "AUTH failed") || !strings.Contains(output, "NOAUTH") {
 		t.Fatalf("ordinary redis-cli did not reproduce its zero-exit wrong-auth response: %v: %s", err, output)
 	}
@@ -465,16 +527,37 @@ func freeStagingPort(t *testing.T) int {
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
+func TestStagingCommandOutputModes(t *testing.T) {
+	output, err := runStagingCommand("sh", "-c", "printf container-id; printf warning >&2")
+	if err != nil || output != "container-id" {
+		t.Fatalf("successful stderr polluted stdout: %v: %q", err, output)
+	}
+	output, err = runStagingCommandCombined("sh", "-c", "printf PONG; printf 'AUTH failed' >&2")
+	if err != nil || output != "PONGAUTH failed" {
+		t.Fatalf("combined diagnostic output was lost: %v: %q", err, output)
+	}
+}
+
 func runStagingCommand(name string, args ...string) (string, error) {
 	return runStagingCommandInput("", name, args...)
 }
 
-func runStagingCommandInput(input, name string, args ...string) (string, error) {
+func runStagingCommandCombined(name string, args ...string) (string, error) {
 	command := exec.Command(name, args...)
-	command.Stdin = strings.NewReader(input)
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()
 	return output.String(), err
+}
+
+func runStagingCommandInput(input, name string, args ...string) (string, error) {
+	command := exec.Command(name, args...)
+	command.Stdin = strings.NewReader(input)
+	output, err := command.Output()
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		output = append(output, exitError.Stderr...)
+	}
+	return string(output), err
 }
