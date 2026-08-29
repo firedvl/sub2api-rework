@@ -16,6 +16,7 @@ UMask=0007
 
 RuntimeDirectory=sub2api-rework-updater
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=restart
 StateDirectory=sub2api-rework-updater
 StateDirectoryMode=0700
 
