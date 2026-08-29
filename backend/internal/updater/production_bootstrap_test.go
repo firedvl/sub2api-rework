@@ -236,7 +236,8 @@ func TestEveryOperationalComposeCommandUsesCompleteFileSet(t *testing.T) {
 
 	prefix := strings.Join((&Service{policy: policy}).composeArgs(), " ")
 	required := []string{
-		"config --no-interpolate --format json", "config --format json", "config --services", "pg_isready", "redis-cli ping",
+		"config --no-interpolate --format json", "config --format json", "config --services", "pg_isready",
+		"env -u REDISCLI_AUTH redis-cli --raw ping",
 		" psql ", " pg_dump ", " stop sub2api", "/app/sub2api --migrate", " up -d --no-deps sub2api",
 	}
 	for _, fragment := range required {

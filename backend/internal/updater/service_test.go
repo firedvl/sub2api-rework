@@ -44,6 +44,11 @@ type fakeRunner struct {
 	digestMismatch       bool
 	tagDigestMismatch    bool
 	failDatabase         bool
+	redisAuthRequired    bool
+	redisClientAuthValid bool
+	failRedis            bool
+	redisReply           string
+	redisSecret          string
 	failBackup           bool
 	failRestore          bool
 	failMigration        bool
@@ -86,6 +91,28 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 	case strings.Contains(joined, "pg_isready"):
 		if f.failDatabase {
 			return fmt.Errorf("database unavailable")
+		}
+	case strings.Contains(joined, "redis-cli --raw ping"):
+		if f.failRedis {
+			if f.redisSecret != "" {
+				return fmt.Errorf("redis unavailable: %s", f.redisSecret)
+			}
+			return fmt.Errorf("redis unavailable")
+		}
+		if f.redisReply != "" {
+			_, _ = io.WriteString(stdout, f.redisReply+"\n")
+			break
+		}
+		withoutAuth := strings.Contains(joined, "env -u REDISCLI_AUTH")
+		switch {
+		case f.redisAuthRequired && withoutAuth:
+			_, _ = io.WriteString(stdout, "NOAUTH Authentication required.\n")
+		case f.redisAuthRequired && f.redisClientAuthValid:
+			_, _ = io.WriteString(stdout, "PONG\n")
+		case f.redisAuthRequired:
+			_, _ = io.WriteString(stdout, "NOAUTH Authentication required.\n")
+		default:
+			_, _ = io.WriteString(stdout, "PONG\n")
 		}
 	case strings.Contains(joined, " psql "):
 		_, _ = fmt.Fprintf(stdout, "%d\n", f.migration)
@@ -186,7 +213,7 @@ func validUpdaterManifest(t *testing.T) []byte {
 		GitSHA: strings.Repeat("a", 40), Image: "ghcr.io/firedvl/sub2api-rework:0.1.184-rework.1",
 		ImageDigest: testTargetDigest, MigrationMin: 232, MigrationMax: 233,
 		ReleaseDate: "2026-08-28T12:00:00Z", Compatibility: updatecontract.CompatibilityApproved,
-		MinimumUpdaterVersion: "1.1.0", ReleaseNotes: updatecontract.ReleaseNotes{Rollback: "Automatic restore uses the pre-update backup."},
+		MinimumUpdaterVersion: Version, ReleaseNotes: updatecontract.ReleaseNotes{Rollback: "Automatic restore uses the pre-update backup."},
 	}
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)
@@ -297,6 +324,95 @@ func installRequest() updatecontract.OperationRequest {
 	return updatecontract.OperationRequest{
 		Version: "0.1.184-rework.1", Confirmation: "INSTALL 0.1.184-rework.1", Actor: "admin:1",
 	}
+}
+
+func TestCheckRedisClearsStaleClientAuthForNoAuthServer(t *testing.T) {
+	policy := testPolicy(t.TempDir())
+	runner := &fakeRunner{}
+	service := &Service{policy: policy, runner: runner}
+
+	require.NoError(t, service.checkRedis(context.Background()))
+	require.True(t, runner.hasCall("env -u REDISCLI_AUTH redis-cli --raw ping"))
+	require.False(t, runner.hasCall(" redis redis-cli --raw ping"))
+}
+
+func TestCheckRedisRequiresPongForAuthenticatedAndUnavailableServers(t *testing.T) {
+	const secret = "redis-auth-secret"
+	tests := []struct {
+		name   string
+		runner *fakeRunner
+		pass   bool
+	}{
+		{"authenticated", &fakeRunner{redisAuthRequired: true, redisClientAuthValid: true}, true},
+		{"wrong password", &fakeRunner{redisAuthRequired: true, redisSecret: secret}, false},
+		{"missing password", &fakeRunner{redisAuthRequired: true}, false},
+		{"unavailable", &fakeRunner{failRedis: true}, false},
+		{"non-PONG reply", &fakeRunner{redisReply: "LOADING Redis is loading"}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := testPolicy(t.TempDir())
+			service := &Service{policy: policy, runner: test.runner}
+
+			err := service.checkRedis(context.Background())
+
+			if test.pass {
+				require.NoError(t, err)
+				require.True(t, test.runner.hasCall("env -u REDISCLI_AUTH redis-cli --raw ping"))
+				require.True(t, test.runner.hasCall(" redis redis-cli --raw ping"))
+			} else {
+				require.EqualError(t, err, "redis ping failed")
+				require.NotContains(t, err.Error(), secret)
+			}
+			for _, call := range test.runner.callsSnapshot() {
+				require.NotContains(t, call, secret)
+			}
+		})
+	}
+}
+
+func TestRedisAuthFailureIsRedactedFromStateAndAudit(t *testing.T) {
+	const secret = "redis-secret-that-must-not-leak"
+	runner := &fakeRunner{failRedis: true, redisSecret: secret}
+	service, policy := newUpdaterTestService(t, runner)
+
+	_, err := service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{
+		Version: "0.1.184-rework.1", Actor: "admin:1",
+	})
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 3*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateFailed, status.State)
+	require.Equal(t, "redis is unavailable", status.LastError)
+	audit, err := os.ReadFile(policy.AuditPath)
+	require.NoError(t, err)
+	require.NotContains(t, string(audit), secret)
+	require.NotContains(t, status.LastError, secret)
+}
+
+func TestUpdater111PreparesRework4FromRework3(t *testing.T) {
+	runner := &fakeRunner{}
+	service, _ := newUpdaterTestServiceWithPolicy(t, runner, func(policy *Policy) {
+		policy.InitialInstalledVersion = "0.1.183-rework.3"
+	})
+	var manifest updatecontract.Manifest
+	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
+	manifest.ReworkVersion = "0.1.183-rework.4"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
+	manifest.MinimumUpdaterVersion = "1.1.1"
+	manifest.MigrationMax = 232
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	service.fetcher = &fakeManifestFetcher{data: data}
+
+	_, err = service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{
+		Version: manifest.ReworkVersion, Actor: "admin:1",
+	})
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 3*time.Second)
+	require.Equal(t, updatecontract.UpdaterStatePrepared, status.State)
+	require.Equal(t, "0.1.183-rework.3", status.InstalledVersion)
+	require.Equal(t, manifest.ReworkVersion, status.PreparedVersion)
+	require.Equal(t, 232, status.CurrentMigration)
 }
 
 func TestPrepareRejectsDigestMismatch(t *testing.T) {

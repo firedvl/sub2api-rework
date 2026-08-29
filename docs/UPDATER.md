@@ -78,6 +78,11 @@ remain mandatory regardless of future signing.
 
 Run these steps on a staging host before the first production bootstrap.
 
+First-time or manual maintenance that can stop the gateway must not use that
+gateway as its control plane. Use an independent terminal or session, or a
+reviewed detached host operation. After acceptance, normal updater operations
+run host-side and do not depend on keeping the initiating HTTP stream alive.
+
 1. Build the updater from a reviewed checkout and install it root-owned:
 
    ```bash
@@ -160,8 +165,11 @@ Run these steps on a staging host before the first production bootstrap.
 
    Verify that the application reaches updater status through the Unix socket,
    has the supplemental socket GID, and has no Docker socket mount. Install the
-   corrected updater `1.1.0` and its schema-v2 policy before installing a release
-   whose manifest requires `minimum_updater_version: 1.1.0`.
+   corrected updater `1.1.1` and its schema-v2 policy before installing a release
+   whose manifest requires `minimum_updater_version: 1.1.1`. Version `1.1.1`
+   validates the Redis reply instead of trusting `redis-cli`'s zero exit status.
+   It accepts an exact `PONG` without incidental client auth, then retries with
+   the managed service credential only when Redis requires authentication.
 
 ## Prepare And Install Flow
 
@@ -224,22 +232,28 @@ Before any production installation:
 1. Clone the production Compose topology with synthetic credentials and data in
    a deployment directory other than `/opt/sub2api-rework/deploy`.
 2. Start the application with a base file plus the updater socket override.
-3. Start updater `1.1.0` with the same ordered set, staging-only paths, and a
+3. Start updater `1.1.1` with the same ordered set, staging-only paths, and a
    loopback health URL. Verify its systemd drop-in permits the configured
    deployment directory and no broader tree.
-4. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
-5. Install an approved test release. Inspect the recreated application container
+4. With no Redis server password, set stale `REDISCLI_AUTH`. Confirm ordinary
+   `redis-cli` prints an auth failure but exits zero with `PONG`, while updater
+   preflight passes. Then require a password and confirm a zero-exit `NOAUTH`
+   reply does not fool the updater: correct credentials must pass; missing or
+   wrong credentials and a stopped or unhealthy Redis must fail without exposing
+   the password in status or audit.
+5. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
+6. Install an approved test release. Inspect the recreated application container
    and verify the updater socket bind mount, supplemental socket GID, image
    digest, migration state, frontend assets, PostgreSQL, Redis, and health
    endpoints. Verify the Docker socket is absent.
-6. Query updater status from the recreated application, then run another
+7. Query updater status from the recreated application, then run another
    prepare/status operation.
-7. Force application health failure and confirm automatic image/database
+8. Force application health failure and confirm automatic image/database
    recovery, removal of schema objects created only by the failed migration, and
    a healthy prior version. Recheck the updater socket mount, supplemental GID,
    Docker socket absence, and updater status after rollback.
-8. Force restore failure and confirm the visible `critical` state and audit.
-9. Send concurrent operations and confirm only one acquires the lock.
+9. Force restore failure and confirm the visible `critical` state and audit.
+10. Send concurrent operations and confirm only one acquires the lock.
 
 ## Emergency Recovery
 

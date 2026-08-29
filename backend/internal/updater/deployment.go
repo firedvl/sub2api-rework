@@ -511,9 +511,23 @@ func (s *Service) checkDatabase(ctx context.Context) error {
 }
 
 func (s *Service) checkRedis(ctx context.Context) error {
-	return s.runDocker(ctx, nil, io.Discard, s.composeArgs(
-		"exec", "-T", s.policy.RedisService, "redis-cli", "ping",
+	output, err := s.commandOutput(ctx, s.composeArgs(
+		"exec", "-T", s.policy.RedisService, "env", "-u", "REDISCLI_AUTH", "redis-cli", "--raw", "ping",
 	)...)
+	response := strings.TrimSpace(output)
+	if err == nil && response == "PONG" {
+		return nil
+	}
+	if err != nil || !strings.HasPrefix(response, "NOAUTH ") {
+		return fmt.Errorf("redis ping failed")
+	}
+	output, err = s.commandOutput(ctx, s.composeArgs(
+		"exec", "-T", s.policy.RedisService, "redis-cli", "--raw", "ping",
+	)...)
+	if err == nil && strings.TrimSpace(output) == "PONG" {
+		return nil
+	}
+	return fmt.Errorf("redis ping failed")
 }
 
 func (s *Service) currentMigration(ctx context.Context) (int, error) {
