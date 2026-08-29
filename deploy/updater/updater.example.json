@@ -20,6 +20,6 @@
   "minimum_free_bytes": 2147483648,
   "operation_timeout_seconds": 1800,
   "health_timeout_seconds": 120,
-  "initial_installed_version": "0.1.183-rework.1",
+  "initial_installed_version": "0.1.183-rework.2",
   "initial_migration": 232
 }
