@@ -11,7 +11,7 @@ import (
 
 func TestEmbeddedMetadataIsCanonicalAndManual(t *testing.T) {
 	metadata := Current()
-	require.Equal(t, "0.1.183-rework.1", metadata.ReworkVersion)
+	require.Equal(t, "0.1.183-rework.2", metadata.ReworkVersion)
 	require.Equal(t, "v0.1.183", metadata.UpstreamBaseline)
 	require.Equal(t, "manual", metadata.DefaultPolicy)
 	require.Equal(t, "1.0.0", metadata.MinimumUpdaterVersion)
