@@ -22,9 +22,31 @@ const (
 	migrationQuery         = "SELECT COALESCE(MAX((regexp_match(filename, '^([0-9]+)'))[1]::int), 0) FROM schema_migrations"
 )
 
-type renderedComposeConfig struct {
-	Services map[string]renderedComposeService `json:"services"`
-	Volumes  map[string]renderedComposeVolume  `json:"volumes"`
+type deploymentValidationError string
+
+const (
+	validationComposeFile            deploymentValidationError = "compose-file"
+	validationEnvironmentFile        deploymentValidationError = "environment-file"
+	validationRawComposeCommand      deploymentValidationError = "raw-compose-command"
+	validationRawComposeJSON         deploymentValidationError = "raw-compose-json"
+	validationManagedImage           deploymentValidationError = "managed-image"
+	validationRenderedComposeCommand deploymentValidationError = "rendered-compose-command"
+	validationRenderedComposeJSON    deploymentValidationError = "rendered-compose-json"
+	validationApplicationService     deploymentValidationError = "application-service"
+	validationDatabaseService        deploymentValidationError = "database-service"
+	validationRedisService           deploymentValidationError = "redis-service"
+	validationVolumesFrom            deploymentValidationError = "volumes-from"
+	validationDockerSocket           deploymentValidationError = "docker-socket"
+	validationNamedVolume            deploymentValidationError = "named-volume"
+	validationUpdaterSocketAccess    deploymentValidationError = "updater-socket-access"
+	validationInternal               deploymentValidationError = "internal"
+)
+
+func (e deploymentValidationError) Error() string { return string(e) }
+
+type composeDocument struct {
+	Services map[string]json.RawMessage `json:"services"`
+	Volumes  map[string]json.RawMessage `json:"volumes"`
 }
 
 type renderedComposeService struct {
@@ -53,7 +75,7 @@ type inspectedDockerVolume struct {
 
 func (s *Service) preflight(ctx context.Context, manifest *updatecontract.Manifest, requireApplicationHealth bool) (int, error) {
 	if err := s.validateDeploymentFiles(ctx); err != nil {
-		return 0, fmt.Errorf("deployment structure check failed")
+		return 0, safeDeploymentValidationError(err)
 	}
 	if err := s.checkDiskSpace(); err != nil {
 		return 0, err
@@ -97,71 +119,82 @@ func (s *Service) preflightRollback(ctx context.Context) (int, error) {
 func (s *Service) validateDeploymentFiles(ctx context.Context) error {
 	for _, path := range s.policy.ComposeFiles {
 		if _, err := readManagedFile(path, 2*1024*1024, false); err != nil {
-			return fmt.Errorf("invalid deployment file")
+			return validationComposeFile
 		}
 	}
 	if _, err := validateManagedRegularFile(s.policy.EnvironmentFile, 2*1024*1024, true); err != nil {
-		return fmt.Errorf("invalid deployment file")
+		return validationEnvironmentFile
 	}
 	merged, err := s.commandOutput(ctx, s.composeArgs("config", "--no-interpolate", "--format", "json")...)
 	if err != nil {
-		return fmt.Errorf("merged compose configuration is invalid")
+		return validationRawComposeCommand
 	}
-	var ownership renderedComposeConfig
+	var ownership composeDocument
 	if err := json.Unmarshal([]byte(merged), &ownership); err != nil {
-		return fmt.Errorf("merged compose configuration is invalid")
+		return validationRawComposeJSON
 	}
-	application, ok := ownership.Services[s.policy.ApplicationService]
-	if !ok || !usesManagedImageVariable(application.Image) {
-		return fmt.Errorf("application image must use SUB2API_IMAGE")
+	applicationData, ok := ownership.Services[s.policy.ApplicationService]
+	var image struct {
+		Image string `json:"image"`
+	}
+	if !ok || json.Unmarshal(applicationData, &image) != nil {
+		return validationRawComposeJSON
+	}
+	if !usesManagedImageVariable(image.Image) {
+		return validationManagedImage
 	}
 	merged, err = s.commandOutput(ctx, s.composeArgs("config", "--format", "json")...)
 	if err != nil {
-		return fmt.Errorf("merged compose configuration is invalid")
+		return validationRenderedComposeCommand
 	}
-	var compose renderedComposeConfig
+	var compose composeDocument
 	if err := json.Unmarshal([]byte(merged), &compose); err != nil {
-		return fmt.Errorf("merged compose configuration is invalid")
+		return validationRenderedComposeJSON
 	}
-	application, ok = compose.Services[s.policy.ApplicationService]
+	applicationData, ok = compose.Services[s.policy.ApplicationService]
 	if !ok {
-		return fmt.Errorf("application service missing")
+		return validationApplicationService
+	}
+	var application renderedComposeService
+	if json.Unmarshal(applicationData, &application) != nil {
+		return validationApplicationService
 	}
 	if _, ok := compose.Services[s.policy.DatabaseService]; !ok {
-		return fmt.Errorf("database service missing")
+		return validationDatabaseService
 	}
 	if _, ok := compose.Services[s.policy.RedisService]; !ok {
-		return fmt.Errorf("redis service missing")
+		return validationRedisService
 	}
 	socketDirectory := filepath.Dir(s.policy.SocketPath)
 	socketPath, hasSocketPath := composeEnvironmentValue(application.Environment, "SUB2API_UPDATER_SOCKET")
 	updaterGID, hasUpdaterGID := composeEnvironmentValue(application.Environment, "SUB2API_UPDATER_GID")
 	hasSocketMount := false
 	if len(application.VolumesFrom) != 0 {
-		return fmt.Errorf("application must not use volumes_from")
+		return validationVolumesFrom
 	}
 	for _, volume := range application.Volumes {
 		if volume.Type == "bind" && bindExposesDockerSocket(volume.Source) || filepath.Base(filepath.Clean(volume.Target)) == "docker.sock" {
-			return fmt.Errorf("application must not mount the Docker socket")
+			return validationDockerSocket
 		}
 		if volume.Type == "volume" {
-			declared, exists := compose.Volumes[volume.Source]
-			if !exists || declared.Name == "" {
-				return fmt.Errorf("application named volume is invalid")
+			declaredData, exists := compose.Volumes[volume.Source]
+			var declared renderedComposeVolume
+			if !exists || json.Unmarshal(declaredData, &declared) != nil || declared.Name == "" {
+				return validationNamedVolume
 			}
 			if bindExposesDockerSocket(declared.DriverOpts["device"]) {
-				return fmt.Errorf("application must not mount the Docker socket")
+				return validationDockerSocket
 			}
 			output, err := s.commandOutput(ctx, "volume", "inspect", "--format", "{{json .}}", declared.Name)
 			var inspected inspectedDockerVolume
 			if err != nil || json.Unmarshal([]byte(output), &inspected) != nil || inspected.Driver != "local" {
-				return fmt.Errorf("application named volume is unsupported")
+				return validationNamedVolume
 			}
 			if bindExposesDockerSocket(inspected.Options["device"]) {
-				return fmt.Errorf("application must not mount the Docker socket")
+				return validationDockerSocket
 			}
 			if len(declared.DriverOpts) != 0 || len(inspected.Options) != 0 {
-				return fmt.Errorf("application named volume is unsupported")
+				return validationNamedVolume
 			}
 		}
 		if volume.Type == "bind" && volume.Source == socketDirectory && volume.Target == socketDirectory {
@@ -169,9 +202,17 @@ func (s *Service) validateDeploymentFiles(ctx context.Context) error {
 		}
 	}
 	if !hasSocketPath || socketPath != s.policy.SocketPath || !hasUpdaterGID || !containsString(application.GroupAdd, updaterGID) || !hasSocketMount {
-		return fmt.Errorf("application updater socket access is incomplete")
+		return validationUpdaterSocketAccess
 	}
 	return nil
+}
+
+func safeDeploymentValidationError(err error) error {
+	reason, ok := err.(deploymentValidationError)
+	if !ok {
+		reason = validationInternal
+	}
+	return fmt.Errorf("deployment structure check failed: %s", reason)
 }
 
 func usesManagedImageVariable(image string) bool {
@@ -211,12 +252,13 @@ func composeEnvironmentValue(data json.RawMessage, name string) (string, bool) {
 		}
 		return "", false
 	}
-	var values map[string]*string
+	var values map[string]json.RawMessage
 	if err := json.Unmarshal(data, &values); err != nil {
 		return "", false
 	}
-	value, ok := values[name]
-	if !ok || value == nil {
+	data, ok := values[name]
+	var value *string
+	if !ok || json.Unmarshal(data, &value) != nil || value == nil {
 		return "", false
 	}
 	return *value, true

@@ -5,7 +5,9 @@ package updater
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,133 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/updatecontract"
 	"github.com/stretchr/testify/require"
 )
+
+type renderedComposeConfig struct {
+	Services map[string]renderedComposeService `json:"services"`
+	Volumes  map[string]renderedComposeVolume  `json:"volumes"`
+}
+
+func TestProductionShapedComposeValidation(t *testing.T) {
+	docker, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("Docker Compose is unavailable")
+	}
+	for _, test := range []struct {
+		name             string
+		postgresGroupAdd string
+	}{
+		{name: "production topology"},
+		{name: "unrelated service representation", postgresGroupAdd: "    group_add: [70]\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			policy := testPolicy(root)
+			policy.DeploymentDirectory = filepath.Join(root, "opt", "sub2api")
+			policy.ComposeFiles = []string{
+				filepath.Join(policy.DeploymentDirectory, "docker-compose.yml"),
+				filepath.Join(policy.DeploymentDirectory, "docker-compose.updater.yml"),
+			}
+			policy.EnvironmentFile = filepath.Join(policy.DeploymentDirectory, ".env")
+			policy.SocketPath = "/run/sub2api-rework-updater/updater.sock"
+			policy.DockerBinary = docker
+			require.NoError(t, os.MkdirAll(policy.DeploymentDirectory, 0700))
+
+			var compose strings.Builder
+			compose.WriteString(`services:
+  sub2api:
+    image: ${SUB2API_IMAGE}
+    volumes:
+      - /opt/sub2api/data:/app/data:Z
+    environment:
+      SYNTH_EMPTY: ${SYNTH_EMPTY:-}
+      SYNTH_NUMBER: ${SYNTH_NUMBER:-000985}
+      SYNTH_BOOLEAN: ${SYNTH_BOOLEAN:-false}
+      SYNTH_SECRET: ${SYNTH_SECRET:?SYNTH_SECRET is required}
+`)
+			for index := range 144 {
+				_, _ = fmt.Fprintf(&compose, "      SYNTHETIC_%03d: ${SYNTHETIC_%03d:-}\n", index, index)
+			}
+			compose.WriteString(`  postgres:
+    image: postgres:18-alpine
+`)
+			compose.WriteString(test.postgresGroupAdd)
+			compose.WriteString(`    volumes:
+      - /opt/sub2api/postgres:/var/lib/postgresql/data
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER:-sub2api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-sub2api}
+  redis:
+    image: redis:8-alpine
+    volumes:
+      - /opt/sub2api/redis:/data
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-}
+`)
+			override := `services:
+  sub2api:
+    group_add:
+      - "${SUB2API_UPDATER_GID:?SUB2API_UPDATER_GID is required}"
+    volumes:
+      - type: bind
+        source: /run/sub2api-rework-updater
+        target: /run/sub2api-rework-updater
+    environment:
+      SUB2API_UPDATER_SOCKET: /run/sub2api-rework-updater/updater.sock
+      SUB2API_UPDATER_GID: "${SUB2API_UPDATER_GID:?SUB2API_UPDATER_GID is required}"
+`
+			var environment strings.Builder
+			environment.WriteString(`SUB2API_IMAGE=ghcr.io/firedvl/sub2api-rework:0.1.183-rework.3
+SUB2API_UPDATER_GID=985
+POSTGRES_USER=sub2api
+POSTGRES_PASSWORD=synthetic-postgres-password
+POSTGRES_DB=sub2api
+REDIS_PASSWORD=
+SYNTH_EMPTY=
+SYNTH_NUMBER=000985
+SYNTH_BOOLEAN=false
+SYNTH_SECRET=synthetic_8f13c4a71730b9e13d6f276d65e5d2be7548e15a2ad4aa258c4bf5b0c2a16e71 # gitleaks:allow
+`)
+			for index := range 144 {
+				_, _ = fmt.Fprintf(&environment, "SYNTHETIC_%03d=synthetic_%03d_%s\n", index, index, strings.Repeat("a", 48))
+			}
+			for path, data := range map[string]string{
+				policy.ComposeFiles[0]: compose.String(),
+				policy.ComposeFiles[1]: override,
+				policy.EnvironmentFile: environment.String(),
+			} {
+				require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+			}
+
+			service := &Service{policy: policy, runner: ExecRunner{Directory: policy.DeploymentDirectory}}
+			var outputs []string
+			for _, args := range [][]string{
+				service.composeArgs("config", "--no-interpolate", "--format", "json"),
+				service.composeArgs("config", "--format", "json"),
+			} {
+				output, err := service.commandOutput(context.Background(), args...)
+				require.NoError(t, err)
+				require.True(t, json.Valid([]byte(output)))
+				require.Greater(t, len(output), 8*1024)
+				outputs = append(outputs, output)
+			}
+			if test.postgresGroupAdd != "" {
+				for index, want := range []string{"70", `"70"`} {
+					var document struct {
+						Services map[string]struct {
+							GroupAdd []json.RawMessage `json:"group_add"`
+						} `json:"services"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(outputs[index]), &document))
+					require.Equal(t, want, string(document.Services[policy.DatabaseService].GroupAdd[0]))
+				}
+			}
+
+			require.NoError(t, service.validateDeploymentFiles(context.Background()))
+		})
+	}
+}
 
 func TestComposeArgsPreservesOrderedComposeFiles(t *testing.T) {
 	for _, count := range []int{1, 2, 3} {
@@ -86,49 +215,73 @@ func TestMergedComposeValidation(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*renderedComposeConfig, Policy)
-		want   string
+		want   deploymentValidationError
 	}{
-		{"missing service", func(config *renderedComposeConfig, policy Policy) {
+		{"missing database service", func(config *renderedComposeConfig, policy Policy) {
+			delete(config.Services, policy.DatabaseService)
+		}, validationDatabaseService},
+		{"missing redis service", func(config *renderedComposeConfig, policy Policy) {
 			delete(config.Services, policy.RedisService)
-		}, "redis service missing"},
+		}, validationRedisService},
 		{"image overridden", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Image = "example.invalid/sub2api:latest"
 			config.Services[policy.ApplicationService] = application
-		}, "SUB2API_IMAGE"},
+		}, validationManagedImage},
 		{"image variable prefix", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Image = "${SUB2API_IMAGE_OVERRIDE:-example.invalid/sub2api:latest}"
 			config.Services[policy.ApplicationService] = application
-		}, "SUB2API_IMAGE"},
-		{"updater access removed", func(config *renderedComposeConfig, policy Policy) {
+		}, validationManagedImage},
+		{"updater socket environment missing", func(config *renderedComposeConfig, policy Policy) {
+			application := config.Services[policy.ApplicationService]
+			mutateRenderedEnvironment(t, &application, "SUB2API_UPDATER_SOCKET", nil)
+			config.Services[policy.ApplicationService] = application
+		}, validationUpdaterSocketAccess},
+		{"updater socket environment wrong", func(config *renderedComposeConfig, policy Policy) {
+			application := config.Services[policy.ApplicationService]
+			wrong := "/run/wrong/updater.sock"
+			mutateRenderedEnvironment(t, &application, "SUB2API_UPDATER_SOCKET", &wrong)
+			config.Services[policy.ApplicationService] = application
+		}, validationUpdaterSocketAccess},
+		{"updater gid environment missing", func(config *renderedComposeConfig, policy Policy) {
+			application := config.Services[policy.ApplicationService]
+			mutateRenderedEnvironment(t, &application, "SUB2API_UPDATER_GID", nil)
+			config.Services[policy.ApplicationService] = application
+		}, validationUpdaterSocketAccess},
+		{"updater group missing", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.GroupAdd = nil
 			config.Services[policy.ApplicationService] = application
-		}, "socket access"},
+		}, validationUpdaterSocketAccess},
+		{"updater socket bind missing", func(config *renderedComposeConfig, policy Policy) {
+			application := config.Services[policy.ApplicationService]
+			application.Volumes = nil
+			config.Services[policy.ApplicationService] = application
+		}, validationUpdaterSocketAccess},
 		{"docker socket added", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Volumes[0].Source = "/var/run/docker.sock"
 			application.Volumes[0].Target = "/var/run/docker.sock"
 			config.Services[policy.ApplicationService] = application
-		}, "Docker socket"},
+		}, validationDockerSocket},
 		{"docker socket parent added", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Volumes[0].Source = "/var/run"
 			application.Volumes[0].Target = "/host-run"
 			config.Services[policy.ApplicationService] = application
-		}, "Docker socket"},
+		}, validationDockerSocket},
 		{"filesystem root added", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Volumes[0].Source = "/"
 			application.Volumes[0].Target = "/host"
 			config.Services[policy.ApplicationService] = application
-		}, "Docker socket"},
+		}, validationDockerSocket},
 		{"volumes_from added", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.VolumesFrom = []string{"helper"}
 			config.Services[policy.ApplicationService] = application
-		}, "volumes_from"},
+		}, validationVolumesFrom},
 		{"bind-backed named volume added", func(config *renderedComposeConfig, policy Policy) {
 			application := config.Services[policy.ApplicationService]
 			application.Volumes = append(application.Volumes, renderedComposeMount{
@@ -141,7 +294,7 @@ func TestMergedComposeValidation(t *testing.T) {
 					DriverOpts: map[string]string{"type": "none", "o": "bind", "device": "/var/run"},
 				},
 			}
-		}, "Docker socket"},
+		}, validationDockerSocket},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -156,9 +309,149 @@ func TestMergedComposeValidation(t *testing.T) {
 
 			err = service.validateDeploymentFiles(context.Background())
 
-			require.ErrorContains(t, err, test.want)
+			require.ErrorIs(t, err, test.want)
 		})
 	}
+}
+
+func mutateRenderedEnvironment(t *testing.T, service *renderedComposeService, name string, value *string) {
+	t.Helper()
+	var environment map[string]*string
+	require.NoError(t, json.Unmarshal(service.Environment, &environment))
+	if value == nil {
+		delete(environment, name)
+	} else {
+		environment[name] = value
+	}
+	data, err := json.Marshal(environment)
+	require.NoError(t, err)
+	service.Environment = data
+}
+
+func TestDeploymentValidationReportsSafeStages(t *testing.T) {
+	t.Run("compose file", func(t *testing.T) {
+		service, policy := newUpdaterTestService(t, &fakeRunner{})
+		require.NoError(t, os.Chmod(policy.ComposeFiles[0], 0620))
+		require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), validationComposeFile)
+	})
+	t.Run("environment file", func(t *testing.T) {
+		service, policy := newUpdaterTestService(t, &fakeRunner{})
+		require.NoError(t, os.Chmod(policy.EnvironmentFile, 0644))
+		require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), validationEnvironmentFile)
+	})
+	for _, test := range []struct {
+		name   string
+		mutate func(*fakeRunner)
+		want   deploymentValidationError
+	}{
+		{"raw compose command", func(runner *fakeRunner) { runner.rawComposeError = "synthetic failure" }, validationRawComposeCommand},
+		{"raw compose json", func(runner *fakeRunner) { runner.composeConfig = "{" }, validationRawComposeJSON},
+		{"rendered compose command", func(runner *fakeRunner) { runner.runtimeComposeError = "synthetic failure" }, validationRenderedComposeCommand},
+		{"rendered compose json", func(runner *fakeRunner) { runner.runtimeComposeConfig = "{" }, validationRenderedComposeJSON},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeRunner{}
+			service, _ := newUpdaterTestService(t, runner)
+			test.mutate(runner)
+			require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), test.want)
+		})
+	}
+}
+
+func TestRenderedComposeRequiresApplicationService(t *testing.T) {
+	runner := &fakeRunner{}
+	service, policy := newUpdaterTestService(t, runner)
+	var config renderedComposeConfig
+	require.NoError(t, json.Unmarshal([]byte(runner.composeConfig), &config))
+	delete(config.Services, policy.ApplicationService)
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	runner.runtimeComposeConfig = string(data)
+
+	require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), validationApplicationService)
+}
+
+func TestMergedComposeValidationRejectsUnsupportedNamedVolume(t *testing.T) {
+	runner := &fakeRunner{volumeInspect: `{"Driver":"nfs","Options":null}`}
+	service, policy := newUpdaterTestService(t, runner)
+	var config renderedComposeConfig
+	require.NoError(t, json.Unmarshal([]byte(runner.composeConfig), &config))
+	application := config.Services[policy.ApplicationService]
+	application.Volumes = append(application.Volumes, renderedComposeMount{
+		Type: "volume", Source: "data", Target: "/app/data",
+	})
+	config.Services[policy.ApplicationService] = application
+	config.Volumes = map[string]renderedComposeVolume{"data": {Name: "project_data"}}
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	runner.composeConfig = string(data)
+
+	require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), validationNamedVolume)
+}
+
+func TestMergedComposeValidationRejectsDockerSocketSymlinkAlias(t *testing.T) {
+	runner := &fakeRunner{}
+	service, policy := newUpdaterTestService(t, runner)
+	target := filepath.Join(t.TempDir(), "docker.sock")
+	require.NoError(t, os.WriteFile(target, nil, 0600))
+	alias := filepath.Join(t.TempDir(), "innocent-source")
+	require.NoError(t, os.Symlink(target, alias))
+	var config renderedComposeConfig
+	require.NoError(t, json.Unmarshal([]byte(runner.composeConfig), &config))
+	application := config.Services[policy.ApplicationService]
+	application.Volumes[0] = renderedComposeMount{Type: "bind", Source: alias, Target: "/host/run"}
+	config.Services[policy.ApplicationService] = application
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	runner.composeConfig = string(data)
+
+	require.ErrorIs(t, service.validateDeploymentFiles(context.Background()), validationDockerSocket)
+}
+
+func TestSafeDeploymentValidationReasons(t *testing.T) {
+	reasons := []deploymentValidationError{
+		validationComposeFile,
+		validationEnvironmentFile,
+		validationRawComposeCommand,
+		validationRawComposeJSON,
+		validationManagedImage,
+		validationRenderedComposeCommand,
+		validationRenderedComposeJSON,
+		validationApplicationService,
+		validationDatabaseService,
+		validationRedisService,
+		validationVolumesFrom,
+		validationDockerSocket,
+		validationNamedVolume,
+		validationUpdaterSocketAccess,
+		validationInternal,
+	}
+	for _, reason := range reasons {
+		t.Run(string(reason), func(t *testing.T) {
+			require.EqualError(t, safeDeploymentValidationError(reason), "deployment structure check failed: "+string(reason))
+		})
+	}
+	const secret = "synthetic-secret-that-must-not-leak"
+	err := safeDeploymentValidationError(fmt.Errorf("unexpected validator failure: %s", secret))
+	require.EqualError(t, err, "deployment structure check failed: internal")
+	require.NotContains(t, err.Error(), secret)
+}
+
+func TestDeploymentValidationDiagnosticsDoNotLeakCommandErrors(t *testing.T) {
+	const secret = "synthetic-compose-secret-that-must-not-leak"
+	runner := &fakeRunner{rawComposeError: secret}
+	service, policy := newUpdaterTestService(t, runner)
+
+	_, err := service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{
+		Version: "0.1.184-rework.1", Actor: "admin:1",
+	})
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 3*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateFailed, status.State)
+	require.Equal(t, "deployment structure check failed: raw-compose-command", status.LastError)
+	audit, err := os.ReadFile(policy.AuditPath)
+	require.NoError(t, err)
+	require.NotContains(t, status.LastError+string(audit), secret)
 }
 
 func TestMergedComposeValidationRejectsUnsafeExistingNamedVolume(t *testing.T) {
@@ -178,7 +471,7 @@ func TestMergedComposeValidationRejectsUnsafeExistingNamedVolume(t *testing.T) {
 
 	err = service.validateDeploymentFiles(context.Background())
 
-	require.ErrorContains(t, err, "Docker socket")
+	require.ErrorIs(t, err, validationDockerSocket)
 }
 
 func TestMergedComposeValidationUsesInterpolatedRuntimeModel(t *testing.T) {
@@ -196,7 +489,7 @@ func TestMergedComposeValidationUsesInterpolatedRuntimeModel(t *testing.T) {
 
 	err = service.validateDeploymentFiles(context.Background())
 
-	require.ErrorContains(t, err, "Docker socket")
+	require.ErrorIs(t, err, validationDockerSocket)
 }
 
 func TestMergedComposeValidationAllowsSupportedMounts(t *testing.T) {
@@ -214,6 +507,27 @@ func TestMergedComposeValidationAllowsSupportedMounts(t *testing.T) {
 	})
 	config.Services[policy.ApplicationService] = application
 	config.Volumes = map[string]renderedComposeVolume{"data": {Name: "project_data"}}
+	data, err := json.Marshal(config)
+	require.NoError(t, err)
+	runner.composeConfig = string(data)
+
+	require.NoError(t, service.validateDeploymentFiles(context.Background()))
+}
+
+func TestMergedComposeValidationIgnoresUnrelatedEnvironmentTypes(t *testing.T) {
+	runner := &fakeRunner{}
+	service, policy := newUpdaterTestService(t, runner)
+	var config renderedComposeConfig
+	require.NoError(t, json.Unmarshal([]byte(runner.composeConfig), &config))
+	application := config.Services[policy.ApplicationService]
+	application.Environment = json.RawMessage(`{
+  "SUB2API_UPDATER_SOCKET": "` + policy.SocketPath + `",
+  "SUB2API_UPDATER_GID": "1234",
+  "EMPTY": null,
+  "NUMBER": 985,
+  "BOOLEAN": false
+}`)
+	config.Services[policy.ApplicationService] = application
 	data, err := json.Marshal(config)
 	require.NoError(t, err)
 	runner.composeConfig = string(data)

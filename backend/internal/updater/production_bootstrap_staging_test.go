@@ -27,8 +27,8 @@ import (
 
 const (
 	stagingSourceVersion = "0.1.183-rework.3"
-	stagingTargetVersion = "0.1.183-rework.5"
-	stagingFailedVersion = "0.1.183-rework.6"
+	stagingTargetVersion = "0.1.183-rework.6"
+	stagingFailedVersion = "0.1.183-rework.7"
 	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingSourceVersion
 	stagingFixtureImage  = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
 	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
@@ -220,6 +220,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	assertStagingRedisAuthModes(t, docker, compose, service, policy)
+	assertStagingSafeDeploymentReason(t, docker, compose, service, policy, updaterCompose)
 	assertStagingManagedPath(t, policy.AuditPath, 0600)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
@@ -288,6 +289,31 @@ func writeStagingDeployment(t *testing.T, project string, port int, socketDirect
 	base = bytes.ReplaceAll(base, []byte("container_name: sub2api-postgres"), []byte("container_name: "+project+"-postgres"))
 	base = bytes.ReplaceAll(base, []byte("container_name: sub2api-redis"), []byte("container_name: "+project+"-redis"))
 	base = bytes.ReplaceAll(base, []byte("container_name: sub2api\n"), []byte("container_name: "+project+"-application\n"))
+	for source, replacement := range map[string]string{
+		"- sub2api_data:/app/data":                 "- " + filepath.Join(filepath.Dir(basePath), "data") + ":/app/data:Z",
+		"- postgres_data:/var/lib/postgresql/data": "- " + filepath.Join(filepath.Dir(basePath), "postgres") + ":/var/lib/postgresql/data",
+		"- redis_data:/data":                       "- " + filepath.Join(filepath.Dir(basePath), "redis") + ":/data",
+	} {
+		if bytes.Count(base, []byte(source)) != 1 {
+			t.Fatalf("staging source mount %q changed", source)
+		}
+		base = bytes.Replace(base, []byte(source), []byte(replacement), 1)
+	}
+	volumeStart := bytes.Index(base, []byte("\n# =============================================================================\n# Volumes\n"))
+	networkStart := bytes.Index(base, []byte("\n# =============================================================================\n# Networks\n"))
+	if volumeStart < 0 || networkStart <= volumeStart {
+		t.Fatal("staging top-level volume block changed")
+	}
+	base = append(base[:volumeStart], base[networkStart:]...)
+	for _, directory := range []string{"data", "postgres", "redis"} {
+		path := filepath.Join(filepath.Dir(basePath), directory)
+		if err := os.Mkdir(path, 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
 	override := fmt.Sprintf(`services:
   sub2api:
     group_add:
@@ -384,6 +410,41 @@ func assertStagingRedisAuthModes(t *testing.T, docker string, compose []string, 
 	}
 	if err := service.checkRedis(context.Background()); err != nil {
 		t.Fatalf("updater did not recover after Redis recreate: %v", err)
+	}
+}
+
+func assertStagingSafeDeploymentReason(t *testing.T, docker string, compose []string, service *Service, policy Policy, overridePath string) {
+	t.Helper()
+	original, err := os.ReadFile(overridePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketDirectory := filepath.Dir(policy.SocketPath)
+	broken := bytes.Replace(original,
+		[]byte("target: "+socketDirectory), []byte("target: /var/run/docker.sock"), 1)
+	if bytes.Equal(broken, original) {
+		t.Fatal("staging updater socket target was not found")
+	}
+	if err := os.WriteFile(overridePath, broken, 0600); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.WriteFile(overridePath, original, 0600); err != nil {
+			t.Errorf("restore staging updater override: %v", err)
+		}
+	}()
+
+	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
+	status := waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, time.Minute)
+	if status.LastError != "deployment structure check failed: docker-socket" {
+		t.Fatalf("unsafe staging topology returned %q", status.LastError)
+	}
+	audit, err := os.ReadFile(policy.AuditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(status.LastError+string(audit), stagingRedisSecret) {
+		t.Fatal("Compose credential appeared in updater status or audit")
 	}
 }
 

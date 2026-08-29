@@ -176,9 +176,11 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
 
    Verify that the application reaches updater status through the Unix socket,
    has the supplemental socket GID, and has no Docker socket mount. Install the
-   corrected updater `1.1.2` and its schema-v2 policy before installing a release
-   whose manifest requires `minimum_updater_version: 1.1.2`. Version `1.1.2`
-   validates the Redis reply instead of trusting `redis-cli`'s zero exit status.
+   corrected updater `1.1.3` and its schema-v2 policy before installing a release
+   whose manifest requires `minimum_updater_version: 1.1.3`. Version `1.1.3`
+   scopes Compose decoding to fields the updater validates, so valid fields on
+   unrelated services cannot fail application preflight. It retains the `1.1.2`
+   Redis reply validation instead of trusting `redis-cli`'s zero exit status.
    It accepts an exact `PONG` without incidental client auth, then retries with
    the managed service credential only when Redis requires authentication.
 
@@ -188,7 +190,7 @@ For a healthy `0.1.183-rework.3` deployment at migration `232` where updater
 `1.1.1` was installed but remains inactive and the application has not yet been
 recreated with socket access:
 
-1. Replace the inactive updater binary with reviewed updater `1.1.2`.
+1. Replace the inactive updater binary with reviewed updater `1.1.3`.
 2. Change `audit_path` in the root-owned schema-v2 policy to
    `/var/lib/sub2api-rework-updater/audit.jsonl`. Do not rewrite other custom
    administrator paths. Preserve any audit file at the old configured path as
@@ -198,7 +200,7 @@ recreated with socket access:
 4. Verify updater status through its Unix socket.
 5. Recreate only the existing `0.1.183-rework.3` application with the complete
    ordered Compose file set so it receives socket access. Verify health and
-   migration `232` before preparing or installing `0.1.183-rework.5`.
+   migration `232` before preparing or installing `0.1.183-rework.6`.
 
 This recovery does not repeat the completed `231` to `232` migration.
 
@@ -210,6 +212,15 @@ interpolated runtime model, pulls the
 digest-addressed image, verifies its repository digest, and persists the prepared
 identity. It does not change the active deployment. Every Compose command uses
 the policy's full ordered file set.
+
+Deployment-structure failures expose only a fixed safe reason after
+`deployment structure check failed:`: `compose-file`, `environment-file`,
+`raw-compose-command`, `raw-compose-json`, `managed-image`,
+`rendered-compose-command`, `rendered-compose-json`, `application-service`,
+`database-service`, `redis-service`, `volumes-from`, `docker-socket`,
+`named-volume`, `updater-socket-access`, or `internal`. The updater does not
+include Compose output, environment values, Docker stderr, or underlying command
+errors in status or audit records.
 
 `install` reacquires the lock and refetches the manifest. Before mutation it
 requires a matching prepared identity, healthy application, reachable PostgreSQL
@@ -264,7 +275,7 @@ Before any production installation:
    a deployment directory other than `/opt/sub2api-rework/deploy`.
 2. Start the application with a base file plus the updater socket override.
 3. Model a root-owned, non-root-group `/var/log` ancestor with mode `0775`.
-   Confirm a custom audit path below it fails, then start updater `1.1.2` with
+   Confirm a custom audit path below it fails, then start updater `1.1.3` with
    state, audit, and backups under its private state tree, the same ordered set,
    staging-only paths, and a loopback health URL. Verify its systemd drop-in
    permits the configured deployment directory and no broader tree.

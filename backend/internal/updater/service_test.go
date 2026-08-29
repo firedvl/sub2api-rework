@@ -39,6 +39,8 @@ type fakeRunner struct {
 	calls                []string
 	composeConfig        string
 	runtimeComposeConfig string
+	rawComposeError      string
+	runtimeComposeError  string
 	volumeInspect        string
 	migration            int
 	digestMismatch       bool
@@ -79,8 +81,14 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 	case strings.Contains(joined, "config --services"):
 		_, _ = io.WriteString(stdout, "sub2api\npostgres\nredis\n")
 	case strings.Contains(joined, "config --no-interpolate --format json"):
+		if f.rawComposeError != "" {
+			return fmt.Errorf("raw compose failed: %s", f.rawComposeError)
+		}
 		_, _ = io.WriteString(stdout, f.composeConfig)
 	case strings.Contains(joined, "config --format json"):
+		if f.runtimeComposeError != "" {
+			return fmt.Errorf("rendered compose failed: %s", f.runtimeComposeError)
+		}
 		if f.runtimeComposeConfig == "" {
 			_, _ = io.WriteString(stdout, f.composeConfig)
 		} else {
@@ -389,16 +397,16 @@ func TestRedisAuthFailureIsRedactedFromStateAndAudit(t *testing.T) {
 	require.NotContains(t, status.LastError, secret)
 }
 
-func TestUpdater112PreparesRework5FromRework3(t *testing.T) {
+func TestUpdater113PreparesRework6FromRework3(t *testing.T) {
 	runner := &fakeRunner{}
 	service, _ := newUpdaterTestServiceWithPolicy(t, runner, func(policy *Policy) {
 		policy.InitialInstalledVersion = "0.1.183-rework.3"
 	})
 	var manifest updatecontract.Manifest
 	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
-	manifest.ReworkVersion = "0.1.183-rework.5"
-	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.5"
-	manifest.MinimumUpdaterVersion = "1.1.2"
+	manifest.ReworkVersion = "0.1.183-rework.6"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.6"
+	manifest.MinimumUpdaterVersion = "1.1.3"
 	manifest.MigrationMax = 232
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)
