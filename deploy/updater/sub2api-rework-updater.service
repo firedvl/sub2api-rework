@@ -44,7 +44,6 @@ DevicePolicy=closed
 ReadWritePaths=/run/sub2api-rework-updater
 ReadWritePaths=/var/lib/sub2api-rework-updater
 ReadWritePaths=/var/log/sub2api-rework-updater
-ReadWritePaths=/opt/sub2api-rework/deploy
 ReadWritePaths=/var/run/docker.sock
 
 [Install]

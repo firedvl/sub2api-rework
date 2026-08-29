@@ -45,7 +45,7 @@ func TestOperationLockRejectsBroadPermissions(t *testing.T) {
 func TestManagedPathsRejectWritableDeploymentFile(t *testing.T) {
 	policy := testPolicy(t.TempDir())
 	writeUpdaterTestDeployment(t, policy)
-	require.NoError(t, os.Chmod(policy.ComposeFile, 0620))
+	require.NoError(t, os.Chmod(policy.ComposeFiles[0], 0620))
 
 	err := validateManagedPaths(policy)
 

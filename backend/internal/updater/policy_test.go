@@ -19,10 +19,10 @@ func TestPolicyFileMustBeRootOwnedAndNotWritableByOthers(t *testing.T) {
 func testPolicy(root string) Policy {
 	deploy := filepath.Join(root, "deploy")
 	return Policy{
-		SchemaVersion: 1, SocketPath: filepath.Join(root, "run", "updater.sock"),
+		SchemaVersion: 2, SocketPath: filepath.Join(root, "run", "updater.sock"),
 		StatePath: filepath.Join(root, "state", "state.json"), AuditPath: filepath.Join(root, "state", "audit.jsonl"),
 		LockPath: filepath.Join(root, "state", "operation.lock"), BackupDirectory: filepath.Join(root, "backups"),
-		DeploymentDirectory: deploy, ComposeFile: filepath.Join(deploy, "docker-compose.yml"),
+		DeploymentDirectory: deploy, ComposeFiles: []string{filepath.Join(deploy, "docker-compose.yml")},
 		EnvironmentFile: filepath.Join(deploy, ".env"), DockerBinary: "/usr/bin/docker",
 		ApplicationService: "sub2api", DatabaseService: "postgres", RedisService: "redis",
 		DatabaseUser: "sub2api", DatabaseName: "sub2api",
@@ -40,7 +40,7 @@ func TestPolicyRejectsTrustBoundaryExpansion(t *testing.T) {
 		name   string
 		mutate func(*Policy)
 	}{
-		{"relative path", func(p *Policy) { p.ComposeFile = "docker-compose.yml" }},
+		{"relative path", func(p *Policy) { p.ComposeFiles = []string{"docker-compose.yml"} }},
 		{"outside deployment", func(p *Policy) { p.EnvironmentFile = filepath.Join(root, "secrets.env") }},
 		{"arbitrary binary", func(p *Policy) { p.DockerBinary = "/bin/sh" }},
 		{"wrong repository", func(p *Policy) { p.TrustedImageRepository = "ghcr.io/attacker/image" }},

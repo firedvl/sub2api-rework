@@ -19,8 +19,12 @@ has host-equivalent privilege; the systemd sandbox limits accidental access but
 does not remove that risk.
 
 This updater supports only the repository's three-service Linux Docker Compose
-topology, where the selected Compose file contains the application, PostgreSQL,
-and Redis services. It does not support `docker-compose.standalone.yml` with
+topology. Policy owns the complete ordered Compose file set, including the base
+file and every override. The merged model must contain the application,
+PostgreSQL, and Redis services and the updater socket access. It does not support
+`volumes_from` on the application or application named volumes with custom
+drivers or driver options. It does not support
+`docker-compose.standalone.yml` with
 external PostgreSQL or Redis, and it does not support Apple container
 deployments. Those topologies need separate backup, health, and runtime-control
 implementations before they can use this updater.
@@ -72,7 +76,7 @@ remain mandatory regardless of future signing.
 
 ## Host Installation
 
-These steps are examples for a staging host. This pull request does not run them.
+Run these steps on a staging host before the first production bootstrap.
 
 1. Build the updater from a reviewed checkout and install it root-owned:
 
@@ -90,53 +94,93 @@ These steps are examples for a staging host. This pull request does not run them
    getent group sub2api-updater
    ```
 
-3. Copy and edit the policy. Keep it root-owned and mode `0600`. Confirm every
-   service name, path, initial version, and migration number against the staging
-   deployment. The configured database user must be able to terminate remaining
-   connections and drop, create, and own the configured database so automatic
-   recovery can replace it from the backup.
+3. Place the base Compose file and updater override in the managed deployment.
+   Copy and edit the schema-v2 policy. Keep it root-owned and mode `0600`.
+   `compose_files` must list the base file first, then every override in the exact
+   order used to start the deployment. The updater rejects an empty set,
+   duplicates, paths outside `deployment_directory`, missing files, symlinks,
+   and unsafe ownership or permissions. It does not accept the old schema-v1
+   `compose_file` field.
 
    ```bash
    sudo install -d -o root -g root -m 0755 /etc/sub2api-rework
+   sudo install -o root -g root -m 0644 deploy/updater/docker-compose.updater.yml /opt/sub2api/docker-compose.updater.yml
    sudo install -o root -g root -m 0600 deploy/updater/updater.example.json /etc/sub2api-rework/updater.json
    ```
 
-4. Set `SUB2API_IMAGE` in the deployment `.env`; use the existing image for the
-   first start. Compose must reference `${SUB2API_IMAGE}` for the application.
-   Keep the deployment directory, Compose file, and environment file owned by
-   root or the updater service UID. No managed directory or file may be group or
-   world writable; state, audit, lock, backup, and environment files must not be
-   accessible to group or world. The updater rejects symlinks at managed file
-   paths and rejects unsafe parent directories.
+   Confirm every service name, path, initial version, and migration number. The
+   configured database user must be able to terminate remaining connections and
+   drop, create, and own the database so automatic recovery can replace it from
+   the backup.
 
-5. Install and inspect the unit before enabling it:
+4. Set `SUB2API_IMAGE` in the deployment `.env`; use the existing image for the
+   first start. The merged Compose model must keep `${SUB2API_IMAGE}` as the
+   application image, mount only the updater socket directory, and pass the same
+   supplemental updater GID through `group_add` and
+   `SUB2API_UPDATER_GID`. Keep the deployment directory, all Compose files, and
+   the environment file owned by root or the updater service UID. No managed
+   directory or file may be group or world writable; state, audit, lock, backup,
+   and environment files must not be accessible to group or world. The updater
+   rejects symlinks at managed file paths and rejects unsafe parent directories.
+
+5. Install the base unit. Then render its deployment-specific drop-in from the
+   validated root-owned policy. The base unit keeps `ProtectSystem=strict`; the
+   drop-in adds one `ReadWritePaths` entry for the configured
+   `deployment_directory`. The renderer rejects control characters and broad
+   paths such as `/` or `/opt`, paths containing updater installation files,
+   quotes spaces and backslashes, and escapes systemd `%` specifiers.
 
    ```bash
    sudo install -o root -g root -m 0644 deploy/updater/sub2api-rework-updater.service /etc/systemd/system/
+   sudo install -d -o root -g root -m 0755 /etc/systemd/system/sub2api-rework-updater.service.d
+   sudo /usr/local/sbin/sub2api-rework-updater \
+     --config /etc/sub2api-rework/updater.json \
+     --print-systemd-drop-in \
+     | sudo tee /etc/systemd/system/sub2api-rework-updater.service.d/10-deployment.conf >/dev/null
+   sudo chmod 0644 /etc/systemd/system/sub2api-rework-updater.service.d/10-deployment.conf
    systemd-analyze verify /etc/systemd/system/sub2api-rework-updater.service
    sudo systemctl daemon-reload
    sudo systemctl enable --now sub2api-rework-updater.service
    sudo systemctl status sub2api-rework-updater.service
    ```
 
-6. Apply `deploy/updater/docker-compose.updater.yml` as a second Compose file,
-   set `SUB2API_UPDATER_GID` to the host group ID, and recreate only the
-   application container. Verify that the application can reach the updater
-   socket and still has no Docker socket mount.
+   Regenerate the drop-in before restarting the service whenever
+   `deployment_directory` changes.
+
+6. Set `SUB2API_UPDATER_GID` to the host group ID and start or recreate the
+   application with the same ordered file set stored in policy:
+
+   ```bash
+   docker compose --project-directory /opt/sub2api \
+     -f /opt/sub2api/docker-compose.yml \
+     -f /opt/sub2api/docker-compose.updater.yml \
+     --env-file /opt/sub2api/.env \
+     up -d --no-deps sub2api
+   ```
+
+   Verify that the application reaches updater status through the Unix socket,
+   has the supplemental socket GID, and has no Docker socket mount. Install the
+   corrected updater `1.1.0` and its schema-v2 policy before installing a release
+   whose manifest requires `minimum_updater_version: 1.1.0`.
 
 ## Prepare And Install Flow
 
 `prepare` acquires the exclusive file lock, validates the approved manifest,
-runs preflight, pulls the digest-addressed image, verifies its repository digest,
-and persists the prepared identity. It does not change the active deployment.
+runs preflight against Docker's merged non-interpolated ownership model and its
+interpolated runtime model, pulls the
+digest-addressed image, verifies its repository digest, and persists the prepared
+identity. It does not change the active deployment. Every Compose command uses
+the policy's full ordered file set.
 
 `install` reacquires the lock and refetches the manifest. Before mutation it
 requires a matching prepared identity, healthy application, reachable PostgreSQL
 and Redis, valid Compose structure, sufficient disk, writable backup storage,
 compatible migration state, and the approved image digest. It then:
 
-1. stores the Compose file, environment file, source image/digest, migration
-   state, and a PostgreSQL custom-format dump under a timestamped update ID;
+1. stores every Compose file under a deterministic name, its original absolute
+   path, order, and SHA-256 checksum, plus the environment file, source
+   image/digest, migration state, and a PostgreSQL custom-format dump under a
+   timestamped update ID;
 2. stops the application service;
 3. pins `SUB2API_IMAGE` to the approved digest;
 4. runs `/app/sub2api --migrate` in a one-shot application container;
@@ -153,8 +197,11 @@ If migration or health validation fails after deployment mutation, the updater
 uses a fresh bounded recovery timeout and stops the application. Whenever
 migration execution was attempted, it forcibly disconnects remaining clients,
 recreates the target PostgreSQL database, and restores the pre-update dump. It
-then restores the previous image/configuration, restarts the service, and reruns
-all health checks. A stop or rollback failure leaves the updater in `critical` state.
+then restores the previous image and environment, restarts the service with the
+complete ordered Compose set, and reruns all health checks. The updater does not
+modify Compose files, so their private backup copies remain recovery and audit
+evidence. Backup validation rejects missing, reordered, renamed, or
+checksum-mismatched Compose copies. A stop or rollback failure leaves the updater in `critical` state.
 Prepare and install remain blocked in that state. A matching recorded rollback
 may be retried, but a failed or interrupted recovery attempt remains `critical`
 and preserves the recorded backup.
@@ -174,18 +221,25 @@ rollback alone reverses database changes.
 
 Before any production installation:
 
-1. Clone the production Compose topology with synthetic credentials and data.
-2. Start the updater with staging-only paths and a loopback health URL.
-3. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
-4. Install an approved test release and verify the digest, migration state,
-   frontend assets, PostgreSQL, Redis, and gateway health endpoints.
-5. Force application health failure and confirm automatic image/database
-   recovery, removal of schema objects created only by the failed migration,
-   and a healthy prior version.
-6. Force restore failure and confirm the visible `critical` state and audit.
-7. Send concurrent operations and confirm only one acquires the lock.
-8. Confirm the application container has the updater socket only, never the
-   Docker socket.
+1. Clone the production Compose topology with synthetic credentials and data in
+   a deployment directory other than `/opt/sub2api-rework/deploy`.
+2. Start the application with a base file plus the updater socket override.
+3. Start updater `1.1.0` with the same ordered set, staging-only paths, and a
+   loopback health URL. Verify its systemd drop-in permits the configured
+   deployment directory and no broader tree.
+4. Verify `prepare` leaves the active `.env`, containers, and database unchanged.
+5. Install an approved test release. Inspect the recreated application container
+   and verify the updater socket bind mount, supplemental socket GID, image
+   digest, migration state, frontend assets, PostgreSQL, Redis, and health
+   endpoints. Verify the Docker socket is absent.
+6. Query updater status from the recreated application, then run another
+   prepare/status operation.
+7. Force application health failure and confirm automatic image/database
+   recovery, removal of schema objects created only by the failed migration, and
+   a healthy prior version. Recheck the updater socket mount, supplemental GID,
+   Docker socket absence, and updater status after rollback.
+8. Force restore failure and confirm the visible `critical` state and audit.
+9. Send concurrent operations and confirm only one acquires the lock.
 
 ## Emergency Recovery
 

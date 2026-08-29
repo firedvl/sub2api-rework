@@ -65,17 +65,23 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 }
 
 type backupMetadata struct {
-	UpdateID        string    `json:"update_id"`
-	Directory       string    `json:"directory"`
-	DatabaseBackup  string    `json:"database_backup"`
-	EnvironmentCopy string    `json:"environment_copy"`
-	ComposeCopy     string    `json:"compose_copy"`
-	SourceVersion   string    `json:"source_version"`
-	TargetVersion   string    `json:"target_version"`
-	SourceImage     string    `json:"source_image"`
-	SourceDigest    string    `json:"source_digest"`
-	SourceMigration int       `json:"source_migration"`
-	CreatedAt       time.Time `json:"created_at"`
+	UpdateID        string              `json:"update_id"`
+	Directory       string              `json:"directory"`
+	DatabaseBackup  string              `json:"database_backup"`
+	EnvironmentCopy string              `json:"environment_copy"`
+	ComposeFiles    []backupComposeFile `json:"compose_files"`
+	SourceVersion   string              `json:"source_version"`
+	TargetVersion   string              `json:"target_version"`
+	SourceImage     string              `json:"source_image"`
+	SourceDigest    string              `json:"source_digest"`
+	SourceMigration int                 `json:"source_migration"`
+	CreatedAt       time.Time           `json:"created_at"`
+}
+
+type backupComposeFile struct {
+	OriginalPath string `json:"original_path"`
+	BackupPath   string `json:"backup_path"`
+	SHA256       string `json:"sha256"`
 }
 
 type persistedState struct {
@@ -99,11 +105,13 @@ func validateManagedPaths(policy Policy) error {
 	if err := validateManagedDirectory(policy.DeploymentDirectory, false); err != nil {
 		return fmt.Errorf("deployment directory: %w", err)
 	}
-	if _, err := validateManagedRegularFile(policy.ComposeFile, 2*1024*1024, false); err != nil {
-		return fmt.Errorf("compose file: %w", err)
-	}
 	if _, err := validateManagedRegularFile(policy.EnvironmentFile, 2*1024*1024, true); err != nil {
 		return fmt.Errorf("deployment environment: %w", err)
+	}
+	for index, path := range policy.ComposeFiles {
+		if _, err := validateManagedRegularFile(path, 2*1024*1024, false); err != nil {
+			return fmt.Errorf("compose file %d: %w", index, err)
+		}
 	}
 	for _, directory := range []string{filepath.Dir(policy.StatePath), filepath.Dir(policy.AuditPath)} {
 		if err := ensureManagedDirectory(directory, 0700, true); err != nil {
@@ -133,7 +141,7 @@ func (s *stateStore) load(initialVersion string, initialMigration int, updaterVe
 	data, err := readManagedFile(s.path, maxStateBytes, true)
 	if errors.Is(err, os.ErrNotExist) {
 		return persistedState{
-			SchemaVersion: 1,
+			SchemaVersion: 2,
 			Status: updatecontract.UpdaterStatus{
 				SchemaVersion: 1, UpdaterVersion: updaterVersion, Healthy: true,
 				State: updatecontract.UpdaterStateIdle, InstalledVersion: initialVersion,
@@ -147,7 +155,7 @@ func (s *stateStore) load(initialVersion string, initialMigration int, updaterVe
 	var state persistedState
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&state); err != nil || state.SchemaVersion != 1 || state.Status.SchemaVersion != 1 {
+	if err := decoder.Decode(&state); err != nil || state.SchemaVersion != 2 || state.Status.SchemaVersion != 1 {
 		return persistedState{}, fmt.Errorf("invalid updater state")
 	}
 	var trailing any

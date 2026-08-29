@@ -2,18 +2,19 @@ package updater
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/updatecontract"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -21,8 +22,37 @@ const (
 	migrationQuery         = "SELECT COALESCE(MAX((regexp_match(filename, '^([0-9]+)'))[1]::int), 0) FROM schema_migrations"
 )
 
+type renderedComposeConfig struct {
+	Services map[string]renderedComposeService `json:"services"`
+	Volumes  map[string]renderedComposeVolume  `json:"volumes"`
+}
+
+type renderedComposeService struct {
+	Image       string                 `json:"image"`
+	Environment json.RawMessage        `json:"environment"`
+	GroupAdd    []string               `json:"group_add"`
+	Volumes     []renderedComposeMount `json:"volumes"`
+	VolumesFrom []string               `json:"volumes_from"`
+}
+
+type renderedComposeMount struct {
+	Type   string `json:"type"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+
+type renderedComposeVolume struct {
+	Name       string            `json:"name"`
+	DriverOpts map[string]string `json:"driver_opts"`
+}
+
+type inspectedDockerVolume struct {
+	Driver  string            `json:"Driver"`
+	Options map[string]string `json:"Options"`
+}
+
 func (s *Service) preflight(ctx context.Context, manifest *updatecontract.Manifest, requireApplicationHealth bool) (int, error) {
-	if err := s.validateDeploymentFiles(); err != nil {
+	if err := s.validateDeploymentFiles(ctx); err != nil {
 		return 0, fmt.Errorf("deployment structure check failed")
 	}
 	if err := s.checkDiskSpace(); err != nil {
@@ -64,25 +94,38 @@ func (s *Service) preflightRollback(ctx context.Context) (int, error) {
 	return s.preflight(ctx, nil, false)
 }
 
-func (s *Service) validateDeploymentFiles() error {
-	data, err := readManagedFile(s.policy.ComposeFile, 2*1024*1024, false)
-	if err != nil {
-		return fmt.Errorf("invalid deployment file")
+func (s *Service) validateDeploymentFiles(ctx context.Context) error {
+	for _, path := range s.policy.ComposeFiles {
+		if _, err := readManagedFile(path, 2*1024*1024, false); err != nil {
+			return fmt.Errorf("invalid deployment file")
+		}
 	}
 	if _, err := validateManagedRegularFile(s.policy.EnvironmentFile, 2*1024*1024, true); err != nil {
 		return fmt.Errorf("invalid deployment file")
 	}
-	var compose struct {
-		Services map[string]struct {
-			Image string `yaml:"image"`
-		} `yaml:"services"`
+	merged, err := s.commandOutput(ctx, s.composeArgs("config", "--no-interpolate", "--format", "json")...)
+	if err != nil {
+		return fmt.Errorf("merged compose configuration is invalid")
 	}
-	if err := yaml.Unmarshal(data, &compose); err != nil {
-		return err
+	var ownership renderedComposeConfig
+	if err := json.Unmarshal([]byte(merged), &ownership); err != nil {
+		return fmt.Errorf("merged compose configuration is invalid")
 	}
-	application, ok := compose.Services[s.policy.ApplicationService]
-	if !ok || !strings.Contains(application.Image, "${SUB2API_IMAGE") {
+	application, ok := ownership.Services[s.policy.ApplicationService]
+	if !ok || !usesManagedImageVariable(application.Image) {
 		return fmt.Errorf("application image must use SUB2API_IMAGE")
+	}
+	merged, err = s.commandOutput(ctx, s.composeArgs("config", "--format", "json")...)
+	if err != nil {
+		return fmt.Errorf("merged compose configuration is invalid")
+	}
+	var compose renderedComposeConfig
+	if err := json.Unmarshal([]byte(merged), &compose); err != nil {
+		return fmt.Errorf("merged compose configuration is invalid")
+	}
+	application, ok = compose.Services[s.policy.ApplicationService]
+	if !ok {
+		return fmt.Errorf("application service missing")
 	}
 	if _, ok := compose.Services[s.policy.DatabaseService]; !ok {
 		return fmt.Errorf("database service missing")
@@ -90,7 +133,102 @@ func (s *Service) validateDeploymentFiles() error {
 	if _, ok := compose.Services[s.policy.RedisService]; !ok {
 		return fmt.Errorf("redis service missing")
 	}
+	socketDirectory := filepath.Dir(s.policy.SocketPath)
+	socketPath, hasSocketPath := composeEnvironmentValue(application.Environment, "SUB2API_UPDATER_SOCKET")
+	updaterGID, hasUpdaterGID := composeEnvironmentValue(application.Environment, "SUB2API_UPDATER_GID")
+	hasSocketMount := false
+	if len(application.VolumesFrom) != 0 {
+		return fmt.Errorf("application must not use volumes_from")
+	}
+	for _, volume := range application.Volumes {
+		if volume.Type == "bind" && bindExposesDockerSocket(volume.Source) || filepath.Base(filepath.Clean(volume.Target)) == "docker.sock" {
+			return fmt.Errorf("application must not mount the Docker socket")
+		}
+		if volume.Type == "volume" {
+			declared, exists := compose.Volumes[volume.Source]
+			if !exists || declared.Name == "" {
+				return fmt.Errorf("application named volume is invalid")
+			}
+			if bindExposesDockerSocket(declared.DriverOpts["device"]) {
+				return fmt.Errorf("application must not mount the Docker socket")
+			}
+			output, err := s.commandOutput(ctx, "volume", "inspect", "--format", "{{json .}}", declared.Name)
+			var inspected inspectedDockerVolume
+			if err != nil || json.Unmarshal([]byte(output), &inspected) != nil || inspected.Driver != "local" {
+				return fmt.Errorf("application named volume is unsupported")
+			}
+			if bindExposesDockerSocket(inspected.Options["device"]) {
+				return fmt.Errorf("application must not mount the Docker socket")
+			}
+			if len(declared.DriverOpts) != 0 || len(inspected.Options) != 0 {
+				return fmt.Errorf("application named volume is unsupported")
+			}
+		}
+		if volume.Type == "bind" && volume.Source == socketDirectory && volume.Target == socketDirectory {
+			hasSocketMount = true
+		}
+	}
+	if !hasSocketPath || socketPath != s.policy.SocketPath || !hasUpdaterGID || !containsString(application.GroupAdd, updaterGID) || !hasSocketMount {
+		return fmt.Errorf("application updater socket access is incomplete")
+	}
 	return nil
+}
+
+func usesManagedImageVariable(image string) bool {
+	if image == "${SUB2API_IMAGE}" {
+		return true
+	}
+	const prefix = "${SUB2API_IMAGE:-"
+	if !strings.HasPrefix(image, prefix) || !strings.HasSuffix(image, "}") {
+		return false
+	}
+	fallback := image[len(prefix) : len(image)-1]
+	return fallback != "" && !strings.ContainsAny(fallback, "${}")
+}
+
+func bindExposesDockerSocket(source string) bool {
+	paths := []string{source}
+	if resolved, err := filepath.EvalSymlinks(source); err == nil {
+		paths = append(paths, resolved)
+	}
+	for _, path := range paths {
+		path = filepath.Clean(path)
+		if filepath.Base(path) == "docker.sock" || pathWithin(path, "/run/docker.sock") || pathWithin(path, "/var/run/docker.sock") {
+			return true
+		}
+	}
+	return false
+}
+
+func composeEnvironmentValue(data json.RawMessage, name string) (string, bool) {
+	var list []string
+	if err := json.Unmarshal(data, &list); err == nil {
+		for _, entry := range list {
+			key, value, found := strings.Cut(entry, "=")
+			if found && key == name {
+				return value, true
+			}
+		}
+		return "", false
+	}
+	var values map[string]*string
+	if err := json.Unmarshal(data, &values); err != nil {
+		return "", false
+	}
+	value, ok := values[name]
+	if !ok || value == nil {
+		return "", false
+	}
+	return *value, true
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) checkDiskSpace() error {
@@ -166,12 +304,12 @@ func (s *Service) createBackup(
 	}()
 
 	environmentCopy := filepath.Join(directory, "deployment.env")
-	composeCopy := filepath.Join(directory, "docker-compose.yml")
 	databaseBackup := filepath.Join(directory, "postgres.dump")
 	if err := copyRegularFile(s.policy.EnvironmentFile, environmentCopy, 0600, true); err != nil {
 		return nil, err
 	}
-	if err := copyRegularFile(s.policy.ComposeFile, composeCopy, 0600, false); err != nil {
+	composeFiles, err := backupComposeFiles(s.policy.ComposeFiles, directory)
+	if err != nil {
 		return nil, err
 	}
 	sourceImage, err := deploymentImageFromEnvironment(s.policy.EnvironmentFile)
@@ -206,7 +344,7 @@ func (s *Service) createBackup(
 
 	metadata := &backupMetadata{
 		UpdateID: updateID, Directory: directory, DatabaseBackup: databaseBackup,
-		EnvironmentCopy: environmentCopy, ComposeCopy: composeCopy,
+		EnvironmentCopy: environmentCopy, ComposeFiles: composeFiles,
 		SourceVersion: sourceVersion, TargetVersion: targetVersion,
 		SourceImage: sourceImage, SourceDigest: sourceDigest, SourceMigration: sourceMigration,
 		CreatedAt: s.now().UTC(),
@@ -402,10 +540,11 @@ func (s *Service) imageDigests(ctx context.Context, image string) ([]string, err
 }
 
 func (s *Service) composeArgs(args ...string) []string {
-	prefix := []string{
-		"compose", "--project-directory", s.policy.DeploymentDirectory,
-		"-f", s.policy.ComposeFile, "--env-file", s.policy.EnvironmentFile,
+	prefix := []string{"compose", "--project-directory", s.policy.DeploymentDirectory}
+	for _, path := range s.policy.ComposeFiles {
+		prefix = append(prefix, "-f", path)
 	}
+	prefix = append(prefix, "--env-file", s.policy.EnvironmentFile)
 	return append(prefix, args...)
 }
 
@@ -493,6 +632,31 @@ func copyRegularFile(source, destination string, mode os.FileMode, sourcePrivate
 	return atomicWriteFile(destination, data, mode)
 }
 
+func backupComposeFiles(paths []string, directory string) ([]backupComposeFile, error) {
+	files := make([]backupComposeFile, 0, len(paths))
+	for index, originalPath := range paths {
+		data, err := readManagedFile(originalPath, 2*1024*1024, false)
+		if err != nil {
+			return nil, fmt.Errorf("invalid backup source")
+		}
+		backupPath := filepath.Join(directory, fmt.Sprintf("compose-%03d.yaml", index))
+		if err := atomicWriteFile(backupPath, data, 0600); err != nil {
+			return nil, err
+		}
+		files = append(files, backupComposeFile{
+			OriginalPath: originalPath,
+			BackupPath:   backupPath,
+			SHA256:       composeChecksum(data),
+		})
+	}
+	return files, nil
+}
+
+func composeChecksum(data []byte) string {
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", digest)
+}
+
 func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 	if backup == nil || backup.Directory == s.policy.BackupDirectory || !pathWithin(s.policy.BackupDirectory, backup.Directory) {
 		return fmt.Errorf("invalid backup directory")
@@ -503,7 +667,6 @@ func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 	expected := map[string]string{
 		backup.DatabaseBackup:  filepath.Join(backup.Directory, "postgres.dump"),
 		backup.EnvironmentCopy: filepath.Join(backup.Directory, "deployment.env"),
-		backup.ComposeCopy:     filepath.Join(backup.Directory, "docker-compose.yml"),
 	}
 	for path, wanted := range expected {
 		if path != wanted {
@@ -515,6 +678,33 @@ func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 	}
 	if _, err := validateManagedRegularFile(filepath.Join(backup.Directory, "metadata.json"), maxStateBytes, true); err != nil {
 		return err
+	}
+	if len(backup.ComposeFiles) != len(s.policy.ComposeFiles) {
+		return fmt.Errorf("invalid backup compose file set")
+	}
+	for index, file := range backup.ComposeFiles {
+		if file.OriginalPath != s.policy.ComposeFiles[index] ||
+			file.BackupPath != filepath.Join(backup.Directory, fmt.Sprintf("compose-%03d.yaml", index)) {
+			return fmt.Errorf("invalid backup compose file identity")
+		}
+		data, err := readManagedFile(file.BackupPath, 2*1024*1024, true)
+		if err != nil || file.SHA256 != composeChecksum(data) {
+			return fmt.Errorf("invalid backup compose file checksum")
+		}
+	}
+	data, err := readManagedFile(filepath.Join(backup.Directory, "metadata.json"), maxStateBytes, true)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	var recorded backupMetadata
+	if err := decoder.Decode(&recorded); err != nil || !reflect.DeepEqual(recorded, *backup) {
+		return fmt.Errorf("backup metadata does not match recorded state")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("invalid backup metadata")
 	}
 	return nil
 }

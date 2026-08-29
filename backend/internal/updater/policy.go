@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/Wei-Shaw/sub2api/internal/releaseinfo"
 	"github.com/Wei-Shaw/sub2api/internal/updatecontract"
@@ -21,30 +23,37 @@ const maxPolicyBytes = 64 * 1024
 
 var policyNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
+var systemdProtectedPaths = []string{
+	"/usr/local/sbin/sub2api-rework-updater",
+	"/etc/sub2api-rework/updater.json",
+	"/etc/systemd/system/sub2api-rework-updater.service",
+	"/etc/systemd/system/sub2api-rework-updater.service.d",
+}
+
 type Policy struct {
-	SchemaVersion           int    `json:"schema_version"`
-	SocketPath              string `json:"socket_path"`
-	StatePath               string `json:"state_path"`
-	AuditPath               string `json:"audit_path"`
-	LockPath                string `json:"lock_path"`
-	BackupDirectory         string `json:"backup_directory"`
-	DeploymentDirectory     string `json:"deployment_directory"`
-	ComposeFile             string `json:"compose_file"`
-	EnvironmentFile         string `json:"environment_file"`
-	DockerBinary            string `json:"docker_binary"`
-	ApplicationService      string `json:"application_service"`
-	DatabaseService         string `json:"database_service"`
-	RedisService            string `json:"redis_service"`
-	DatabaseUser            string `json:"database_user"`
-	DatabaseName            string `json:"database_name"`
-	TrustedImageRepository  string `json:"trusted_image_repository"`
-	ManifestBaseURL         string `json:"manifest_base_url"`
-	HealthBaseURL           string `json:"health_base_url"`
-	MinimumFreeBytes        uint64 `json:"minimum_free_bytes"`
-	OperationTimeoutSeconds int    `json:"operation_timeout_seconds"`
-	HealthTimeoutSeconds    int    `json:"health_timeout_seconds"`
-	InitialInstalledVersion string `json:"initial_installed_version"`
-	InitialMigration        int    `json:"initial_migration"`
+	SchemaVersion           int      `json:"schema_version"`
+	SocketPath              string   `json:"socket_path"`
+	StatePath               string   `json:"state_path"`
+	AuditPath               string   `json:"audit_path"`
+	LockPath                string   `json:"lock_path"`
+	BackupDirectory         string   `json:"backup_directory"`
+	DeploymentDirectory     string   `json:"deployment_directory"`
+	ComposeFiles            []string `json:"compose_files"`
+	EnvironmentFile         string   `json:"environment_file"`
+	DockerBinary            string   `json:"docker_binary"`
+	ApplicationService      string   `json:"application_service"`
+	DatabaseService         string   `json:"database_service"`
+	RedisService            string   `json:"redis_service"`
+	DatabaseUser            string   `json:"database_user"`
+	DatabaseName            string   `json:"database_name"`
+	TrustedImageRepository  string   `json:"trusted_image_repository"`
+	ManifestBaseURL         string   `json:"manifest_base_url"`
+	HealthBaseURL           string   `json:"health_base_url"`
+	MinimumFreeBytes        uint64   `json:"minimum_free_bytes"`
+	OperationTimeoutSeconds int      `json:"operation_timeout_seconds"`
+	HealthTimeoutSeconds    int      `json:"health_timeout_seconds"`
+	InitialInstalledVersion string   `json:"initial_installed_version"`
+	InitialMigration        int      `json:"initial_migration"`
 }
 
 func LoadPolicy(path string) (Policy, error) {
@@ -105,21 +114,40 @@ func validatePolicyFileSecurity(mode os.FileMode, ownerUID uint32) error {
 }
 
 func (p Policy) Validate() error {
-	if p.SchemaVersion != 1 {
+	if p.SchemaVersion != 2 {
 		return fmt.Errorf("unsupported updater policy schema_version %d", p.SchemaVersion)
 	}
 	for name, path := range map[string]string{
 		"socket_path": p.SocketPath, "state_path": p.StatePath, "audit_path": p.AuditPath,
 		"lock_path": p.LockPath, "backup_directory": p.BackupDirectory,
-		"deployment_directory": p.DeploymentDirectory, "compose_file": p.ComposeFile,
-		"environment_file": p.EnvironmentFile, "docker_binary": p.DockerBinary,
+		"deployment_directory": p.DeploymentDirectory,
+		"environment_file":     p.EnvironmentFile, "docker_binary": p.DockerBinary,
 	} {
 		if !cleanAbsolutePath(path) {
 			return fmt.Errorf("%s must be a clean absolute path", name)
 		}
 	}
-	if !pathWithin(p.DeploymentDirectory, p.ComposeFile) || !pathWithin(p.DeploymentDirectory, p.EnvironmentFile) {
-		return fmt.Errorf("compose_file and environment_file must be inside deployment_directory")
+	if parent := filepath.Dir(p.DeploymentDirectory); parent == p.DeploymentDirectory || parent == string(filepath.Separator) {
+		return fmt.Errorf("deployment_directory must identify a dedicated subdirectory")
+	}
+	if !pathWithin(p.DeploymentDirectory, p.EnvironmentFile) {
+		return fmt.Errorf("environment_file must be inside deployment_directory")
+	}
+	if len(p.ComposeFiles) == 0 {
+		return fmt.Errorf("compose_files must not be empty")
+	}
+	seenComposeFiles := make(map[string]struct{}, len(p.ComposeFiles))
+	for _, path := range p.ComposeFiles {
+		if !cleanAbsolutePath(path) {
+			return fmt.Errorf("compose_files entries must be clean absolute paths")
+		}
+		if !pathWithin(p.DeploymentDirectory, path) {
+			return fmt.Errorf("compose_files entries must be inside deployment_directory")
+		}
+		if _, duplicate := seenComposeFiles[path]; duplicate {
+			return fmt.Errorf("compose_files must not contain duplicates")
+		}
+		seenComposeFiles[path] = struct{}{}
 	}
 	if filepath.Base(p.DockerBinary) != "docker" {
 		return fmt.Errorf("docker_binary must name the Docker CLI")
@@ -156,7 +184,7 @@ func (p Policy) Validate() error {
 }
 
 func cleanAbsolutePath(path string) bool {
-	return filepath.IsAbs(path) && filepath.Clean(path) == path
+	return filepath.IsAbs(path) && filepath.Clean(path) == path && strings.IndexFunc(path, unicode.IsControl) == -1
 }
 
 func pathWithin(root, path string) bool {
@@ -170,4 +198,34 @@ func (p Policy) operationTimeout() time.Duration {
 
 func (p Policy) healthTimeout() time.Duration {
 	return time.Duration(p.HealthTimeoutSeconds) * time.Second
+}
+
+func SystemdDropIn(policy Policy, runtimeProtectedPaths ...string) ([]byte, error) {
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	deploymentPaths := []string{policy.DeploymentDirectory}
+	if resolved, err := filepath.EvalSymlinks(policy.DeploymentDirectory); err == nil {
+		deploymentPaths = append(deploymentPaths, resolved)
+	}
+	protectedPaths := append([]string{policy.DockerBinary}, systemdProtectedPaths...)
+	protectedPaths = append(protectedPaths, runtimeProtectedPaths...)
+	for _, protectedPath := range protectedPaths {
+		if !cleanAbsolutePath(protectedPath) {
+			return nil, fmt.Errorf("systemd protected path must be clean and absolute")
+		}
+		pathAliases := []string{protectedPath}
+		if resolved, err := filepath.EvalSymlinks(protectedPath); err == nil {
+			pathAliases = append(pathAliases, resolved)
+		}
+		for _, deploymentPath := range deploymentPaths {
+			for _, path := range pathAliases {
+				if pathWithin(deploymentPath, path) || pathWithin(path, deploymentPath) {
+					return nil, fmt.Errorf("deployment_directory must not contain updater installation paths")
+				}
+			}
+		}
+	}
+	path := strconv.Quote(strings.ReplaceAll(policy.DeploymentDirectory, "%", "%%"))
+	return []byte("[Service]\nReadWritePaths=" + path + "\n"), nil
 }
