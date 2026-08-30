@@ -30,6 +30,7 @@ type stubAdminService struct {
 	testedProxyIDs                      []int64
 	getUserErr                          error
 	createAccountErr                    error
+	createProxyErr                      error
 	createSparkShadowErr                error
 	updateAccountErr                    error
 	lastUpdateAccountInput              *service.UpdateAccountInput
@@ -626,6 +627,9 @@ func (s *stubAdminService) CreateProxy(ctx context.Context, input *service.Creat
 	s.mu.Lock()
 	s.createdProxies = append(s.createdProxies, input)
 	s.mu.Unlock()
+	if s.createProxyErr != nil {
+		return nil, s.createProxyErr
+	}
 	proxy := service.Proxy{ID: 400, Name: input.Name, Status: service.StatusActive}
 	return &proxy, nil
 }

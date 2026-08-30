@@ -2,9 +2,11 @@ import { defineConfig, loadEnv, Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import checker from 'vite-plugin-checker'
 import { resolve } from 'path'
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   getOperatorFixtureData,
+  getOperatorImportPreview,
+  getOperatorImportResult,
   isOperatorFixtureReadRequest,
   operatorFixturePublicSettings,
   operatorFixtureUser,
@@ -94,6 +96,12 @@ function sendReviewJson(response: ServerResponse, status: number, payload: unkno
   response.end(JSON.stringify(payload))
 }
 
+async function readReviewJson(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
+}
+
 function operatorReviewFixtures(): Plugin {
   const fixtureUser = operatorFixtureUser()
   const appConfig = JSON.stringify(operatorFixturePublicSettings)
@@ -110,7 +118,7 @@ function operatorReviewFixtures(): Plugin {
       )
     },
     configureServer(server) {
-      server.middlewares.use((request, response, next) => {
+      server.middlewares.use(async (request, response, next) => {
         const url = new URL(request.url || '/', 'http://operator-review.local')
         const pathname = url.pathname
         const method = (request.method || 'GET').toUpperCase()
@@ -129,6 +137,20 @@ function operatorReviewFixtures(): Plugin {
 
         if (!pathname.startsWith('/api/v1/')) {
           next()
+          return
+        }
+
+        if (method === 'POST' && (pathname === '/api/v1/admin/accounts/data/preview' || pathname === '/api/v1/admin/accounts/data')) {
+          try {
+            const body = await readReviewJson(request)
+            sendReviewJson(response, 200, {
+              code: 0,
+              message: 'ok',
+              data: pathname.endsWith('/preview') ? getOperatorImportPreview(body) : getOperatorImportResult(body),
+            })
+          } catch {
+            sendReviewJson(response, 400, { code: 400, message: 'Invalid fixture request' })
+          }
           return
         }
 

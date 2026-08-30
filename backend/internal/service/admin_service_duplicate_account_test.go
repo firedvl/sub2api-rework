@@ -70,6 +70,51 @@ func (s *duplicateAccountRepoStub) FindByExtraField(_ context.Context, key strin
 	return matches, nil
 }
 
+func TestCreateAccountAtomicGroupBindRollsBackOnGroupFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newDuplicateAccountRepoStub()
+	repo.atomicCreateErr = errors.New("group insert failed")
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+
+	_, err := svc.CreateAccount(ctx, &CreateAccountInput{
+		Name:                  "imported",
+		Platform:              PlatformOpenAI,
+		Type:                  AccountTypeAPIKey,
+		Credentials:           map[string]any{"api_key": "secret"},
+		GroupIDs:              []int64{7},
+		AtomicGroupBind:       true,
+		SkipDefaultGroupBind:  true,
+		SkipMixedChannelCheck: true,
+	})
+
+	require.ErrorIs(t, err, repo.atomicCreateErr)
+	require.Empty(t, repo.accounts)
+}
+
+func TestCreateAccountAtomicGroupBindPreservesBindOrderPriority(t *testing.T) {
+	repo := newDuplicateAccountRepoStub()
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+
+	account, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+		Name:                  "imported",
+		Platform:              PlatformOpenAI,
+		Type:                  AccountTypeAPIKey,
+		Credentials:           map[string]any{"api_key": "secret"},
+		Priority:              7,
+		GroupIDs:              []int64{9, 3},
+		AtomicGroupBind:       true,
+		SkipDefaultGroupBind:  true,
+		SkipMixedChannelCheck: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 7, account.Priority)
+	require.Equal(t, []AccountGroup{
+		{AccountID: account.ID, GroupID: 9, Priority: 1},
+		{AccountID: account.ID, GroupID: 3, Priority: 2},
+	}, account.AccountGroups)
+}
+
 func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()

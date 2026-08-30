@@ -3,8 +3,10 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -70,6 +72,7 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 	)
 
 	router.GET("/api/v1/admin/accounts/data", h.ExportData)
+	router.POST("/api/v1/admin/accounts/data/preview", h.PreviewImportData)
 	router.POST("/api/v1/admin/accounts/data", h.ImportData)
 	return router, adminSvc
 }
@@ -129,6 +132,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
+	require.NotContains(t, rec.Body.String(), "source_index")
 }
 
 func TestExportDataWithoutProxies(t *testing.T) {
@@ -315,5 +319,207 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 
 	require.Len(t, adminSvc.createdProxies, 0)
 	require.Len(t, adminSvc.createdAccounts, 1)
+	require.True(t, adminSvc.createdAccounts[0].AtomicGroupBind)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
+}
+
+func TestPreviewImportDataDetectsExistingAndBatchDuplicatesWithoutSecrets(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{{ID: 9, Name: "existing", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "acct-1", "access_token": "existing-secret"}}}
+	payload := map[string]any{"data": map[string]any{"proxies": []any{}, "accounts": []map[string]any{
+		{"source_index": 10, "name": "one", "platform": service.PlatformOpenAI, "type": service.AccountTypeOAuth, "credentials": map[string]any{"chatgpt_account_id": "acct-1", "access_token": "s3cr"}},
+		{"source_index": 11, "name": "two", "platform": service.PlatformOpenAI, "type": service.AccountTypeOAuth, "credentials": map[string]any{"chatgpt_account_id": "acct-2", "access_token": "very-secret-5678"}},
+		{"source_index": 12, "name": "three", "platform": service.PlatformOpenAI, "type": service.AccountTypeSetupToken, "credentials": map[string]any{"chatgpt_account_id": "acct-2", "access_token": "very-secret-9012"}},
+	}}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data/preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "very-secret")
+	require.NotContains(t, rec.Body.String(), "s3cr")
+	var response struct {
+		Data DataPreviewResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, 3, response.Data.Total)
+	require.Equal(t, 2, response.Data.Duplicate)
+	require.Equal(t, 1, response.Data.Ready)
+	require.Equal(t, 0, response.Data.Invalid)
+	require.Equal(t, 0, response.Data.Unsupported)
+	require.Len(t, response.Data.Items, 3)
+	require.Equal(t, "existing", response.Data.Items[0].DuplicateScope)
+	require.Equal(t, int64(9), response.Data.Items[0].ExistingAccountID)
+	require.Equal(t, "batch", response.Data.Items[2].DuplicateScope)
+	require.Equal(t, "••••5678", response.Data.Items[1].CredentialHint)
+}
+
+func TestImportDataSkipsDuplicatesAndAppliesBatchOptions(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	accounts := make([]map[string]any, 50)
+	for i := range accounts {
+		platform, accountType := service.PlatformOpenAI, service.AccountTypeOAuth
+		if i == 0 {
+			platform, accountType = " OpenAI ", " OAuth "
+		}
+		accounts[i] = map[string]any{"source_index": i + 1, "name": "account", "platform": platform, "type": accountType, "credentials": map[string]any{"chatgpt_account_id": "acct-" + strconv.Itoa(i/2), "token": "secret"}}
+	}
+	payload := map[string]any{"data": map[string]any{"proxies": []any{}, "accounts": accounts}, "options": map[string]any{"status": service.StatusDisabled, "schedulable": false, "priority": 7, "group_ids": []int64{3}}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 25)
+	for _, input := range adminSvc.createdAccounts {
+		require.Equal(t, service.PlatformOpenAI, input.Platform)
+		require.Equal(t, service.AccountTypeOAuth, input.Type)
+		require.Equal(t, service.StatusDisabled, input.Status)
+		require.NotNil(t, input.Schedulable)
+		require.False(t, *input.Schedulable)
+		require.Equal(t, 7, input.Priority)
+		require.True(t, input.AtomicGroupBind)
+	}
+	var response struct {
+		Data DataImportResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, 0, response.Data.AccountUpdated)
+	require.Equal(t, 25, response.Data.AccountSkipped)
+	require.Len(t, response.Data.Items, 50)
+}
+
+func TestImportDataDoesNotSerializeProxyKeyOrRawServiceErrors(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.createProxyErr = errors.New("proxy password super-secret failed")
+	payload := map[string]any{"data": map[string]any{"proxies": []map[string]any{{"protocol": "http", "host": "example.test", "port": 8080, "username": "user", "password": "proxy-secret"}}, "accounts": []any{}}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "proxy-secret")
+	require.NotContains(t, rec.Body.String(), "super-secret")
+	require.NotContains(t, rec.Body.String(), "proxy_key")
+	require.Contains(t, rec.Body.String(), "proxy could not be created")
+}
+
+func TestPreviewImportDataRejectsInvalidOptionsAndProviderShapes(t *testing.T) {
+	router, _ := setupAccountDataRouter()
+	payload := map[string]any{"data": map[string]any{"proxies": []any{}, "accounts": []map[string]any{
+		{"name": "setup", "platform": service.PlatformOpenAI, "type": service.AccountTypeSetupToken, "credentials": map[string]any{"access_token": "token"}},
+		{"name": "oauth", "platform": service.PlatformOpenAI, "type": service.AccountTypeOAuth, "credentials": map[string]any{"refresh_token": "token"}},
+		{"name": "vertex", "platform": service.PlatformGemini, "type": service.AccountTypeServiceAccount, "credentials": map[string]any{"service_account_json": map[string]any{"client_email": "a@example.test", "private_key": "pem", "project_id": "project"}}},
+		{"name": "vertex-copy", "platform": service.PlatformGemini, "type": service.AccountTypeServiceAccount, "credentials": map[string]any{"service_account_json": `{"client_email":"a@example.test","private_key":"pem","project_id":"project"}`}},
+		{"name": "unsupported", "platform": service.PlatformKimi, "type": service.AccountTypeOAuth, "credentials": map[string]any{"token": "token"}},
+	}}, "options": map[string]any{"priority": -1}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data/preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+
+	delete(payload, "options")
+	body, err = json.Marshal(payload)
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data/preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Data DataPreviewResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, 3, response.Data.Ready)
+	require.Equal(t, 1, response.Data.Duplicate)
+	require.Equal(t, 1, response.Data.Unsupported)
+}
+
+func TestImportDataValidatesProxyOptionBeforeMutation(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	payload := map[string]any{
+		"data": map[string]any{
+			"proxies":  []map[string]any{{"name": "new", "protocol": "http", "host": "example.test", "port": 8080, "status": "active"}},
+			"accounts": []map[string]any{{"name": "account", "platform": service.PlatformOpenAI, "type": service.AccountTypeAPIKey, "credentials": map[string]any{"api_key": "secret"}}},
+		},
+		"options": map[string]any{"proxy_id": 999},
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	for _, path := range []string{"/api/v1/admin/accounts/data/preview", "/api/v1/admin/accounts/data"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "selected proxy is unavailable")
+	}
+	require.Empty(t, adminSvc.createdProxies)
+	require.Empty(t, adminSvc.createdAccounts)
+}
+
+func TestDataImportRejectsSecretBearingHeaderWithoutEcho(t *testing.T) {
+	router, _ := setupAccountDataRouter()
+	payload := map[string]any{"data": map[string]any{"type": "secret-value", "proxies": []any{}, "accounts": []any{}}}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data/preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "unsupported data type")
+	require.NotContains(t, rec.Body.String(), "secret-value")
+}
+
+func TestExportPreviewImportRoundTripPreservesLinkedProxy(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	proxyID := int64(11)
+	adminSvc.proxies = []service.Proxy{{ID: proxyID, Name: "proxy", Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive}}
+	adminSvc.accounts = []service.Account{{
+		ID: 21, Name: "account", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Credentials: map[string]any{"email": "roundtrip@example.test", "refresh_token": "secret"}, ProxyID: &proxyID,
+	}}
+
+	exportRec := httptest.NewRecorder()
+	router.ServeHTTP(exportRec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusOK, exportRec.Code)
+	var exported struct {
+		Data DataPayload `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(exportRec.Body.Bytes(), &exported))
+	adminSvc.accounts = nil
+	adminSvc.proxies = nil
+
+	body, err := json.Marshal(DataImportRequest{Data: exported.Data})
+	require.NoError(t, err)
+	previewRec := httptest.NewRecorder()
+	previewReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data/preview", bytes.NewReader(body))
+	previewReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(previewRec, previewReq)
+	require.Equal(t, http.StatusOK, previewRec.Code)
+	var previewResponse struct {
+		Data DataPreviewResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(previewRec.Body.Bytes(), &previewResponse))
+	require.Equal(t, 1, previewResponse.Data.Ready)
+
+	importRec := httptest.NewRecorder()
+	importReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	importReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(importRec, importReq)
+	require.Equal(t, http.StatusOK, importRec.Code)
+	require.Len(t, adminSvc.createdProxies, 1)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.NotNil(t, adminSvc.createdAccounts[0].ProxyID)
 }

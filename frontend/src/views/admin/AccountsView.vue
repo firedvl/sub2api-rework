@@ -587,7 +587,13 @@
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <ImportDataModal
+      :show="showImportData"
+      :proxies="proxies"
+      :groups="groups"
+      @close="closeImportData"
+      @imported="handleDataImported"
+    />
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"
@@ -2272,7 +2278,11 @@ const handleBulkUpdated = () => {
   clearSelection()
   reload()
 }
-const handleDataImported = () => { showImportData.value = false; reload() }
+const closeImportData = () => {
+  showImportData.value = false
+  nextTick(() => accountToolsTriggerRef.value?.focus())
+}
+const handleDataImported = () => { closeImportData(); reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({

@@ -15,6 +15,8 @@ import type {
   AccountUsageStatsResponse,
   TempUnschedulableStatus,
   AdminDataPayload,
+  AdminDataImportOptions,
+  AdminDataPreviewResult,
   AdminDataImportResult,
   CodexSessionImportRequest,
   CodexSessionImportResult,
@@ -667,10 +669,21 @@ export async function exportData(options?: {
 export async function importData(payload: {
   data: AdminDataPayload
   skip_default_group_bind?: boolean
-}): Promise<AdminDataImportResult> {
-  const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
-    data: payload.data,
-    skip_default_group_bind: payload.skip_default_group_bind
+  options?: AdminDataImportOptions
+}, idempotencyKey?: string): Promise<AdminDataImportResult> {
+  const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', payload, {
+    timeout: 120000,
+    ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {})
+  })
+  return data
+}
+
+export async function previewImportData(payload: {
+  data: AdminDataPayload
+  options?: AdminDataImportOptions
+}): Promise<AdminDataPreviewResult> {
+  const { data } = await apiClient.post<AdminDataPreviewResult>('/admin/accounts/data/preview', payload, {
+    timeout: 120000
   })
   return data
 }
@@ -1022,6 +1035,7 @@ export const accountsAPI = {
   previewFromCrs,
   syncFromCrs,
   exportData,
+  previewImportData,
   importData,
   importCodexSession,
   createOpenAICodexPAT,

@@ -373,6 +373,16 @@ type CreateAccountInput struct {
 	ExpiresAt          *int64
 	AutoPauseOnExpired *bool
 	ProbeEnabled       *bool
+	// Status and Schedulable are optional import-time overrides. Normal account
+	// creation keeps its existing active/schedulable defaults.
+	Status      string
+	Schedulable *bool
+	// AtomicGroupBind persists the account and requested groups in one transaction.
+	// It is intentionally opt-in so existing creation behavior is unchanged.
+	AtomicGroupBind bool
+	// SkipAsyncPrivacy lets a bounded batch operation perform privacy setup once
+	// after all rows are persisted. Normal account creation remains unchanged.
+	SkipAsyncPrivacy bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
