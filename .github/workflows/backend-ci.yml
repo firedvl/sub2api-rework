@@ -54,28 +54,19 @@ jobs:
       - name: Verify Go version
         run: |
           go version | grep -q 'go1.27.0'
-      - name: Production-like updater lifecycle
-        working-directory: backend
-        run: |
-          docker_gid="$(stat -c '%g' /var/run/docker.sock)"
-          test "$docker_gid" -ne 0
-          sudo -n setpriv \
-            --reuid=0 \
-            --regid="$docker_gid" \
-            --clear-groups \
-            env \
-            PATH="$PATH" \
-            HOME=/root \
-            TMPDIR=/tmp \
-            go test -tags=staging ./internal/updater \
-              -run '^TestProductionBootstrapPreservesUpdaterAccess$' \
-              -count=1 -timeout=20m
-      - name: Verify updater systemd sandbox
+      - name: Production-like updater lifecycle under systemd
         working-directory: backend
         run: |
           CGO_ENABLED=0 go build -trimpath -o /tmp/sub2api-rework-updater ./cmd/updater
+          CGO_ENABLED=0 go test -c -tags=staging \
+            -o /tmp/sub2api-rework-updater-qualification ./internal/updater
+          sudo groupadd --force --system sub2api-updater
+          test "$(getent group sub2api-updater | cut -d: -f3)" -ne 0
           sudo install -o root -g root -m 0755 \
             /tmp/sub2api-rework-updater /usr/local/sbin/sub2api-rework-updater
+          sudo install -D -o root -g root -m 0755 \
+            /tmp/sub2api-rework-updater-qualification \
+            /usr/local/libexec/sub2api-rework-updater-qualification
           sudo install -D -o root -g root -m 0600 \
             ../deploy/updater/updater.example.json /etc/sub2api-rework/updater.json
           sudo install -D -o root -g root -m 0644 \
@@ -83,14 +74,49 @@ jobs:
             /etc/systemd/system/sub2api-rework-updater.service
           sudo install -d -o root -g root -m 0755 \
             /etc/systemd/system/sub2api-rework-updater.service.d
+          sudo install -d -o root -g root -m 0755 /opt/sub2api
           sudo /usr/local/sbin/sub2api-rework-updater \
             --config /etc/sub2api-rework/updater.json \
             --print-systemd-drop-in \
             | sudo tee \
               /etc/systemd/system/sub2api-rework-updater.service.d/10-deployment.conf \
               >/dev/null
+          printf '%s\n' \
+            '[Service]' \
+            'Type=oneshot' \
+            'RemainAfterExit=yes' \
+            'ExecStart=' \
+            'ExecStart=/usr/local/libexec/sub2api-rework-updater-qualification -test.run=^TestProductionBootstrapPreservesUpdaterAccess$ -test.v -test.count=1 -test.timeout=20m' \
+            'Restart=no' \
+            'TimeoutStartSec=25min' \
+            | sudo tee \
+              /etc/systemd/system/sub2api-rework-updater.service.d/20-qualification.conf \
+              >/dev/null
           sudo systemd-analyze verify \
             /etc/systemd/system/sub2api-rework-updater.service
+          sudo systemctl daemon-reload
+          trap 'sudo systemctl stop sub2api-rework-updater.service >/dev/null 2>&1 || true' EXIT
+          if ! sudo systemctl start sub2api-rework-updater.service; then
+            sudo systemctl status --no-pager sub2api-rework-updater.service || true
+            sudo journalctl --no-pager -u sub2api-rework-updater.service
+            exit 1
+          fi
+          sudo journalctl --no-pager -u sub2api-rework-updater.service
+          runtime_before="$(stat -Lc '%d:%i' /run/sub2api-rework-updater)"
+          printf '%s\n' \
+            '[Service]' \
+            'Type=oneshot' \
+            'RemainAfterExit=yes' \
+            'ExecStart=' \
+            'ExecStart=/usr/bin/test -d /run/sub2api-rework-updater' \
+            'Restart=no' \
+            | sudo tee \
+              /etc/systemd/system/sub2api-rework-updater.service.d/20-qualification.conf \
+              >/dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl restart sub2api-rework-updater.service
+          runtime_after="$(stat -Lc '%d:%i' /run/sub2api-rework-updater)"
+          test "$runtime_after" = "$runtime_before"
 
   frontend:
     runs-on: ubuntu-latest

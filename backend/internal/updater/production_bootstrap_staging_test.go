@@ -27,8 +27,10 @@ import (
 
 const (
 	stagingSourceVersion = "0.1.183-rework.3"
-	stagingTargetVersion = "0.1.183-rework.7"
-	stagingFailedVersion = "0.1.183-rework.8"
+	stagingTargetVersion = "0.1.183-rework.8"
+	stagingFailedVersion = "0.1.183-rework.9"
+	stagingUpdaterHome   = "/var/lib/sub2api-rework-updater"
+	stagingUpdaterRun    = "/run/sub2api-rework-updater"
 	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingSourceVersion
 	stagingFixtureImage  = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
 	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
@@ -118,24 +120,31 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("staging test requires Linux Unix-socket bind semantics")
 	}
+	if os.Getenv("INVOCATION_ID") == "" {
+		t.Fatal("staging qualification must run under systemd")
+	}
 	docker, err := exec.LookPath("docker")
 	if err != nil {
-		t.Skip("docker is unavailable")
+		t.Fatal("Docker is unavailable under the updater sandbox")
 	}
-	root, err := os.MkdirTemp("/tmp", "sub2api-updater-staging-")
+	if home := os.Getenv("HOME"); home != stagingUpdaterHome {
+		t.Fatalf("updater HOME is %q, want %q", home, stagingUpdaterHome)
+	}
+	if _, err := os.ReadDir("/root"); err == nil {
+		t.Fatal("ProtectHome did not make /root inaccessible")
+	}
+	root, err := os.MkdirTemp(stagingUpdaterHome, "staging-")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("private updater HOME is not writable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	deploymentDirectory := filepath.Join(root, "opt", "sub2api")
-	socketDirectory := filepath.Join(root, "run", "sub2api-rework-updater")
+	socketDirectory := stagingUpdaterRun
 	if err := os.MkdirAll(deploymentDirectory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(socketDirectory, 0750); err != nil {
-		t.Fatal(err)
-	}
+	assertStagingManagedPath(t, socketDirectory, 0750)
 	unsafeAuditDirectory := filepath.Join(root, "var", "log", "sub2api-rework-updater")
 	configureStagingVarLog(t, filepath.Dir(unsafeAuditDirectory), unsafeAuditDirectory)
 	port := freeStagingPort(t)
@@ -148,6 +157,32 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	compose := []string{
 		"compose", "--project-directory", deploymentDirectory,
 		"-f", baseCompose, "-f", updaterCompose, "--env-file", environmentFile,
+	}
+	if output, err := runStagingCommand(docker, "version"); err != nil {
+		t.Fatalf("Docker failed under updater sandbox: %v: %s", err, output)
+	}
+	if output, err := runStagingCommand(docker, "compose", "version"); err != nil {
+		t.Fatalf("Compose plugin discovery failed under updater sandbox: %v: %s", err, output)
+	}
+	pluginPath, err := runStagingCommand(docker, "info", "--format", `{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}`)
+	pluginPath = strings.TrimSpace(pluginPath)
+	if err != nil || !filepath.IsAbs(pluginPath) || pathWithin(stagingUpdaterHome, pluginPath) || pathWithin("/root", pluginPath) {
+		t.Fatalf("Compose plugin is not installed system-wide: %q: %v", pluginPath, err)
+	}
+	if output, err := runStagingCommand(pluginPath, "docker-cli-plugin-metadata"); err != nil || !json.Valid([]byte(output)) {
+		t.Fatalf("direct Compose plugin metadata failed: %v: %s", err, output)
+	}
+	for _, config := range []struct {
+		name string
+		args []string
+	}{
+		{name: "raw", args: []string{"config", "--no-interpolate", "--format", "json"}},
+		{name: "rendered", args: []string{"config", "--format", "json"}},
+	} {
+		output, err := runStagingCommand(docker, append(append([]string(nil), compose...), config.args...)...)
+		if err != nil || !json.Valid([]byte(output)) {
+			t.Fatalf("%s Compose config failed under updater sandbox: %v: %s", config.name, err, output)
+		}
 	}
 	t.Cleanup(func() {
 		_, _ = runStagingCommand(docker, append(compose, "down", "-v", "--remove-orphans")...)
@@ -167,7 +202,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		SocketPath:          filepath.Join(socketDirectory, "updater.sock"),
 		StatePath:           filepath.Join(stateDirectory, "state.json"),
 		AuditPath:           filepath.Join(stateDirectory, "audit.jsonl"),
-		LockPath:            filepath.Join(root, "run", "sub2api-rework-updater", "operation.lock"),
+		LockPath:            filepath.Join(socketDirectory, "operation.lock"),
 		BackupDirectory:     filepath.Join(stateDirectory, "backups"),
 		DeploymentDirectory: deploymentDirectory,
 		ComposeFiles:        []string{baseCompose, updaterCompose}, EnvironmentFile: environmentFile,
@@ -307,7 +342,7 @@ func configureStagingVarLog(t *testing.T, parent, child string) {
 	if err := os.Chmod(parent, 0775); err != nil {
 		t.Fatal(err)
 	}
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 && os.Getgid() == 0 {
 		if err := os.Chown(parent, 0, 123); err != nil {
 			t.Fatal(err)
 		}

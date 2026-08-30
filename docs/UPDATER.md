@@ -160,6 +160,13 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
    sudo systemctl status sub2api-rework-updater.service
    ```
 
+   The base unit sets `HOME=/var/lib/sub2api-rework-updater`, inside the private
+   state directory that systemd creates with mode `0700`. Keep `ProtectHome=yes`.
+   `HOME=/root` is inaccessible under that setting and can prevent the Docker CLI
+   from discovering Compose. Install the Compose plugin system-wide; do not depend
+   on root's Docker CLI configuration or plugins, expose `/root`, or disable
+   `ProtectHome`.
+
    Regenerate the drop-in before restarting the service whenever
    `deployment_directory` changes.
 
@@ -183,6 +190,50 @@ run host-side and do not depend on keeping the initiating HTTP stream alive.
    Redis reply validation instead of trusting `redis-cli`'s zero exit status.
    It accepts an exact `PONG` without incidental client auth, then retries with
    the managed service credential only when Redis requires authentication.
+
+### Roll Out 0.1.183-rework.8 From Current Production
+
+Use this flow only after `0.1.183-rework.8` is published. Current production
+already runs application `0.1.183-rework.3`, migration `232`, and updater `1.1.3`,
+and already has `RuntimeDirectoryPreserve=restart`. This rollout replaces the
+base unit to add the private updater home. It does not replace the updater binary
+or recreate the application. Do not retry `0.1.183-rework.7` after `.8` exists.
+
+1. Install the `.8` base unit, verify it, and reload systemd:
+
+   ```bash
+   sudo install -o root -g root -m 0644 \
+     deploy/updater/sub2api-rework-updater.service \
+     /etc/systemd/system/sub2api-rework-updater.service
+   sudo systemd-analyze verify /etc/systemd/system/sub2api-rework-updater.service
+   sudo systemctl daemon-reload
+   ```
+
+2. Record the runtime directory identity and the application, PostgreSQL, and
+   Redis container IDs as shown below.
+3. Restart the updater with `systemctl restart`. Verify the runtime directory
+   identity is unchanged and updater `1.1.3` is healthy and idle.
+4. From the existing application, verify `updater.sock` is reachable. Verify the
+   application has no Docker socket and all three container IDs are unchanged.
+5. Run the raw Compose preflight with the production file order:
+
+   ```bash
+   docker compose --project-directory /opt/sub2api \
+     -f /opt/sub2api/docker-compose.yml \
+     -f /opt/sub2api/docker-compose.updater.yml \
+     --env-file /opt/sub2api/.env \
+     config --no-interpolate --format json
+   ```
+
+   This host-side command checks the file order and raw Compose syntax. The
+   following updater `prepare` is the authoritative preflight under the hardened
+   service with its private home; do not treat the host command as a substitute.
+
+6. Prepare `0.1.183-rework.8` and require updater state `prepared` before install.
+7. Install `0.1.183-rework.8`. Verify migration remains `232`, updater status is
+   healthy, the application reaches `updater.sock`, the application has no Docker
+   socket, and the application, PostgreSQL, and Redis container IDs remain the
+   recorded values.
 
 ### Replace An Active Updater
 
@@ -274,7 +325,7 @@ recreated with socket access:
 4. Verify updater status through its Unix socket.
 5. Recreate only the existing `0.1.183-rework.3` application with the complete
    ordered Compose file set so it receives socket access. Verify health and
-   migration `232` before preparing or installing `0.1.183-rework.7`.
+   migration `232` before preparing or installing `0.1.183-rework.8`.
 
 This recovery does not repeat the completed `231` to `232` migration.
 
