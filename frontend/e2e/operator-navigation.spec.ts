@@ -523,7 +523,9 @@ test.describe('operator console navigation', () => {
     await page.keyboard.press('Enter')
     await expect(detailsToggle).toHaveAttribute('aria-expanded', 'true')
     await expect(cooldownRow.getByTestId('account-technical-details')).toBeVisible()
-    await expect(cooldownRow).toContainText('Provider cooldown')
+    const cooldownStatus = cooldownRow.locator('.operator-capacity-account-status small')
+    await expect(cooldownStatus).toContainText('Resets')
+    await expect(cooldownStatus).toHaveAttribute('title', /Provider cooldown until/)
 
     await page.goto('/admin/dashboard')
     await page.locator('.operator-fleet-metric.is-error').click()

@@ -55,6 +55,11 @@
               <Icon name="refresh" size="sm" />
               {{ t('admin.accounts.resetQuota') }}
             </button>
+            <div class="operator-menu-divider my-1 border-t border-gray-100 dark:border-dark-700"></div>
+            <button @click="$emit('delete', account); $emit('close')" class="operator-menu-item operator-menu-item-destructive flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="trash" size="sm" />
+              {{ t('admin.accounts.deleteAccount') }}
+            </button>
           </template>
         </div>
       </div>
@@ -70,7 +75,7 @@ import type { Account } from '@/types'
 import { getActiveModelRateLimits } from '@/utils/modelRateLimits'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'delete'])
 const { t } = useI18n()
 const menuContent = ref<HTMLElement | null>(null)
 const menuStyle = ref<Record<string, string>>({})

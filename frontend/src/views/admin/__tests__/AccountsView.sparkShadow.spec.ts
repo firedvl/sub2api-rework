@@ -19,6 +19,7 @@ const {
   getAllGroups,
   duplicateAccount,
   createSparkShadow,
+  deleteAccount,
   showSuccess,
   showError
 } = vi.hoisted(() => ({
@@ -31,6 +32,7 @@ const {
   getAllGroups: vi.fn(),
   duplicateAccount: vi.fn(),
   createSparkShadow: vi.fn(),
+  deleteAccount: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -45,7 +47,7 @@ vi.mock('@/api/admin', () => ({
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings,
       createSparkShadow,
-      delete: vi.fn(),
+      delete: deleteAccount,
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn()
@@ -67,7 +69,11 @@ vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
     ...actual,
-    useI18n: () => ({ t: (key: string) => key })
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, unknown>) => key === 'admin.accounts.deleteConfirm'
+        ? `${key}:${params?.name}`
+        : key
+    })
   }
 })
 
@@ -112,7 +118,7 @@ const mountView = () =>
 describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchUsage, getBatchTodayStats, getUpstreamBillingProbeSettings, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchUsage, getBatchTodayStats, getUpstreamBillingProbeSettings, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, deleteAccount, showSuccess, showError]) {
       fn.mockReset()
     }
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
@@ -124,6 +130,7 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     getAllGroups.mockResolvedValue([])
     duplicateAccount.mockResolvedValue({ id: 998, name: 'parent-acc (Copy)' })
     createSparkShadow.mockResolvedValue({ id: 999, name: 'parent-acc (Spark)' })
+    deleteAccount.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -213,6 +220,44 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     expect(createSparkShadow).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('AccountActionMenu 删除事件需要具名确认，成功后刷新并提示', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const listCallsBeforeDelete = listAccounts.mock.calls.length
+
+    wrapper.findComponent(AccountActionMenu).vm.$emit('delete', { id: 42, name: 'parent-acc' })
+    await flushPromises()
+
+    const dialog = wrapper.findAllComponents(ConfirmDialog).find(d => d.props('show'))
+    expect(dialog?.props('message')).toBe('admin.accounts.deleteConfirm:parent-acc')
+    expect(deleteAccount).not.toHaveBeenCalled()
+
+    dialog?.vm.$emit('confirm')
+    await flushPromises()
+
+    expect(deleteAccount).toHaveBeenCalledWith(42)
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.bulkActions.deleteSuccess')
+    expect(listAccounts.mock.calls.length).toBeGreaterThan(listCallsBeforeDelete)
+    expect(dialog?.props('show')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows the existing account-delete error feedback when deletion fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    deleteAccount.mockRejectedValueOnce(new Error('delete failed'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    wrapper.findComponent(AccountActionMenu).vm.$emit('delete', { id: 42, name: 'parent-acc' })
+    await flushPromises()
+    wrapper.findAllComponents(ConfirmDialog).find(d => d.props('show'))?.vm.$emit('confirm')
+    await flushPromises()
+
+    expect(showError).toHaveBeenCalledWith('delete failed')
+    consoleError.mockRestore()
+    wrapper.unmount()
+  })
 })
 
 // 账号行展示
@@ -266,7 +311,7 @@ const mountViewWithRow = () =>
 describe('admin AccountsView — 账号行展示', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchUsage, getBatchTodayStats, getUpstreamBillingProbeSettings, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchUsage, getBatchTodayStats, getUpstreamBillingProbeSettings, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, deleteAccount, showSuccess, showError]) {
       fn.mockReset()
     }
     listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
