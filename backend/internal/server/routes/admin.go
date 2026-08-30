@@ -35,6 +35,9 @@ func RegisterAdminRoutes(
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 
+		// Read-only operator assistant
+		registerOperatorAssistantRoutes(admin, h)
+
 		// 仪表盘
 		registerDashboardRoutes(admin, h)
 
@@ -131,6 +134,14 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerOperatorAssistantRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	assistant := admin.Group("/operator-assistant")
+	{
+		assistant.GET("/models", h.Admin.OperatorAssistant.Models)
+		assistant.POST("", h.Admin.OperatorAssistant.Stream)
 	}
 }
 

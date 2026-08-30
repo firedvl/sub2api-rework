@@ -168,6 +168,7 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/system/prepare":                         {},
 	"POST /api/v1/admin/system/install":                         {},
 	"POST /api/v1/admin/system/rollback":                        {},
+	"POST /api/v1/admin/operator-assistant":                     {},
 }
 
 // NewAuditLogMiddleware 创建审计中间件。
