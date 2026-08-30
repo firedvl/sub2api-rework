@@ -12967,20 +12967,6 @@ watch(
   @apply relative flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-150 ease-out hover:text-gray-900 dark:text-gray-300 dark:hover:text-white;
 }
 
-@media (min-width: 768px) {
-  .settings-tabs {
-    @apply min-w-full;
-  }
-
-  .settings-tab {
-    @apply min-w-0 flex-1 basis-0 overflow-hidden px-2 text-[13px];
-  }
-
-  .settings-tab-icon {
-    @apply h-6 w-6;
-  }
-}
-
 .settings-tab:focus-visible {
   outline: 2px solid var(--operator-focus);
   outline-offset: -2px;
@@ -13026,6 +13012,6 @@ watch(
 }
 
 .settings-tab-label {
-  @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
+  @apply whitespace-nowrap leading-none;
 }
 </style>

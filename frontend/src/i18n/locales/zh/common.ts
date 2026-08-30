@@ -217,6 +217,7 @@ export default {
 
   // Auth
   auth: {
+    poweredBy: '由 {product} 提供支持',
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',

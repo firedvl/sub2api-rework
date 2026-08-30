@@ -43,6 +43,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
     site_subtitle: 'Test subtitle',
     ...settings,
   }
+  appStore.siteName = String(appStore.cachedPublicSettings.site_name || 'Fallback site')
 
   return mount(HomeView, {
     global: {

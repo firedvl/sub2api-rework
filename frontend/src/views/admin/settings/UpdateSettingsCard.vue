@@ -74,7 +74,7 @@
 
     <ConfirmDialog
       :show="confirmation !== null"
-      :title="t(`admin.settings.updates.${confirmation}`)"
+      :title="confirmation ? t(`admin.settings.updates.${confirmation}`) : ''"
       :message="confirmationMessage"
       :confirm-text="t('common.confirm')"
       :danger="confirmation === 'rollback'"

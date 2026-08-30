@@ -22,7 +22,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
 
-const ConfirmDialogStub = { name: 'ConfirmDialog', props: ['show'], template: '<div v-if="show"><slot /><button type="button" @click="$emit(\'confirm\')">confirm</button></div>' }
+const ConfirmDialogStub = { name: 'ConfirmDialog', props: ['show', 'title'], template: '<div v-if="show"><slot /><button type="button" @click="$emit(\'confirm\')">confirm</button></div>' }
 
 function updateStatus(state: string, updaterState = 'idle', prepared = '') {
   return {
@@ -56,6 +56,7 @@ describe('UpdateSettingsCard', () => {
     expect(wrapper.text()).toContain('admin.settings.updates.noteLabels.compatibility')
     expect(wrapper.text()).toContain('<b>safe text</b>')
     expect(wrapper.find('b').exists()).toBe(false)
+    expect(wrapper.getComponent({ name: 'ConfirmDialog' }).props('title')).toBe('')
     const prepareButton = wrapper.findAll('button').find(button => button.text().includes('admin.settings.updates.prepare'))
     expect(prepareButton!.attributes('disabled')).toBeDefined()
   })

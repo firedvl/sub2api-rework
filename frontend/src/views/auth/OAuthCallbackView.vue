@@ -1,20 +1,19 @@
 <template>
-  <div class="min-h-screen bg-gray-50 px-4 py-10 dark:bg-black">
-    <div class="mx-auto max-w-2xl">
-      <div v-if="isProcessing" class="card p-6 text-center">
-        <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
-        <h1 class="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
+  <AuthLayout>
+    <div v-if="isProcessing" class="text-center" role="status" aria-live="polite">
+        <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" aria-hidden="true"></div>
+        <h2 class="mt-4 text-lg font-semibold text-gray-900 dark:text-white">
           {{ t('auth.oauth.callbackTitle') }}
-        </h1>
+        </h2>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
           {{ t('auth.oauth.callbackHint') }}
         </p>
       </div>
 
-      <div v-else-if="needsRegistrationCompletion" class="card p-6">
-        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+    <div v-else-if="needsRegistrationCompletion">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
           {{ t('auth.oidc.callbackTitle', { providerName }) }}
-        </h1>
+        </h2>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
           {{ registrationHint }}
         </p>
@@ -79,10 +78,10 @@
         </div>
       </div>
 
-      <div v-else-if="invalidCallback" class="card p-6 text-center">
-        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+    <div v-else-if="invalidCallback" class="text-center">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
           {{ t('auth.oauth.invalidCallbackTitle') }}
-        </h1>
+        </h2>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
           {{ t('auth.oauth.invalidCallbackHint') }}
         </p>
@@ -91,10 +90,10 @@
         </button>
       </div>
 
-      <div v-else class="card p-6">
-        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+    <div v-else>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
           {{ t('auth.oauth.callbackTitle') }}
-        </h1>
+        </h2>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
           {{ t('auth.oauth.callbackHint') }}
         </p>
@@ -103,7 +102,7 @@
           <div>
             <label class="input-label">{{ t('auth.oauth.code') }}</label>
             <div class="flex gap-2">
-              <input class="input flex-1 font-mono text-sm" :value="code" readonly />
+              <input class="input min-w-0 flex-1 font-mono text-sm" :value="code" readonly />
               <button class="btn btn-secondary" type="button" :disabled="!code" @click="copy(code)">
                 {{ t('common.copy') }}
               </button>
@@ -113,7 +112,7 @@
           <div>
             <label class="input-label">{{ t('auth.oauth.state') }}</label>
             <div class="flex gap-2">
-              <input class="input flex-1 font-mono text-sm" :value="state" readonly />
+              <input class="input min-w-0 flex-1 font-mono text-sm" :value="state" readonly />
               <button
                 class="btn btn-secondary"
                 type="button"
@@ -128,7 +127,7 @@
           <div>
             <label class="input-label">{{ t('auth.oauth.fullUrl') }}</label>
             <div class="flex gap-2">
-              <input class="input flex-1 font-mono text-xs" :value="fullUrl" readonly />
+              <input class="input min-w-0 flex-1 font-mono text-xs" :value="fullUrl" readonly />
               <button
                 class="btn btn-secondary"
                 type="button"
@@ -140,15 +139,15 @@
             </div>
           </div>
         </div>
-      </div>
     </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { AuthLayout } from '@/components/layout'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore, useAuthStore } from '@/stores'
 import { apiClient } from '@/api/client'

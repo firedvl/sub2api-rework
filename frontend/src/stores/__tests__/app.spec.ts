@@ -415,6 +415,18 @@ describe('useAppStore', () => {
       expect(store.publicSettingsLoaded).toBe(true)
     })
 
+    it('仅规范化展示名称，保留原始公开设置', () => {
+      const windowAny = window as any
+      windowAny.__APP_CONFIG__ = createPublicSettings({ site_name: 'Sub2API' })
+
+      const store = useAppStore()
+      store.initFromInjectedConfig()
+
+      expect(store.siteName).toBe('Gateway')
+      expect(store.cachedPublicSettings?.site_name).toBe('Sub2API')
+      expect(windowAny.__APP_CONFIG__.site_name).toBe('Sub2API')
+    })
+
     it('无注入配置时返回 false', () => {
       const store = useAppStore()
       const result = store.initFromInjectedConfig()

@@ -1,17 +1,13 @@
 <template>
-  <div
-    class="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 p-4 dark:bg-black dark:bg-none"
-  >
+  <div class="auth-codex-shell">
     <div class="w-full max-w-2xl">
       <!-- Logo & Title -->
-      <div class="mb-8 text-center">
-        <div
-          class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 shadow-lg"
-        >
-          <Icon name="cog" size="xl" class="text-white" />
+      <div class="auth-codex-brand">
+        <div class="auth-codex-logo">
+          <img src="/logo.svg" alt="" aria-hidden="true" class="h-full w-full object-contain" />
         </div>
-        <h1 class="text-3xl font-bold text-gray-900 dark:text-white">{{ t('setup.title') }}</h1>
-        <p class="mt-2 text-gray-500 dark:text-dark-400">{{ t('setup.description') }}</p>
+        <h1>{{ t('setup.title') }}</h1>
+        <p>{{ t('setup.description') }}</p>
       </div>
 
       <!-- Progress Steps -->
@@ -58,7 +54,7 @@
       </div>
 
       <!-- Step Content -->
-      <div class="rounded-2xl bg-white p-8 shadow-xl dark:bg-dark-800">
+      <div class="auth-codex-card">
         <!-- Step 1: Database -->
         <div v-if="currentStep === 0" class="space-y-6">
           <div class="mb-6 text-center">

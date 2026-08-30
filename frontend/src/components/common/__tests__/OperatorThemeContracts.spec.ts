@@ -41,8 +41,9 @@ describe('operator shared theme contracts', () => {
 
   it('keeps bootstrap and full-page loading roots neutral in dark mode', () => {
     expect(source('src/style.css')).toContain('dark:bg-black dark:text-gray-100')
-    expect(source('src/views/setup/SetupWizardView.vue')).toContain('dark:bg-black dark:bg-none')
-    expect(source('src/views/auth/OAuthCallbackView.vue')).toContain('min-h-screen bg-gray-50 px-4 py-10 dark:bg-black')
-    expect(source('src/views/auth/WechatPaymentCallbackView.vue')).toContain('min-h-screen bg-gray-50 px-4 py-10 dark:bg-black')
+    expect(source('src/style.css')).toContain('--operator-background: oklch(0.07 0 0)')
+    expect(source('src/views/setup/SetupWizardView.vue')).toContain('class="auth-codex-shell"')
+    expect(source('src/views/auth/OAuthCallbackView.vue')).toContain('<AuthLayout>')
+    expect(source('src/views/auth/WechatPaymentCallbackView.vue')).toContain('<AuthLayout>')
   })
 })

@@ -23,7 +23,8 @@
         <div class="flex min-w-0 flex-1 items-center gap-3">
           <img
             :src="siteLogo || '/logo.svg'"
-            alt="Logo"
+            alt=""
+            aria-hidden="true"
             class="h-9 w-9 shrink-0 rounded-lg object-contain"
           />
           <span class="min-w-0 truncate text-base font-semibold">{{ siteName }}</span>
@@ -71,7 +72,8 @@
       <div class="min-w-0 max-w-2xl text-center">
         <img
           :src="siteLogo || '/logo.svg'"
-          alt="Logo"
+          alt=""
+          aria-hidden="true"
           class="mx-auto mb-6 h-20 w-20 rounded-2xl object-contain"
         />
         <h1 class="[overflow-wrap:anywhere] text-3xl font-bold md:text-4xl">{{ siteName }}</h1>
@@ -120,7 +122,7 @@
         <!-- Logo -->
         <div class="flex items-center">
           <div class="h-10 w-10 overflow-hidden rounded-xl shadow-md">
-            <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
+            <img :src="siteLogo || '/logo.svg'" alt="" aria-hidden="true" class="h-full w-full object-contain" />
           </div>
         </div>
 
@@ -499,6 +501,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { resolveOperatorProductDescriptor } from '@/utils/branding'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 
@@ -508,9 +511,9 @@ const authStore = useAuthStore()
 const appStore = useAppStore()
 
 // Site settings - directly from appStore (already initialized from injected config)
-const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
+const siteName = computed(() => appStore.siteName)
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
+const siteSubtitle = computed(() => resolveOperatorProductDescriptor(appStore.cachedPublicSettings?.site_subtitle))
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
 const hasHomeContent = computed(() => homeContent.value.trim().length > 0)

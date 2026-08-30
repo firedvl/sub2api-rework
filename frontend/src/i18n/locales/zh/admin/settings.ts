@@ -1,7 +1,7 @@
 export default {
     settings: {
       title: '系统设置',
-      description: '管理注册、邮箱验证、默认值和 SMTP 设置',
+      description: '管理网关行为、访问控制、集成与更新',
       tabs: {
         general: '通用设置',
         agreement: '登录条款',
@@ -595,10 +595,10 @@ export default {
           '禁用用户注册、公开页面和自助服务功能。仅管理员可以登录和管理平台。',
         siteName: '站点名称',
         siteNameHint: '显示在邮件和页面标题中',
-        siteNamePlaceholder: 'Sub2API',
+        siteNamePlaceholder: 'Gateway',
         siteSubtitle: '站点副标题',
         siteSubtitleHint: '显示在登录和注册页面',
-        siteSubtitlePlaceholder: '订阅转 API 转换平台',
+        siteSubtitlePlaceholder: 'AI Gateway',
         apiBaseUrl: 'API 端点地址',
         apiBaseUrlHint: '用于"使用密钥"、"导入到 CC Switch"和回调地址建议，留空则使用当前站点地址',
         apiBaseUrlPlaceholder: 'https://api.example.com',
@@ -650,13 +650,13 @@ export default {
       },
       updates: {
         title: '软件更新',
-        description: '检查已批准的 rework 发布，并请求本机更新器准备、安装或回滚。',
+        description: '检查已批准的 Sub2API Rework 发布，并请求本机更新器准备、安装或回滚。',
         check: '检查更新',
         loading: '正在检查已批准的发布...',
         loadFailed: '检查更新失败',
         operationAccepted: '更新器已接受该操作。',
         operationFailed: '更新器操作失败',
-        currentVersion: '当前安装：{version}',
+        currentVersion: '当前 Sub2API Rework：{version}',
         upstreamBaseline: '上游基线',
         latestUpstream: '最新上游',
         availableVersion: '已批准发布',
