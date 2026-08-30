@@ -9,17 +9,12 @@
         <h2>{{ t('admin.dashboard.capacity.title') }}</h2>
         <p>{{ t('admin.dashboard.capacity.description') }}</p>
       </div>
-      <div v-if="accounts.length" class="operator-capacity-counts" aria-label="Account fleet summary">
-        <span>{{ t('admin.dashboard.capacity.accountCount', { count: accountCount }) }}</span>
-        <span class="is-schedulable">
-          {{ t('admin.dashboard.capacity.schedulableCount', { count: schedulableCount }) }}
-        </span>
-        <span v-if="warningCount" class="is-warning">
-          {{ t('admin.dashboard.capacity.warningCount', { count: warningCount }) }}
-        </span>
-        <span v-if="unavailableCount" class="is-critical">
-          {{ t('admin.dashboard.capacity.unavailableCount', { count: unavailableCount }) }}
-        </span>
+      <div v-if="accounts.length && !compact" class="operator-capacity-counts" aria-label="Account fleet summary">
+        <span>Accounts {{ accountCount }}</span>
+        <span class="is-active">Active {{ statusCounts.active }}</span>
+        <span v-if="statusCounts.limited" class="is-limited">Limited {{ statusCounts.limited }}</span>
+        <span v-if="statusCounts.error" class="is-error">Errors {{ statusCounts.error }}</span>
+        <span v-if="statusCounts.disabled" class="is-disabled">Disabled {{ statusCounts.disabled }}</span>
       </div>
     </header>
 
@@ -87,7 +82,7 @@
         </RouterLink>
       </section>
 
-      <div v-if="!compact" class="operator-capacity-providers">
+      <div v-if="!compact && providers.length" class="operator-capacity-providers">
         <section v-for="provider in providers" :key="provider.platform" class="operator-capacity-provider">
           <header class="operator-capacity-provider-header">
             <button
@@ -144,28 +139,68 @@
               v-for="summary in provider.accounts"
               :key="summary.account.id"
               class="operator-capacity-account"
+              :data-status="statusInfo(summary).status"
+              data-testid="account-capacity-row"
             >
-              <header class="operator-capacity-account-heading">
+              <header class="operator-capacity-account-row">
                 <div class="operator-capacity-account-title">
                   <h4>{{ summary.account.name }}</h4>
-                  <p v-if="summary.identity" :title="summary.identity">{{ summary.identity }}</p>
-                  <p v-else>#{{ summary.account.id }} &middot; {{ accountTypeLabel(summary.account.type) }}</p>
+                  <p :title="summary.identity || `Account ${summary.account.id}`">
+                    {{ summary.identity || `#${summary.account.id}` }}
+                    <span aria-hidden="true">&middot;</span>
+                    {{ providerLabel(summary.account.platform) }} / {{ accountTypeLabel(summary.account.type) }}
+                  </p>
                 </div>
-                <div class="operator-capacity-account-primary">
-                  <span :class="['operator-capacity-status', `is-${summary.health}`]">
+                <div class="operator-capacity-account-status">
+                  <span :class="['operator-capacity-status', `is-${statusInfo(summary).status}`]">
                     <span aria-hidden="true" />
-                    {{ healthLabel(summary.health) }}
+                    {{ statusLabel(statusInfo(summary).status) }}
                   </span>
-                  <strong class="operator-capacity-account-remaining" :class="capacityTone(summary.lowestRemaining)">
-                    {{ percentLabel(summary.lowestRemaining) }}
-                  </strong>
-                  <div v-if="$slots['account-actions']" class="operator-capacity-account-actions">
-                    <slot name="account-actions" :account="summary.account" />
-                  </div>
+                  <small v-if="statusInfo(summary).reason" :title="statusDetail(summary)">
+                    {{ statusDetail(summary) }}
+                  </small>
                 </div>
+                <div class="operator-capacity-account-quota" :title="quotaDetail(summary)">
+                  <span>Quota</span>
+                  <strong :class="capacityTone(summary.lowestRemaining)">
+                    {{ quotaSummary(summary) }}
+                  </strong>
+                </div>
+                <div class="operator-capacity-account-scheduling">
+                  <span>Scheduling</span>
+                  <strong :class="summary.account.schedulable ? 'is-schedulable' : 'is-unschedulable'">
+                    {{ summary.account.schedulable ? 'Available' : 'Unavailable' }}
+                  </strong>
+                </div>
+                <div v-if="$slots['account-actions']" class="operator-capacity-account-actions">
+                  <slot name="account-actions" :account="summary.account" />
+                </div>
+                <button
+                  type="button"
+                  class="operator-capacity-details-toggle"
+                  :aria-expanded="isAccountExpanded(summary.account.id)"
+                  :aria-controls="accountDetailsId(summary.account.id)"
+                  :title="isAccountExpanded(summary.account.id) ? 'Hide details' : 'Show details'"
+                  @click="toggleAccount(summary.account.id)"
+                >
+                  <Icon
+                    name="chevronDown"
+                    size="sm"
+                    :class="{ 'is-expanded': isAccountExpanded(summary.account.id) }"
+                    aria-hidden="true"
+                  />
+                  <span class="sr-only">
+                    {{ isAccountExpanded(summary.account.id) ? 'Hide' : 'Show' }} details for {{ summary.account.name }}
+                  </span>
+                </button>
               </header>
 
-              <div class="operator-capacity-account-body">
+              <div
+                v-show="isAccountExpanded(summary.account.id)"
+                :id="accountDetailsId(summary.account.id)"
+                class="operator-capacity-account-body"
+                data-testid="account-technical-details"
+              >
                 <div class="operator-capacity-account-meta">
                   <div class="operator-capacity-meta-line">
                     <span>{{ accountTypeLabel(summary.account.type) }}</span>
@@ -226,6 +261,9 @@
           </div>
         </section>
       </div>
+      <div v-else-if="!compact" class="operator-capacity-empty" data-testid="capacity-filter-empty">
+        No accounts match this status.
+      </div>
     </template>
   </section>
 </template>
@@ -237,9 +275,13 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
 import {
+  aggregateNormalizedCapacity,
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
-  type OperatorAccountHealth,
+  classifyOperatorAccount,
+  summarizeOperatorQuota,
+  type OperatorAccountCapacity,
+  type OperatorAccountStatus,
 } from '@/utils/operatorCapacity'
 import type { Account, AccountPlatform, AccountType, AccountUsageInfo } from '@/types'
 
@@ -251,6 +293,8 @@ const props = withDefaults(defineProps<{
   error?: boolean
   compact?: boolean
   totalCount?: number
+  status?: OperatorAccountStatus | 'all'
+  sort?: 'capacity' | 'name' | 'status'
 }>(), {
   usageByAccountId: () => ({}),
   errorsByAccountId: () => ({}),
@@ -258,27 +302,45 @@ const props = withDefaults(defineProps<{
   error: false,
   compact: false,
   totalCount: undefined,
+  status: 'all',
+  sort: 'capacity',
 })
 
 const emit = defineEmits<{ retry: [] }>()
 const { t } = useI18n()
-const providers = computed(() => buildProviderCapacity(
+const allProviders = computed(() => buildProviderCapacity(
   props.accounts,
   props.usageByAccountId,
   props.errorsByAccountId,
 ))
-const summaries = computed(() => providers.value.flatMap((provider) => provider.accounts))
+const summaries = computed(() => allProviders.value.flatMap((provider) => provider.accounts))
+const statusCounts = computed(() => summaries.value.reduce<Record<OperatorAccountStatus, number>>((counts, summary) => {
+  counts[classifyOperatorAccount(summary).status] += 1
+  return counts
+}, { active: 0, limited: 0, error: 0, disabled: 0 }))
+const STATUS_ORDER: Record<OperatorAccountStatus, number> = { error: 0, limited: 1, disabled: 2, active: 3 }
+const providers = computed(() => allProviders.value.flatMap((provider) => {
+  const accounts = provider.accounts
+    .filter((summary) => props.status === 'all' || classifyOperatorAccount(summary).status === props.status)
+    .slice()
+
+  if (props.sort === 'name') {
+    accounts.sort((left, right) => left.account.name.localeCompare(right.account.name))
+  } else if (props.sort === 'status') {
+    accounts.sort((left, right) => (
+      STATUS_ORDER[classifyOperatorAccount(left).status] - STATUS_ORDER[classifyOperatorAccount(right).status]
+      || left.account.name.localeCompare(right.account.name)
+    ))
+  }
+
+  return accounts.length ? [{
+    ...provider,
+    accounts,
+    ...aggregateNormalizedCapacity(accounts),
+  }] : []
+}))
 const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value))
 const accountCount = computed(() => props.totalCount ?? props.accounts.length)
-const schedulableCount = computed(() => summaries.value.filter((summary) => summary.account.schedulable).length)
-const unavailableCount = computed(() => summaries.value.filter(
-  (summary) => summary.health === 'error' || summary.health === 'inactive',
-).length)
-const warningCount = computed(() => summaries.value.filter((summary) => (
-  summary.health !== 'healthy'
-  && summary.health !== 'error'
-  && summary.health !== 'inactive'
-) || (summary.lowestRemaining !== null && summary.lowestRemaining <= 20)).length)
 const poolTitleId = 'operator-account-pool-title'
 const PROVIDER_COLLAPSE_STORAGE_KEY = 'operator-capacity-collapsed-providers'
 
@@ -293,6 +355,7 @@ const loadCollapsedProviders = (): Set<AccountPlatform> => {
 }
 
 const collapsedProviders = ref(loadCollapsedProviders())
+const expandedAccountIDs = ref(new Set<number>())
 const isProviderCollapsed = (platform: AccountPlatform) => collapsedProviders.value.has(platform)
 const providerPanelId = (platform: AccountPlatform) => `operator-provider-${platform}-accounts`
 const toggleProvider = (platform: AccountPlatform) => {
@@ -305,6 +368,15 @@ const toggleProvider = (platform: AccountPlatform) => {
   } catch {
     // Session persistence is optional; the accordion still works without storage.
   }
+}
+
+const accountDetailsId = (accountID: number) => `operator-account-${accountID}-details`
+const isAccountExpanded = (accountID: number) => expandedAccountIDs.value.has(accountID)
+const toggleAccount = (accountID: number) => {
+  const next = new Set(expandedAccountIDs.value)
+  if (next.has(accountID)) next.delete(accountID)
+  else next.add(accountID)
+  expandedAccountIDs.value = next
 }
 
 const recordEntries = (value: unknown): Array<[string, string]> => {
@@ -350,7 +422,13 @@ const accountTypeLabel = (type: AccountType) => ({
   service_account: 'Service account',
 })[type]
 
-const healthLabel = (health: OperatorAccountHealth) => t(`admin.dashboard.capacity.health.${health}`)
+const statusInfo = (summary: OperatorAccountCapacity) => classifyOperatorAccount(summary)
+const statusLabel = (status: OperatorAccountStatus) => ({
+  active: 'Active',
+  limited: 'Limited',
+  error: 'Error',
+  disabled: 'Disabled',
+})[status]
 
 const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 
@@ -374,6 +452,16 @@ const poolAriaLabel = computed(() => normalizedPool.value.remainingPercent === n
   : `${t('admin.dashboard.capacity.poolTitle')}: ${formatPercent(normalizedPool.value.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}, ${formatPercent(normalizedPool.value.usedPercent as number)}% ${t('admin.dashboard.capacity.poolUsed')}`)
 
 const formatReset = (value: string) => formatDateTimeToMinute(value) || t('common.unknown')
+const statusDetail = (summary: OperatorAccountCapacity) => {
+  const status = statusInfo(summary)
+  return status.until
+    ? `${status.reason} until ${formatReset(status.until)}`
+    : status.reason ?? ''
+}
+const quotaSummary = (summary: OperatorAccountCapacity) => summarizeOperatorQuota(summary)
+const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
+  ? summary.windows.map((window) => `${window.label} ${formatPercent(window.remainingPercent)}%`).join(', ')
+  : summarizeOperatorQuota(summary)
 </script>
 
 <style scoped>
@@ -449,10 +537,12 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 }
 
 .operator-capacity-counts .is-schedulable,
+.operator-capacity-counts .is-active,
 .operator-capacity-meta-line .is-schedulable { color: var(--operator-success); }
-.operator-capacity-counts .is-warning,
+.operator-capacity-counts .is-limited,
 .operator-capacity-meta-line .is-unschedulable { color: var(--operator-warning); }
-.operator-capacity-counts .is-critical { color: var(--operator-destructive); }
+.operator-capacity-counts .is-error { color: var(--operator-destructive); }
+.operator-capacity-counts .is-disabled { color: var(--operator-muted-foreground); }
 
 .operator-capacity-error {
   display: flex;
@@ -631,7 +721,6 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
 
 .operator-capacity-account {
   min-width: 0;
-  padding: 1.125rem 1.25rem 1.25rem;
   border: 1px solid var(--operator-border-subtle);
   border-radius: 0.25rem;
   background: var(--operator-card);
@@ -651,6 +740,48 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.operator-capacity-account-row {
+  display: grid;
+  min-width: 0;
+  min-height: 4.25rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  grid-template-columns: minmax(12rem, 1.5fr) minmax(10rem, 0.9fr) minmax(13rem, 1.1fr) minmax(7rem, 0.65fr) auto auto;
+  gap: 0.75rem 1rem;
+}
+
+.operator-capacity-account-status,
+.operator-capacity-account-quota,
+.operator-capacity-account-scheduling {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.operator-capacity-account-status small,
+.operator-capacity-account-quota > span,
+.operator-capacity-account-scheduling > span {
+  overflow: hidden;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-capacity-account-quota strong,
+.operator-capacity-account-scheduling strong {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-capacity-account-scheduling .is-schedulable { color: var(--operator-success); }
+.operator-capacity-account-scheduling .is-unschedulable { color: var(--operator-muted-foreground); }
 
 .operator-capacity-account-primary {
   display: flex;
@@ -673,13 +804,10 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   border-radius: 999px;
   background: currentColor;
 }
-.operator-capacity-status.is-healthy { color: var(--operator-success); }
+.operator-capacity-status.is-active { color: var(--operator-success); }
 .operator-capacity-status.is-error { color: var(--operator-destructive); }
-.operator-capacity-status.is-rate_limited,
-.operator-capacity-status.is-overloaded,
-.operator-capacity-status.is-paused,
-.operator-capacity-status.is-unschedulable { color: var(--operator-warning); }
-.operator-capacity-status.is-inactive { color: var(--operator-muted-foreground); }
+.operator-capacity-status.is-limited { color: var(--operator-warning); }
+.operator-capacity-status.is-disabled { color: var(--operator-muted-foreground); }
 
 .operator-capacity-account-remaining {
   min-width: 7.5rem;
@@ -692,10 +820,26 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
   align-items: center;
   gap: 0.375rem;
 }
+.operator-capacity-details-toggle {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: var(--operator-radius);
+  color: var(--operator-muted-foreground);
+}
+.operator-capacity-details-toggle:hover { background: var(--operator-muted); color: var(--operator-foreground); }
+.operator-capacity-details-toggle:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+.operator-capacity-details-toggle svg { transition: transform 150ms ease; }
+.operator-capacity-details-toggle svg.is-expanded { transform: rotate(180deg); }
 .operator-capacity-account-body {
   display: grid;
   min-width: 0;
-  margin-top: 1rem;
+  padding: 1rem;
+  border-top: 1px solid var(--operator-border-subtle);
   grid-template-columns: minmax(13rem, 0.55fr) minmax(0, 1.45fr);
   gap: 1.5rem;
 }
@@ -804,6 +948,10 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
     margin-left: auto;
   }
   .operator-capacity-account-body { grid-template-columns: 1fr; }
+  .operator-capacity-account-row {
+    grid-template-columns: minmax(12rem, 1.5fr) minmax(9rem, 0.9fr) minmax(11rem, 1fr) auto;
+  }
+  .operator-capacity-account-scheduling { display: none; }
   .operator-capacity-summary { grid-template-columns: minmax(0, 1fr) minmax(12rem, 1fr); }
   .operator-capacity-summary > .btn { justify-self: start; }
 }
@@ -821,6 +969,16 @@ const formatReset = (value: string) => formatDateTimeToMinute(value) || t('commo
     padding-left: 1rem;
   }
   .operator-capacity-summary { grid-template-columns: 1fr; }
+  .operator-capacity-account-row {
+    min-height: 0;
+    padding: 0.875rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .operator-capacity-account-status,
+  .operator-capacity-account-quota {
+    grid-column: 1 / -1;
+  }
+  .operator-capacity-account-actions { grid-column: 1; }
   .operator-capacity-summary-meta dd { text-align: left; }
   .operator-capacity-provider-toggle {
     padding-right: 1rem;

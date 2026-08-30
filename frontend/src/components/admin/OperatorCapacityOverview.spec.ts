@@ -89,7 +89,20 @@ describe('OperatorCapacityOverview', () => {
     expect(wrapper.text()).toContain('OpenAI primary')
     expect(wrapper.text()).toContain('OpenAI reserve')
     expect(wrapper.text()).toContain('Gemini primary')
-    expect(wrapper.findAll('[data-testid="account-technical-details"]')).toHaveLength(0)
+    const details = wrapper.findAll('[data-testid="account-technical-details"]')
+    expect(details).toHaveLength(3)
+    expect(details.every((detail) => detail.attributes('style')?.includes('display: none'))).toBe(true)
+
+    const primaryAccount = wrapper.findAll('.operator-capacity-account')
+      .find((row) => row.text().includes('OpenAI primary'))!
+    const accountToggle = primaryAccount.get('.operator-capacity-details-toggle')
+    const accountDetails = primaryAccount.get('[data-testid="account-technical-details"]')
+    expect(accountToggle.attributes('aria-expanded')).toBe('false')
+    await accountToggle.trigger('click')
+    expect(accountToggle.attributes('aria-expanded')).toBe('true')
+    expect(accountDetails.attributes('style')).not.toContain('display: none')
+    expect(accountDetails.text()).toContain('admin.dashboard.capacity.modelCount:2')
+    expect(accountDetails.text()).toContain('production')
     expect(wrapper.get('[data-testid="provider-toggle-openai"]').text()).toContain(
       'admin.dashboard.capacity.normalizedRemaining',
     )
@@ -132,5 +145,35 @@ describe('OperatorCapacityOverview', () => {
     expect(pool.text()).toContain('Account 2')
     expect(pool.get('a').attributes('href')).toBe('/admin/stats')
     expect(wrapper.find('.operator-capacity-providers').exists()).toBe(false)
+  })
+
+  it('filters by operator status and keeps quota exhaustion separate from errors', () => {
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        accounts: [
+          account(1, { name: 'Ready account' }),
+          account(2, { name: 'Quota limited' }),
+          account(3, { name: 'Broken account', status: 'error', error_message: 'Authentication failed' }),
+          account(4, { name: 'Disabled account', status: 'inactive', schedulable: false }),
+        ],
+        usageByAccountId: {
+          '1': usage(18),
+          '2': usage(100),
+        },
+        status: 'limited',
+      },
+      global: {
+        stubs: { LoadingSpinner: true, RouterLink: true }
+      }
+    })
+
+    const rows = wrapper.findAll('[data-testid="account-capacity-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].attributes('data-status')).toBe('limited')
+    expect(rows[0].text()).toContain('Quota limited')
+    expect(rows[0].text()).toContain('5h quota exhausted')
+    expect(rows[0].text()).toContain('5h 0%')
+    expect(wrapper.text()).not.toContain('Broken account')
+    expect(wrapper.text()).not.toContain('Disabled account')
   })
 })

@@ -1,11 +1,12 @@
 <template>
   <AppLayout>
     <div class="operator-accounts-layout">
-      <div
-        class="operator-account-view-tabs"
-        role="tablist"
-        :aria-label="t('admin.accounts.viewSwitcher')"
-      >
+      <div class="operator-account-view-bar">
+        <div
+          class="operator-account-view-tabs"
+          role="tablist"
+          :aria-label="t('admin.accounts.viewSwitcher')"
+        >
         <button
           id="account-capacity-tab"
           ref="capacityViewTabRef"
@@ -38,6 +39,21 @@
         >
           {{ t('admin.accounts.technicalView') }}
         </button>
+        </div>
+        <div v-if="accountView === 'capacity'" class="operator-capacity-controls">
+          <Select
+            :model-value="operatorStatus"
+            :options="operatorStatusOptions"
+            aria-label="Filter accounts by operator status"
+            @update:model-value="setOperatorStatus"
+          />
+          <Select
+            :model-value="capacitySort"
+            :options="capacitySortOptions"
+            aria-label="Sort account capacity rows"
+            @update:model-value="setCapacitySort"
+          />
+        </div>
       </div>
 
       <div class="operator-accounts-toolbar">
@@ -46,6 +62,7 @@
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
+            :show-status="accountView === 'technical'"
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
@@ -231,6 +248,8 @@
           :errors-by-account-id="fleetUsageErrorByAccountId"
           :loading="fleetLoading"
           :error="fleetError"
+          :status="operatorStatus"
+          :sort="capacitySort"
           @retry="loadFleetCapacity"
         >
           <template #account-actions="{ account }">
@@ -238,19 +257,19 @@
               type="button"
               class="operator-account-row-action"
               :title="t('common.edit')"
+              :aria-label="`${t('common.edit')} ${account.name}`"
               @click="handleEdit(account)"
             >
               <Icon name="edit" size="sm" />
-              <span>{{ t('common.edit') }}</span>
             </button>
             <button
               type="button"
               class="operator-account-row-action"
               :title="t('common.more')"
+              :aria-label="`${t('common.more')} ${account.name}`"
               @click="openMenu(account, $event)"
             >
               <Icon name="more" size="sm" />
-              <span>{{ t('common.more') }}</span>
             </button>
           </template>
         </OperatorCapacityOverview>
@@ -596,9 +615,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, inject, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { routeLocationKey } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
@@ -623,7 +643,7 @@ import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vu
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
-import type { SelectOption } from '@/components/common/Select.vue'
+import Select, { type SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
@@ -637,7 +657,7 @@ import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRules
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { supportsBatchAccountUsage } from '@/utils/operatorCapacity'
+import { supportsBatchAccountUsage, type OperatorAccountStatus } from '@/utils/operatorCapacity'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -649,13 +669,46 @@ import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType,
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const route = inject(routeLocationKey, null)
 
 type AccountView = 'capacity' | 'technical'
 const accountView = ref<AccountView>('capacity')
+type CapacitySort = 'capacity' | 'name' | 'status'
+const routeOperatorStatus = Array.isArray(route?.query.operator_status)
+  ? route.query.operator_status[0]
+  : route?.query.operator_status
+const operatorStatus = ref<OperatorAccountStatus | 'all'>(
+  ['active', 'limited', 'error', 'disabled'].includes(String(routeOperatorStatus))
+    ? routeOperatorStatus as OperatorAccountStatus
+    : 'all'
+)
+const capacitySort = ref<CapacitySort>('capacity')
+const operatorStatusOptions: SelectOption[] = [
+  { value: 'all', label: 'All operator states' },
+  { value: 'active', label: 'Active' },
+  { value: 'limited', label: 'Limited' },
+  { value: 'error', label: 'Error' },
+  { value: 'disabled', label: 'Disabled' },
+]
+const capacitySortOptions: SelectOption[] = [
+  { value: 'capacity', label: 'Lowest capacity first' },
+  { value: 'status', label: 'Status priority' },
+  { value: 'name', label: 'Account name' },
+]
+const setOperatorStatus = (value: string | number | boolean | null) => {
+  operatorStatus.value = String(value) as OperatorAccountStatus | 'all'
+}
+const setCapacitySort = (value: string | number | boolean | null) => {
+  capacitySort.value = String(value) as CapacitySort
+}
 const capacityViewTabRef = ref<HTMLButtonElement | null>(null)
 const technicalViewTabRef = ref<HTMLButtonElement | null>(null)
 const setAccountView = (view: AccountView, focus = false) => {
   accountView.value = view
+  if (view === 'capacity' && params.status) {
+    params.status = ''
+    debouncedReload()
+  }
   if (!focus) return
   nextTick(() => {
     (view === 'capacity' ? capacityViewTabRef.value : technicalViewTabRef.value)?.focus()
@@ -2710,6 +2763,25 @@ onUnmounted(() => {
   background: var(--operator-muted);
 }
 
+.operator-account-view-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.operator-capacity-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.operator-capacity-controls > * {
+  width: 12rem;
+}
+
 .operator-account-view-tab {
   min-width: 6.25rem;
   min-height: 2.25rem;
@@ -2743,8 +2815,8 @@ onUnmounted(() => {
   min-height: 2.25rem;
   align-items: center;
   justify-content: center;
-  gap: 0.375rem;
-  padding: 0.4375rem 0.625rem;
+  width: 2.25rem;
+  padding: 0;
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
   background: var(--operator-card);
@@ -2886,10 +2958,13 @@ onUnmounted(() => {
 }
 
 @media (max-width: 639px) {
-  .operator-account-row-action span {
-    display: none;
+  .operator-account-view-bar,
+  .operator-capacity-controls {
+    align-items: stretch;
+    flex-direction: column;
   }
-
+  .operator-capacity-controls,
+  .operator-capacity-controls > * { width: 100%; }
   .operator-account-view-tabs,
   .operator-account-view-tab {
     width: 100%;

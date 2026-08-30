@@ -189,7 +189,12 @@ const routes: RouteRecordRaw[] = [
   // ==================== User Routes ====================
   {
     path: '/',
-    redirect: '/home'
+    name: 'Root',
+    component: () => import('@/views/HomeView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Home'
+    }
   },
   {
     path: '/dashboard',
@@ -800,6 +805,13 @@ router.beforeEach(async (to, _from, next) => {
   if (!authInitialized) {
     authStore.checkAuth()
     authInitialized = true
+  }
+
+  if (to.path === '/') {
+    next(authStore.isAuthenticated
+      ? authStore.isAdmin ? '/admin/dashboard' : '/dashboard'
+      : '/login')
+    return
   }
 
   // Set page title

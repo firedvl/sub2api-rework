@@ -17,6 +17,14 @@ export type OperatorAccountHealth =
   | 'inactive'
   | 'error'
 
+export type OperatorAccountStatus = 'active' | 'limited' | 'error' | 'disabled'
+
+export interface OperatorAccountStatusInfo {
+  status: OperatorAccountStatus
+  reason: string | null
+  until: string | null
+}
+
 export interface OperatorAccountCapacity {
   account: Account
   identity: string
@@ -171,6 +179,33 @@ function accountHealth(account: Account, now: Date): OperatorAccountHealth {
   return 'healthy'
 }
 
+const AUTH_FAILURE_PATTERN = /\b(?:401|403|unauthenticated|unauthorized|invalid_grant|forbidden|reauthori[sz](?:e|ation)|authentication failed)\b/i
+const RATE_LIMIT_PATTERN = /\b(?:429|rate[\s_-]?limit(?:ed)?|too many requests)\b/i
+
+function usageHealth(
+  usage: AccountUsageInfo | null | undefined,
+  error: string | null,
+): { health: 'rate_limited' | 'error'; reason: string } | null {
+  const errorCode = usage?.error_code?.toLowerCase()
+  if (usage?.needs_verify) {
+    return { health: 'error', reason: usage?.forbidden_reason?.trim() || 'Account verification required' }
+  }
+  if (usage?.is_banned) {
+    return { health: 'error', reason: usage?.forbidden_reason?.trim() || 'Provider account banned' }
+  }
+  if (usage?.needs_reauth || errorCode === 'unauthenticated') {
+    return { health: 'error', reason: 'Authentication failed' }
+  }
+  if (usage?.is_forbidden || errorCode === 'forbidden') {
+    return { health: 'error', reason: usage?.forbidden_reason?.trim() || 'Provider access forbidden' }
+  }
+  if (error && AUTH_FAILURE_PATTERN.test(error)) return { health: 'error', reason: error }
+  if (errorCode === 'rate_limited' || (error && RATE_LIMIT_PATTERN.test(error))) {
+    return { health: 'rate_limited', reason: 'Provider rate limit' }
+  }
+  return null
+}
+
 function addWindow(
   windows: OperatorCapacityWindow[],
   window: Omit<OperatorCapacityWindow, 'remainingPercent'> & { remainingPercent: number | null },
@@ -300,6 +335,9 @@ export function normalizeAccountCapacity(
 
   const remainingValues = windows.map((window) => window.remainingPercent)
   const credentials = account.credentials ?? {}
+  const usageError = error?.trim() || usage?.forbidden_reason?.trim() || usage?.error?.trim() || null
+  const baseHealth = accountHealth(account, now)
+  const derivedUsageHealth = baseHealth === 'healthy' ? usageHealth(usage, usageError) : null
 
   return {
     account,
@@ -317,12 +355,94 @@ export function normalizeAccountCapacity(
       credentials.tier_id,
       extra.plan_type,
     ),
-    health: accountHealth(account, now),
+    health: derivedUsageHealth?.health ?? baseHealth,
     groups: (account.groups ?? []).map((group) => group.name).filter(Boolean),
     windows,
     lowestRemaining: remainingValues.length ? Math.min(...remainingValues) : null,
-    error: error || usage?.error || null,
+    error: derivedUsageHealth?.reason ?? usageError,
   }
+}
+
+export function classifyOperatorAccount(
+  summary: OperatorAccountCapacity,
+): OperatorAccountStatusInfo {
+  const { account, health, windows } = summary
+
+  if (health === 'error') {
+    return {
+      status: 'error',
+      reason: account.error_message?.trim() || summary.error?.trim() || 'Account error',
+      until: null,
+    }
+  }
+  if (health === 'inactive') {
+    return { status: 'disabled', reason: 'Account disabled', until: null }
+  }
+  if (health === 'unschedulable') {
+    return { status: 'disabled', reason: 'Scheduling disabled', until: null }
+  }
+  if (health === 'rate_limited') {
+    return { status: 'limited', reason: 'Provider rate limit', until: account.rate_limit_reset_at }
+  }
+  if (health === 'overloaded') {
+    return { status: 'limited', reason: 'Provider cooldown', until: account.overload_until }
+  }
+  if (health === 'paused') {
+    return {
+      status: 'limited',
+      reason: account.temp_unschedulable_reason?.trim() || 'Temporarily unavailable',
+      until: account.temp_unschedulable_until,
+    }
+  }
+
+  const exhaustedWindow = windows.find((window) => window.remainingPercent === 0)
+  if (exhaustedWindow) {
+    return {
+      status: 'limited',
+      reason: `${exhaustedWindow.label} quota exhausted`,
+      until: exhaustedWindow.resetsAt,
+    }
+  }
+
+  return { status: 'active', reason: null, until: null }
+}
+
+function serviceableCapacityAccounts(accounts: OperatorAccountCapacity[]): OperatorAccountCapacity[] {
+  return accounts.filter((summary) => {
+    const status = classifyOperatorAccount(summary).status
+    return status === 'active' || status === 'limited'
+  })
+}
+
+function compactPercent(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, '')
+}
+
+export function summarizeOperatorQuota(summary: OperatorAccountCapacity): string {
+  const { platform } = summary.account
+  let windows = summary.windows
+
+  if (platform === 'openai') {
+    const primaryWindows = ['five_hour', 'seven_day']
+      .flatMap((key) => windows.filter((window) => window.key === key))
+    if (primaryWindows.length) windows = primaryWindows
+  }
+
+  const modelWindows = windows.filter((window) => window.key.startsWith('antigravity:'))
+  if (platform === 'antigravity' && modelWindows.length > 1) {
+    const minimum = Math.min(...modelWindows.map((window) => window.remainingPercent))
+    return `${compactPercent(minimum)}% minimum across ${modelWindows.length} models`
+  }
+
+  if (!windows.length) return 'Quota unavailable'
+
+  const visible = windows.slice(0, 2)
+  const summaryText = visible
+    .map((window) => `${window.label} ${compactPercent(window.remainingPercent)}%`)
+    .join(' · ')
+  return windows.length > visible.length
+    ? `${summaryText} · +${windows.length - visible.length} more`
+    : summaryText
 }
 
 export function buildProviderCapacity(
@@ -369,7 +489,8 @@ export function aggregateNormalizedCapacity(
   accounts: OperatorAccountCapacity[],
   now = new Date(),
 ): OperatorNormalizedCapacityAggregate {
-  const knownAccounts = accounts.filter(
+  const capacityAccounts = serviceableCapacityAccounts(accounts)
+  const knownAccounts = capacityAccounts.filter(
     (summary): summary is OperatorAccountCapacity & { lowestRemaining: number } => (
       summary.lowestRemaining !== null
     ),
@@ -395,10 +516,10 @@ export function aggregateNormalizedCapacity(
       ? knownAccounts.reduce((total, summary) => total + summary.lowestRemaining, 0) / knownAccounts.length
       : null,
     knownCount: knownAccounts.length,
-    unknownCount: accounts.length - knownAccounts.length,
+    unknownCount: capacityAccounts.length - knownAccounts.length,
     lowestRemaining: lowestAccount?.lowestRemaining ?? null,
     lowestAccount,
-    schedulableCount: accounts.filter((summary) => summary.account.schedulable).length,
+    schedulableCount: capacityAccounts.filter((summary) => summary.account.schedulable).length,
     nextReset,
   }
 }
@@ -408,12 +529,13 @@ export function buildNormalizedPoolCapacity(
   now = new Date(),
 ): OperatorPoolCapacity {
   const aggregate = aggregateNormalizedCapacity(accounts, now)
-  const knownAccounts = accounts.filter(
+  const capacityAccounts = serviceableCapacityAccounts(accounts)
+  const knownAccounts = capacityAccounts.filter(
     (summary): summary is OperatorAccountCapacity & { lowestRemaining: number } => (
       summary.lowestRemaining !== null
     ),
   )
-  const unknownAccounts = accounts.filter((summary) => summary.lowestRemaining === null)
+  const unknownAccounts = capacityAccounts.filter((summary) => summary.lowestRemaining === null)
 
   if (!knownAccounts.length) {
     return {
@@ -441,9 +563,10 @@ export function buildWindowCapacities(
   accounts: OperatorAccountCapacity[],
   now = new Date(),
 ): OperatorWindowCapacity[] {
+  const capacityAccounts = serviceableCapacityAccounts(accounts)
   const windowsByKey = new Map<string, { label: string; kind: OperatorCapacityWindow['kind'] }>()
 
-  for (const summary of accounts) {
+  for (const summary of capacityAccounts) {
     for (const window of summary.windows) {
       if (!windowsByKey.has(window.key)) {
         windowsByKey.set(window.key, { label: window.label, kind: window.kind })
@@ -452,12 +575,12 @@ export function buildWindowCapacities(
   }
 
   return Array.from(windowsByKey.entries()).map(([key, definition]) => {
-    const known = accounts.flatMap((summary) => {
+    const known = capacityAccounts.flatMap((summary) => {
       const window = summary.windows.find((candidate) => candidate.key === key)
       return window ? [{ summary, window }] : []
     })
     const knownAccountIDs = new Set(known.map(({ summary }) => summary.account.id))
-    const unknownAccounts = accounts.filter((summary) => !knownAccountIDs.has(summary.account.id))
+    const unknownAccounts = capacityAccounts.filter((summary) => !knownAccountIDs.has(summary.account.id))
 
     if (!known.length) {
       return {
@@ -466,7 +589,7 @@ export function buildWindowCapacities(
         remainingPercent: null,
         usedPercent: null,
         knownCount: 0,
-        unknownCount: accounts.length,
+        unknownCount: capacityAccounts.length,
         nextReset: null,
         segments: [],
         unknownAccounts,

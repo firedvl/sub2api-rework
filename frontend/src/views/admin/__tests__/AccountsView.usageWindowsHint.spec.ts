@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { routeLocationKey } from 'vue-router'
 
+import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import AccountsView from '../AccountsView.vue'
 
 const {
@@ -92,10 +94,13 @@ const HelpTooltipStub = {
   template: '<span data-test="usage-windows-hint">{{ content }}</span>'
 }
 
-function mountView(attachTo?: Element) {
+function mountView(attachTo?: Element, query: Record<string, string> = {}) {
   return mount(AccountsView, {
     attachTo,
     global: {
+      provide: {
+        [routeLocationKey as symbol]: { query },
+      },
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: {
@@ -130,7 +135,8 @@ function mountView(attachTo?: Element) {
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
         AccountUsageCell: true,
-        Icon: true
+        Icon: true,
+        RouterLink: true,
       }
     }
   })
@@ -258,6 +264,13 @@ describe('admin AccountsView usage windows hint', () => {
     expect(technicalPanel.find('[data-test="data-table"]').exists()).toBe(true)
     expect(listAccounts).toHaveBeenCalledTimes(listCalls)
     expect(getBatchUsage).toHaveBeenCalledTimes(usageCalls)
+  })
+
+  it('hydrates the operator status filter from a dashboard query link', async () => {
+    const wrapper = mountView(undefined, { operator_status: 'limited' })
+    await flushPromises()
+
+    expect(wrapper.getComponent(OperatorCapacityOverview).props('status')).toBe('limited')
   })
 
   it('renders an explanatory tooltip next to the usage windows column header', async () => {

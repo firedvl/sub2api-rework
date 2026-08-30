@@ -51,7 +51,7 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
 })
 
 describe('StatsCapacitySection', () => {
-  it('renders global and provider pool partitions with unknown accounts excluded', () => {
+  it('renders pool partitions and exposes chart details through hover and selection', async () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
         accounts: [
@@ -75,9 +75,19 @@ describe('StatsCapacitySection', () => {
     const global = wrapper.get('[data-testid="global-capacity-donut"]')
     expect(global.get('[data-testid="capacity-used-segment"]').attributes('style')).toContain('40 60')
     expect(global.findAll('[data-testid="capacity-account-segment"]')).toHaveLength(2)
-    expect(global.text()).toContain('Unknown Gemini')
+    expect(global.text()).not.toContain('Unknown Gemini')
     expect(global.text()).toContain('admin.dashboard.capacity.poolContribution 40')
     expect(global.text()).toContain('admin.dashboard.capacity.poolContribution 20')
+
+    const firstAccountSegment = global.findAll('[data-testid="capacity-account-segment"]')[0]
+    await firstAccountSegment.trigger('mouseenter')
+    expect(global.get('.stats-capacity-tooltip').text()).toContain('Account 2')
+    await firstAccountSegment.trigger('click')
+    expect(firstAccountSegment.attributes('aria-pressed')).toBe('true')
+    expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Account 2')
+
+    await global.get('select').setValue('unknown')
+    expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Unknown Gemini')
 
     const openAI = wrapper.get('[data-testid="provider-capacity-donut-openai"]')
     expect(openAI.get('[data-testid="capacity-used-segment"]').attributes('style')).toContain('40 60')
@@ -89,7 +99,7 @@ describe('StatsCapacitySection', () => {
     expect(gemini.get('svg').attributes('aria-label')).toContain('admin.dashboard.capacity.quotaUnknown')
   })
 
-  it('shows each provider window and its per-account contributions', () => {
+  it('keeps provider windows collapsed until requested', async () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
         accounts: [account(1), account(2)],
@@ -107,6 +117,10 @@ describe('StatsCapacitySection', () => {
     })
 
     const provider = wrapper.get('[data-testid="provider-capacity-openai"]')
+    const details = provider.get('details.stats-window-section')
+    expect(details.attributes('open')).toBeUndefined()
+    await details.get('summary').trigger('click')
+    expect(details.attributes('open')).toBe('')
     expect(provider.text()).toContain('5h')
     expect(provider.text()).toContain('7d')
     expect(provider.text()).toContain('admin.stats.capacity.windowCoverage 2 0')
