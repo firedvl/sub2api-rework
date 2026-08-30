@@ -76,6 +76,63 @@ export const operatorFixtureUpdateStatus = {
   },
 }
 
+export const operatorAssistantFixtureModels = {
+  default: 'auto',
+  models: [
+    { id: '11:gpt-5.4', model: 'gpt-5.4', group_id: 11, group_name: 'OpenAI Production', platform: 'openai', available: true },
+    { id: '12:claude-sonnet-4-6', model: 'claude-sonnet-4-6', group_id: 12, group_name: 'Claude Production', platform: 'anthropic', available: true },
+    { id: '14:gemini-2.5-pro', model: 'gemini-2.5-pro', group_id: 14, group_name: 'Gemini Reserve', platform: 'gemini', available: false },
+  ],
+}
+
+export function operatorAssistantFixturePrompt(body: unknown): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return ''
+  const messages = (body as { messages?: unknown }).messages
+  if (!Array.isArray(messages)) return ''
+  const last = [...messages].reverse().find((message) => (
+    message && typeof message === 'object' && (message as { role?: unknown }).role === 'user'
+  )) as { content?: unknown } | undefined
+  return typeof last?.content === 'string' ? last.content : ''
+}
+
+export function operatorAssistantFixtureAnswer(body: unknown): string {
+  const prompt = operatorAssistantFixturePrompt(body).toLowerCase()
+  if (prompt.includes('markdown')) {
+    return 'Safe **operator answer**. <img src=x onerror="window.fixtureXss=true"> [unsafe](javascript:alert(1)) [Runbook](https://example.com/runbook).'
+  }
+  if (prompt.includes('version')) {
+    return 'Gateway is running **0.1.183-rework.12** on upstream v0.1.183. Migration remains 232.'
+  }
+  if (prompt.includes('model')) {
+    return '**gpt-5.4** and **claude-sonnet-4-6** have schedulable capacity. Gemini Reserve is unavailable.'
+  }
+  if (prompt.includes('capacity')) {
+    return '4 of 5 accounts are schedulable. One OpenAI account is limited at 0% remaining; its next reset is 3:00 PM.'
+  }
+  if (prompt.includes('error')) {
+    return 'Recent error rate is **1.8%** across 1,284 requests. Rate limits account for 14 of 23 errors.'
+  }
+  return 'One OpenAI account needs attention: it is rate limited at 0% remaining. Claude and Antigravity capacity remain schedulable.'
+}
+
+export function operatorAssistantFixtureMetadata(body: unknown) {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const selected = (body as { model?: unknown }).model
+    if (typeof selected === 'string' && selected.startsWith('12:')) {
+      return { model: 'claude-sonnet-4-6', selection: selected, provider: 'anthropic' }
+    }
+  }
+  return { model: 'gpt-5.4', selection: '11:gpt-5.4', provider: 'openai' }
+}
+
+export function operatorAssistantFixtureSSE(body: unknown): string {
+  const answer = operatorAssistantFixtureAnswer(body)
+  const splitAt = Math.max(1, Math.floor(answer.length / 2))
+  return [answer.slice(0, splitAt), answer.slice(splitAt)]
+    .map((delta) => `event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta })}\n\n`)
+    .join('') + `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed' })}\n\n`
+}
+
 const paginated = <T>(items: T[], pageSize = 20) => ({
   items,
   total: items.length,
@@ -720,6 +777,7 @@ export function isOperatorFixtureReadRequest(method: string, pathname: string): 
     '/api/v1/admin/accounts/data/preview',
     '/api/v1/admin/accounts/today-stats/batch',
     '/api/v1/admin/accounts/usage/batch',
+    '/api/v1/admin/operator-assistant',
   ].includes(pathname)
 }
 
@@ -828,6 +886,7 @@ export function getOperatorFixtureData(
     }
   }
   if (pathname === '/api/v1/admin/settings') return adminSettings
+  if (pathname === '/api/v1/admin/operator-assistant/models') return operatorAssistantFixtureModels
   if (pathname === '/api/v1/admin/system/check-updates') return operatorFixtureUpdateStatus
   if (pathname === '/api/v1/admin/payment/config') {
     return {

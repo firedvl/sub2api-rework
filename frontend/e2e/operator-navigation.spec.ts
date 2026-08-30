@@ -186,6 +186,26 @@ test.describe('operator console navigation', () => {
     await expect(page).toHaveTitle('Overview · Gateway')
   })
 
+  test('logs a fresh admin into the dashboard without the legacy tour', async ({ browser }) => {
+    const freshSession = await browser.newContext({ locale: 'en-US' })
+    const loginPage = await freshSession.newPage()
+    await installOperatorApiMock(loginPage)
+    await loginPage.goto('/login')
+
+    expect(await loginPage.evaluate(() => localStorage.getItem('auth_token'))).toBeNull()
+    expect(await loginPage.evaluate(() => Object.keys(localStorage).some((key) => /guide|onboarding|tour/i.test(key)))).toBe(false)
+    await loginPage.getByLabel('Email').fill('admin@example.test')
+    await loginPage.getByLabel('Password').fill('fixture-password')
+    await loginPage.getByRole('button', { name: 'Sign In' }).click()
+
+    await expect(loginPage).toHaveURL(/\/admin\/dashboard$/)
+    await expect(loginPage.locator('.driver-overlay, .driver-popover, .driver-active-element')).toHaveCount(0)
+    await expect(loginPage.getByText(/Restart Onboarding Tour|Start setup|onboarding guide/i)).toHaveCount(0)
+    expect(await loginPage.evaluate(() => Object.keys(localStorage).some((key) => /guide|onboarding|tour/i.test(key)))).toBe(false)
+    await expect(loginPage.getByRole('button', { name: 'Ask Gateway' })).toBeVisible()
+    await freshSession.close()
+  })
+
   test('reaches all six areas and keeps history and deep-link state', async ({ page }) => {
     test.setTimeout(60_000)
     await page.goto('/admin/dashboard')
@@ -231,6 +251,108 @@ test.describe('operator console navigation', () => {
     await expect(page).toHaveURL(/\/admin\/accounts$/)
     await expect(sidebar).toHaveClass(/-translate-x-full/)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
+
+  test('has no legacy startup tour and keeps Ask Gateway usable across operator widths', async ({ page }) => {
+    test.setTimeout(60_000)
+    const cases = [
+      { width: 1440, height: 900, route: '/admin/dashboard' },
+      { width: 1024, height: 768, route: '/admin/accounts' },
+      { width: 390, height: 844, route: '/admin/usage' },
+    ]
+
+    for (const reviewCase of cases) {
+      await page.setViewportSize({ width: reviewCase.width, height: reviewCase.height })
+      await page.goto(reviewCase.route)
+      await expect(page.locator('.driver-overlay, .driver-popover, .driver-active-element')).toHaveCount(0)
+      await expect(page.getByText(/Restart Onboarding Tour|Start setup|onboarding guide/i)).toHaveCount(0)
+
+      const trigger = page.getByRole('button', { name: 'Ask Gateway' })
+      await expect(trigger).toBeVisible()
+      await trigger.click()
+
+      const dialog = page.getByRole('dialog', { name: 'Ask Gateway' })
+      await expect(dialog).toBeVisible()
+      await expect(dialog.getByRole('textbox')).toBeFocused()
+      await expect.poll(async () => {
+        const box = await dialog.locator('.operator-assistant-panel').boundingBox()
+        return box ? Math.round(box.x + box.width) : Number.POSITIVE_INFINITY
+      }).toBeLessThanOrEqual(reviewCase.width + 1)
+      const panelBox = await dialog.locator('.operator-assistant-panel').boundingBox()
+      expect(panelBox).not.toBeNull()
+      expect(panelBox!.width).toBeLessThanOrEqual(reviewCase.width)
+      expect(await dialog.locator('.operator-assistant-panel').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+
+      await page.keyboard.press('Tab')
+      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(dialog).toBeHidden()
+      await expect(trigger).toBeFocused()
+    }
+
+    expect(await page.evaluate(() => Object.keys(localStorage).some((key) => /guide|onboarding|tour/i.test(key)))).toBe(false)
+  })
+
+  test('streams, stops, retries, clears, sanitizes, and keeps assistant history ephemeral', async ({ page, context }) => {
+    test.setTimeout(60_000)
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/dashboard')
+    await page.getByRole('button', { name: 'Ask Gateway' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Ask Gateway' })
+    const composer = dialog.getByRole('textbox')
+
+    await expect(dialog.getByRole('button', { name: 'What needs attention?' })).toBeVisible()
+    await expect(dialog.locator('.select-value')).toHaveText('Auto')
+    await dialog.getByRole('button', { name: 'What needs attention?' }).click()
+    let answer = dialog.locator('.operator-assistant-message-assistant').last()
+    await expect(answer).toContainText('One OpenAI account needs attention')
+    await expect(answer.locator('.operator-assistant-metadata')).toContainText(/Auto -> gpt-5\.4 \/ openai \/ [\d.]+s/)
+
+    await answer.getByRole('button', { name: 'Copy' }).click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('One OpenAI account')
+
+    await dialog.getByRole('button', { name: 'Model' }).click()
+    await page.getByRole('option', { name: /claude-sonnet-4-6/ }).click()
+    expect(await page.evaluate(() => localStorage.getItem('operator_assistant_model'))).toBe('12:claude-sonnet-4-6')
+    await expect(dialog.locator('.operator-assistant-message-assistant').first().locator('.operator-assistant-metadata'))
+      .toContainText(/Auto -> gpt-5\.4 \/ openai \/ [\d.]+s/)
+    await composer.fill('What version is running?')
+    await dialog.getByRole('button', { name: 'Send message' }).click()
+    answer = dialog.locator('.operator-assistant-message-assistant').last()
+    await expect(answer).toContainText('0.1.183-rework.12')
+    await expect(answer.locator('.operator-assistant-metadata')).toContainText(/claude-sonnet-4-6 \/ anthropic/)
+
+    await composer.fill('Show markdown fixture')
+    await dialog.getByRole('button', { name: 'Send message' }).click()
+    answer = dialog.locator('.operator-assistant-message-assistant').last()
+    await expect(answer.locator('strong')).toHaveText('operator answer')
+    await expect(answer.locator('img')).toHaveCount(0)
+    await expect(answer.locator('a[href^="javascript:"]')).toHaveCount(0)
+    const runbook = answer.getByRole('link', { name: 'Runbook' })
+    await expect(runbook).toHaveAttribute('target', '_blank')
+    await expect(runbook).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(await page.evaluate(() => (window as Window & { fixtureXss?: boolean }).fixtureXss)).toBeUndefined()
+
+    await composer.fill('Retry fixture')
+    await dialog.getByRole('button', { name: 'Send message' }).click()
+    answer = dialog.locator('.operator-assistant-message-assistant').last()
+    await expect(answer).toContainText('No eligible model capacity is currently available.')
+    await answer.getByRole('button', { name: 'Retry' }).click()
+    await expect(dialog.locator('.operator-assistant-message-assistant').last()).toContainText('One OpenAI account needs attention')
+
+    await composer.fill('Slow fixture')
+    await dialog.getByRole('button', { name: 'Send message' }).click()
+    await dialog.getByRole('button', { name: 'Stop response' }).click()
+    await expect(dialog.locator('.operator-assistant-message-assistant').last()).toContainText('Stopped')
+
+    await dialog.getByRole('button', { name: 'Clear conversation' }).click()
+    await expect(dialog.locator('.operator-assistant-message')).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: 'What needs attention?' })).toBeVisible()
+    const storage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))
+    expect(Object.keys(storage).some((key) => /conversation|messages|prompt/i.test(key))).toBe(false)
+    expect(JSON.stringify(storage)).not.toContain('Retry fixture')
+    expect(JSON.stringify(storage)).not.toContain('One OpenAI account needs attention')
   })
 
   test('keeps admin personal routes outside operator styling', async ({ page }) => {
@@ -1052,5 +1174,6 @@ test('production guards remain authoritative for hidden or unauthorized links', 
   await installOperatorApiMock(personalPage, 'user')
   await personalPage.goto('/admin/accounts')
   await expect(personalPage).toHaveURL(/\/dashboard$/)
+  await expect(personalPage.getByRole('button', { name: 'Ask Gateway' })).toHaveCount(0)
   await personal.close()
 })

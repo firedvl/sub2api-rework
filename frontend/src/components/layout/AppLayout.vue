@@ -43,14 +43,11 @@
 </template>
 
 <script setup lang="ts">
-import '@/styles/onboarding.css'
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
-import { useOnboardingTour } from '@/composables/useOnboardingTour'
-import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import OperatorContextNav from './OperatorContextNav.vue'
@@ -76,16 +73,4 @@ const pageDescription = computed(() => {
   return key ? t(key) : (route.meta.description as string) || ''
 })
 
-const { replayTour } = useOnboardingTour({
-  storageKey: isAdmin.value ? 'admin_guide' : 'user_guide',
-  autoStart: true
-})
-
-const onboardingStore = useOnboardingStore()
-
-onMounted(() => {
-  onboardingStore.setReplayCallback(replayTour)
-})
-
-defineExpose({ replayTour })
 </script>

@@ -32,6 +32,16 @@
       </nav>
 
       <div class="operator-header-actions">
+        <button
+          v-if="authStore.isAdmin"
+          type="button"
+          class="operator-icon-button operator-assistant-trigger"
+          :aria-label="t('admin.operatorAssistant.title')"
+          @click="assistantOpen = true"
+        >
+          <Icon name="chat" size="sm" />
+          <span>{{ t('admin.operatorAssistant.title') }}</span>
+        </button>
         <AnnouncementBell class="operator-header-secondary-action" />
         <LocaleSwitcher class="operator-header-secondary-action" />
         <button
@@ -49,6 +59,7 @@
       </div>
     </div>
   </header>
+  <OperatorAssistantDrawer :show="assistantOpen" @close="assistantOpen = false" />
 </template>
 
 <script setup lang="ts">
@@ -56,6 +67,7 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import OperatorAssistantDrawer from '@/components/admin/OperatorAssistantDrawer.vue'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore, useAuthStore } from '@/stores'
@@ -68,6 +80,7 @@ const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const isDark = ref(document.documentElement.classList.contains('dark'))
+const assistantOpen = ref(false)
 
 const visibleAreas = computed(() =>
   operatorAreas.filter((area) => !(authStore.isSimpleMode && area.hideInSimpleMode)),
@@ -94,3 +107,26 @@ async function handleLogout() {
   await router.push('/login')
 }
 </script>
+
+<style scoped>
+.operator-assistant-trigger {
+  width: auto;
+  padding-right: 0.75rem;
+  padding-left: 0.75rem;
+  border: 1px solid var(--operator-border);
+  background: var(--operator-raised);
+  color: var(--operator-foreground);
+}
+
+@media (max-width: 1279px) {
+  .operator-assistant-trigger {
+    width: 2.5rem;
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  .operator-assistant-trigger span {
+    display: none;
+  }
+}
+</style>

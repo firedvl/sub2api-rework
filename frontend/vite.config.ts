@@ -10,6 +10,9 @@ import {
   isOperatorFixtureReadRequest,
   operatorFixturePublicSettings,
   operatorFixtureUser,
+  operatorAssistantFixtureAnswer,
+  operatorAssistantFixturePrompt,
+  operatorAssistantFixtureMetadata,
   OPERATOR_FIXTURE_ACCOUNTS_ETAG,
   OPERATOR_FIXTURE_TOKEN,
 } from './e2e/fixtures/operatorData'
@@ -102,11 +105,39 @@ async function readReviewJson(request: IncomingMessage): Promise<unknown> {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
 }
 
+async function sendReviewAssistantStream(
+  request: IncomingMessage,
+  response: ServerResponse,
+  body: unknown,
+): Promise<void> {
+  const answer = operatorAssistantFixtureAnswer(body)
+  const chunks = answer.match(/.{1,32}/g) || [answer]
+  const metadata = operatorAssistantFixtureMetadata(body)
+  const delay = operatorAssistantFixturePrompt(body).toLowerCase().includes('slow fixture') ? 250 : 35
+  response.statusCode = 200
+  response.setHeader('Content-Type', 'text/event-stream')
+  response.setHeader('Cache-Control', 'no-store')
+  response.setHeader('X-Accel-Buffering', 'no')
+  response.setHeader('X-Gateway-Model', metadata.model)
+  response.setHeader('X-Gateway-Model-Selection', metadata.selection)
+  response.setHeader('X-Gateway-Provider', metadata.provider)
+  response.flushHeaders()
+
+  let closed = false
+  request.once('close', () => { closed = true })
+  for (const delta of chunks) {
+    if (closed) return
+    response.write(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta })}\n\n`)
+    await new Promise((resolve) => setTimeout(resolve, delay))
+  }
+  if (!closed) response.end(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed' })}\n\n`)
+}
+
 function operatorReviewFixtures(): Plugin {
   const fixtureUser = operatorFixtureUser()
   const appConfig = JSON.stringify(operatorFixturePublicSettings)
   const sessionUser = JSON.stringify(fixtureUser)
-  const reviewInitScript = `<script>(()=>{window.__OPERATOR_REVIEW_MODE__=true;window.__APP_CONFIG__=${appConfig};const keys=['auth_token','auth_user','refresh_token','token_expires_at'];localStorage.setItem('admin_guide_1_admin_v4_interactive','true');if(location.pathname==='/login'){keys.forEach((key)=>localStorage.removeItem(key));return;}localStorage.setItem('auth_token',${JSON.stringify(OPERATOR_FIXTURE_TOKEN)});localStorage.setItem('auth_user',${JSON.stringify(sessionUser)});})();</script>`
+  const reviewInitScript = `<script>(()=>{window.__OPERATOR_REVIEW_MODE__=true;window.__APP_CONFIG__=${appConfig};const keys=['auth_token','auth_user','refresh_token','token_expires_at'];if(location.pathname==='/login'){keys.forEach((key)=>localStorage.removeItem(key));return;}localStorage.setItem('auth_token',${JSON.stringify(OPERATOR_FIXTURE_TOKEN)});localStorage.setItem('auth_user',${JSON.stringify(sessionUser)});})();</script>`
 
   return {
     name: 'operator-review-fixtures',
@@ -150,6 +181,15 @@ function operatorReviewFixtures(): Plugin {
             })
           } catch {
             sendReviewJson(response, 400, { code: 400, message: 'Invalid fixture request' })
+          }
+          return
+        }
+
+        if (method === 'POST' && pathname === '/api/v1/admin/operator-assistant') {
+          try {
+            await sendReviewAssistantStream(request, response, await readReviewJson(request))
+          } catch {
+            if (!response.headersSent) sendReviewJson(response, 400, { code: 400, message: 'Invalid fixture request' })
           }
           return
         }

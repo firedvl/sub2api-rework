@@ -5,6 +5,9 @@ import {
   getOperatorImportResult,
   isOperatorFixtureReadRequest,
   operatorFixtureUser,
+  operatorAssistantFixturePrompt,
+  operatorAssistantFixtureSSE,
+  operatorAssistantFixtureMetadata,
   OPERATOR_FIXTURE_ACCOUNTS_ETAG,
   OPERATOR_FIXTURE_TOKEN,
   type RunMode,
@@ -34,8 +37,6 @@ export async function seedSession(
   await page.addInitScript(({ user, token }) => {
     localStorage.setItem('auth_token', token)
     localStorage.setItem('auth_user', JSON.stringify(user))
-    const guide = user.role === 'admin' ? 'admin_guide' : 'user_guide'
-    localStorage.setItem(`${guide}_${user.id}_${user.role}_v4_interactive`, 'true')
   }, { user: operatorFixtureUser(role, runMode), token: OPERATOR_FIXTURE_TOKEN })
 }
 
@@ -44,6 +45,7 @@ export async function installOperatorApiMock(
   role: SessionRole = 'admin',
   runMode: RunMode = 'standard',
 ): Promise<void> {
+  const assistantAttempts = new Map<string, number>()
   await page.route('**/setup/status*', (route) =>
     route.fulfill({
       status: 200,
@@ -56,6 +58,32 @@ export async function installOperatorApiMock(
     const request = route.request()
     const pathname = new URL(request.url()).pathname
     const method = request.method().toUpperCase()
+
+    if (method === 'POST' && pathname === '/api/v1/admin/operator-assistant') {
+      if (role !== 'admin') return fulfill(route, {}, { status: 403 })
+      const body = request.postDataJSON()
+      const prompt = operatorAssistantFixturePrompt(body)
+      const attempt = (assistantAttempts.get(prompt) || 0) + 1
+      assistantAttempts.set(prompt, attempt)
+      if (prompt.toLowerCase().includes('retry fixture') && attempt === 1) {
+        return fulfill(route, {}, { status: 503 })
+      }
+      if (prompt.toLowerCase().includes('slow fixture')) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+      }
+      const metadata = operatorAssistantFixtureMetadata(body)
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-Gateway-Model': metadata.model,
+          'X-Gateway-Model-Selection': metadata.selection,
+          'X-Gateway-Provider': metadata.provider,
+        },
+        body: operatorAssistantFixtureSSE(body),
+      })
+    }
 
     if (method === 'POST' && pathname === '/api/v1/admin/accounts/data/preview') {
       return fulfill(route, getOperatorImportPreview(request.postDataJSON()))
