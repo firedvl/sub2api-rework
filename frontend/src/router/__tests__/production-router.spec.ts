@@ -107,6 +107,39 @@ describe('production router navigation', () => {
     expect((await navigate('/')).path).toBe('/admin/dashboard')
   })
 
+  it('preserves the dashboard destination for an unauthenticated visitor', async () => {
+    const route = await navigate('/dashboard')
+
+    expect(route.path).toBe('/login')
+    expect(route.query.redirect).toBe('/dashboard')
+  })
+
+  it('allows an authenticated user to open the personal dashboard', async () => {
+    stores.auth.isAuthenticated = true
+
+    expect((await navigate('/dashboard')).path).toBe('/dashboard')
+  })
+
+  it('redirects an authenticated admin from the personal dashboard to the operator overview', async () => {
+    stores.auth.isAuthenticated = true
+    stores.auth.isAdmin = true
+
+    const route = await navigate('/dashboard')
+
+    expect(route.path).toBe('/admin/dashboard')
+    expect(route.redirectedFrom?.path).toBe('/dashboard')
+  })
+
+  it('allows an authenticated admin to open the operator overview directly without a redirect loop', async () => {
+    stores.auth.isAuthenticated = true
+    stores.auth.isAdmin = true
+
+    const route = await navigate('/admin/dashboard')
+
+    expect(route.path).toBe('/admin/dashboard')
+    expect(route.redirectedFrom).toBeUndefined()
+  })
+
   it('redirects completed setup through the production guard', async () => {
     api.getSetupStatus.mockResolvedValue({ needs_setup: false })
 
