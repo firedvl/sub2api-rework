@@ -629,6 +629,10 @@ func TestBaseSystemdUnitUsesPrivateStateAndRuntimeStorage(t *testing.T) {
 	}
 	require.Contains(t, unit, "StateDirectory=sub2api-rework-updater")
 	require.Contains(t, unit, "StateDirectoryMode=0700")
+	require.Equal(t, 1, strings.Count(unit, "Environment=HOME="))
+	require.Contains(t, unit, "\nEnvironment=HOME=/var/lib/sub2api-rework-updater\n")
+	require.NotContains(t, unit, "Environment=HOME=/root")
+	require.NotContains(t, unit, "DOCKER_CONFIG")
 	require.Contains(t, unit, "RuntimeDirectory=sub2api-rework-updater")
 	require.Contains(t, unit, "RuntimeDirectoryMode=0750")
 	require.Equal(t, 1, strings.Count(unit, "RuntimeDirectoryPreserve="))
@@ -637,6 +641,9 @@ func TestBaseSystemdUnitUsesPrivateStateAndRuntimeStorage(t *testing.T) {
 	require.Contains(t, unit, "ReadWritePaths=/var/lib/sub2api-rework-updater")
 	require.Contains(t, unit, "ReadWritePaths=/run/sub2api-rework-updater")
 	require.Contains(t, unit, "ReadWritePaths=/var/run/docker.sock")
+	require.Equal(t, 1, strings.Count(unit, "ProtectHome="))
+	require.NotContains(t, unit, "ProtectHome=no")
+	require.NotContains(t, unit, "ProtectHome=false")
 	require.NotContains(t, unit, "LogsDirectory=")
 	require.NotContains(t, unit, "/var/log/sub2api-rework-updater")
 }

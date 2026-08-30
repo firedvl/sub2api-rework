@@ -19,6 +19,7 @@ RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=restart
 StateDirectory=sub2api-rework-updater
 StateDirectoryMode=0700
+Environment=HOME=/var/lib/sub2api-rework-updater
 
 NoNewPrivileges=yes
 ProtectSystem=strict
