@@ -464,8 +464,14 @@ test.describe('operator console navigation', () => {
     await page.keyboard.press('Enter')
     await expect(firstSegment).toHaveAttribute('aria-pressed', 'true')
 
-    await global.getByRole('combobox', { name: 'Inspect segment' }).selectOption('account:101')
-    await expect(global.getByTestId('capacity-selected-detail')).toContainText('Codex Team West')
+    const segmentSelect = global.getByRole('button', { name: 'Inspect segment' })
+    await segmentSelect.focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(page.getByRole('listbox')).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await expect(segmentSelect).toBeFocused()
+    await expect(global.getByTestId('capacity-selected-detail')).toContainText('Claude Primary')
 
     const openAI = page.getByTestId('provider-capacity-openai')
     await expect(openAI).toContainText('52%')

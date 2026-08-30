@@ -86,7 +86,12 @@ describe('StatsCapacitySection', () => {
     expect(firstAccountSegment.attributes('aria-pressed')).toBe('true')
     expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Account 2')
 
-    await global.get('select').setValue('unknown')
+    await global.get('.select-trigger').trigger('click')
+    const unknownOption = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find((option) => option.textContent?.includes('admin.dashboard.capacity.quotaUnknown'))
+    expect(unknownOption).toBeDefined()
+    unknownOption?.click()
+    await wrapper.vm.$nextTick()
     expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Unknown Gemini')
 
     const openAI = wrapper.get('[data-testid="provider-capacity-donut-openai"]')

@@ -95,14 +95,17 @@
       <p>
         {{ t('admin.stats.capacity.coverage', { known: pool.knownCount, unknown: pool.unknownCount }) }}
       </p>
-      <label class="stats-capacity-select-label">
+      <div class="stats-capacity-select-label">
         <span>Inspect segment</span>
-        <select :value="resolvedSelectedKey" @change="selectFromControl">
-          <option v-for="option in detailOptions" :key="option.key" :value="option.key">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+        <Select
+          :model-value="resolvedSelectedKey"
+          :options="detailOptions"
+          value-key="key"
+          label-key="label"
+          aria-label="Inspect segment"
+          @update:model-value="selectFromControl"
+        />
+      </div>
       <div v-if="selectedDetail" class="stats-capacity-selected" data-testid="capacity-selected-detail">
         <span :class="['stats-capacity-swatch', selectedDetail.tone]" aria-hidden="true" />
         <div>
@@ -118,6 +121,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Select from '@/components/common/Select.vue'
 import type { OperatorPoolCapacity } from '@/utils/operatorCapacity'
 import { formatDateTimeToMinute } from '@/utils/format'
 
@@ -142,6 +146,7 @@ const chartSegments = computed(() => {
 })
 const segmentKey = (segment: OperatorPoolCapacity['segments'][number]) => `account:${segment.summary.account.id}`
 interface CapacityDetail {
+  [key: string]: unknown
   key: string
   label: string
   value: string
@@ -184,8 +189,8 @@ const resolvedSelectedKey = computed(() => detailOptions.value.some((option) => 
   : detailOptions.value[0]?.key ?? '')
 const selectedDetail = computed(() => detailOptions.value.find((option) => option.key === resolvedSelectedKey.value) ?? null)
 const hoveredDetail = computed(() => detailOptions.value.find((option) => option.key === hoveredKey.value) ?? null)
-const selectFromControl = (event: Event) => {
-  selectedKey.value = (event.target as HTMLSelectElement).value
+const selectFromControl = (value: string | number | boolean | null) => {
+  selectedKey.value = String(value ?? '')
 }
 const segmentLabel = (segment: OperatorPoolCapacity['segments'][number]) => {
   const limitingWindow = segment.summary.windows.find(
@@ -304,20 +309,11 @@ const chartLabel = computed(() => props.pool.remainingPercent === null
   font-size: 0.6875rem;
 }
 
-.stats-capacity-select-label select {
-  width: 100%;
+.stats-capacity-select-label :deep(.select-trigger) {
   min-height: 2.25rem;
-  padding: 0.375rem 2rem 0.375rem 0.625rem;
-  border: 1px solid var(--operator-border);
+  padding: 0.375rem 0.625rem;
   border-radius: var(--operator-radius);
-  background: var(--operator-card);
-  color: var(--operator-foreground);
   font-size: 0.75rem;
-}
-
-.stats-capacity-select-label select:focus-visible {
-  outline: 2px solid var(--operator-focus);
-  outline-offset: 2px;
 }
 
 .stats-capacity-selected {
