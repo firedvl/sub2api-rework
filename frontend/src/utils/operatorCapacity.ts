@@ -1,4 +1,5 @@
 import type { Account, AccountPlatform, AccountUsageInfo, UsageProgress } from '@/types'
+import { getActiveModelRateLimits } from '@/utils/modelRateLimits'
 
 export interface OperatorCapacityWindow {
   key: string
@@ -175,6 +176,8 @@ function accountHealth(account: Account, now: Date): OperatorAccountHealth {
   }
   if (isFuture(account.overload_until, now)) return 'overloaded'
   if (isFuture(account.temp_unschedulable_until, now)) return 'paused'
+  if (account.session_window_status === 'rejected') return 'paused'
+  if (getActiveModelRateLimits(account.extra, now).length) return 'rate_limited'
   if (!account.schedulable) return 'unschedulable'
   return 'healthy'
 }
@@ -337,7 +340,16 @@ export function normalizeAccountCapacity(
   const credentials = account.credentials ?? {}
   const usageError = error?.trim() || usage?.forbidden_reason?.trim() || usage?.error?.trim() || null
   const baseHealth = accountHealth(account, now)
-  const derivedUsageHealth = baseHealth === 'healthy' ? usageHealth(usage, usageError) : null
+  const derivedUsageHealth = usageHealth(usage, usageError)
+  let health = baseHealth
+  if (derivedUsageHealth?.health === 'error') {
+    health = 'error'
+  } else if (
+    derivedUsageHealth?.health === 'rate_limited'
+    && (baseHealth === 'healthy' || baseHealth === 'unschedulable')
+  ) {
+    health = 'rate_limited'
+  }
 
   return {
     account,
@@ -355,7 +367,7 @@ export function normalizeAccountCapacity(
       credentials.tier_id,
       extra.plan_type,
     ),
-    health: derivedUsageHealth?.health ?? baseHealth,
+    health,
     groups: (account.groups ?? []).map((group) => group.name).filter(Boolean),
     windows,
     lowestRemaining: remainingValues.length ? Math.min(...remainingValues) : null,
@@ -378,9 +390,6 @@ export function classifyOperatorAccount(
   if (health === 'inactive') {
     return { status: 'disabled', reason: 'Account disabled', until: null }
   }
-  if (health === 'unschedulable') {
-    return { status: 'disabled', reason: 'Scheduling disabled', until: null }
-  }
   if (health === 'rate_limited') {
     return { status: 'limited', reason: 'Provider rate limit', until: account.rate_limit_reset_at }
   }
@@ -402,6 +411,9 @@ export function classifyOperatorAccount(
       reason: `${exhaustedWindow.label} quota exhausted`,
       until: exhaustedWindow.resetsAt,
     }
+  }
+  if (health === 'unschedulable') {
+    return { status: 'disabled', reason: 'Scheduling disabled', until: null }
   }
 
   return { status: 'active', reason: null, until: null }

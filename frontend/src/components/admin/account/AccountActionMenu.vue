@@ -67,6 +67,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
+import { getActiveModelRateLimits } from '@/utils/modelRateLimits'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
 const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow'])
@@ -81,14 +82,7 @@ const isRateLimited = computed(() => {
   if (props.account?.rate_limit_reset_at && new Date(props.account.rate_limit_reset_at) > new Date()) {
     return true
   }
-  const modelLimits = (props.account?.extra as Record<string, unknown> | undefined)?.model_rate_limits as
-    | Record<string, { rate_limit_reset_at: string }>
-    | undefined
-  if (modelLimits) {
-    const now = new Date()
-    return Object.values(modelLimits).some(info => new Date(info.rate_limit_reset_at) > now)
-  }
-  return false
+  return getActiveModelRateLimits(props.account?.extra).length > 0
 })
 const isOverloaded = computed(() => props.account?.overload_until && new Date(props.account.overload_until) > new Date())
 const isTempUnschedulable = computed(() => props.account?.temp_unschedulable_until && new Date(props.account.temp_unschedulable_until) > new Date())

@@ -45,6 +45,51 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
 })
 
 describe('operator capacity normalization', () => {
+  it('applies operator status precedence to session and model restrictions', () => {
+    const now = new Date('2026-08-25T18:00:00Z')
+    const activeModelLimit = {
+      model_rate_limits: {
+        'claude-sonnet-5': {
+          rate_limited_at: '2026-08-25T17:00:00Z',
+          rate_limit_reset_at: '2026-08-25T19:00:00Z',
+        },
+      },
+    }
+    const expiredModelLimit = {
+      model_rate_limits: {
+        'claude-sonnet-5': {
+          rate_limited_at: '2026-08-25T16:00:00Z',
+          rate_limit_reset_at: '2026-08-25T17:00:00Z',
+        },
+      },
+    }
+    const status = (
+      accountOverrides: Partial<Account> = {},
+      accountUsage: AccountUsageInfo | null = null,
+    ) => classifyOperatorAccount(normalizeAccountCapacity(
+      account(100, accountOverrides),
+      accountUsage,
+      null,
+      now,
+    )).status
+
+    expect(status({ session_window_status: 'rejected' })).toBe('limited')
+    expect(status({ session_window_status: 'rejected', schedulable: false })).toBe('limited')
+    expect(status({ status: 'inactive', session_window_status: 'rejected', schedulable: false })).toBe('disabled')
+    expect(status({ extra: activeModelLimit })).toBe('limited')
+    expect(status({ extra: expiredModelLimit })).toBe('active')
+    expect(status(
+      { session_window_status: 'rejected', schedulable: false },
+      usage({ needs_reauth: true, error: 'usage API error: HTTP 401' }),
+    )).toBe('error')
+    expect(status({ status: 'inactive', schedulable: false, extra: activeModelLimit })).toBe('disabled')
+    expect(status(
+      { schedulable: false },
+      usage({ five_hour: { utilization: 100, resets_at: '2026-08-25T20:00:00Z', remaining_seconds: 7200 } }),
+    )).toBe('limited')
+    expect(status()).toBe('active')
+  })
+
   it('maps operator status without treating temporary limits or disabled accounts as errors', () => {
     const now = new Date('2026-08-25T18:00:00Z')
     const exhausted = usage({
