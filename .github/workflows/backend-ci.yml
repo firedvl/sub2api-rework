@@ -67,6 +67,9 @@ jobs:
           sudo install -D -o root -g root -m 0755 \
             /tmp/sub2api-rework-updater-qualification \
             /usr/local/libexec/sub2api-rework-updater-qualification
+          sudo install -D -o root -g root -m 0644 \
+            ../deploy/docker-compose.yml \
+            /usr/local/share/sub2api-rework-qualification/docker-compose.yml
           sudo install -D -o root -g root -m 0600 \
             ../deploy/updater/updater.example.json /etc/sub2api-rework/updater.json
           sudo install -D -o root -g root -m 0644 \
@@ -85,6 +88,7 @@ jobs:
             '[Service]' \
             'Type=oneshot' \
             'RemainAfterExit=yes' \
+            'Environment=SUB2API_STAGING_COMPOSE=/usr/local/share/sub2api-rework-qualification/docker-compose.yml' \
             'ExecStart=' \
             'ExecStart=/usr/local/libexec/sub2api-rework-updater-qualification -test.run=^TestProductionBootstrapPreservesUpdaterAccess$ -test.v -test.count=1 -test.timeout=20m' \
             'Restart=no' \

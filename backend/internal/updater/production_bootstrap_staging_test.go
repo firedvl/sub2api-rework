@@ -371,7 +371,11 @@ func assertStagingManagedPath(t *testing.T, path string, mode os.FileMode) {
 
 func writeStagingDeployment(t *testing.T, project string, port int, socketDirectory, basePath, overridePath, environmentPath string) {
 	t.Helper()
-	base, err := os.ReadFile("../../../deploy/docker-compose.yml")
+	sourcePath := os.Getenv("SUB2API_STAGING_COMPOSE")
+	if sourcePath == "" {
+		sourcePath = "../../../deploy/docker-compose.yml"
+	}
+	base, err := os.ReadFile(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
