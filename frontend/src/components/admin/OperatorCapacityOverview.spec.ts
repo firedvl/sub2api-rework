@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import type { Account, AccountUsageInfo } from '@/types'
@@ -9,9 +9,11 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string, params?: Record<string, unknown>) => params?.count == null
-        ? key
-        : `${key}:${params.count}`
+      t: (key: string, params?: Record<string, unknown>) => {
+        if (params?.count != null) return `${key}:${params.count}`
+        if (params?.time != null) return `${key}:${params.time}`
+        return key
+      }
     })
   }
 })
@@ -55,6 +57,10 @@ describe('OperatorCapacityOverview', () => {
     sessionStorage.clear()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('groups accounts by provider and persists collapsed sections for the session', async () => {
     const wrapper = mount(OperatorCapacityOverview, {
       props: {
@@ -86,6 +92,8 @@ describe('OperatorCapacityOverview', () => {
       'OpenAI',
       'Gemini',
     ])
+    expect(wrapper.findAll('.operator-capacity-provider-mark')).toHaveLength(2)
+    expect(wrapper.get('[data-testid="provider-toggle-openai"] .operator-capacity-provider-mark svg').exists()).toBe(true)
     expect(wrapper.text()).toContain('OpenAI primary')
     expect(wrapper.text()).toContain('OpenAI reserve')
     expect(wrapper.text()).toContain('Gemini primary')
@@ -113,6 +121,65 @@ describe('OperatorCapacityOverview', () => {
     expect(openAIToggle.attributes('aria-expanded')).toBe('false')
     expect(wrapper.get('#operator-provider-openai-accounts').attributes('style')).toContain('display: none')
     expect(sessionStorage.getItem('operator-capacity-collapsed-providers')).toBe('["openai"]')
+  })
+
+  it('renders every known quota window as a default-row progress bar and keeps unknown quota text-only', () => {
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        accounts: [account(1, { name: 'Known account' }), account(2, { name: 'Unknown account' })],
+        usageByAccountId: {
+          '1': {
+            updated_at: '2026-08-26T10:00:00Z',
+            five_hour: { utilization: 58, resets_at: null, remaining_seconds: null },
+            seven_day: { utilization: 32, resets_at: null, remaining_seconds: null },
+            seven_day_sonnet: null,
+          },
+        },
+      },
+      global: {
+        stubs: { LoadingSpinner: true, RouterLink: true }
+      }
+    })
+
+    const rows = wrapper.findAll('[data-testid="account-capacity-row"]')
+    const known = rows.find((row) => row.text().includes('Known account'))!
+    const unknown = rows.find((row) => row.text().includes('Unknown account'))!
+    const bars = known.findAll('.operator-capacity-row-track')
+
+    expect(bars).toHaveLength(2)
+    expect(bars.map((bar) => bar.attributes('aria-valuenow'))).toEqual(['42', '68'])
+    expect(known.text()).toContain('5h')
+    expect(known.text()).toContain('42%')
+    expect(known.text()).toContain('7d')
+    expect(known.text()).toContain('68%')
+    expect(unknown.text()).toContain('admin.dashboard.capacity.quotaUnknown')
+    expect(unknown.find('[role="progressbar"]').exists()).toBe(false)
+    expect(unknown.find('[aria-valuenow="0"]').exists()).toBe(false)
+  })
+
+  it('shows a compact reset line while preserving the full limited reason in the title', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 30, 10, 0))
+    const resetAt = new Date(2026, 7, 30, 15, 0).toISOString()
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        accounts: [account(1, {
+          name: 'Rate-limited account',
+          rate_limited_at: new Date(2026, 7, 30, 9, 0).toISOString(),
+          rate_limit_reset_at: resetAt,
+        })],
+      },
+      global: {
+        stubs: { LoadingSpinner: true, RouterLink: true }
+      }
+    })
+
+    const status = wrapper.get('.operator-capacity-account-status')
+    expect(status.text()).toContain('Limited')
+    expect(status.text()).toContain('admin.dashboard.capacity.resets:3:00 PM')
+    expect(status.text()).not.toContain('Provider rate limit')
+    expect(status.get('small').attributes('title')).toContain('Provider rate limit until')
+    expect(status.get('small').attributes('title')).toContain('15:00')
   })
 
   it('renders an accessible normalized pool and excludes unknown quota', () => {
@@ -171,8 +238,9 @@ describe('OperatorCapacityOverview', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].attributes('data-status')).toBe('limited')
     expect(rows[0].text()).toContain('Quota limited')
-    expect(rows[0].text()).toContain('5h quota exhausted')
-    expect(rows[0].text()).toContain('5h 0%')
+    expect(rows[0].get('.operator-capacity-account-status small').attributes('title')).toContain('5h quota exhausted')
+    expect(rows[0].text()).toContain('5h')
+    expect(rows[0].text()).toContain('0%')
     expect(wrapper.text()).not.toContain('Broken account')
     expect(wrapper.text()).not.toContain('Disabled account')
   })

@@ -173,4 +173,23 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
 
     wrapper.unmount()
   })
+
+  it('删除账号是破坏性菜单项，并触发 delete 与 close 事件', async () => {
+    const account = makeAccount({ name: 'delete-target' })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, position },
+      attachTo: document.body,
+    })
+
+    const deleteBtn = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.deleteAccount'))
+    expect(deleteBtn).toBeDefined()
+    expect(deleteBtn?.classList.contains('operator-menu-item-destructive')).toBe(true)
+
+    deleteBtn!.click()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('delete')?.[0]?.[0]).toMatchObject({ id: account.id, name: account.name })
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
 })

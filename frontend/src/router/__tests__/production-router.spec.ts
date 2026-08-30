@@ -114,6 +114,17 @@ describe('production router navigation', () => {
     expect(route.query.redirect).toBe('/dashboard')
   })
 
+  it('upgrades a preserved dashboard destination after admin authentication', async () => {
+    const loginRoute = await navigate('/dashboard')
+    stores.auth.isAuthenticated = true
+    stores.auth.isAdmin = true
+
+    const route = await navigate(String(loginRoute.query.redirect))
+
+    expect(route.path).toBe('/admin/dashboard')
+    expect(route.redirectedFrom?.path).toBe('/dashboard')
+  })
+
   it('allows an authenticated user to open the personal dashboard', async () => {
     stores.auth.isAuthenticated = true
 

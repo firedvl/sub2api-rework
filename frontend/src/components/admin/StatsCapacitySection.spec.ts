@@ -98,10 +98,24 @@ describe('StatsCapacitySection', () => {
     expect(openAI.get('[data-testid="capacity-used-segment"]').attributes('style')).toContain('40 60')
     expect(openAI.findAll('[data-testid="capacity-account-segment"]')).toHaveLength(2)
 
+    const openAIStats = wrapper.get('[data-testid="provider-capacity-openai"] .stats-provider-stats')
+    expect(openAIStats.findAll('dt').map((node) => node.text())).toEqual([
+      'admin.dashboard.capacity.quotaCoverage',
+      'admin.dashboard.capacity.schedulable',
+      'admin.dashboard.capacity.lowestCapacity',
+      'admin.dashboard.capacity.nextReset',
+    ])
+    expect(openAIStats.findAll('dd').map((node) => node.text())[0]).toBe('2/2')
+    expect(openAIStats.text()).toContain('40%')
+    expect(openAIStats.text()).toContain('Account 2')
+
     const gemini = wrapper.get('[data-testid="provider-capacity-donut-gemini"]')
     expect(gemini.get('[data-testid="capacity-unknown-ring"]').attributes('tabindex')).toBe('0')
     expect(gemini.find('[data-testid="capacity-used-segment"]').exists()).toBe(false)
     expect(gemini.get('svg').attributes('aria-label')).toContain('admin.dashboard.capacity.quotaUnknown')
+    const geminiStats = wrapper.get('[data-testid="provider-capacity-gemini"] .stats-provider-stats')
+    expect(geminiStats.findAll('dd').map((node) => node.text())[0]).toBe('0/1')
+    expect(geminiStats.text()).toContain('admin.dashboard.capacity.unknownCount 1')
   })
 
   it('keeps provider windows collapsed until requested', async () => {

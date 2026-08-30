@@ -46,20 +46,32 @@
             :test-id="`provider-capacity-donut-${provider.platform}`"
           />
 
-          <ul class="stats-provider-meta">
-            <li>{{ t('admin.dashboard.capacity.knownCount', { count: provider.knownCount }) }}</li>
-            <li>{{ t('admin.dashboard.capacity.unknownCount', { count: provider.unknownCount }) }}</li>
-            <li>{{ t('admin.dashboard.capacity.schedulableCount', { count: provider.schedulableCount }) }}</li>
-            <li v-if="provider.lowestAccount && provider.lowestRemaining !== null">
-              {{ t('admin.dashboard.capacity.lowestAccountRemaining', {
-                value: formatPercent(provider.lowestRemaining),
-                account: provider.lowestAccount.account.name,
-              }) }}
-            </li>
-            <li v-if="provider.nextReset">
-              {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(provider.nextReset) }) }}
-            </li>
-          </ul>
+          <dl class="stats-provider-stats">
+            <div>
+              <dt>{{ t('admin.dashboard.capacity.quotaCoverage') }}</dt>
+              <dd>{{ provider.knownCount }}/{{ provider.knownCount + provider.unknownCount }}</dd>
+              <small v-if="provider.unknownCount">
+                {{ t('admin.dashboard.capacity.unknownCount', { count: provider.unknownCount }) }}
+              </small>
+            </div>
+            <div>
+              <dt>{{ t('admin.dashboard.capacity.schedulable') }}</dt>
+              <dd>{{ provider.schedulableCount }}</dd>
+            </div>
+            <div>
+              <dt>{{ t('admin.dashboard.capacity.lowestCapacity') }}</dt>
+              <dd>{{ provider.lowestRemaining === null ? t('common.unknown') : `${formatPercent(provider.lowestRemaining)}%` }}</dd>
+              <small v-if="provider.lowestAccount" :title="provider.lowestAccount.account.name">
+                {{ provider.lowestAccount.account.name }}
+              </small>
+            </div>
+            <div>
+              <dt>{{ t('admin.dashboard.capacity.nextReset') }}</dt>
+              <dd :title="provider.nextReset ? formatReset(provider.nextReset) : undefined">
+                {{ provider.nextReset ? formatCompactReset(provider.nextReset) : t('common.unknown') }}
+              </dd>
+            </div>
+          </dl>
 
           <details v-if="provider.windows.length" class="stats-window-section">
             <summary>
@@ -108,7 +120,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import { formatDateTimeToMinute } from '@/utils/format'
+import { formatDateTimeToMinute, formatDayAwareDateTime } from '@/utils/format'
 import {
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
@@ -160,6 +172,7 @@ const providerLabel = (platform: AccountPlatform) => ({
 })[platform]
 const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 const formatReset = (value: string) => formatDateTimeToMinute(value) || t('common.unknown')
+const formatCompactReset = (value: string) => formatDayAwareDateTime(value) || t('common.unknown')
 const windowAriaLabel = (window: OperatorWindowCapacity) => window.remainingPercent === null
   ? `${window.label}: ${t('admin.dashboard.capacity.quotaUnknown')}`
   : `${window.label}: ${formatPercent(window.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}`
@@ -200,15 +213,41 @@ const windowAriaLabel = (window: OperatorWindowCapacity) => window.remainingPerc
   padding: 0 1.25rem 1.25rem;
 }
 
-.stats-provider-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem 0.75rem;
+.stats-provider-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 1rem;
   padding-top: 0.875rem;
   border-top: 1px solid var(--operator-border);
+}
+.stats-provider-stats > div {
+  min-width: 0;
+  padding: 0 0.75rem;
+}
+.stats-provider-stats > div:first-child { padding-left: 0; }
+.stats-provider-stats > div:last-child { padding-right: 0; }
+.stats-provider-stats > div + div { border-left: 1px solid var(--operator-border-subtle); }
+.stats-provider-stats dt,
+.stats-provider-stats small {
+  overflow: hidden;
   color: var(--operator-muted-foreground);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-provider-stats dd {
+  margin-top: 0.1875rem;
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-provider-stats small {
+  display: block;
+  margin-top: 0.125rem;
 }
 
 .stats-window-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--operator-border); }
@@ -244,6 +283,11 @@ const windowAriaLabel = (window: OperatorWindowCapacity) => window.remainingPerc
   .stats-section-header { align-items: flex-start; flex-direction: column; }
   .stats-capacity-card.is-global { margin: 0.75rem; }
   .stats-provider-grid { padding: 0 0.75rem 0.75rem; }
+  .stats-provider-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats-provider-stats > div { padding: 0.625rem 0.75rem; }
+  .stats-provider-stats > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .stats-provider-stats > div:nth-child(even) { padding-right: 0; }
+  .stats-provider-stats > div:nth-child(n + 3) { border-top: 1px solid var(--operator-border-subtle); }
   .stats-window-contributions li { flex-direction: column; gap: 0.125rem; }
   .stats-window-contributions li span:last-child { text-align: left; }
 }

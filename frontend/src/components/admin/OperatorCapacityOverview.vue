@@ -100,7 +100,10 @@
                   :class="{ 'is-collapsed': isProviderCollapsed(provider.platform) }"
                   aria-hidden="true"
                 />
-                <span>
+                <span class="operator-capacity-provider-mark" aria-hidden="true">
+                  <ProviderIcon :provider="provider.platform" :size="18" />
+                </span>
+                <span class="operator-capacity-provider-copy">
                   <span class="operator-capacity-provider-name">{{ providerLabel(provider.platform) }}</span>
                   <span class="operator-capacity-provider-counts">
                     {{ t('admin.dashboard.capacity.providerAccounts', { count: provider.accounts.length }) }}
@@ -124,7 +127,7 @@
                   }) }}
                 </span>
                 <span v-if="provider.nextReset">
-                  {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(provider.nextReset) }) }}
+                  {{ t('admin.dashboard.capacity.nextLimitingReset', { time: formatCompactReset(provider.nextReset) }) }}
                 </span>
               </span>
             </button>
@@ -156,15 +159,35 @@
                     <span aria-hidden="true" />
                     {{ statusLabel(statusInfo(summary).status) }}
                   </span>
-                  <small v-if="statusInfo(summary).reason" :title="statusDetail(summary)">
+                  <small v-if="statusInfo(summary).reason" :title="statusTitle(summary)">
                     {{ statusDetail(summary) }}
                   </small>
                 </div>
                 <div class="operator-capacity-account-quota" :title="quotaDetail(summary)">
-                  <span>Quota</span>
-                  <strong :class="capacityTone(summary.lowestRemaining)">
-                    {{ quotaSummary(summary) }}
-                  </strong>
+                  <template v-if="summary.windows.length">
+                    <div v-for="window in summary.windows" :key="window.key" class="operator-capacity-row-window">
+                      <span :title="window.label">{{ window.label }}</span>
+                      <div
+                        class="operator-capacity-row-track"
+                        role="progressbar"
+                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}`"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        :aria-valuenow="Math.round(window.remainingPercent)"
+                      >
+                        <span
+                          :class="capacityTone(window.remainingPercent)"
+                          :style="{ width: `${window.remainingPercent}%` }"
+                        />
+                      </div>
+                      <strong :class="capacityTone(window.remainingPercent)">
+                        {{ formatPercent(window.remainingPercent) }}%
+                      </strong>
+                    </div>
+                  </template>
+                  <span v-else class="operator-capacity-row-unknown">
+                    {{ t('admin.dashboard.capacity.quotaUnknown') }}
+                  </span>
                 </div>
                 <div class="operator-capacity-account-scheduling">
                   <span>Scheduling</span>
@@ -273,7 +296,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { formatDateTimeToMinute } from '@/utils/format'
+import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
+import { formatDateTimeToMinute, formatDayAwareDateTime } from '@/utils/format'
 import {
   aggregateNormalizedCapacity,
   buildNormalizedPoolCapacity,
@@ -452,13 +476,19 @@ const poolAriaLabel = computed(() => normalizedPool.value.remainingPercent === n
   : `${t('admin.dashboard.capacity.poolTitle')}: ${formatPercent(normalizedPool.value.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}, ${formatPercent(normalizedPool.value.usedPercent as number)}% ${t('admin.dashboard.capacity.poolUsed')}`)
 
 const formatReset = (value: string) => formatDateTimeToMinute(value) || t('common.unknown')
+const formatCompactReset = (value: string) => formatDayAwareDateTime(value) || t('common.unknown')
 const statusDetail = (summary: OperatorAccountCapacity) => {
+  const status = statusInfo(summary)
+  return status.until
+    ? t('admin.dashboard.capacity.resets', { time: formatCompactReset(status.until) })
+    : status.reason ?? ''
+}
+const statusTitle = (summary: OperatorAccountCapacity) => {
   const status = statusInfo(summary)
   return status.until
     ? `${status.reason} until ${formatReset(status.until)}`
     : status.reason ?? ''
 }
-const quotaSummary = (summary: OperatorAccountCapacity) => summarizeOperatorQuota(summary)
 const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   ? summary.windows.map((window) => `${window.label} ${formatPercent(window.remainingPercent)}%`).join(', ')
   : summarizeOperatorQuota(summary)
@@ -641,10 +671,11 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   padding: 0;
   border-top: 1px solid var(--operator-border-subtle);
   border-bottom: 1px solid var(--operator-border-subtle);
-  background: color-mix(in oklch, var(--operator-muted) 58%, transparent);
+  background: var(--operator-raised);
+  box-shadow: inset 3px 0 0 var(--operator-border);
 }
 .operator-capacity-provider-name { font-size: 1rem; }
-.operator-capacity-provider-identity > span > span {
+.operator-capacity-provider-counts {
   margin-top: 0.125rem;
   color: var(--operator-muted-foreground);
   font-size: 0.8125rem;
@@ -691,7 +722,19 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   transform: rotate(-90deg);
 }
 
-.operator-capacity-provider-identity > span {
+.operator-capacity-provider-mark {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+}
+
+.operator-capacity-provider-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -714,7 +757,7 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
 
 .operator-capacity-account-list {
   display: grid;
-  padding: 0.75rem 0 0;
+  padding: 0.75rem 0.75rem 0;
   background: transparent;
   gap: 0.75rem;
 }
@@ -747,12 +790,11 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   min-height: 4.25rem;
   align-items: center;
   padding: 0.75rem 1rem;
-  grid-template-columns: minmax(12rem, 1.5fr) minmax(10rem, 0.9fr) minmax(13rem, 1.1fr) minmax(7rem, 0.65fr) auto auto;
+  grid-template-columns: minmax(11rem, 1.35fr) minmax(8rem, 0.75fr) minmax(16rem, 1.5fr) minmax(6.5rem, 0.6fr) auto auto;
   gap: 0.75rem 1rem;
 }
 
 .operator-capacity-account-status,
-.operator-capacity-account-quota,
 .operator-capacity-account-scheduling {
   display: flex;
   min-width: 0;
@@ -761,7 +803,6 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
 }
 
 .operator-capacity-account-status small,
-.operator-capacity-account-quota > span,
 .operator-capacity-account-scheduling > span {
   overflow: hidden;
   color: var(--operator-muted-foreground);
@@ -770,7 +811,6 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   white-space: nowrap;
 }
 
-.operator-capacity-account-quota strong,
 .operator-capacity-account-scheduling strong {
   overflow: hidden;
   color: var(--operator-foreground);
@@ -779,6 +819,48 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.operator-capacity-account-quota {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.375rem 0.75rem;
+}
+.operator-capacity-row-window {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  grid-template-columns: minmax(1.75rem, auto) minmax(2.5rem, 1fr) auto;
+  gap: 0.375rem;
+}
+.operator-capacity-row-window > span,
+.operator-capacity-row-unknown {
+  overflow: hidden;
+  color: var(--operator-muted-foreground);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-capacity-row-window strong {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+.operator-capacity-row-track {
+  height: 0.3125rem;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--operator-track);
+}
+.operator-capacity-row-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.operator-capacity-row-track > .is-healthy { background: var(--operator-success-fill); }
+.operator-capacity-row-track > .is-warning { background: var(--operator-warning-fill); }
+.operator-capacity-row-track > .is-critical { background: var(--operator-destructive-fill); }
 
 .operator-capacity-account-scheduling .is-schedulable { color: var(--operator-success); }
 .operator-capacity-account-scheduling .is-unschedulable { color: var(--operator-muted-foreground); }
@@ -949,7 +1031,7 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   }
   .operator-capacity-account-body { grid-template-columns: 1fr; }
   .operator-capacity-account-row {
-    grid-template-columns: minmax(12rem, 1.5fr) minmax(9rem, 0.9fr) minmax(11rem, 1fr) auto;
+    grid-template-columns: minmax(11rem, 1.2fr) minmax(8rem, 0.8fr) minmax(15rem, 1.4fr) auto;
   }
   .operator-capacity-account-scheduling { display: none; }
   .operator-capacity-summary { grid-template-columns: minmax(0, 1fr) minmax(12rem, 1fr); }
@@ -962,7 +1044,6 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
     align-items: flex-start;
     flex-direction: column;
   }
-  .operator-capacity-account,
   .operator-capacity-header,
   .operator-capacity-summary {
     padding-right: 1rem;
@@ -984,6 +1065,7 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
     padding-right: 1rem;
     padding-left: 1rem;
   }
+  .operator-capacity-account-list { padding-right: 0.5rem; padding-left: 0.5rem; }
   .operator-capacity-provider-summary {
     width: 100%;
     align-items: flex-start;

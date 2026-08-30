@@ -171,6 +171,41 @@ export function formatDateTimeToMinute(
 }
 
 /**
+ * Format a timestamp for compact operational status: time today, tomorrow + time,
+ * or a short date and time for later dates.
+ */
+export function formatDayAwareDateTime(
+  date: string | Date | null | undefined,
+  localeOverride?: string,
+  now: Date = new Date()
+): string {
+  if (!date) return ''
+
+  const target = new Date(date)
+  if (isNaN(target.getTime()) || isNaN(now.getTime())) return ''
+
+  const locale = localeOverride ?? getLocale()
+  const time = formatDate(target, { hour: 'numeric', minute: '2-digit' }, locale)
+  const targetDay = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate())
+  const currentDay = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const calendarDays = Math.round((targetDay - currentDay) / (24 * 60 * 60 * 1000))
+
+  if (calendarDays === 0) return time
+  if (calendarDays === 1) {
+    return `${new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(1, 'day')} ${time}`
+  }
+
+  const options: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  }
+  if (target.getFullYear() !== now.getFullYear()) options.year = 'numeric'
+  return formatDate(target, options, locale)
+}
+
+/**
  * 格式化为 date 控件值（YYYY-MM-DD，使用本地时间）
  */
 export function formatDateLocalInput(date: Date): string {
