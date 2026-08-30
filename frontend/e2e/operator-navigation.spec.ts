@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
+import { OPERATOR_FIXTURE_NOW } from './fixtures/operatorData'
 
 const primaryLinks = [
   { href: '/admin/dashboard', target: '/admin/dashboard' },
@@ -159,6 +160,7 @@ async function expectNeutralOperatorDialog(page: Page, dialog: Locator) {
 
 test.describe('operator console navigation', () => {
   test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(OPERATOR_FIXTURE_NOW)
     await seedSession(page)
     await installOperatorApiMock(page)
   })
@@ -222,7 +224,7 @@ test.describe('operator console navigation', () => {
     await page.goto('/admin/accounts')
     await expect(page.locator('html')).not.toHaveClass(/dark/)
 
-    await page.locator('.select-trigger').first().click()
+    await page.locator('.operator-accounts-toolbar .select-trigger').first().click()
     const popup = page.locator('body > .select-dropdown-portal.operator-select-menu.operator-menu')
     await expect(popup).toBeVisible()
 
@@ -333,7 +335,9 @@ test.describe('operator console navigation', () => {
     await expect(capacityTab).toHaveAttribute('aria-selected', 'true')
     await expect(capacityPanel).toBeVisible()
     await expect(technicalPanel).toBeHidden()
-    await expect(page.locator('details.operator-account-details')).toHaveCount(0)
+    const capacityDetails = page.getByTestId('account-technical-details')
+    await expect(capacityDetails).toHaveCount(6)
+    await expect(capacityDetails.first()).toBeHidden()
 
     await capacityTab.focus()
     await page.keyboard.press('ArrowRight')
@@ -342,10 +346,17 @@ test.describe('operator console navigation', () => {
     await expect(capacityPanel).toBeHidden()
     await expect(technicalPanel).toBeVisible()
 
+    const technicalStatus = page.locator('.operator-accounts-toolbar .select-trigger').nth(2)
+    await technicalStatus.click()
+    await page.getByRole('option', { name: 'Active', exact: true }).click()
+    await expect(technicalStatus).toContainText('Active')
+
+    await technicalTab.focus()
     await page.keyboard.press('ArrowLeft')
     await expect(capacityTab).toBeFocused()
     await expect(capacityPanel).toBeVisible()
     await expect(technicalPanel).toBeHidden()
+    await expect(capacityDetails).toHaveCount(6)
   })
 
   test('keeps technical sticky columns aligned at every review width', async ({ page }) => {
@@ -427,7 +438,7 @@ test.describe('operator console navigation', () => {
 
     const summary = page.getByTestId('account-pool-capacity')
     await expect(summary).toBeVisible()
-    await expect(summary).toContainText('53.12%')
+    await expect(summary).toContainText('21%')
     await expect(summary.locator('[data-testid="capacity-account-segment"]')).toHaveCount(0)
     await expect(summary.getByRole('link', { name: 'View Stats' })).toHaveAttribute('href', '/admin/stats')
 
@@ -435,16 +446,42 @@ test.describe('operator console navigation', () => {
     await expect(page).toHaveURL(/\/admin\/stats$/)
 
     const global = page.getByTestId('global-capacity-donut')
-    await expect(global).toContainText('53.12%')
-    await expect(global.locator('[data-testid="capacity-account-segment"]')).toHaveCount(5)
-    await expect(global.locator('svg[role="img"]')).toHaveAttribute('aria-label', /53\.12% available, 46\.88% Used capacity/)
-    await expect(global).toContainText('Gemini Recovery')
+    await expect(global).toContainText('21%')
+    await expect(global.locator('[data-testid="capacity-account-segment"]')).toHaveCount(4)
+    await expect(global.locator('svg[role="img"]')).toHaveAttribute('aria-label', /21% available, 79% Used capacity/)
+    await expect(global).not.toContainText('Gemini Recovery')
+
+    const usedSegment = global.getByTestId('capacity-used-segment')
+    const usedBounds = await usedSegment.boundingBox()
+    expect(usedBounds).not.toBeNull()
+    await page.mouse.move(
+      (usedBounds?.x ?? 0) + (usedBounds?.width ?? 0) / 2,
+      (usedBounds?.y ?? 0) + 2,
+    )
+    await expect(global.locator('.stats-capacity-tooltip')).toBeVisible()
+    const firstSegment = global.locator('[data-testid="capacity-account-segment"]').first()
+    await firstSegment.focus()
+    await page.keyboard.press('Enter')
+    await expect(firstSegment).toHaveAttribute('aria-pressed', 'true')
+
+    const segmentSelect = global.getByRole('button', { name: 'Inspect segment' })
+    await segmentSelect.focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(page.getByRole('listbox')).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    await expect(segmentSelect).toBeFocused()
+    await expect(global.getByTestId('capacity-selected-detail')).toContainText('Claude Primary')
 
     const openAI = page.getByTestId('provider-capacity-openai')
-    await expect(openAI).toContainText('66.8%')
+    await expect(openAI).toContainText('52%')
+    const openAIWindows = openAI.locator('details.stats-window-section')
+    await expect(openAIWindows).not.toHaveAttribute('open', '')
+    await openAIWindows.locator('summary').click()
+    await expect(openAIWindows).toHaveAttribute('open', '')
     await expect(openAI).toContainText('5h')
     await expect(openAI).toContainText('7d')
-    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-account-segment"]')).toHaveCount(2)
+    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
     await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-used-segment"]')).toBeVisible()
 
     const anthropic = page.getByTestId('provider-capacity-anthropic')
@@ -456,21 +493,96 @@ test.describe('operator console navigation', () => {
     await expect(antigravity.getByTestId('provider-capacity-donut-antigravity').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
 
     const gemini = page.getByTestId('provider-capacity-gemini')
-    await expect(gemini).toContainText('100%')
-    await expect(gemini).toContainText('Gemini Healthy')
-    await expect(gemini).toContainText('Gemini Recovery')
-    await expect(gemini).toContainText('1 unknown')
+    await expect(gemini).toContainText('0%')
+    await expect(gemini).toContainText('Gemini Quota Limited')
+    await expect(gemini).not.toContainText('1 unknown')
     await expect(gemini.getByTestId('provider-capacity-donut-gemini').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
   })
 
+  test('drills from Overview into filtered operator states and expands account details', async ({ page }) => {
+    await page.goto('/admin/dashboard')
+
+    const fleet = page.locator('.operator-fleet-summary')
+    await expect(fleet.locator('.operator-fleet-metric').nth(0)).toContainText('6')
+    await expect(fleet.locator('.operator-fleet-metric.is-active')).toContainText('2')
+    await expect(fleet.locator('.operator-fleet-metric.is-limited')).toContainText('2')
+    await expect(fleet.locator('.operator-fleet-metric.is-error')).toContainText('1')
+    await expect(fleet.locator('.operator-fleet-disabled')).toContainText('1 disabled')
+
+    await fleet.locator('.operator-fleet-metric.is-limited').click()
+    await expect(page).toHaveURL(/\/admin\/accounts\?operator_status=limited$/)
+    const limitedRows = page.locator('[data-testid="account-capacity-row"][data-status="limited"]')
+    await expect(limitedRows).toHaveCount(2)
+    await expect(limitedRows.filter({ hasText: 'Antigravity Pro' })).toHaveCount(1)
+    await expect(limitedRows.filter({ hasText: 'Gemini Quota Limited' })).toHaveCount(1)
+
+    const cooldownRow = limitedRows.filter({ hasText: 'Antigravity Pro' })
+    const detailsToggle = cooldownRow.locator('.operator-capacity-details-toggle')
+    await expect(detailsToggle).toHaveAccessibleName('Show details for Antigravity Pro')
+    await detailsToggle.focus()
+    await page.keyboard.press('Enter')
+    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(cooldownRow.getByTestId('account-technical-details')).toBeVisible()
+    await expect(cooldownRow).toContainText('Provider cooldown')
+
+    await page.goto('/admin/dashboard')
+    await page.locator('.operator-fleet-metric.is-error').click()
+    await expect(page).toHaveURL(/\/admin\/accounts\?operator_status=error$/)
+    const errorRows = page.locator('[data-testid="account-capacity-row"][data-status="error"]')
+    await expect(errorRows).toHaveCount(1)
+    await expect(errorRows).toContainText('Gemini Recovery')
+    await expect(errorRows).toContainText('Fixture: reauthorization required')
+
+    await page.goto('/admin/accounts?operator_status=disabled')
+    const disabledRows = page.locator('[data-testid="account-capacity-row"][data-status="disabled"]')
+    await expect(disabledRows).toHaveCount(1)
+    await expect(disabledRows).toContainText('Codex Standby')
+  })
+
+  test('keeps proxy rows inside the visible table and uses compact named actions', async ({ page }) => {
+    for (const width of [1440, 1024, 768]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/admin/proxies')
+      const table = page.locator('.operator-proxy-table .table-wrapper')
+      const row = table.locator('tbody tr[data-index]').first()
+      await expect(row).toBeVisible()
+
+      const bounds = await table.evaluate((element) => {
+        const row = element.querySelector('tbody tr[data-index]') as HTMLElement
+        return {
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          rowWidth: row.getBoundingClientRect().width,
+        }
+      })
+      expect(bounds.scrollWidth, `${width}px table overflow`).toBeLessThanOrEqual(bounds.clientWidth + 1)
+      expect(bounds.rowWidth, `${width}px row hover surface`).toBeLessThanOrEqual(bounds.clientWidth + 1)
+
+      for (const name of ['Test Connection', 'Quality Check', 'Edit', 'Delete']) {
+        const action = row.getByRole('button', { name: new RegExp(`^${name} US West relay$`) })
+        await expect(action).toBeVisible()
+        await expect(action).toHaveText('')
+      }
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/admin/proxies')
+    await expect(page.locator('.operator-proxy-table .table-wrapper')).toHaveCount(0)
+    await expect(page.locator('.operator-proxy-row-actions')).toHaveCount(2)
+    const overflow = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }))
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+  })
+
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
-    await page.clock.setFixedTime('2026-08-26T00:00:00Z')
     await page.goto('/admin/accounts')
 
     const toggle = page.getByTestId('provider-toggle-openai')
     const panel = page.locator('#operator-provider-openai-accounts')
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(toggle).toContainText('66.8% normalized remaining')
+    await expect(toggle).toContainText('52% normalized remaining')
     await expect(toggle).toContainText('Lowest 52% - Codex Team West')
     await expect(toggle).toContainText('Next limiting reset')
     await toggle.focus()

@@ -164,6 +164,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
 import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdownWithSuffix, formatTime } from '@/utils/format'
+import { getActiveModelRateLimits } from '@/utils/modelRateLimits'
 
 const { t } = useI18n()
 
@@ -189,23 +190,15 @@ type AccountModelStatusItem = {
 
 // Computed: active model statuses (普通模型限流 + 积分耗尽 + 走积分中)
 const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
-  const extra = props.account.extra as Record<string, unknown> | undefined
-  const modelLimits = extra?.model_rate_limits as
-    | Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
-    | undefined
-  const now = new Date()
+  const extra = props.account.extra
+  const modelLimits = getActiveModelRateLimits(extra)
   const items: AccountModelStatusItem[] = []
 
-  if (!modelLimits) return items
-
   // 检查 AICredits key 是否生效（积分是否耗尽）
-  const aiCreditsEntry = modelLimits['AICredits']
-  const hasActiveAICredits = aiCreditsEntry && new Date(aiCreditsEntry.rate_limit_reset_at) > now
+  const hasActiveAICredits = modelLimits.some(([model]) => model === 'AICredits')
   const allowOverages = !!(extra?.allow_overages)
 
-  for (const [model, info] of Object.entries(modelLimits)) {
-    if (new Date(info.rate_limit_reset_at) <= now) continue
-
+  for (const [model, info] of modelLimits) {
     if (model === 'AICredits') {
       // AICredits key → 积分已用尽
       items.push({ kind: 'credits_exhausted', model, reset_at: info.rate_limit_reset_at })

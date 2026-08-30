@@ -61,8 +61,11 @@
             </li>
           </ul>
 
-          <div v-if="provider.windows.length" class="stats-window-section">
-            <h4>{{ t('admin.stats.capacity.windows') }}</h4>
+          <details v-if="provider.windows.length" class="stats-window-section">
+            <summary>
+              <span>{{ t('admin.stats.capacity.windows') }}</span>
+              <span>{{ provider.windows.length }}</span>
+            </summary>
             <ul class="stats-window-list">
               <li v-for="window in provider.windows" :key="window.key">
                 <div class="stats-window-heading">
@@ -94,7 +97,7 @@
                 </ul>
               </li>
             </ul>
-          </div>
+          </details>
         </article>
       </div>
     </template>
@@ -209,7 +212,19 @@ const windowAriaLabel = (window: OperatorWindowCapacity) => window.remainingPerc
 }
 
 .stats-window-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--operator-border); }
-.stats-window-section h4 { color: var(--operator-foreground); font-size: 0.8125rem; font-weight: 650; }
+.stats-window-section summary {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--operator-foreground);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+.stats-window-section summary:focus-visible { outline: 2px solid var(--operator-focus); outline-offset: 2px; }
+.stats-window-section summary span:last-child { color: var(--operator-muted-foreground); font-size: 0.75rem; font-weight: 500; }
 .stats-window-list { display: grid; gap: 1rem; margin-top: 0.75rem; }
 .stats-window-heading,
 .stats-window-contributions li { display: flex; justify-content: space-between; gap: 0.75rem; }

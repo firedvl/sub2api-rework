@@ -26,6 +26,8 @@ describe('operator shared theme contracts', () => {
 
     const toast = wrapper.get('.operator-toast')
     expect(toast.attributes('data-tone')).toBe('info')
+    expect(toast.classes()).not.toContain('border-l-4')
+    expect(toast.classes()).not.toContain('border-blue-500')
     expect(toast.get('.operator-toast-icon').exists()).toBe(true)
     expect(toast.get('.operator-toast-close').exists()).toBe(true)
     expect(toast.get('.operator-toast-track').exists()).toBe(true)

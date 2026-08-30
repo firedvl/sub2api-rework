@@ -4,7 +4,9 @@ import {
   buildNormalizedPoolCapacity,
   buildProviderCapacity,
   buildWindowCapacities,
+  classifyOperatorAccount,
   normalizeAccountCapacity,
+  summarizeOperatorQuota,
 } from '../operatorCapacity'
 
 const account = (id: number, overrides: Partial<Account> = {}): Account => ({
@@ -43,6 +45,122 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
 })
 
 describe('operator capacity normalization', () => {
+  it('applies operator status precedence to session and model restrictions', () => {
+    const now = new Date('2026-08-25T18:00:00Z')
+    const activeModelLimit = {
+      model_rate_limits: {
+        'claude-sonnet-5': {
+          rate_limited_at: '2026-08-25T17:00:00Z',
+          rate_limit_reset_at: '2026-08-25T19:00:00Z',
+        },
+      },
+    }
+    const expiredModelLimit = {
+      model_rate_limits: {
+        'claude-sonnet-5': {
+          rate_limited_at: '2026-08-25T16:00:00Z',
+          rate_limit_reset_at: '2026-08-25T17:00:00Z',
+        },
+      },
+    }
+    const status = (
+      accountOverrides: Partial<Account> = {},
+      accountUsage: AccountUsageInfo | null = null,
+    ) => classifyOperatorAccount(normalizeAccountCapacity(
+      account(100, accountOverrides),
+      accountUsage,
+      null,
+      now,
+    )).status
+
+    expect(status({ session_window_status: 'rejected' })).toBe('limited')
+    expect(status({ session_window_status: 'rejected', schedulable: false })).toBe('limited')
+    expect(status({ status: 'inactive', session_window_status: 'rejected', schedulable: false })).toBe('disabled')
+    expect(status({ extra: activeModelLimit })).toBe('limited')
+    expect(status({ extra: expiredModelLimit })).toBe('active')
+    expect(status(
+      { session_window_status: 'rejected', schedulable: false },
+      usage({ needs_reauth: true, error: 'usage API error: HTTP 401' }),
+    )).toBe('error')
+    expect(status({ status: 'inactive', schedulable: false, extra: activeModelLimit })).toBe('disabled')
+    expect(status(
+      { schedulable: false },
+      usage({ five_hour: { utilization: 100, resets_at: '2026-08-25T20:00:00Z', remaining_seconds: 7200 } }),
+    )).toBe('limited')
+    expect(status()).toBe('active')
+  })
+
+  it('maps operator status without treating temporary limits or disabled accounts as errors', () => {
+    const now = new Date('2026-08-25T18:00:00Z')
+    const exhausted = usage({
+      five_hour: { utilization: 100, resets_at: '2026-08-25T20:00:00Z', remaining_seconds: 7200 },
+    })
+
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(1, {
+      status: 'error',
+      error_message: 'Authentication failed',
+      rate_limited_at: '2026-08-25T17:00:00Z',
+    }), exhausted, null, now))).toMatchObject({
+      status: 'error',
+      reason: 'Authentication failed',
+    })
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(2, {
+      status: 'inactive',
+      schedulable: false,
+    }), exhausted, null, now)).status).toBe('disabled')
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(3, {
+      schedulable: false,
+    }), null, null, now)).status).toBe('disabled')
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(4, {
+      overload_until: '2026-08-25T19:00:00Z',
+    }), null, null, now))).toMatchObject({
+      status: 'limited',
+      reason: 'Provider cooldown',
+    })
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(5), exhausted, null, now))).toEqual({
+      status: 'limited',
+      reason: '5h quota exhausted',
+      until: '2026-08-25T20:00:00Z',
+    })
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(6), usage({
+      five_hour: { utilization: 99, resets_at: null, remaining_seconds: null },
+    }), null, now)).status).toBe('active')
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(7), usage({
+      needs_reauth: true,
+      error: 'usage API error: HTTP 401',
+    }), null, now))).toMatchObject({
+      status: 'error',
+      reason: 'Authentication failed',
+    })
+    expect(classifyOperatorAccount(normalizeAccountCapacity(account(8), usage({
+      error_code: 'rate_limited',
+      error: 'usage API error: HTTP 429',
+    }), null, now)).status).toBe('limited')
+    expect(classifyOperatorAccount(normalizeAccountCapacity(
+      account(9),
+      null,
+      'temporary network failure',
+      now,
+    )).status).toBe('active')
+  })
+
+  it('summarizes OpenAI windows first and condenses Antigravity model quota', () => {
+    const openAI = normalizeAccountCapacity(account(1), usage({
+      five_hour: { utilization: 32, resets_at: null, remaining_seconds: null },
+      seven_day: { utilization: 48, resets_at: null, remaining_seconds: null },
+      thirty_day: { utilization: 12, resets_at: null, remaining_seconds: null },
+    }))
+    const antigravity = normalizeAccountCapacity(account(2, { platform: 'antigravity' }), usage({
+      antigravity_quota: {
+        'gemini-2.5-pro': { utilization: 72, reset_time: null },
+        'claude-sonnet-4-5': { utilization: 44, reset_time: null },
+      },
+    }))
+
+    expect(summarizeOperatorQuota(openAI)).toBe('5h 68% · 7d 52%')
+    expect(summarizeOperatorQuota(antigravity)).toBe('28% minimum across 2 models')
+  })
+
   it('keeps provider windows and spend limits separate while surfacing the lowest remaining quota', () => {
     const openAIUsage = usage({
       five_hour: { utilization: 32, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },
@@ -99,7 +217,7 @@ describe('operator capacity normalization', () => {
     })
   })
 
-  it('weights known accounts equally and excludes unknown quota from the pool', () => {
+  it('weights serviceable known accounts equally and excludes unknown or unusable accounts', () => {
     const highCapacity = normalizeAccountCapacity(account(1), usage({
       five_hour: { utilization: 20, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },
       seven_day: { utilization: 10, resets_at: '2026-08-29T00:00:00Z', remaining_seconds: 345600 },
@@ -108,11 +226,25 @@ describe('operator capacity normalization', () => {
       five_hour: { utilization: 60, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },
     }))
     const unknownCapacity = normalizeAccountCapacity(account(3, { platform: 'gemini' }))
+    const disabledCapacity = normalizeAccountCapacity(account(4, {
+      status: 'inactive',
+      schedulable: false,
+    }), usage({
+      five_hour: { utilization: 0, resets_at: null, remaining_seconds: null },
+    }))
+    const errorCapacity = normalizeAccountCapacity(account(5, {
+      status: 'error',
+      error_message: 'Authentication failed',
+    }), usage({
+      five_hour: { utilization: 0, resets_at: null, remaining_seconds: null },
+    }))
 
     const pool = buildNormalizedPoolCapacity([
       highCapacity,
       limitedCapacity,
       unknownCapacity,
+      disabledCapacity,
+      errorCapacity,
     ])
 
     expect(highCapacity.lowestRemaining).toBe(80)

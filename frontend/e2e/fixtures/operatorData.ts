@@ -3,9 +3,10 @@ export type RunMode = 'standard' | 'simple'
 
 export const OPERATOR_FIXTURE_ACCOUNTS_ETAG = '"operator-review-accounts-v2"'
 export const OPERATOR_FIXTURE_TOKEN = 'operator-review-session'
+export const OPERATOR_FIXTURE_NOW = '2026-08-30T02:00:00Z'
 
 const createdAt = '2026-08-01T09:00:00Z'
-const updatedAt = '2026-08-25T18:45:00Z'
+const updatedAt = '2026-08-30T01:45:00Z'
 
 export const operatorFixtureUser = (
   role: SessionRole = 'admin',
@@ -250,9 +251,9 @@ export const operatorFixtureAccounts = [
       auto_warmup_enabled: true,
       codex_auto_warmup_state: {
         status: 'succeeded',
-        attempted_at: '2026-08-25T18:40:00Z',
-        completed_at: '2026-08-25T18:40:01Z',
-        reset_at: '2026-08-25T21:00:00Z',
+        attempted_at: '2026-08-30T01:40:00Z',
+        completed_at: '2026-08-30T01:40:01Z',
+        reset_at: '2026-08-30T04:00:00Z',
         window_type: '5h',
       },
       codex_5h_used_percent: 32,
@@ -275,16 +276,15 @@ export const operatorFixtureAccounts = [
     current_concurrency: 2,
     group_ids: [12, 13],
     groups: [...accountGroup(12), ...accountGroup(13)],
-    session_window_start: '2026-08-25T16:00:00Z',
-    session_window_end: '2026-08-25T21:00:00Z',
+    session_window_start: '2026-08-29T23:00:00Z',
+    session_window_end: '2026-08-30T04:00:00Z',
     session_window_status: 'allowed',
   }),
   makeAccount(103, 'Antigravity Pro', 'antigravity', 'oauth', {
     credentials: { email: 'antigravity@example.test', tier_id: 'PRO' },
     credentials_status: { has_access_token: true, has_refresh_token: true },
     current_concurrency: 0,
-    rate_limited_at: '2026-08-25T18:30:00Z',
-    rate_limit_reset_at: '2026-08-25T20:00:00Z',
+    overload_until: '2026-08-30T04:00:00Z',
     group_ids: [13],
     groups: accountGroup(13),
   }),
@@ -294,7 +294,7 @@ export const operatorFixtureAccounts = [
     status: 'error',
     schedulable: false,
     error_message: 'Fixture: reauthorization required',
-    last_used_at: '2026-08-25T14:20:00Z',
+    last_used_at: '2026-08-29T21:20:00Z',
     group_ids: [13],
     groups: accountGroup(13),
   }),
@@ -302,13 +302,13 @@ export const operatorFixtureAccounts = [
     credentials_status: { has_api_key: true },
     status: 'inactive',
     schedulable: false,
-    last_used_at: '2026-08-22T10:00:00Z',
+    last_used_at: '2026-08-27T10:00:00Z',
     quota_limit: 100,
     quota_used: 18.4,
     group_ids: [11],
     groups: accountGroup(11),
   }),
-  makeAccount(106, 'Gemini Healthy', 'gemini', 'oauth', {
+  makeAccount(106, 'Gemini Quota Limited', 'gemini', 'oauth', {
     credentials: { email: 'gemini-healthy@example.test', tier_id: 'google_ai_pro' },
     credentials_status: { has_access_token: true, has_refresh_token: true },
     current_concurrency: 0,
@@ -336,16 +336,16 @@ const accountUsage = {
   '101': {
     source: 'passive',
     updated_at: updatedAt,
-    five_hour: usageProgress(32, '2026-08-25T21:00:00Z'),
-    seven_day: usageProgress(48, '2026-08-29T00:00:00Z'),
+    five_hour: usageProgress(32, '2026-08-30T04:00:00Z'),
+    seven_day: usageProgress(48, '2026-09-04T00:00:00Z'),
     seven_day_sonnet: null,
   },
   '102': {
     source: 'passive',
     updated_at: updatedAt,
-    five_hour: usageProgress(61, '2026-08-25T21:00:00Z'),
-    seven_day: usageProgress(37, '2026-08-30T00:00:00Z'),
-    seven_day_sonnet: usageProgress(96, '2026-08-30T00:00:00Z'),
+    five_hour: usageProgress(61, '2026-08-30T04:00:00Z'),
+    seven_day: usageProgress(37, '2026-09-04T00:00:00Z'),
+    seven_day_sonnet: usageProgress(96, '2026-09-04T00:00:00Z'),
   },
   '103': {
     source: 'passive',
@@ -354,8 +354,8 @@ const accountUsage = {
     seven_day: null,
     seven_day_sonnet: null,
     antigravity_quota: {
-      'gemini-2.5-pro': { utilization: 72, reset_time: '2026-08-26T00:00:00Z' },
-      'claude-sonnet-4-5': { utilization: 44, reset_time: '2026-08-26T00:00:00Z' },
+      'gemini-2.5-pro': { utilization: 72, reset_time: '2026-08-30T08:00:00Z' },
+      'claude-sonnet-4-5': { utilization: 44, reset_time: '2026-08-30T08:00:00Z' },
     },
   },
   '104': {
@@ -380,7 +380,7 @@ const accountUsage = {
     five_hour: null,
     seven_day: null,
     seven_day_sonnet: null,
-    gemini_shared_daily: usageProgress(0, '2026-08-27T00:00:00Z'),
+    gemini_shared_daily: usageProgress(100, '2026-08-31T00:00:00Z'),
   },
 }
 
@@ -423,12 +423,12 @@ const dashboardStats = {
 }
 
 const dashboardTrend = [
-  ['2026-08-25T13:00:00Z', 402, 418_000, 102_000, 1.84],
-  ['2026-08-25T14:00:00Z', 516, 534_000, 128_000, 2.31],
-  ['2026-08-25T15:00:00Z', 684, 712_000, 166_000, 3.04],
-  ['2026-08-25T16:00:00Z', 792, 864_000, 211_000, 3.82],
-  ['2026-08-25T17:00:00Z', 946, 1_016_000, 246_000, 4.44],
-  ['2026-08-25T18:00:00Z', 946, 1_068_400, 271_100, 3.98],
+  ['2026-08-29T20:00:00Z', 402, 418_000, 102_000, 1.84],
+  ['2026-08-29T21:00:00Z', 516, 534_000, 128_000, 2.31],
+  ['2026-08-29T22:00:00Z', 684, 712_000, 166_000, 3.04],
+  ['2026-08-29T23:00:00Z', 792, 864_000, 211_000, 3.82],
+  ['2026-08-30T00:00:00Z', 946, 1_016_000, 246_000, 4.44],
+  ['2026-08-30T01:00:00Z', 946, 1_068_400, 271_100, 3.98],
 ].map(([date, requests, input, output, actualCost]) => ({
   date,
   requests,
@@ -494,7 +494,7 @@ const usageLog = (id: number, overrides: Record<string, unknown>) => ({
   ip_address: '192.0.2.10',
   cache_ttl_overridden: false,
   billing_mode: 'token',
-  created_at: `2026-08-25T18:${48 - id}:00Z`,
+  created_at: `2026-08-30T01:${48 - id}:00Z`,
   user_email: 'member@example.test',
   api_key_name: 'review-console',
   account_name: 'Codex Team West',
@@ -602,8 +602,8 @@ export const operatorFixtureProxies = [
 ]
 
 const opsOverview = {
-  start_time: '2026-08-25T18:00:00Z',
-  end_time: '2026-08-25T19:00:00Z',
+  start_time: '2026-08-30T01:00:00Z',
+  end_time: '2026-08-30T02:00:00Z',
   platform: '',
   health_score: 96,
   success_count: 2_814,
@@ -628,11 +628,11 @@ const opsOverview = {
 const opsThroughput = {
   bucket: 'minute',
   points: [
-    { bucket_start: '2026-08-25T18:55:00Z', request_count: 38, token_consumed: 48_200, switch_count: 2, qps: 0.63, tps: 803 },
-    { bucket_start: '2026-08-25T18:56:00Z', request_count: 44, token_consumed: 52_800, switch_count: 1, qps: 0.73, tps: 880 },
-    { bucket_start: '2026-08-25T18:57:00Z', request_count: 49, token_consumed: 61_400, switch_count: 3, qps: 0.82, tps: 1_023 },
-    { bucket_start: '2026-08-25T18:58:00Z', request_count: 41, token_consumed: 50_100, switch_count: 1, qps: 0.68, tps: 835 },
-    { bucket_start: '2026-08-25T18:59:00Z', request_count: 46, token_consumed: 56_600, switch_count: 2, qps: 0.77, tps: 943 },
+    { bucket_start: '2026-08-30T01:55:00Z', request_count: 38, token_consumed: 48_200, switch_count: 2, qps: 0.63, tps: 803 },
+    { bucket_start: '2026-08-30T01:56:00Z', request_count: 44, token_consumed: 52_800, switch_count: 1, qps: 0.73, tps: 880 },
+    { bucket_start: '2026-08-30T01:57:00Z', request_count: 49, token_consumed: 61_400, switch_count: 3, qps: 0.82, tps: 1_023 },
+    { bucket_start: '2026-08-30T01:58:00Z', request_count: 41, token_consumed: 50_100, switch_count: 1, qps: 0.68, tps: 835 },
+    { bucket_start: '2026-08-30T01:59:00Z', request_count: 46, token_consumed: 56_600, switch_count: 2, qps: 0.77, tps: 943 },
   ],
   by_platform: [
     { platform: 'openai', request_count: 1_426, token_consumed: 1_824_000 },
@@ -771,8 +771,8 @@ export function getOperatorFixtureData(
   if (pathname === '/api/v1/admin/dashboard/snapshot-v2') {
     return {
       generated_at: updatedAt,
-      start_date: '2026-08-25T13:00:00Z',
-      end_date: '2026-08-25T19:00:00Z',
+      start_date: '2026-08-29T20:00:00Z',
+      end_date: '2026-08-30T02:00:00Z',
       granularity: 'hour',
       stats: dashboardStats,
       trend: dashboardTrend,
@@ -783,12 +783,12 @@ export function getOperatorFixtureData(
         { group_id: 13, group_name: 'Balanced Coding Route', requests: 828, total_tokens: 931_500, cost: 3.82, actual_cost: 2.77, account_cost: 2.12 },
       ],
       users_trend: [
-        { date: '2026-08-25T18:00:00Z', user_id: 2, email: 'member@example.test', username: 'member', requests: 516, tokens: 682_000, cost: 3.42, actual_cost: 2.78 },
+        { date: '2026-08-30T01:00:00Z', user_id: 2, email: 'member@example.test', username: 'member', requests: 516, tokens: 682_000, cost: 3.42, actual_cost: 2.78 },
       ],
     }
   }
   if (pathname === '/api/v1/admin/dashboard/users-trend') {
-    return { trend: [], start_date: '2026-08-25', end_date: '2026-08-25', granularity: 'hour' }
+    return { trend: [], start_date: '2026-08-29', end_date: '2026-08-30', granularity: 'hour' }
   }
   if (pathname === '/api/v1/admin/dashboard/users-ranking') {
     return {
@@ -800,12 +800,12 @@ export function getOperatorFixtureData(
       total_actual_cost: 19.43,
       total_requests: 4_286,
       total_tokens: 5_475_500,
-      start_date: '2026-08-25',
-      end_date: '2026-08-25',
+      start_date: '2026-08-29',
+      end_date: '2026-08-30',
     }
   }
   if (pathname === '/api/v1/admin/dashboard/models') {
-    return { models: dashboardModels, start_date: '2026-08-25', end_date: '2026-08-25' }
+    return { models: dashboardModels, start_date: '2026-08-29', end_date: '2026-08-30' }
   }
 
   if (pathname === '/api/v1/admin/accounts') return paginated(operatorFixtureAccounts)
@@ -844,8 +844,8 @@ export function getOperatorFixtureData(
   }
   if (pathname === '/api/v1/admin/audit-logs') {
     return paginated([
-      { id: 1, user_id: 1, action: 'account.test', resource_type: 'account', resource_id: '101', details: { result: 'healthy' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-25T18:42:00Z', user: operatorFixtureUser() },
-      { id: 2, user_id: 1, action: 'settings.update', resource_type: 'settings', resource_id: null, details: { section: 'operations' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-25T17:16:00Z', user: operatorFixtureUser() },
+      { id: 1, user_id: 1, action: 'account.test', resource_type: 'account', resource_id: '101', details: { result: 'healthy' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-30T01:42:00Z', user: operatorFixtureUser() },
+      { id: 2, user_id: 1, action: 'settings.update', resource_type: 'settings', resource_id: null, details: { section: 'operations' }, ip_address: '192.0.2.1', user_agent: 'Fixture review', created_at: '2026-08-30T00:16:00Z', user: operatorFixtureUser() },
     ])
   }
 
@@ -911,8 +911,8 @@ export function getOperatorFixtureData(
   }
   if (pathname === '/api/v1/admin/ops/system-logs') {
     return paginated([
-      { id: 1, created_at: '2026-08-25T18:47:00Z', host: 'gateway-fixture-1', level: 'info', component: 'scheduler', message: 'Selected healthy account for request', request_id: 'req_fixture_1', account_id: 101, platform: 'openai', model: 'gpt-5.2-codex' },
-      { id: 2, created_at: '2026-08-25T18:43:00Z', host: 'gateway-fixture-1', level: 'warn', component: 'quota', message: 'Account entered provider cooldown', request_id: 'req_fixture_3', account_id: 103, platform: 'antigravity', model: 'gemini-2.5-pro' },
+      { id: 1, created_at: '2026-08-30T01:47:00Z', host: 'gateway-fixture-1', level: 'info', component: 'scheduler', message: 'Selected healthy account for request', request_id: 'req_fixture_1', account_id: 101, platform: 'openai', model: 'gpt-5.2-codex' },
+      { id: 2, created_at: '2026-08-30T01:43:00Z', host: 'gateway-fixture-1', level: 'warn', component: 'quota', message: 'Account entered provider cooldown', request_id: 'req_fixture_3', account_id: 103, platform: 'antigravity', model: 'gemini-2.5-pro' },
     ])
   }
 

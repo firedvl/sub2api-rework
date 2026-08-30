@@ -90,6 +90,23 @@ describe('production router navigation', () => {
     await navigate('/home')
   })
 
+  it('routes the root to login for an unauthenticated visitor', async () => {
+    expect((await navigate('/')).path).toBe('/login')
+  })
+
+  it('routes the root to the personal dashboard for an authenticated user', async () => {
+    stores.auth.isAuthenticated = true
+
+    expect((await navigate('/')).path).toBe('/dashboard')
+  })
+
+  it('routes the root to the operator overview for an authenticated admin', async () => {
+    stores.auth.isAuthenticated = true
+    stores.auth.isAdmin = true
+
+    expect((await navigate('/')).path).toBe('/admin/dashboard')
+  })
+
   it('redirects completed setup through the production guard', async () => {
     api.getSetupStatus.mockResolvedValue({ needs_setup: false })
 

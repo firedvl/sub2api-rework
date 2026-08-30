@@ -118,6 +118,36 @@ describe('Select dropdown viewport constraints', () => {
   })
 })
 
+describe('Select keyboard interaction', () => {
+  it('moves focus into a non-searchable listbox and selects with ArrowDown and Enter', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: 'alpha',
+        searchable: false,
+        options: [
+          { value: 'alpha', label: 'Alpha account' },
+          { value: 'beta', label: 'Beta account' },
+        ],
+      },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    const trigger = wrapper.get('button')
+    await trigger.trigger('click')
+    await nextTick()
+
+    const dropdown = document.body.querySelector<HTMLElement>('.select-dropdown-portal')
+    expect(document.activeElement).toBe(dropdown)
+    dropdown?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    dropdown?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
+    expect(document.activeElement).toBe(trigger.element)
+  })
+})
+
 describe('Select remote search', () => {
   const mountRemoteSelect = (props: Record<string, unknown> = {}) => {
     const wrapper = mount(Select, {

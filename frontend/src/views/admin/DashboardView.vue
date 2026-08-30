@@ -22,39 +22,57 @@
       </section>
 
       <template v-if="!loading && stats">
-        <section class="operator-stats-grid">
-          <article class="card operator-stat-card">
-            <div class="operator-stat-heading">
-              <span>{{ t('admin.dashboard.todayRequests') }}</span>
-              <span class="operator-stat-icon operator-stat-icon-neutral"><Icon name="chart" size="md" /></span>
+        <section class="operator-fleet-summary" aria-labelledby="operator-fleet-title">
+          <header class="operator-fleet-heading">
+            <div>
+              <h2 id="operator-fleet-title">Account fleet</h2>
+              <p>{{ fleetSummaryText }}</p>
             </div>
-            <p class="operator-stat-value">{{ formatNumber(stats.today_requests) }}</p>
-            <p class="operator-stat-meta">{{ formatNumber(stats.rpm) }} RPM</p>
-          </article>
-          <article class="card operator-stat-card">
-            <div class="operator-stat-heading">
-              <span>{{ t('admin.dashboard.todayTokens') }}</span>
-              <span class="operator-stat-icon operator-stat-icon-neutral"><Icon name="database" size="md" /></span>
+            <span v-if="accountStatusCounts.disabled" class="operator-fleet-disabled">
+              {{ accountStatusCounts.disabled }} disabled
+            </span>
+          </header>
+          <div class="operator-fleet-metrics">
+            <RouterLink to="/admin/accounts" class="operator-fleet-metric">
+              <span>Accounts</span>
+              <strong>{{ fleetCountLabel(capacityAccounts.length) }}</strong>
+              <small>Configured</small>
+            </RouterLink>
+            <RouterLink :to="accountStatusLink('active')" class="operator-fleet-metric is-active">
+              <span>Active</span>
+              <strong>{{ fleetCountLabel(accountStatusCounts.active) }}</strong>
+              <small>Ready for traffic</small>
+            </RouterLink>
+            <RouterLink :to="accountStatusLink('limited')" class="operator-fleet-metric is-limited">
+              <span>Limited</span>
+              <strong>{{ fleetCountLabel(accountStatusCounts.limited) }}</strong>
+              <small>Temporary pressure</small>
+            </RouterLink>
+            <RouterLink :to="accountStatusLink('error')" class="operator-fleet-metric is-error">
+              <span>Errors</span>
+              <strong>{{ fleetCountLabel(accountStatusCounts.error) }}</strong>
+              <small>Needs attention</small>
+            </RouterLink>
+          </div>
+        </section>
+
+        <section class="operator-gateway-summary" aria-labelledby="operator-gateway-title">
+          <div class="operator-gateway-heading">
+            <div>
+              <div class="operator-gateway-status"><span aria-hidden="true" /> Online</div>
+              <h2 id="operator-gateway-title">Gateway traffic</h2>
+              <p>{{ hasGatewayTraffic ? t('admin.dashboard.receivingTraffic') : t('admin.dashboard.idleTraffic') }}</p>
             </div>
-            <p class="operator-stat-value">{{ formatTokens(stats.today_tokens) }}</p>
-            <p class="operator-stat-meta">{{ formatTokens(stats.today_input_tokens) }} {{ t('admin.dashboard.input') }}</p>
-          </article>
-          <article class="card operator-stat-card">
-            <div class="operator-stat-heading">
-              <span>{{ t('admin.dashboard.todayCost') }}</span>
-              <span class="operator-stat-icon operator-stat-icon-neutral"><Icon name="dollar" size="md" /></span>
-            </div>
-            <p class="operator-stat-value">${{ formatCost(stats.today_actual_cost) }}</p>
-            <p class="operator-stat-meta">{{ t('admin.dashboard.accountCost') }} ${{ formatCost(stats.today_account_cost) }}</p>
-          </article>
-          <article class="card operator-stat-card">
-            <div class="operator-stat-heading">
-              <span>{{ t('admin.dashboard.avgResponse') }}</span>
-              <span class="operator-stat-icon operator-stat-icon-neutral"><Icon name="clock" size="md" /></span>
-            </div>
-            <p class="operator-stat-value">{{ formatDuration(stats.average_duration_ms) }}</p>
-            <p class="operator-stat-meta">{{ formatNumber(stats.hourly_active_users) }} {{ t('admin.dashboard.activeUsers') }}</p>
-          </article>
+            <RouterLink to="/admin/usage">{{ t('admin.dashboard.viewActivity') }}</RouterLink>
+          </div>
+          <dl class="operator-gateway-metrics">
+            <div><dt>RPM</dt><dd>{{ formatNumber(stats.rpm) }}</dd></div>
+            <div><dt>TPM</dt><dd>{{ formatTokens(stats.tpm) }}</dd></div>
+            <div><dt>Today</dt><dd>{{ formatNumber(stats.today_requests) }} requests</dd></div>
+            <div><dt>Tokens</dt><dd>{{ formatTokens(stats.today_tokens) }}</dd></div>
+            <div><dt>Cost</dt><dd>${{ formatCost(stats.today_actual_cost) }}</dd></div>
+            <div><dt>Avg response</dt><dd>{{ formatDuration(stats.average_duration_ms) }}</dd></div>
+          </dl>
         </section>
       </template>
 
@@ -68,47 +86,6 @@
         compact
         @retry="loadAccountCapacity"
       />
-
-      <template v-if="!loading && stats">
-        <section v-if="hasAccountExceptions" class="flex flex-wrap items-center justify-between gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-          <div class="flex items-center gap-2"><Icon name="server" size="sm" /><span>{{ t('admin.dashboard.accountAttention') }}</span></div>
-          <button type="button" class="font-medium underline underline-offset-2" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.reviewAccounts') }}</button>
-        </section>
-
-        <section class="grid gap-4 lg:grid-cols-2">
-          <article class="card operator-summary-panel">
-            <div class="operator-summary-header">
-              <div>
-                <h2>{{ t('admin.dashboard.accountHealth') }}</h2>
-                <p>{{ hasAccountExceptions ? t('admin.dashboard.accountAttention') : t('admin.dashboard.noAccountExceptions') }}</p>
-              </div>
-              <button type="button" @click="router.push('/admin/accounts')">{{ t('admin.dashboard.viewAccounts') }}</button>
-            </div>
-            <p class="operator-summary-value">{{ formatNumber(stats.normal_accounts) }} <span>/ {{ formatNumber(stats.total_accounts) }}</span></p>
-            <dl class="operator-summary-grid">
-              <div><dt>{{ t('common.error') }}</dt><dd>{{ formatNumber(stats.error_accounts) }}</dd></div>
-              <div><dt>{{ t('admin.dashboard.throttled') }}</dt><dd>{{ formatNumber(stats.ratelimit_accounts) }}</dd></div>
-              <div><dt>{{ t('admin.dashboard.overloaded') }}</dt><dd>{{ formatNumber(stats.overload_accounts) }}</dd></div>
-            </dl>
-          </article>
-          <article class="card operator-summary-panel">
-            <div class="operator-summary-header">
-              <div>
-                <h2>{{ t('admin.dashboard.gatewayTraffic') }}</h2>
-                <p>{{ hasGatewayTraffic ? t('admin.dashboard.receivingTraffic') : t('admin.dashboard.idleTraffic') }}</p>
-              </div>
-              <button type="button" @click="router.push('/admin/usage')">{{ t('admin.dashboard.viewActivity') }}</button>
-            </div>
-            <p class="operator-summary-value">{{ formatNumber(stats.rpm) }} <span>RPM</span></p>
-            <dl class="operator-summary-grid">
-              <div><dt>TPM</dt><dd>{{ formatTokens(stats.tpm) }}</dd></div>
-              <div><dt>{{ t('admin.dashboard.activeUsers') }}</dt><dd>{{ formatNumber(stats.hourly_active_users) }}</dd></div>
-              <div><dt>{{ t('common.total') }}</dt><dd>{{ formatNumber(stats.total_requests) }}</dd></div>
-            </dl>
-          </article>
-        </section>
-
-      </template>
     </div>
   </AppLayout>
 </template>
@@ -116,10 +93,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-
-const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
   Account,
@@ -130,10 +104,15 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
-import { supportsBatchAccountUsage } from '@/utils/operatorCapacity'
+import {
+  buildProviderCapacity,
+  classifyOperatorAccount,
+  supportsBatchAccountUsage,
+  type OperatorAccountStatus,
+} from '@/utils/operatorCapacity'
 
+const { t } = useI18n()
 const appStore = useAppStore()
-const router = useRouter()
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(false)
 const snapshotError = ref(false)
@@ -145,12 +124,29 @@ const capacityError = ref(false)
 let capacityLoadSeq = 0
 
 const hasGatewayTraffic = computed(() => (stats.value?.rpm ?? 0) > 0 || (stats.value?.tpm ?? 0) > 0)
-
-const hasAccountExceptions = computed(() => {
-  const currentStats = stats.value
-  return Boolean(
-    currentStats && (currentStats.error_accounts > 0 || currentStats.ratelimit_accounts > 0 || currentStats.overload_accounts > 0)
-  )
+const capacitySummaries = computed(() => buildProviderCapacity(
+  capacityAccounts.value,
+  capacityUsageByAccountId.value,
+  capacityUsageErrorByAccountId.value,
+).flatMap((provider) => provider.accounts))
+const accountStatusCounts = computed(() => capacitySummaries.value.reduce<Record<OperatorAccountStatus, number>>(
+  (counts, summary) => {
+    counts[classifyOperatorAccount(summary).status] += 1
+    return counts
+  },
+  { active: 0, limited: 0, error: 0, disabled: 0 },
+))
+const fleetSummaryText = computed(() => {
+  if (capacityLoading.value) return 'Loading account status...'
+  if (capacityError.value) return 'Account status is unavailable.'
+  if (accountStatusCounts.value.error) return `${accountStatusCounts.value.error} account${accountStatusCounts.value.error === 1 ? '' : 's'} need attention.`
+  if (accountStatusCounts.value.limited) return 'Temporary limits are reducing available capacity.'
+  return 'No account issues need attention.'
+})
+const fleetCountLabel = (count: number) => capacityLoading.value ? '-' : formatNumber(count)
+const accountStatusLink = (status: OperatorAccountStatus) => ({
+  path: '/admin/accounts',
+  query: { operator_status: status },
 })
 
 // Format helpers
@@ -283,4 +279,129 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.operator-fleet-summary,
+.operator-gateway-summary {
+  overflow: hidden;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+}
+
+.operator-fleet-heading,
+.operator-gateway-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.operator-fleet-heading h2,
+.operator-gateway-heading h2 {
+  color: var(--operator-foreground);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.operator-fleet-heading p,
+.operator-gateway-heading p {
+  margin-top: 0.1875rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-fleet-disabled {
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.operator-fleet-metrics,
+.operator-gateway-metrics {
+  display: grid;
+  border-top: 1px solid var(--operator-border-subtle);
+}
+
+.operator-fleet-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.operator-fleet-metric {
+  display: flex;
+  min-width: 0;
+  min-height: 6.25rem;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.875rem 1.25rem;
+  color: var(--operator-foreground);
+}
+.operator-fleet-metric + .operator-fleet-metric,
+.operator-gateway-metrics > div + div { border-left: 1px solid var(--operator-border-subtle); }
+.operator-fleet-metric:hover { background: var(--operator-muted); }
+.operator-fleet-metric:focus-visible {
+  position: relative;
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -3px;
+}
+.operator-fleet-metric span,
+.operator-fleet-metric small,
+.operator-gateway-metrics dt {
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+}
+.operator-fleet-metric strong {
+  margin: 0.125rem 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.operator-fleet-metric.is-active strong { color: var(--operator-success); }
+.operator-fleet-metric.is-limited strong { color: var(--operator-warning); }
+.operator-fleet-metric.is-error strong { color: var(--operator-destructive); }
+
+.operator-gateway-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.375rem;
+  color: var(--operator-success);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.operator-gateway-status span {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+.operator-gateway-heading > a {
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.operator-gateway-heading > a:hover { text-decoration: underline; text-underline-offset: 2px; }
+.operator-gateway-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.operator-gateway-metrics > div { min-width: 0; padding: 0.875rem 1rem; }
+.operator-gateway-metrics dd {
+  overflow: hidden;
+  margin-top: 0.1875rem;
+  color: var(--operator-foreground);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .operator-gateway-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .operator-gateway-metrics > div:nth-child(4) { border-left: 0; }
+  .operator-gateway-metrics > div:nth-child(n + 4) { border-top: 1px solid var(--operator-border-subtle); }
+}
+
+@media (max-width: 639px) {
+  .operator-fleet-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operator-fleet-metric:nth-child(3) { border-left: 0; }
+  .operator-fleet-metric:nth-child(n + 3) { border-top: 1px solid var(--operator-border-subtle); }
+  .operator-gateway-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .operator-gateway-metrics > div:nth-child(3),
+  .operator-gateway-metrics > div:nth-child(5) { border-left: 0; }
+  .operator-gateway-metrics > div:nth-child(n + 3) { border-top: 1px solid var(--operator-border-subtle); }
+}
 </style>

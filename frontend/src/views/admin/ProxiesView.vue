@@ -88,11 +88,12 @@
       </template>
 
       <template #table>
-        <div ref="proxyTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="proxyTableRef" class="operator-proxy-table flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           :columns="columns"
           :data="proxies"
           :loading="loading"
+          :expandable-actions="false"
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
@@ -118,83 +119,72 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-          </template>
-
-          <template #cell-protocol="{ value }">
-            <span
-              v-if="value"
-              :class="['badge', value.startsWith('socks5') ? 'badge-primary' : 'badge-gray']"
-            >
-              {{ value.toUpperCase() }}
-            </span>
-            <span v-else class="text-sm text-gray-400">-</span>
-          </template>
-
-          <template #cell-address="{ row }">
-            <div class="flex items-center gap-1.5">
-              <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <div class="relative">
-                <button
-                  type="button"
-                  class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
-                  :title="t('admin.proxies.copyProxyUrl')"
-                  @click.stop="copyProxyUrl(row)"
-                  @contextmenu.prevent="toggleCopyMenu(row.id)"
-                >
-                  <Icon name="copy" size="sm" />
-                </button>
-                <!-- 右键展开格式选择菜单 -->
-                <div
-                  v-if="copyMenuProxyId === row.id"
-                  class="operator-menu absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
-                >
-                  <button
-                    v-for="fmt in getCopyFormats(row)"
-                    :key="fmt.label"
-                    class="operator-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
-                    @click.stop="copyFormat(fmt.value)"
-                  >
-                    <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <template #cell-auth="{ row }">
-            <div v-if="row.username || row.password" class="flex items-center gap-1.5">
-              <div class="flex flex-col text-xs">
-                <span v-if="row.username" class="text-gray-700 dark:text-gray-200">{{ row.username }}</span>
-                <span v-if="row.password" class="font-mono text-gray-500 dark:text-gray-400">
-                  {{ visiblePasswordIds.has(row.id) ? row.password : '••••••' }}
-                </span>
-              </div>
-              <button
-                v-if="row.password"
-                type="button"
-                class="ml-1 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                @click.stop="visiblePasswordIds.has(row.id) ? visiblePasswordIds.delete(row.id) : visiblePasswordIds.add(row.id)"
-              >
-                <Icon :name="visiblePasswordIds.has(row.id) ? 'eyeOff' : 'eye'" size="sm" />
-              </button>
-            </div>
-            <span v-else class="text-sm text-gray-400">-</span>
-          </template>
-
-          <template #cell-location="{ row }">
-            <div class="flex items-center gap-2">
-              <img
-                v-if="row.country_code"
-                :src="flagUrl(row.country_code)"
-                :alt="row.country || row.country_code"
-                class="h-4 w-6 rounded-sm"
-              />
-              <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
+          <template #cell-name="{ row }">
+            <div class="operator-proxy-name" :title="row.name">
+              <strong>{{ row.name }}</strong>
+              <span v-if="formatLocation(row)" :title="formatLocation(row)">
+                <img
+                  v-if="row.country_code"
+                  :src="flagUrl(row.country_code)"
+                  :alt="row.country || row.country_code"
+                />
                 {{ formatLocation(row) }}
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+            </div>
+          </template>
+
+          <template #cell-protocol="{ row }">
+            <div class="operator-proxy-endpoint">
+              <div class="operator-proxy-address">
+                <span
+                  v-if="row.protocol"
+                  :class="['badge', row.protocol.startsWith('socks5') ? 'badge-primary' : 'badge-gray']"
+                >
+                  {{ row.protocol.toUpperCase() }}
+                </span>
+                <code class="code text-xs" :title="`${row.host}:${row.port}`">{{ row.host }}:{{ row.port }}</code>
+                <div class="relative">
+                  <button
+                    type="button"
+                    class="operator-proxy-inline-action"
+                    :title="t('admin.proxies.copyProxyUrl')"
+                    :aria-label="`${t('admin.proxies.copyProxyUrl')} ${row.name}`"
+                    @click.stop="copyProxyUrl(row)"
+                    @contextmenu.prevent="toggleCopyMenu(row.id)"
+                  >
+                    <Icon name="copy" size="sm" aria-hidden="true" />
+                  </button>
+                  <div
+                    v-if="copyMenuProxyId === row.id"
+                    class="operator-menu absolute left-0 top-full z-50 mt-1 w-auto min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-500 dark:bg-dark-700"
+                  >
+                    <button
+                      v-for="fmt in getCopyFormats(row)"
+                      :key="fmt.label"
+                      class="operator-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-dark-600"
+                      @click.stop="copyFormat(fmt.value)"
+                    >
+                      <span class="truncate font-mono text-gray-600 dark:text-gray-300">{{ fmt.label }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div v-if="row.username || row.password" class="operator-proxy-auth">
+                <span v-if="row.username">{{ row.username }}</span>
+                <span v-if="row.password" class="font-mono">
+                  {{ visiblePasswordIds.has(row.id) ? row.password : '••••••' }}
+                </span>
+                <button
+                  v-if="row.password"
+                  type="button"
+                  class="operator-proxy-inline-action"
+                  :title="visiblePasswordIds.has(row.id) ? 'Hide password' : 'Show password'"
+                  :aria-label="visiblePasswordIds.has(row.id) ? 'Hide password' : 'Show password'"
+                  @click.stop="visiblePasswordIds.has(row.id) ? visiblePasswordIds.delete(row.id) : visiblePasswordIds.add(row.id)"
+                >
+                  <Icon :name="visiblePasswordIds.has(row.id) ? 'eyeOff' : 'eye'" size="sm" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </template>
 
@@ -215,8 +205,16 @@
             </span>
           </template>
 
-          <template #cell-latency="{ row }">
-            <div class="flex flex-col gap-1">
+          <template #cell-status="{ row }">
+            <div class="operator-proxy-health">
+              <span
+                :class="[
+                  'badge',
+                  row.status === 'active' ? 'badge-success' : 'badge-danger'
+                ]"
+              >
+                {{ t('admin.accounts.status.' + row.status) }}
+              </span>
               <span
                 v-if="row.latency_status === 'failed'"
                 class="badge badge-danger"
@@ -230,10 +228,10 @@
               >
                 {{ row.latency_ms }}ms
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <span v-else class="text-xs text-gray-400">{{ t('admin.proxies.columns.latency') }} -</span>
               <div
                 v-if="typeof row.quality_checked === 'number'"
-                class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+                class="operator-proxy-quality"
                 :title="row.quality_summary || undefined"
               >
                 <span>{{ t('admin.proxies.qualityInline', { grade: row.quality_grade || '-', score: row.quality_score ?? '-' }) }}</span>
@@ -245,34 +243,29 @@
           </template>
 
           <template #cell-expiry="{ row }">
-            <span v-if="!row.expires_at" class="text-sm text-gray-400">{{ t('admin.proxies.neverExpires') }}</span>
-            <div v-else class="flex flex-col text-xs">
-              <span class="text-gray-700 dark:text-gray-200">{{ formatDateTime(row.expires_at) }}</span>
-              <span :class="expiryBadgeClass(row)">{{ expiryLabel(row) }}</span>
+            <div class="operator-proxy-lifecycle">
+              <span v-if="!row.expires_at" class="text-gray-400">{{ t('admin.proxies.neverExpires') }}</span>
+              <template v-else>
+                <span>{{ formatDateTime(row.expires_at) }}</span>
+                <span :class="expiryBadgeClass(row)">{{ expiryLabel(row) }}</span>
+              </template>
             </div>
           </template>
 
           <template #cell-created_at="{ row }">
-            <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
-          </template>
-
-          <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
-              ]"
-            >
-              {{ t('admin.accounts.status.' + value) }}
-            </span>
+            <span class="operator-proxy-created">{{ formatDateTime(row.created_at) }}</span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="operator-proxy-row-actions">
               <button
+                type="button"
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+                class="operator-proxy-row-action is-test"
+                :title="t('admin.proxies.testConnection')"
+                :aria-label="`${t('admin.proxies.testConnection')} ${row.name}`"
+                :aria-busy="testingProxyIds.has(row.id)"
               >
                 <svg
                   v-if="testingProxyIds.has(row.id)"
@@ -294,13 +287,16 @@
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   ></path>
                 </svg>
-                <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
+                <Icon v-else name="checkCircle" size="sm" aria-hidden="true" />
               </button>
               <button
+                type="button"
                 @click="handleQualityCheck(row)"
                 :disabled="qualityCheckingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="operator-proxy-row-action is-quality"
+                :title="t('admin.proxies.qualityCheck')"
+                :aria-label="`${t('admin.proxies.qualityCheck')} ${row.name}`"
+                :aria-busy="qualityCheckingProxyIds.has(row.id)"
               >
                 <svg
                   v-if="qualityCheckingProxyIds.has(row.id)"
@@ -322,22 +318,25 @@
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   ></path>
                 </svg>
-                <Icon v-else name="shield" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
+                <Icon v-else name="shield" size="sm" aria-hidden="true" />
               </button>
               <button
+                type="button"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="operator-proxy-row-action"
+                :title="t('common.edit')"
+                :aria-label="`${t('common.edit')} ${row.name}`"
               >
-                <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t('common.edit') }}</span>
+                <Icon name="edit" size="sm" aria-hidden="true" />
               </button>
               <button
+                type="button"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="operator-proxy-row-action is-danger"
+                :title="t('common.delete')"
+                :aria-label="`${t('common.delete')} ${row.name}`"
               >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
+                <Icon name="trash" size="sm" aria-hidden="true" />
               </button>
             </div>
           </template>
@@ -994,18 +993,14 @@ const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '', sortable: false },
-  { key: 'name', label: t('admin.proxies.columns.name'), sortable: true },
-  { key: 'protocol', label: t('admin.proxies.columns.protocol'), sortable: true },
-  { key: 'address', label: t('admin.proxies.columns.address'), sortable: false },
-  { key: 'auth', label: t('admin.proxies.columns.auth'), sortable: false },
-  { key: 'location', label: t('admin.proxies.columns.location'), sortable: false },
-  { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true },
-  { key: 'latency', label: t('admin.proxies.columns.latency'), sortable: false },
-  { key: 'expiry', label: t('admin.proxies.columns.expiry'), sortable: true },
-  { key: 'created_at', label: t('admin.proxies.columns.createdAt'), sortable: true },
-  { key: 'status', label: t('admin.proxies.columns.status'), sortable: true },
-  { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false }
+  { key: 'select', label: '', sortable: false, class: 'operator-proxy-select-column' },
+  { key: 'name', label: t('admin.proxies.columns.name'), sortable: true, class: 'operator-proxy-name-column' },
+  { key: 'protocol', label: t('admin.proxies.columns.address'), sortable: true, class: 'operator-proxy-endpoint-column' },
+  { key: 'account_count', label: t('admin.proxies.columns.accounts'), sortable: true, class: 'operator-proxy-account-column' },
+  { key: 'status', label: t('admin.proxies.columns.status'), sortable: true, class: 'operator-proxy-health-column' },
+  { key: 'expiry', label: t('admin.proxies.columns.expiry'), sortable: true, class: 'operator-proxy-lifecycle-column' },
+  { key: 'created_at', label: t('admin.proxies.columns.createdAt'), sortable: true, class: 'operator-proxy-created-column' },
+  { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false, class: 'operator-proxy-actions-column' }
 ])
 
 // Filter options
@@ -2074,3 +2069,119 @@ onUnmounted(() => {
   document.removeEventListener('click', closeCopyMenu)
 })
 </script>
+
+<style scoped>
+.operator-proxy-table :deep(.table-wrapper table) {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.operator-proxy-table :deep(.operator-proxy-select-column) { width: 2.75rem; }
+.operator-proxy-table :deep(.operator-proxy-name-column) { width: 15%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-endpoint-column) { width: 27%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-account-column) { width: 9%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-health-column) { width: 14%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-lifecycle-column) { width: 12%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-created-column) { width: 11%; white-space: normal; }
+.operator-proxy-table :deep(.operator-proxy-actions-column) { width: 9rem; }
+
+.operator-proxy-name,
+.operator-proxy-endpoint,
+.operator-proxy-health,
+.operator-proxy-lifecycle {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.operator-proxy-name { gap: 0.25rem; }
+.operator-proxy-name strong {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-proxy-name span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  overflow: hidden;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-proxy-name img { width: 1.125rem; height: 0.75rem; flex: none; border-radius: 1px; }
+
+.operator-proxy-endpoint { gap: 0.375rem; }
+.operator-proxy-address,
+.operator-proxy-auth,
+.operator-proxy-row-actions,
+.operator-proxy-quality {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+}
+.operator-proxy-address code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-proxy-auth {
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+}
+.operator-proxy-inline-action {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: var(--operator-muted-foreground);
+}
+.operator-proxy-inline-action:hover { background: var(--operator-muted); color: var(--operator-foreground); }
+.operator-proxy-inline-action:focus-visible,
+.operator-proxy-row-action:focus-visible { outline: 2px solid var(--operator-focus); outline-offset: 2px; }
+
+.operator-proxy-health { align-items: flex-start; gap: 0.375rem; }
+.operator-proxy-quality { flex-wrap: wrap; color: var(--operator-muted-foreground); font-size: 0.75rem; }
+.operator-proxy-lifecycle { gap: 0.1875rem; color: var(--operator-foreground); font-size: 0.75rem; }
+.operator-proxy-created { color: var(--operator-muted-foreground); font-size: 0.75rem; }
+
+.operator-proxy-row-actions { justify-content: flex-end; }
+.operator-proxy-row-action {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: var(--operator-muted-foreground);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.operator-proxy-row-action:hover { background: var(--operator-muted); color: var(--operator-foreground); }
+.operator-proxy-row-action.is-test:hover { color: var(--operator-success); }
+.operator-proxy-row-action.is-quality:hover { color: var(--operator-focus); }
+.operator-proxy-row-action.is-danger:hover { color: var(--operator-destructive); }
+.operator-proxy-row-action:disabled { cursor: not-allowed; opacity: 0.5; }
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .operator-proxy-table :deep(.operator-proxy-created-column) { display: none; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .operator-proxy-table :deep(.operator-proxy-name-column) { width: 17%; }
+  .operator-proxy-table :deep(.operator-proxy-endpoint-column) { width: 31%; }
+  .operator-proxy-table :deep(.operator-proxy-account-column) { width: 10%; }
+  .operator-proxy-table :deep(.operator-proxy-health-column) { width: 20%; }
+  .operator-proxy-table :deep(.operator-proxy-lifecycle-column) { display: none; }
+}
+</style>

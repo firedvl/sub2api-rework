@@ -6,6 +6,11 @@ import type { Account, DashboardStats } from '@/types'
 import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import DashboardView from '../DashboardView.vue'
 
+const RouterLinkStub = {
+  props: ['to'],
+  template: '<a><slot /></a>'
+}
+
 const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, listAccounts, getBatchUsage, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
@@ -120,6 +125,7 @@ const mountDashboard = () => mount(DashboardView, {
       AppLayout: { template: '<div><slot /></div>' },
       LoadingSpinner: true,
       Icon: true,
+      RouterLink: RouterLinkStub,
     }
   }
 })
@@ -229,6 +235,59 @@ describe('admin DashboardView', () => {
       expect.objectContaining({ name: 'Second persisted account' })
     ])
     expect(getBatchUsage).toHaveBeenCalledWith([1, 2], false)
+  })
+
+  it('shows four operator states and links each actionable count to Accounts', async () => {
+    listAccounts.mockResolvedValue({
+      items: [
+        createAccount(1, 'Ready account'),
+        createAccount(2, 'Rate limited', {
+          rate_limited_at: '2099-01-01T00:00:00Z',
+          rate_limit_reset_at: '2099-01-01T01:00:00Z',
+        }),
+        createAccount(3, 'Quota limited'),
+        createAccount(4, 'Broken account', {
+          status: 'error',
+          schedulable: false,
+          error_message: 'Authentication failed',
+        }),
+        createAccount(5, 'Disabled account', { status: 'inactive', schedulable: false }),
+      ],
+      total: 5,
+      page: 1,
+      page_size: 1000,
+      pages: 1,
+    })
+    getBatchUsage.mockResolvedValue({
+      usage: {
+        '3': {
+          updated_at: '2026-08-29T00:00:00Z',
+          five_hour: { utilization: 100, resets_at: '2099-01-01T01:00:00Z', remaining_seconds: 3600 },
+          seven_day: null,
+          seven_day_sonnet: null,
+        },
+      },
+      errors: {},
+    })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const metrics = wrapper.findAll('.operator-fleet-metric')
+    expect(metrics.map((metric) => metric.text())).toEqual([
+      'Accounts5Configured',
+      'Active1Ready for traffic',
+      'Limited2Temporary pressure',
+      'Errors1Needs attention',
+    ])
+    expect(wrapper.get('.operator-fleet-disabled').text()).toBe('1 disabled')
+
+    const links = wrapper.findAllComponents(RouterLinkStub)
+    expect(links.map((link) => link.props('to'))).toEqual(expect.arrayContaining([
+      { path: '/admin/accounts', query: { operator_status: 'active' } },
+      { path: '/admin/accounts', query: { operator_status: 'limited' } },
+      { path: '/admin/accounts', query: { operator_status: 'error' } },
+    ]))
   })
 
   it('shows an account-list failure and recovers on retry', async () => {
