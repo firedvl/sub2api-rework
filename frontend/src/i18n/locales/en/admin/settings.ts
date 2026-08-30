@@ -1,7 +1,7 @@
 export default {
     settings: {
       title: 'System Settings',
-      description: 'Manage registration, email verification, default values, and SMTP settings',
+      description: 'Manage gateway behavior, access, integrations, and updates',
       tabs: {
         general: 'General',
         agreement: 'Agreement',
@@ -601,10 +601,10 @@ export default {
         backendModeDescription:
           'Disables user registration, public site, and self-service features. Only admin can log in and manage the platform.',
         siteName: 'Site Name',
-        siteNamePlaceholder: 'Sub2API',
+        siteNamePlaceholder: 'Gateway',
         siteNameHint: 'Displayed in emails and page titles',
         siteSubtitle: 'Site Subtitle',
-        siteSubtitlePlaceholder: 'Subscription to API Conversion Platform',
+        siteSubtitlePlaceholder: 'AI Gateway',
         siteSubtitleHint: 'Displayed on login and register pages',
         apiBaseUrl: 'API Base URL',
         apiBaseUrlPlaceholder: 'https://api.example.com',
@@ -655,13 +655,13 @@ export default {
       },
       updates: {
         title: 'Software Updates',
-        description: 'Check approved rework releases and ask the local updater to prepare, install, or roll back.',
+        description: 'Check approved Sub2API Rework releases and ask the local updater to prepare, install, or roll back.',
         check: 'Check updates',
         loading: 'Checking approved releases...',
         loadFailed: 'Failed to check updates',
         operationAccepted: 'The updater accepted the operation.',
         operationFailed: 'The updater operation failed',
-        currentVersion: 'Installed: {version}',
+        currentVersion: 'Sub2API Rework installed: {version}',
         upstreamBaseline: 'Upstream baseline',
         latestUpstream: 'Latest upstream',
         availableVersion: 'Approved release',

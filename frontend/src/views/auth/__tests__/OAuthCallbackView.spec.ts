@@ -76,6 +76,10 @@ vi.mock('@/composables/useClipboard', () => ({
   }),
 }))
 
+vi.mock('@/components/layout', () => ({
+  AuthLayout: { template: '<div><slot /></div>' },
+}))
+
 describe('OAuthCallbackView', () => {
   beforeEach(() => {
     routeState.path = '/auth/callback'
@@ -109,6 +113,7 @@ describe('OAuthCallbackView', () => {
     expect(wrapper.text()).toContain('auth.oauth.callbackTitle')
     expect(wrapper.text()).toContain('auth.oauth.callbackHint')
     expect(wrapper.text()).toContain('common.copy')
+    expect(wrapper.get('h2').text()).toBe('auth.oauth.callbackTitle')
     expect(wrapper.find('input[value="oauth-code"]').exists()).toBe(true)
     expect(wrapper.find('input[value="oauth-state"]').exists()).toBe(true)
   })

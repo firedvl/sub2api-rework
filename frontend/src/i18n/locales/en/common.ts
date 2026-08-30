@@ -217,6 +217,7 @@ export default {
 
   // Auth
   auth: {
+    poweredBy: 'Powered by {product}',
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',

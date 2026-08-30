@@ -12,7 +12,7 @@
         </button>
         <router-link to="/admin/dashboard" class="operator-brand">
           <span class="operator-brand-mark">
-            <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="" />
+            <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="" aria-hidden="true" />
           </span>
           <span>{{ siteName }}</span>
         </router-link>
@@ -73,7 +73,7 @@ const visibleAreas = computed(() =>
   operatorAreas.filter((area) => !(authStore.isSimpleMode && area.hideInSimpleMode)),
 )
 const activeArea = computed(() => getOperatorArea(route.path))
-const siteName = computed(() => appStore.siteName || 'Sub2API')
+const siteName = computed(() => appStore.siteName)
 const siteLogo = computed(() =>
   sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }),
 )

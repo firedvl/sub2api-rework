@@ -45,6 +45,10 @@ vi.mock('@/stores', () => ({
   }),
 }))
 
+vi.mock('@/components/layout', () => ({
+  AuthLayout: { template: '<div><slot /></div>' },
+}))
+
 describe('WechatPaymentCallbackView', () => {
   beforeEach(() => {
     replaceMock.mockReset()
@@ -111,6 +115,8 @@ describe('WechatPaymentCallbackView', () => {
     expect(replaceMock).not.toHaveBeenCalled()
     expect(showErrorMock).toHaveBeenCalledWith('微信支付回调缺少恢复令牌。')
     expect(wrapper.text()).toContain('微信支付回调缺少恢复令牌。')
+    expect(wrapper.get('h2').text()).toBe('正在恢复微信支付')
+    expect(wrapper.text().match(/微信支付回调缺少恢复令牌。/g)).toHaveLength(1)
     expect(wrapper.find('.bg-red-50').exists()).toBe(false)
   })
 })

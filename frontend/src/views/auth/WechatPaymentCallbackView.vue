@@ -1,20 +1,22 @@
 <template>
-  <div class="min-h-screen bg-gray-50 px-4 py-10 dark:bg-black">
-    <div class="mx-auto max-w-2xl">
-      <div class="card p-6">
-        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+  <AuthLayout>
+    <div>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
           {{ callbackTitleText }}
-        </h1>
-        <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {{ errorMessage || callbackProcessingText }}
+        </h2>
+        <p v-if="!errorMessage" class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          {{ callbackProcessingText }}
         </p>
 
         <div
           v-if="!errorMessage"
           class="mt-6 flex items-center justify-center py-10"
+          role="status"
+          aria-live="polite"
         >
           <div
             class="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"
+            aria-hidden="true"
           ></div>
         </div>
 
@@ -33,15 +35,15 @@
             {{ backToPaymentText }}
           </button>
         </div>
-      </div>
     </div>
-  </div>
+  </AuthLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { AuthLayout } from '@/components/layout'
 import { useAppStore } from '@/stores'
 
 const { t } = useI18n()

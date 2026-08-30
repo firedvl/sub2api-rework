@@ -40,10 +40,10 @@ function isSafeImageUrl(value: string): boolean {
 function injectBranding(html: string, config: { site_name?: string; site_logo?: string }): string {
   let brandedHtml = html
   const siteName = config.site_name?.trim()
-  if (siteName) {
+  if (siteName && siteName.toLowerCase() !== 'sub2api') {
     brandedHtml = brandedHtml.replace(
-      /<title>[^<]*<\/title>/i,
-      `<title>${escapeHtml(siteName)} - AI API Gateway</title>`,
+      /<title(?:\s[^>]*)?>[^<]*<\/title>/i,
+      `<title data-operator-brand>${escapeHtml(siteName)}</title>`,
     )
   }
 

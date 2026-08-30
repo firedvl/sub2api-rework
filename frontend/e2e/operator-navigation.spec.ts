@@ -165,6 +165,27 @@ test.describe('operator console navigation', () => {
     await installOperatorApiMock(page)
   })
 
+  test('uses Gateway identity on login and operator browser surfaces', async ({ page, browser }) => {
+    const anonymous = await browser.newContext({ locale: 'en-US' })
+    const loginPage = await anonymous.newPage()
+    await installOperatorApiMock(loginPage)
+    await loginPage.goto('/login')
+
+    await expect(loginPage.getByRole('heading', { level: 1, name: 'Gateway' })).toBeVisible()
+    await expect(loginPage.locator('.auth-codex-brand p')).toHaveText('AI Gateway')
+    await expect(loginPage.locator('.auth-codex-copyright')).toHaveText('Powered by Sub2API Rework')
+    await expect(loginPage.locator('.auth-codex-logo img')).toHaveAttribute('src', '/logo.svg')
+    await expect(loginPage.locator('.auth-codex-logo img')).toHaveAttribute('aria-hidden', 'true')
+    await expect(loginPage.locator('html')).toHaveAttribute('lang', 'en')
+    await expect(loginPage).toHaveTitle('Login · Gateway')
+    await anonymous.close()
+
+    await page.goto('/admin/dashboard')
+    await expect(page.locator('.operator-brand')).toContainText('Gateway')
+    await expect(page.locator('.operator-brand img')).toHaveAttribute('src', '/logo.svg')
+    await expect(page).toHaveTitle('Overview · Gateway')
+  })
+
   test('reaches all six areas and keeps history and deep-link state', async ({ page }) => {
     test.setTimeout(60_000)
     await page.goto('/admin/dashboard')

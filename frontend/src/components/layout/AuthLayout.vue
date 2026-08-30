@@ -11,7 +11,7 @@
         <!-- Custom Logo or Default Logo -->
         <template v-if="settingsLoaded">
           <div class="auth-codex-logo">
-            <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
+            <img :src="siteLogo || '/logo.svg'" alt="" aria-hidden="true" class="h-full w-full object-contain" />
           </div>
           <h1>
             {{ siteName }}
@@ -32,9 +32,9 @@
         <slot name="footer" />
       </div>
 
-      <!-- Copyright -->
+      <!-- Technical attribution -->
       <div class="auth-codex-copyright">
-        &copy; {{ currentYear }} {{ siteName }}. All rights reserved.
+        {{ t('auth.poweredBy', { product: TECHNICAL_PRODUCT_NAME }) }}
       </div>
     </div>
   </div>
@@ -42,18 +42,25 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
+import {
+  TECHNICAL_PRODUCT_NAME,
+  resolveOperatorProductDescriptor,
+  resolveOperatorProductName,
+} from '@/utils/branding'
 import { sanitizeUrl } from '@/utils/url'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 
-const siteName = computed(() => appStore.siteName || 'Sub2API')
+const siteName = computed(() => resolveOperatorProductName(appStore.siteName))
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'Subscription to API Conversion Platform')
+const siteSubtitle = computed(() =>
+  resolveOperatorProductDescriptor(appStore.cachedPublicSettings?.site_subtitle),
+)
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 const isFixtureReview = window.__OPERATOR_REVIEW_MODE__ === true
-
-const currentYear = computed(() => new Date().getFullYear())
 
 onMounted(() => {
   appStore.fetchPublicSettings()
