@@ -20,8 +20,6 @@
           :class="[
             'operator-toast pointer-events-auto min-w-[320px] max-w-md overflow-hidden rounded-lg shadow-lg',
             'bg-white dark:bg-dark-800',
-            'border-l-4',
-            getBorderColor(toast.type)
           ]"
         >
           <div class="p-4">
@@ -106,16 +104,6 @@ const getIconColor = (type: string): string => {
     error: 'text-red-500',
     warning: 'text-yellow-500',
     info: 'text-blue-500'
-  }
-  return colors[type] || colors.info
-}
-
-const getBorderColor = (type: string): string => {
-  const colors: Record<string, string> = {
-    success: 'border-green-500',
-    error: 'border-red-500',
-    warning: 'border-yellow-500',
-    info: 'border-blue-500'
   }
   return colors[type] || colors.info
 }
