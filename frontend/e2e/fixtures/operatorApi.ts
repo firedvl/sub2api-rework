@@ -1,15 +1,17 @@
 import type { Page, Route } from '@playwright/test'
 import {
   getOperatorFixtureData,
+  getOperatorImportPreview,
+  getOperatorImportResult,
   isOperatorFixtureReadRequest,
   operatorFixtureUser,
   OPERATOR_FIXTURE_ACCOUNTS_ETAG,
   OPERATOR_FIXTURE_TOKEN,
   type RunMode,
   type SessionRole,
-} from './operatorData'
+} from './operatorData.ts'
 
-export type { RunMode, SessionRole } from './operatorData'
+export type { RunMode, SessionRole } from './operatorData.ts'
 
 async function fulfill(
   route: Route,
@@ -54,6 +56,13 @@ export async function installOperatorApiMock(
     const request = route.request()
     const pathname = new URL(request.url()).pathname
     const method = request.method().toUpperCase()
+
+    if (method === 'POST' && pathname === '/api/v1/admin/accounts/data/preview') {
+      return fulfill(route, getOperatorImportPreview(request.postDataJSON()))
+    }
+    if (method === 'POST' && pathname === '/api/v1/admin/accounts/data') {
+      return fulfill(route, getOperatorImportResult(request.postDataJSON()))
+    }
 
     if (!isOperatorFixtureReadRequest(method, pathname)) {
       return fulfill(route, { fixture_review: true, read_only: true }, { status: 405 })

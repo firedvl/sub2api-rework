@@ -716,9 +716,93 @@ export function isOperatorFixtureReadRequest(method: string, pathname: string): 
   if (method === 'GET' || method === 'HEAD') return true
   return method === 'POST' && [
     '/api/v1/auth/login',
+    '/api/v1/admin/accounts/data',
+    '/api/v1/admin/accounts/data/preview',
     '/api/v1/admin/accounts/today-stats/batch',
     '/api/v1/admin/accounts/usage/batch',
   ].includes(pathname)
+}
+
+type ImportFixtureAccount = {
+  source_index?: number
+  name?: string
+  platform?: string
+  type?: string
+  credentials?: Record<string, unknown>
+}
+
+const importPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek'])
+
+function importAccounts(body: unknown): ImportFixtureAccount[] {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return []
+  const data = (body as { data?: unknown }).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const accounts = (data as { accounts?: unknown }).accounts
+  return Array.isArray(accounts) ? accounts as ImportFixtureAccount[] : []
+}
+
+function importIdentity(account: ImportFixtureAccount): string {
+  const credentials = account.credentials || {}
+  for (const key of ['crs_account_id', 'chatgpt_account_id', 'chatgpt_user_id', 'account_uuid', 'email', 'client_email']) {
+    const value = credentials[key]
+    if (typeof value === 'string' && value.trim()) return `${account.platform || ''}:${key}:${value.trim().toLowerCase()}`
+  }
+  return ''
+}
+
+function importIdentityDisplay(identity: string): string {
+  return identity.split(':').slice(2).join(':') || identity
+}
+
+export function getOperatorImportPreview(body: unknown) {
+  const accounts = importAccounts(body)
+  const existing = new Map(operatorFixtureAccounts.map((account) => [importIdentity(account), account]))
+  const seen = new Set<string>()
+  const items = accounts.map((account, offset) => {
+    const index = account.source_index || offset + 1
+    const base = { index, name: account.name || '', platform: account.platform || '', type: account.type || '' }
+    if (!account.name || !account.platform || !account.type || !account.credentials || !Object.keys(account.credentials).length) {
+      return { ...base, status: 'invalid', message: 'account data is invalid' }
+    }
+    if (!importPlatforms.has(account.platform)) return { ...base, status: 'unsupported', message: 'account provider or type is unsupported' }
+    if (account.type === 'apikey' && typeof account.credentials.api_key !== 'string') return { ...base, status: 'invalid', message: 'api_key is required' }
+    if (account.type === 'oauth' && !['access_token', 'refresh_token', 'token'].some((key) => typeof account.credentials?.[key] === 'string')) return { ...base, status: 'invalid', message: 'oauth token is required' }
+    const identity = importIdentity(account)
+    if (identity && existing.has(identity)) {
+      const match = existing.get(identity)!
+      return { ...base, status: 'duplicate', identity: importIdentityDisplay(identity), duplicate_scope: 'existing', existing_account_id: match.id, existing_account_name: match.name, message: 'duplicate account' }
+    }
+    if (identity && seen.has(identity)) return { ...base, status: 'duplicate', identity: importIdentityDisplay(identity), duplicate_scope: 'batch', message: 'duplicate account' }
+    if (identity) seen.add(identity)
+    return { ...base, status: 'ready', identity: importIdentityDisplay(identity), message: '' }
+  })
+  return {
+    total: items.length,
+    ready: items.filter((item) => item.status === 'ready').length,
+    duplicate: items.filter((item) => item.status === 'duplicate').length,
+    invalid: items.filter((item) => item.status === 'invalid').length,
+    unsupported: items.filter((item) => item.status === 'unsupported').length,
+    items,
+  }
+}
+
+export function getOperatorImportResult(body: unknown) {
+  const preview = getOperatorImportPreview(body)
+  const items = preview.items.map((item) => {
+    if (item.status === 'duplicate') return { index: item.index, action: 'skipped', name: item.name, message: 'duplicate account' }
+    if (item.status !== 'ready' || item.name.toLowerCase().includes('provider reject')) return { index: item.index, action: 'failed', name: item.name, message: item.status === 'ready' ? 'Provider validation failed' : item.message }
+    return { index: item.index, action: 'created', account_id: 1000 + item.index, name: item.name }
+  })
+  return {
+    proxy_created: 0,
+    proxy_reused: 0,
+    proxy_failed: 0,
+    account_created: items.filter((item) => item.action === 'created').length,
+    account_updated: 0,
+    account_skipped: items.filter((item) => item.action === 'skipped').length,
+    account_failed: items.filter((item) => item.action === 'failed').length,
+    items,
+  }
 }
 
 export function getOperatorFixtureData(

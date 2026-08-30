@@ -1542,6 +1542,7 @@ export interface AdminDataProxy {
 }
 
 export interface AdminDataAccount {
+  source_index?: number
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1556,6 +1557,39 @@ export interface AdminDataAccount {
   auto_pause_on_expired?: boolean
 }
 
+export interface AdminDataImportOptions {
+  status?: 'active' | 'disabled'
+  schedulable?: boolean
+  proxy_id?: number | null
+  priority?: number
+  group_ids?: number[]
+}
+
+export type AdminDataPreviewStatus = 'ready' | 'duplicate' | 'invalid' | 'unsupported' | 'conflict'
+
+export interface AdminDataPreviewItem {
+  index: number
+  status: AdminDataPreviewStatus
+  platform?: string
+  type?: string
+  name?: string
+  identity?: string
+  credential_hint?: string
+  duplicate_scope?: 'batch' | 'existing'
+  existing_account_id?: number
+  existing_account_name?: string
+  message?: string
+}
+
+export interface AdminDataPreviewResult {
+  total: number
+  ready: number
+  duplicate: number
+  invalid: number
+  unsupported?: number
+  items: AdminDataPreviewItem[]
+}
+
 export interface AdminDataImportError {
   kind: 'proxy' | 'account'
   name?: string
@@ -1568,8 +1602,19 @@ export interface AdminDataImportResult {
   proxy_reused: number
   proxy_failed: number
   account_created: number
+  account_updated?: number
+  account_skipped?: number
   account_failed: number
   errors?: AdminDataImportError[]
+  items?: AdminDataImportItem[]
+}
+
+export interface AdminDataImportItem {
+  index: number
+  action: 'created' | 'updated' | 'skipped' | 'failed'
+  account_id?: number
+  name?: string
+  message?: string
 }
 
 export interface CodexSessionImportRequest {
