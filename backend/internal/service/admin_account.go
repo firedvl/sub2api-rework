@@ -420,6 +420,15 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	if input.Status != "" {
+		if input.Status != StatusActive && input.Status != StatusDisabled {
+			return nil, errors.New("account status is invalid")
+		}
+		account.Status = input.Status
+	}
+	if input.Schedulable != nil {
+		account.Schedulable = *input.Schedulable
+	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -509,20 +518,32 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
-		return nil, err
-	}
-
-	// 绑定分组
-	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+	if input.AtomicGroupBind && len(groupIDs) > 0 {
+		if s.accountDuplicateRepo == nil {
+			return nil, errors.New("account group repository is not configured")
+		}
+		groups := make([]AccountGroup, len(groupIDs))
+		for i, groupID := range groupIDs {
+			groups[i] = AccountGroup{GroupID: groupID, Priority: i + 1}
+		}
+		if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, account, groups); err != nil {
 			return nil, err
+		}
+	} else {
+		if err := s.accountRepo.Create(ctx, account); err != nil {
+			return nil, err
+		}
+		// 绑定分组
+		if len(groupIDs) > 0 {
+			if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	// OAuth 账号：创建后异步设置隐私。
 	// 使用 Ensure（幂等）而非 Force：新建账号 Extra 为空时效果相同，但更安全。
-	if account.Type == AccountTypeOAuth {
+	if !input.SkipAsyncPrivacy && account.Type == AccountTypeOAuth {
 		switch account.Platform {
 		case PlatformOpenAI:
 			go func() {

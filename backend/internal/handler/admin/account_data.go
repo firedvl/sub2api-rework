@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -58,6 +60,7 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
+	SourceIndex        int            `json:"source_index,omitempty"`
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes,omitempty"`
 	Platform           string         `json:"platform"`
@@ -73,8 +76,18 @@ type DataAccount struct {
 }
 
 type DataImportRequest struct {
-	Data                 DataPayload `json:"data"`
-	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
+	Data                 DataPayload        `json:"data"`
+	SkipDefaultGroupBind *bool              `json:"skip_default_group_bind"`
+	Options              *DataImportOptions `json:"options,omitempty"`
+}
+
+// DataImportOptions contains batch-wide, non-secret creation settings.
+type DataImportOptions struct {
+	Status      string  `json:"status,omitempty"`
+	Schedulable *bool   `json:"schedulable,omitempty"`
+	ProxyID     *int64  `json:"proxy_id,omitempty"`
+	Priority    *int    `json:"priority,omitempty"`
+	GroupIDs    []int64 `json:"group_ids,omitempty"`
 }
 
 type DataImportResult struct {
@@ -82,14 +95,48 @@ type DataImportResult struct {
 	ProxyReused    int               `json:"proxy_reused"`
 	ProxyFailed    int               `json:"proxy_failed"`
 	AccountCreated int               `json:"account_created"`
+	AccountUpdated int               `json:"account_updated"`
+	AccountSkipped int               `json:"account_skipped"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
+	Items          []DataImportRow   `json:"items,omitempty"`
+}
+
+type DataImportRow struct {
+	Index     int    `json:"index"`
+	Action    string `json:"action"`
+	AccountID int64  `json:"account_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+type DataPreviewResult struct {
+	Total       int              `json:"total"`
+	Ready       int              `json:"ready"`
+	Duplicate   int              `json:"duplicate"`
+	Invalid     int              `json:"invalid"`
+	Unsupported int              `json:"unsupported"`
+	Items       []DataPreviewRow `json:"items"`
+}
+
+type DataPreviewRow struct {
+	Index               int    `json:"index"`
+	Status              string `json:"status"`
+	Platform            string `json:"platform,omitempty"`
+	Type                string `json:"type,omitempty"`
+	Name                string `json:"name,omitempty"`
+	Identity            string `json:"identity,omitempty"`
+	DuplicateScope      string `json:"duplicate_scope,omitempty"`
+	ExistingAccountID   int64  `json:"existing_account_id,omitempty"`
+	ExistingAccountName string `json:"existing_account_name,omitempty"`
+	CredentialHint      string `json:"credential_hint,omitempty"`
+	Message             string `json:"message,omitempty"`
 }
 
 type DataImportError struct {
 	Kind     string `json:"kind"`
 	Name     string `json:"name,omitempty"`
-	ProxyKey string `json:"proxy_key,omitempty"`
+	ProxyKey string `json:"-"`
 	Message  string `json:"message"`
 }
 
@@ -228,7 +275,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 func (h *AccountHandler) ImportData(c *gin.Context) {
 	var req DataImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "Invalid request")
 		return
 	}
 
@@ -236,10 +283,38 @@ func (h *AccountHandler) ImportData(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if err := validateImportOptions(req.Options); err != nil {
+		response.BadRequest(c, safeValidationMessage(err))
+		return
+	}
 
 	executeAdminIdempotentJSON(c, "admin.accounts.import_data", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		return h.importData(ctx, req)
+		result, err := h.importData(ctx, req)
+		middleware.SetAuditExtra(c, map[string]any{"requested": len(req.Data.Accounts), "created": result.AccountCreated, "skipped": result.AccountSkipped, "failed": result.AccountFailed})
+		return result, err
 	})
+}
+
+func (h *AccountHandler) PreviewImportData(c *gin.Context) {
+	var req DataImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if err := validateDataHeader(req.Data); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := validateImportOptions(req.Options); err != nil {
+		response.BadRequest(c, safeValidationMessage(err))
+		return
+	}
+	result, err := h.previewData(c.Request.Context(), req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) (DataImportResult, error) {
@@ -253,6 +328,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	existingProxies, err := h.listAllProxies(ctx)
 	if err != nil {
+		return result, err
+	}
+	if err := validateImportProxyOption(req.Options, existingProxies); err != nil {
 		return result, err
 	}
 
@@ -277,10 +355,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if err := validateDataProxy(item); err != nil {
 			result.ProxyFailed++
 			result.Errors = append(result.Errors, DataImportError{
-				Kind:     "proxy",
-				Name:     item.Name,
-				ProxyKey: key,
-				Message:  err.Error(),
+				Kind:    "proxy",
+				Name:    item.Name,
+				Message: "proxy data is invalid",
 			})
 			continue
 		}
@@ -341,10 +418,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				// 查不到备用代理：降级 fallback_mode=none，记录 warning
 				fallbackMode = service.FallbackModeNone
 				result.Errors = append(result.Errors, DataImportError{
-					Kind:     "proxy",
-					Name:     item.Name,
-					ProxyKey: key,
-					Message:  fmt.Sprintf("backup_proxy_name %q not found, fallback_mode downgraded to none", item.BackupProxyName),
+					Kind:    "proxy",
+					Name:    item.Name,
+					Message: "backup proxy is unavailable",
 				})
 			}
 		}
@@ -364,10 +440,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		if createErr != nil {
 			result.ProxyFailed++
 			result.Errors = append(result.Errors, DataImportError{
-				Kind:     "proxy",
-				Name:     item.Name,
-				ProxyKey: key,
-				Message:  createErr.Error(),
+				Kind:    "proxy",
+				Name:    item.Name,
+				Message: "proxy could not be created",
 			})
 			continue
 		}
@@ -396,19 +471,42 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 	}
 
-	// 收集需要异步设置隐私的 Antigravity OAuth 账号
+	// Run OAuth privacy once after the batch instead of one goroutine per row.
 	var privacyAccounts []*service.Account
-
+	existingAccounts, err := h.listAccountsFiltered(ctx, "", "", "", "", 0, "", "id", "asc")
+	if err != nil {
+		return result, err
+	}
+	seenIdentities := make(map[string]struct{}, len(existingAccounts)+len(dataPayload.Accounts))
+	for i := range existingAccounts {
+		if identity := dataAccountIdentity(existingAccounts[i].Platform, existingAccounts[i].Type, existingAccounts[i].Credentials, existingAccounts[i].Extra); identity != "" {
+			seenIdentities[identity] = struct{}{}
+		}
+	}
 	for i := range dataPayload.Accounts {
-		item := dataPayload.Accounts[i]
+		item := normalizeDataAccount(dataPayload.Accounts[i])
+		index := item.SourceIndex
+		if index == 0 {
+			index = i + 1
+		}
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:    "account",
 				Name:    item.Name,
-				Message: err.Error(),
+				Message: safeValidationMessage(err),
 			})
+			result.Items = append(result.Items, DataImportRow{Index: index, Action: "failed", Name: item.Name, Message: safeValidationMessage(err)})
 			continue
+		}
+		identity := dataAccountIdentity(item.Platform, item.Type, item.Credentials, item.Extra)
+		if identity != "" {
+			if _, exists := seenIdentities[identity]; exists {
+				result.AccountSkipped++
+				result.Items = append(result.Items, DataImportRow{Index: index, Action: "skipped", Name: item.Name, Message: "duplicate account"})
+				continue
+			}
+			seenIdentities[identity] = struct{}{}
 		}
 
 		var proxyID *int64
@@ -418,13 +516,16 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			} else {
 				result.AccountFailed++
 				result.Errors = append(result.Errors, DataImportError{
-					Kind:     "account",
-					Name:     item.Name,
-					ProxyKey: *item.ProxyKey,
-					Message:  "proxy_key not found",
+					Kind:    "account",
+					Name:    item.Name,
+					Message: "proxy_key not found",
 				})
+				result.Items = append(result.Items, DataImportRow{Index: index, Action: "failed", Name: item.Name, Message: "proxy is unavailable"})
 				continue
 			}
+		}
+		if req.Options != nil && req.Options.ProxyID != nil {
+			proxyID = req.Options.ProxyID
 		}
 
 		enrichCredentialsFromIDToken(&item)
@@ -443,7 +544,20 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			GroupIDs:             nil,
 			ExpiresAt:            item.ExpiresAt,
 			AutoPauseOnExpired:   item.AutoPauseOnExpired,
+			AtomicGroupBind:      true,
 			SkipDefaultGroupBind: skipDefaultGroupBind,
+			SkipAsyncPrivacy:     true,
+		}
+		if req.Options != nil {
+			accountInput.Status = req.Options.Status
+			accountInput.Schedulable = req.Options.Schedulable
+			if req.Options.Priority != nil {
+				accountInput.Priority = *req.Options.Priority
+			}
+			if len(req.Options.GroupIDs) > 0 {
+				accountInput.GroupIDs = req.Options.GroupIDs
+				accountInput.SkipDefaultGroupBind = true
+			}
 		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
@@ -452,19 +566,21 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:    "account",
 				Name:    item.Name,
-				Message: err.Error(),
+				Message: "account could not be created",
 			})
+			result.Items = append(result.Items, DataImportRow{Index: index, Action: "failed", Name: item.Name, Message: "account could not be created"})
 			continue
 		}
 		// 收集 Antigravity OAuth 账号，稍后异步设置隐私
-		if created.Platform == service.PlatformAntigravity && created.Type == service.AccountTypeOAuth {
+		if (created.Platform == service.PlatformOpenAI || created.Platform == service.PlatformAntigravity) && created.Type == service.AccountTypeOAuth {
 			privacyAccounts = append(privacyAccounts, created)
 		}
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
+		result.Items = append(result.Items, DataImportRow{Index: index, Action: "created", AccountID: created.ID, Name: created.Name})
 	}
 
-	// 异步设置 Antigravity 隐私，避免大量导入时阻塞请求
+	// Bounded sequential post-import privacy work avoids unbounded goroutine fanout.
 	if len(privacyAccounts) > 0 {
 		adminSvc := h.adminService
 		go func() {
@@ -475,9 +591,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}()
 			bgCtx := context.Background()
 			for _, acc := range privacyAccounts {
-				adminSvc.ForceAntigravityPrivacy(bgCtx, acc)
+				if acc.Platform == service.PlatformOpenAI {
+					adminSvc.EnsureOpenAIPrivacy(bgCtx, acc)
+				} else {
+					adminSvc.EnsureAntigravityPrivacy(bgCtx, acc)
+				}
 			}
-			slog.Info("import_antigravity_privacy_done", "count", len(privacyAccounts))
+			slog.Info("import_oauth_privacy_done", "count", len(privacyAccounts))
 		}()
 	}
 
@@ -500,6 +620,206 @@ func (h *AccountHandler) listAllProxies(ctx context.Context) ([]service.Proxy, e
 		page++
 	}
 	return out, nil
+}
+
+func (h *AccountHandler) previewData(ctx context.Context, req DataImportRequest) (DataPreviewResult, error) {
+	payload := req.Data
+	existing, err := h.listAccountsFiltered(ctx, "", "", "", "", 0, "", "id", "asc")
+	if err != nil {
+		return DataPreviewResult{}, err
+	}
+	existingByIdentity := make(map[string]service.Account, len(existing))
+	for i := range existing {
+		if identity := dataAccountIdentity(existing[i].Platform, existing[i].Type, existing[i].Credentials, existing[i].Extra); identity != "" {
+			existingByIdentity[identity] = existing[i]
+		}
+	}
+	existingProxies, err := h.listAllProxies(ctx)
+	if err != nil {
+		return DataPreviewResult{}, err
+	}
+	if err := validateImportProxyOption(req.Options, existingProxies); err != nil {
+		return DataPreviewResult{}, err
+	}
+	proxyKeys := make(map[string]struct{}, len(existingProxies)+len(payload.Proxies))
+	for _, proxy := range existingProxies {
+		proxyKeys[buildProxyKey(proxy.Protocol, proxy.Host, proxy.Port, proxy.Username, proxy.Password)] = struct{}{}
+	}
+	for _, proxy := range payload.Proxies {
+		if validateDataProxy(proxy) != nil {
+			continue
+		}
+		key := proxy.ProxyKey
+		if key == "" {
+			key = buildProxyKey(proxy.Protocol, proxy.Host, proxy.Port, proxy.Username, proxy.Password)
+		}
+		proxyKeys[key] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(payload.Accounts))
+	result := DataPreviewResult{Total: len(payload.Accounts), Items: make([]DataPreviewRow, 0, len(payload.Accounts))}
+	for i := range payload.Accounts {
+		item := normalizeDataAccount(payload.Accounts[i])
+		index := item.SourceIndex
+		if index == 0 {
+			index = i + 1
+		}
+		row := DataPreviewRow{Index: index, Status: "ready", Platform: item.Platform, Type: item.Type, Name: item.Name}
+		if err := validateDataAccount(item); err != nil {
+			row.Status, row.Message = validationPreviewStatus(err), safeValidationMessage(err)
+			if row.Status == "unsupported" {
+				result.Unsupported++
+			} else {
+				result.Invalid++
+			}
+			result.Items = append(result.Items, row)
+			continue
+		}
+		if item.ProxyKey != nil && *item.ProxyKey != "" && (req.Options == nil || req.Options.ProxyID == nil) {
+			if _, ok := proxyKeys[*item.ProxyKey]; !ok {
+				row.Status, row.Message = "invalid", "proxy is unavailable"
+				result.Invalid++
+				result.Items = append(result.Items, row)
+				continue
+			}
+		}
+		identity := dataAccountIdentity(item.Platform, item.Type, item.Credentials, item.Extra)
+		row.Identity = identityDisplay(identity)
+		row.CredentialHint = credentialHint(item.Credentials)
+		if identity != "" {
+			if account, ok := existingByIdentity[identity]; ok {
+				row.Status, row.DuplicateScope, row.ExistingAccountID, row.ExistingAccountName = "duplicate", "existing", account.ID, account.Name
+			} else if _, ok := seen[identity]; ok {
+				row.Status, row.DuplicateScope = "duplicate", "batch"
+			}
+			seen[identity] = struct{}{}
+		}
+		switch row.Status {
+		case "duplicate":
+			result.Duplicate++
+		default:
+			result.Ready++
+		}
+		result.Items = append(result.Items, row)
+	}
+	return result, nil
+}
+
+func safeValidationMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	switch message {
+	case "account name is required", "account platform is required", "account type is required",
+		"account credentials is required", "account platform is unsupported", "account type is invalid",
+		"bedrock accounts require anthropic", "service accounts require anthropic or gemini",
+		"setup-token accounts require anthropic or openai", "upstream accounts require antigravity",
+		"this platform requires an api key", "api_key is required", "oauth token is required",
+		"setup token is required", "service account credential is invalid", "bedrock credentials are required",
+		"upstream base_url is invalid", "upstream api_key is required", "rate_multiplier must be >= 0", "concurrency must be >= 0",
+		"priority must be >= 0", "account status is invalid", "proxy_id must be positive",
+		"group_ids must be positive":
+		return message
+	}
+	return "account data is invalid"
+}
+
+func validationPreviewStatus(err error) string {
+	if err == nil {
+		return "ready"
+	}
+	message := err.Error()
+	if strings.Contains(message, "unsupported") || strings.Contains(message, "requires ") || message == "account type is invalid" {
+		return "unsupported"
+	}
+	return "invalid"
+}
+
+func validateImportOptions(options *DataImportOptions) error {
+	if options == nil {
+		return nil
+	}
+	if options.Status != "" && options.Status != service.StatusActive && options.Status != service.StatusDisabled {
+		return errors.New("account status is invalid")
+	}
+	if options.ProxyID != nil && *options.ProxyID <= 0 {
+		return errors.New("proxy_id must be positive")
+	}
+	if options.Priority != nil && *options.Priority < 0 {
+		return errors.New("priority must be >= 0")
+	}
+	for _, groupID := range options.GroupIDs {
+		if groupID <= 0 {
+			return errors.New("group_ids must be positive")
+		}
+	}
+	return nil
+}
+
+func validateImportProxyOption(options *DataImportOptions, proxies []service.Proxy) error {
+	if options == nil || options.ProxyID == nil {
+		return nil
+	}
+	for i := range proxies {
+		if proxies[i].ID == *options.ProxyID {
+			return nil
+		}
+	}
+	return infraerrors.BadRequest("IMPORT_PROXY_NOT_FOUND", "selected proxy is unavailable")
+}
+
+func dataAccountIdentity(platform, accountType string, credentials, extra map[string]any) string {
+	platform, accountType = strings.ToLower(strings.TrimSpace(platform)), strings.ToLower(strings.TrimSpace(accountType))
+	if accountType == service.AccountTypeServiceAccount {
+		if email, err := service.VertexServiceAccountClientEmail(credentials); err == nil {
+			return identityKey(platform, "client_email", email)
+		}
+	}
+	for _, key := range []string{"crs_account_id", "chatgpt_account_id", "chatgpt_user_id", "account_uuid", "email", "client_email"} {
+		value := stringValue(extra, key)
+		if value == "" {
+			value = stringValue(credentials, key)
+		}
+		if value != "" {
+			return identityKey(platform, key, value)
+		}
+	}
+	return ""
+}
+
+func identityKey(platform, kind, value string) string {
+	return strings.ToLower(strings.TrimSpace(platform)) + "\x00" + kind + "\x00" + strings.ToLower(strings.TrimSpace(value))
+}
+
+func identityDisplay(identity string) string {
+	parts := strings.SplitN(identity, "\x00", 3)
+	if len(parts) == 3 {
+		return parts[2]
+	}
+	return ""
+}
+
+func stringValue(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func credentialHint(credentials map[string]any) string {
+	for _, key := range []string{"api_key", "access_token", "token", "refresh_token", "setup_token"} {
+		value := stringValue(credentials, key)
+		if value == "" {
+			continue
+		}
+		runes := []rune(value)
+		if len(runes) <= 4 {
+			return "••••"
+		}
+		return "••••" + string(runes[len(runes)-4:])
+	}
+	return ""
 }
 
 func (h *AccountHandler) listAccountsFiltered(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode, sortBy, sortOrder string) ([]service.Account, error) {
@@ -637,10 +957,10 @@ func parseIncludeProxies(c *gin.Context) (bool, error) {
 
 func validateDataHeader(payload DataPayload) error {
 	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType {
-		return fmt.Errorf("unsupported data type: %s", payload.Type)
+		return errors.New("unsupported data type")
 	}
 	if payload.Version != 0 && payload.Version != dataVersion {
-		return fmt.Errorf("unsupported data version: %d", payload.Version)
+		return errors.New("unsupported data version")
 	}
 	if payload.Proxies == nil {
 		return errors.New("proxies is required")
@@ -688,10 +1008,58 @@ func validateDataAccount(item DataAccount) error {
 	if len(item.Credentials) == 0 {
 		return errors.New("account credentials is required")
 	}
-	switch item.Type {
-	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream:
+	platform := strings.ToLower(strings.TrimSpace(item.Platform))
+	accountType := strings.ToLower(strings.TrimSpace(item.Type))
+	supported := map[string]bool{service.PlatformAnthropic: true, service.PlatformOpenAI: true, service.PlatformGemini: true, service.PlatformAntigravity: true, service.PlatformGrok: true, service.PlatformKimi: true, service.PlatformZhipu: true, service.PlatformDeepseek: true}
+	if !supported[platform] {
+		return errors.New("account platform is unsupported")
+	}
+	switch accountType {
+	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream, service.AccountTypeBedrock, service.AccountTypeServiceAccount:
 	default:
-		return fmt.Errorf("account type is invalid: %s", item.Type)
+		return errors.New("account type is invalid")
+	}
+	if accountType == service.AccountTypeBedrock && platform != service.PlatformAnthropic {
+		return errors.New("bedrock accounts require anthropic")
+	}
+	if accountType == service.AccountTypeServiceAccount && platform != service.PlatformAnthropic && platform != service.PlatformGemini {
+		return errors.New("service accounts require anthropic or gemini")
+	}
+	if accountType == service.AccountTypeSetupToken && platform != service.PlatformAnthropic && platform != service.PlatformOpenAI {
+		return errors.New("setup-token accounts require anthropic or openai")
+	}
+	if accountType == service.AccountTypeUpstream && platform != service.PlatformAntigravity {
+		return errors.New("upstream accounts require antigravity")
+	}
+	if (platform == service.PlatformKimi || platform == service.PlatformZhipu || platform == service.PlatformDeepseek) && accountType != service.AccountTypeAPIKey {
+		return errors.New("this platform requires an api key")
+	}
+	if accountType == service.AccountTypeAPIKey && stringValue(item.Credentials, "api_key") == "" {
+		return errors.New("api_key is required")
+	}
+	if accountType == service.AccountTypeOAuth && stringValue(item.Credentials, "access_token") == "" && stringValue(item.Credentials, "refresh_token") == "" && stringValue(item.Credentials, "token") == "" {
+		return errors.New("oauth token is required")
+	}
+	if accountType == service.AccountTypeSetupToken && stringValue(item.Credentials, "setup_token") == "" && stringValue(item.Credentials, "access_token") == "" && stringValue(item.Credentials, "refresh_token") == "" && stringValue(item.Credentials, "token") == "" {
+		return errors.New("setup token is required")
+	}
+	if accountType == service.AccountTypeServiceAccount {
+		if _, err := service.VertexServiceAccountClientEmail(item.Credentials); err != nil {
+			return errors.New("service account credential is invalid")
+		}
+	}
+	if accountType == service.AccountTypeBedrock && stringValue(item.Credentials, "api_key") == "" && (stringValue(item.Credentials, "aws_access_key_id") == "" || stringValue(item.Credentials, "aws_secret_access_key") == "") {
+		return errors.New("bedrock credentials are required")
+	}
+	if accountType == service.AccountTypeUpstream {
+		baseURL := stringValue(item.Credentials, "base_url")
+		parsed, err := url.Parse(baseURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return errors.New("upstream base_url is invalid")
+		}
+		if stringValue(item.Credentials, "api_key") == "" {
+			return errors.New("upstream api_key is required")
+		}
 	}
 	if item.RateMultiplier != nil && *item.RateMultiplier < 0 {
 		return errors.New("rate_multiplier must be >= 0")
@@ -703,6 +1071,12 @@ func validateDataAccount(item DataAccount) error {
 		return errors.New("priority must be >= 0")
 	}
 	return nil
+}
+
+func normalizeDataAccount(item DataAccount) DataAccount {
+	item.Platform = strings.ToLower(strings.TrimSpace(item.Platform))
+	item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+	return item
 }
 
 func defaultProxyName(name string) string {

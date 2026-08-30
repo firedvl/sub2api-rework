@@ -114,6 +114,16 @@ func parseVertexServiceAccountKey(account *Account) (*vertexServiceAccountKey, e
 	return nil, errors.New("service_account_json not found in credentials")
 }
 
+// VertexServiceAccountClientEmail validates the canonical string or nested
+// service-account credential and returns its stable, non-secret identity.
+func VertexServiceAccountClientEmail(credentials map[string]any) (string, error) {
+	key, err := parseVertexServiceAccountKey(&Account{Credentials: credentials})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(key.ClientEmail), nil
+}
+
 func parseVertexServiceAccountJSON(raw []byte) (*vertexServiceAccountKey, error) {
 	var key vertexServiceAccountKey
 	if err := json.Unmarshal(raw, &key); err != nil {
