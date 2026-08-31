@@ -292,13 +292,13 @@ func TestFilterGrokFreeQuotaAccountsEvictsDepartedAccounts(t *testing.T) {
 		{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Credentials: map[string]any{"subscription_tier": "FREE"}},
 	}
 	// First call schedules async refresh + may not have finished sweep yet.
-	_ = filterGrokFreeQuotaAccountsCore(context.Background(), grokFreeQuotaTestConfig(), repo, &cache, accounts)
+	_ = filterGrokFreeQuotaAccountsCore(context.Background(), grokFreeQuotaTestConfig(), repo, &cache, accounts, true)
 	require.Eventually(t, func() bool {
 		_, departedStillCached := cache.Load(int64(99))
 		_, freshCached := cache.Load(int64(1))
 		return !departedStillCached && freshCached
 	}, 2*time.Second, 10*time.Millisecond)
-	filtered := filterGrokFreeQuotaAccountsCore(context.Background(), grokFreeQuotaTestConfig(), repo, &cache, accounts)
+	filtered := filterGrokFreeQuotaAccountsCore(context.Background(), grokFreeQuotaTestConfig(), repo, &cache, accounts, true)
 	require.Equal(t, []int64{1}, accountIDs(filtered))
 }
 

@@ -1388,44 +1388,8 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		return nil
 	}
 
-	// Filter by platform if specified
-	if platform != "" {
-		filtered := make([]Account, 0)
-		for _, acc := range accounts {
-			if acc.Platform == platform {
-				filtered = append(filtered, acc)
-			}
-		}
-		accounts = filtered
-	}
-
-	// Collect unique models from all accounts
-	modelSet := make(map[string]struct{})
-	hasAnyMapping := false
-
-	for _, acc := range accounts {
-		// Passthrough routing accepts models independently of model_mapping. A stale
-		// mapping on any eligible passthrough account therefore cannot define the
-		// public whitelist; return nil so the handler uses its default model set.
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
-			if s.modelsListCache != nil {
-				s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
-				modelsListCacheStoreTotal.Add(1)
-			}
-			return nil
-		}
-
-		mapping := acc.GetModelMapping()
-		if len(mapping) > 0 {
-			hasAnyMapping = true
-			for model := range mapping {
-				modelSet[model] = struct{}{}
-			}
-		}
-	}
-
-	// If no account has model_mapping, return nil (use default)
-	if !hasAnyMapping {
+	models := availableModelIDsFromAccounts(accounts, platform)
+	if len(models) == 0 {
 		if s.modelsListCache != nil {
 			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
 			modelsListCacheStoreTotal.Add(1)
@@ -1433,18 +1397,44 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		return nil
 	}
 
-	// Convert to slice
-	models := make([]string, 0, len(modelSet))
-	for model := range modelSet {
-		models = append(models, model)
-	}
-	sort.Strings(models)
-
 	if s.modelsListCache != nil {
 		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
 		modelsListCacheStoreTotal.Add(1)
 	}
 	return cloneStringSlice(models)
+}
+
+func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
+	modelSet := make(map[string]struct{})
+	hasAnyMapping := false
+	for i := range accounts {
+		account := &accounts[i]
+		if platform != "" && account.Platform != platform {
+			continue
+		}
+		// Passthrough routing accepts models independently of model_mapping. A
+		// leftover mapping must not become a public whitelist.
+		if platform == PlatformOpenAI && account.IsOpenAIPassthroughEnabled() {
+			return nil
+		}
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			continue
+		}
+		hasAnyMapping = true
+		for model := range mapping {
+			modelSet[model] = struct{}{}
+		}
+	}
+	if !hasAnyMapping {
+		return nil
+	}
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models
 }
 
 // GetSchedulablePlatforms returns the concrete platforms that currently have

@@ -271,6 +271,27 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 	return accounts, useMixed, nil
 }
 
+// PeekSchedulableAccounts reads the active scheduler snapshot without falling
+// back to the database or publishing a replacement on a miss.
+func (s *SchedulerSnapshotService) PeekSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, bool, error) {
+	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
+	if s == nil || s.cache == nil {
+		return nil, useMixed, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, useMixed, false, err
+	}
+
+	cached, hit, err := s.cache.GetSnapshot(ctx, s.bucketFor(groupID, platform, s.resolveMode(platform, hasForcePlatform)))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, useMixed, false, ctxErr
+	}
+	if err != nil || !hit {
+		return nil, useMixed, false, err
+	}
+	return derefAccounts(cached), useMixed, true, nil
+}
+
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
 	if accountID <= 0 {
 		return nil, nil
