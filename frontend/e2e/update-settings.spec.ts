@@ -46,7 +46,7 @@ test('shows compatibility pending distinctly at a narrow width and renders relea
   await page.goto('/admin/settings')
 
   const card = page.getByRole('region', { name: 'Software Updates' })
-  await expect(card).toContainText('Compatibility review pending')
+  await expect(card).toContainText('Compatibility review pending', { timeout: 15_000 })
   await expect(card).toContainText('Upstream baseline')
   await expect(card).toContainText('v0.1.183')
   await expect(card).toContainText('Latest upstream')

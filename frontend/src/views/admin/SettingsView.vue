@@ -9,7 +9,13 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="operator-settings-form space-y-6" novalidate>
+      <form
+        v-else
+        @submit.prevent="saveSettings"
+        class="operator-settings-form space-y-6"
+        :class="{ 'settings-form-dirty': settingsDirty }"
+        novalidate
+      >
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav
@@ -6279,6 +6285,7 @@
                     v-model="form.site_name"
                     type="text"
                     class="input"
+                    data-testid="settings-site-name"
                     :placeholder="t('admin.settings.site.siteNamePlaceholder')"
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -8376,6 +8383,7 @@
                     v-model="form.smtp_password"
                     type="password"
                     class="input"
+                    data-testid="settings-smtp-password"
                     autocomplete="new-password"
                     autocapitalize="off"
                     spellcheck="false"
@@ -8681,12 +8689,45 @@
           <BackupSettings />
         </div>
 
-        <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <Transition name="settings-dirty-bar">
+          <div
+            v-if="settingsDirty"
+            class="settings-dirty-bar"
+            data-testid="settings-dirty-bar"
+          >
+            <p role="status" aria-live="polite">
+              {{ t("admin.settings.unsavedChanges") }}
+            </p>
+            <div class="settings-dirty-actions">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-testid="settings-discard-button"
+                :disabled="saving"
+                @click="discardSettingsChanges"
+              >
+                {{ t("admin.settings.discardChanges") }}
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary"
+                data-testid="settings-floating-save-button"
+                :disabled="saving || loadFailed"
+                :aria-busy="saving"
+              >
+                {{ saving ? t("admin.settings.saving") : t("admin.settings.saveSettings") }}
+              </button>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- Secondary save fallback at the natural end of the form. -->
+        <div v-show="activeTab !== 'backup'" class="settings-bottom-actions flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
-            class="btn btn-primary"
+            class="btn btn-secondary"
+            :aria-busy="saving"
           >
             <svg
               v-if="saving"
@@ -10767,9 +10808,153 @@ const codexSyncedVersionLabel = computed(() => {
   });
 });
 
+const settingsSaveableFormKeys = Object.keys(form).filter(
+  (key) =>
+    !key.endsWith("_configured") &&
+    !key.includes("_effective_") &&
+    !key.endsWith("_synced") &&
+    !key.startsWith("auth_source_default_") &&
+    !key.startsWith("ops_") &&
+    ![
+      "passkey_rp_id",
+      "passkey_rp_origins",
+      "registration_email_suffix_whitelist",
+      "table_page_size_options",
+      "claude_oauth_system_prompt_blocks",
+      "codex_cli_only_blacklist",
+      "codex_cli_only_whitelist",
+      "codex_cli_only_engine_fingerprint_signals",
+      "openai_fast_policy_settings",
+      "web_search_emulation_enabled",
+    ].includes(key),
+);
+
+interface SettingsBaseline {
+  canonical: string;
+  form: SettingsForm;
+  authSourceDefaults: AuthSourceDefaultsState;
+  registrationEmailSuffixWhitelistTags: string[];
+  tablePageSizeOptionsInput: string;
+  claudeOAuthSystemPromptBlocks: ClaudeOAuthSystemPromptBlock[];
+  codexBlacklistRows: CodexClientRow[];
+  codexWhitelistRows: CodexClientRow[];
+  codexFingerprintRows: FingerprintSignalRow[];
+  openaiFastPolicyLoaded: boolean;
+  openaiFastPolicyRules: OpenAIFastPolicyRule[];
+  webSearchConfig: WebSearchEmulationConfig;
+}
+
+function cloneJSON<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function canonicalSettingsJSON(): string {
+  const formValues = Object.fromEntries(
+    settingsSaveableFormKeys.map((key) => [
+      key,
+      (form as Record<string, unknown>)[key],
+    ]),
+  );
+  const webSearch = {
+    enabled: webSearchConfig.enabled,
+    providers: webSearchConfig.providers.map((provider) => ({
+      type: provider.type,
+      api_key: provider.api_key,
+      quota_limit:
+        Number(provider.quota_limit) > 0 ? Number(provider.quota_limit) : null,
+      subscribed_at: provider.subscribed_at,
+      proxy_id: provider.proxy_id,
+      expires_at: provider.expires_at,
+    })),
+  };
+
+  return JSON.stringify({
+    form: formValues,
+    authSourceDefaults,
+    registrationEmailSuffixWhitelistTags: [
+      ...normalizeRegistrationEmailSuffixDomains(
+        registrationEmailSuffixWhitelistTags.value,
+      ),
+    ].sort(),
+    tablePageSizeOptions: parseTablePageSizeOptionsInput(
+      tablePageSizeOptionsInput.value,
+    ),
+    claudeOAuthSystemPromptBlocks:
+      serializeClaudeOAuthSystemPromptBlocksToJSON(
+        claudeOAuthSystemPromptBlocks.value,
+      ),
+    codexBlacklist: serializeCodexRowsToJSON(codexBlacklistRows.value),
+    codexWhitelist: serializeCodexRowsToJSON(codexWhitelistRows.value),
+    codexFingerprint: serializeFingerprintRowsToJSON(
+      codexFingerprintRows.value,
+    ),
+    ...(openaiFastPolicyLoaded.value
+      ? { openaiFastPolicyRules: openaiFastPolicyForm.rules }
+      : {}),
+    webSearch,
+  });
+}
+
+const settingsBaseline = ref<SettingsBaseline | null>(null);
+const settingsDirty = computed(
+  () =>
+    settingsBaseline.value !== null &&
+    canonicalSettingsJSON() !== settingsBaseline.value.canonical,
+);
+
+function captureSettingsBaseline(): void {
+  settingsBaseline.value = {
+    canonical: canonicalSettingsJSON(),
+    form: cloneJSON(form),
+    authSourceDefaults: cloneJSON(authSourceDefaults),
+    registrationEmailSuffixWhitelistTags: [
+      ...registrationEmailSuffixWhitelistTags.value,
+    ],
+    tablePageSizeOptionsInput: tablePageSizeOptionsInput.value,
+    claudeOAuthSystemPromptBlocks: cloneJSON(
+      claudeOAuthSystemPromptBlocks.value,
+    ),
+    codexBlacklistRows: cloneJSON(codexBlacklistRows.value),
+    codexWhitelistRows: cloneJSON(codexWhitelistRows.value),
+    codexFingerprintRows: cloneJSON(codexFingerprintRows.value),
+    openaiFastPolicyLoaded: openaiFastPolicyLoaded.value,
+    openaiFastPolicyRules: cloneJSON(openaiFastPolicyForm.rules),
+    webSearchConfig: cloneJSON(webSearchConfig),
+  };
+}
+
+function discardSettingsChanges(): void {
+  const baseline = settingsBaseline.value;
+  if (!baseline) return;
+
+  Object.assign(form, cloneJSON(baseline.form));
+  Object.assign(
+    authSourceDefaults,
+    cloneJSON(baseline.authSourceDefaults),
+  );
+  registrationEmailSuffixWhitelistTags.value = [
+    ...baseline.registrationEmailSuffixWhitelistTags,
+  ];
+  tablePageSizeOptionsInput.value = baseline.tablePageSizeOptionsInput;
+  claudeOAuthSystemPromptBlocks.value = cloneJSON(
+    baseline.claudeOAuthSystemPromptBlocks,
+  );
+  codexBlacklistRows.value = cloneJSON(baseline.codexBlacklistRows);
+  codexWhitelistRows.value = cloneJSON(baseline.codexWhitelistRows);
+  codexFingerprintRows.value = cloneJSON(baseline.codexFingerprintRows);
+  openaiFastPolicyLoaded.value = baseline.openaiFastPolicyLoaded;
+  openaiFastPolicyForm.rules = cloneJSON(baseline.openaiFastPolicyRules);
+  Object.assign(webSearchConfig, cloneJSON(baseline.webSearchConfig));
+  registrationEmailSuffixWhitelistDraft.value = "";
+  forwardedClientIpHeaderDraft.value = "";
+  smtpPasswordManuallyEdited.value = false;
+  syncCaptchaProviderSelection();
+}
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
+  settingsBaseline.value = null;
   try {
     const settings = await adminAPI.settings.getSettings();
     settings.payment_load_balance_strategy =
@@ -10931,6 +11116,7 @@ async function loadSettings() {
 
     // Load web search emulation config separately
     await loadWebSearchConfig();
+    captureSettingsBaseline();
   } catch (error: unknown) {
     loadFailed.value = true;
     appStore.showError(
@@ -11589,6 +11775,9 @@ async function saveSettings() {
     }
     // Save web search emulation config separately (errors handled internally)
     const wsOk = await saveWebSearchConfig();
+    if (wsOk) {
+      captureSettingsBaseline();
+    }
     // Refresh cached settings so sidebar/header update immediately
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
@@ -13013,5 +13202,87 @@ watch(
 
 .settings-tab-label {
   @apply whitespace-nowrap leading-none;
+}
+
+.operator-settings-form.settings-form-dirty {
+  padding-bottom: 6rem;
+}
+
+.settings-dirty-bar {
+  position: fixed;
+  z-index: 40;
+  right: 1rem;
+  bottom: calc(3.25rem + env(safe-area-inset-bottom));
+  left: 1rem;
+  display: flex;
+  width: min(44rem, calc(100vw - 2rem));
+  min-height: 3.5rem;
+  margin: 0 auto;
+  padding: 0.625rem 0.75rem 0.625rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--operator-border);
+  border-radius: 0.5rem;
+  background: var(--operator-card);
+  box-shadow: 0 12px 32px oklch(0 0 0 / 0.28);
+  color: var(--operator-foreground);
+}
+
+.settings-dirty-bar p {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.settings-dirty-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.settings-bottom-actions {
+  margin-top: 2rem !important;
+  padding: 1rem 0 2rem;
+}
+
+.settings-dirty-bar-enter-active,
+.settings-dirty-bar-leave-active {
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+}
+
+.settings-dirty-bar-enter-from,
+.settings-dirty-bar-leave-to {
+  opacity: 0;
+  transform: translateY(0.5rem);
+}
+
+@media (max-width: 479px) {
+  .operator-settings-form.settings-form-dirty {
+    padding-bottom: 8rem;
+  }
+
+  .settings-dirty-bar {
+    flex-wrap: wrap;
+    gap: 0.625rem;
+    padding: 0.75rem;
+  }
+
+  .settings-dirty-actions {
+    width: 100%;
+  }
+
+  .settings-dirty-actions .btn {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-dirty-bar-enter-active,
+  .settings-dirty-bar-leave-active {
+    transition: none;
+  }
 }
 </style>

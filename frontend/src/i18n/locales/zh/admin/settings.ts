@@ -1261,6 +1261,8 @@ export default {
       },
       saveSettings: '保存设置',
       saving: '保存中...',
+      unsavedChanges: '有未保存的更改',
+      discardChanges: '放弃更改',
       settingsSaved: '设置保存成功',
       smtpConnectionSuccess: 'SMTP 连接成功',
       testEmailSent: '测试邮件发送成功',

@@ -326,13 +326,13 @@ onUnmounted(() => {
   @apply border border-gray-200 dark:border-dark-600;
   @apply text-gray-900 dark:text-gray-100;
   @apply transition-all duration-200;
-  @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
+  @apply focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500/30;
   @apply hover:border-gray-300 dark:hover:border-dark-500;
   @apply cursor-pointer;
 }
 
 .select-trigger-open {
-  @apply border-primary-500 ring-2 ring-primary-500/30;
+  @apply border-gray-500 ring-2 ring-gray-500/30;
 }
 
 .select-trigger-disabled {
@@ -392,8 +392,7 @@ onUnmounted(() => {
 }
 
 .select-option-selected {
-  @apply bg-primary-50 dark:bg-primary-900/20;
-  @apply text-primary-700 dark:text-primary-300;
+  @apply bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-gray-100;
 }
 
 .select-option-label {

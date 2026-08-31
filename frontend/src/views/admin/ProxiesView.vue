@@ -102,7 +102,7 @@
           <template #header-select>
             <input
               type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              class="operator-checkbox h-4 w-4 cursor-pointer rounded border-gray-300 focus:ring-gray-500"
               :checked="allVisibleSelected"
               @click.stop
               @change="toggleSelectAllVisible($event)"
@@ -112,7 +112,7 @@
           <template #cell-select="{ row }">
             <input
               type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              class="operator-checkbox h-4 w-4 cursor-pointer rounded border-gray-300 focus:ring-gray-500"
               :checked="selectedProxyIds.has(row.id)"
               @click.stop
               @change="toggleSelectRow(row.id, $event)"
@@ -138,7 +138,7 @@
               <div class="operator-proxy-address">
                 <span
                   v-if="row.protocol"
-                  :class="['badge', row.protocol.startsWith('socks5') ? 'badge-primary' : 'badge-gray']"
+                  class="badge badge-gray"
                 >
                   {{ row.protocol.toUpperCase() }}
                 </span>
@@ -192,7 +192,7 @@
             <button
               v-if="(value || 0) > 0"
               type="button"
-              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-gray-200 dark:bg-dark-600 dark:text-primary-300 dark:hover:bg-dark-500"
+              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-900 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-100 dark:hover:bg-dark-500"
               @click="openAccountsModal(row)"
             >
               {{ t('admin.groups.accountsCount', { count: value || 0 }) }}
