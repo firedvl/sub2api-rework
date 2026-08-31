@@ -1,6 +1,10 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+)
 
 func normalizeGroupModelsListConfig(cfg GroupModelsListConfig) GroupModelsListConfig {
 	out := GroupModelsListConfig{Enabled: cfg.Enabled}
@@ -72,6 +76,14 @@ func modelsListAllowsModel(availablePatterns []string, model string) bool {
 	for _, pattern := range availablePatterns {
 		if pattern == model || (strings.HasSuffix(pattern, "*") && strings.HasPrefix(model, strings.TrimSuffix(pattern, "*"))) {
 			return true
+		}
+	}
+	normalized := claude.NormalizeModelID(strings.TrimSuffix(model, "-thinking"))
+	if normalized != model {
+		for _, pattern := range availablePatterns {
+			if pattern == normalized {
+				return true
+			}
 		}
 	}
 	return false

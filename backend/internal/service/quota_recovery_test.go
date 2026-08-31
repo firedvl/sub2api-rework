@@ -395,6 +395,10 @@ func (q *quotaRecoveryQuotaStub) CacheResetCreditsSnapshot(context.Context, int6
 	return nil
 }
 
+func (q *quotaRecoveryQuotaStub) CachePostResetSnapshot(context.Context, int64, *OpenAIQuotaUsage) error {
+	return nil
+}
+
 func (q *quotaRecoveryQuotaStub) ResetCreditTargeted(context.Context, int64, string, string) (*OpenAIQuotaResetResult, error) {
 	return nil, nil
 }

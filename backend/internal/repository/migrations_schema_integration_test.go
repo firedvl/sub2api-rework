@@ -5,10 +5,15 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"io/fs"
+	"net/url"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +50,8 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// users: columns required by repository queries
 	requireColumn(t, tx, "users", "username", "character varying", 100, false)
 	requireColumn(t, tx, "users", "notes", "text", 0, false)
+	requireColumn(t, tx, "users", "restrict_public_groups", "boolean", 0, false)
+	requireColumnDefaultContains(t, tx, "users", "restrict_public_groups", "false")
 
 	// accounts: schedulable and rate-limit fields
 	requireColumn(t, tx, "accounts", "notes", "text", 0, true)
@@ -69,6 +76,9 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "billing_type", "smallint", 0, false)
 	requireColumn(t, tx, "usage_logs", "request_type", "smallint", 0, false)
 	requireColumn(t, tx, "usage_logs", "openai_ws_mode", "boolean", 0, false)
+	requireColumn(t, tx, "usage_logs", "native_compaction_v2", "boolean", 0, false)
+	requireColumnDefaultContains(t, tx, "usage_logs", "native_compaction_v2", "false")
+	requireColumn(t, tx, "usage_logs", "requested_reasoning_effort", "character varying", 20, true)
 	requireColumn(t, tx, "usage_logs", "image_input_size", "character varying", 32, true)
 	requireColumn(t, tx, "usage_logs", "image_output_size", "character varying", 32, true)
 	requireColumn(t, tx, "usage_logs", "image_size_source", "character varying", 16, true)
@@ -178,6 +188,103 @@ WHERE ns.nspname = 'public'
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+}
+
+func TestMigrationsRunner_UpgradeFrom232PreservesRows(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dbName := fmt.Sprintf("sub2api_upgrade_%d", time.Now().UnixNano())
+	_, err := integrationDB.ExecContext(ctx, "CREATE DATABASE "+dbName)
+	require.NoError(t, err)
+
+	var upgradeDB *sql.DB
+	t.Cleanup(func() {
+		if upgradeDB != nil {
+			_ = upgradeDB.Close()
+		}
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dropCancel()
+		if _, dropErr := integrationDB.ExecContext(dropCtx, "DROP DATABASE IF EXISTS "+dbName+" WITH (FORCE)"); dropErr != nil {
+			t.Errorf("drop upgrade rehearsal database: %v", dropErr)
+		}
+	})
+
+	dsn, err := url.Parse(integrationPostgresDSN)
+	require.NoError(t, err)
+	dsn.Path = "/" + dbName
+	dsn.RawPath = ""
+	upgradeDB, err = openSQLWithRetry(ctx, dsn.String(), 30*time.Second)
+	require.NoError(t, err)
+
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	require.NoError(t, err)
+	migrations232 := fstest.MapFS{}
+	for _, name := range files {
+		if name >= "233_" {
+			continue
+		}
+		data, readErr := migrations.FS.ReadFile(name)
+		require.NoError(t, readErr)
+		migrations232[name] = &fstest.MapFile{Data: data}
+	}
+	_, has232 := migrations232["232_openai_auto_warmup_attempts.sql"]
+	require.True(t, has232)
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, migrations232))
+
+	columnExists := func(table, column string) bool {
+		var exists bool
+		require.NoError(t, upgradeDB.QueryRowContext(ctx, `
+SELECT EXISTS (
+	SELECT 1 FROM information_schema.columns
+	WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+)`, table, column).Scan(&exists))
+		return exists
+	}
+	require.False(t, columnExists("usage_logs", "native_compaction_v2"))
+	require.False(t, columnExists("usage_logs", "requested_reasoning_effort"))
+	require.False(t, columnExists("users", "restrict_public_groups"))
+
+	var userID, accountID, apiKeyID int64
+	require.NoError(t, upgradeDB.QueryRowContext(ctx,
+		"INSERT INTO users (email, password_hash) VALUES ('upgrade-232@example.com', 'hash') RETURNING id",
+	).Scan(&userID))
+	require.NoError(t, upgradeDB.QueryRowContext(ctx,
+		"INSERT INTO accounts (name, platform, type) VALUES ('upgrade-232', 'openai', 'oauth') RETURNING id",
+	).Scan(&accountID))
+	require.NoError(t, upgradeDB.QueryRowContext(ctx,
+		"INSERT INTO api_keys (user_id, key, name) VALUES ($1, 'sk-upgrade-232', 'upgrade-232') RETURNING id", userID,
+	).Scan(&apiKeyID))
+	_, err = upgradeDB.ExecContext(ctx, `
+INSERT INTO usage_logs (user_id, api_key_id, account_id, request_id, model)
+VALUES ($1, $2, $3, 'upgrade-232-log', 'gpt-5.6-sol')`, userID, apiKeyID, accountID)
+	require.NoError(t, err)
+
+	require.NoError(t, ApplyMigrations(ctx, upgradeDB))
+	require.NoError(t, ApplyMigrations(ctx, upgradeDB))
+
+	var nativeCompaction, restrictPublicGroups bool
+	var requestedEffort sql.NullString
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `
+SELECT native_compaction_v2, requested_reasoning_effort
+FROM usage_logs WHERE request_id = 'upgrade-232-log'`,
+	).Scan(&nativeCompaction, &requestedEffort))
+	require.False(t, nativeCompaction)
+	require.False(t, requestedEffort.Valid)
+	require.NoError(t, upgradeDB.QueryRowContext(ctx,
+		"SELECT restrict_public_groups FROM users WHERE id = $1", userID,
+	).Scan(&restrictPublicGroups))
+	require.False(t, restrictPublicGroups)
+
+	var applied int
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM schema_migrations
+WHERE filename IN (
+	'233_add_usage_log_native_compaction_v2.sql',
+	'234_add_usage_log_requested_reasoning_effort.sql',
+	'235_user_restrict_public_groups.sql'
+)`).Scan(&applied))
+	require.Equal(t, 3, applied)
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {

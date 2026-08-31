@@ -7,6 +7,7 @@ const {
   listAccounts,
   listWithEtag,
   getBatchUsage,
+  getUpstreamBillingRatesWithEtag,
   getBatchTodayStats,
   getUpstreamBillingProbeSettings,
   getAllProxies,
@@ -19,6 +20,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getBatchUsage: vi.fn(),
+  getUpstreamBillingRatesWithEtag: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock('@/api/admin', () => ({
       list: listAccounts,
       listWithEtag,
       getBatchUsage,
+      getUpstreamBillingRatesWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
@@ -131,6 +134,7 @@ describe('admin AccountsView bulk edit scope', () => {
     listAccounts.mockReset()
     listWithEtag.mockReset()
     getBatchUsage.mockReset()
+    getUpstreamBillingRatesWithEtag.mockReset()
     getBatchTodayStats.mockReset()
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
@@ -153,6 +157,11 @@ describe('admin AccountsView bulk edit scope', () => {
       data: null
     })
     getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({
+      notModified: true,
+      etag: null,
+      data: null
+    })
     getBatchTodayStats.mockResolvedValue({ stats: {} })
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
@@ -409,7 +418,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([7, 11])
   })
 
-  it('refreshes the current page after a batch probe and displays the synced rate', async () => {
+  it('updates the current page locally after a batch probe', async () => {
     const account = (id: number, rateMultiplier: number) => ({
       id,
       name: `account-${id}`,
@@ -441,6 +450,7 @@ describe('admin AccountsView bulk edit scope', () => {
         snapshot: {
           status: 'ok',
           data: { effective_rate_multiplier: 0.065 },
+          synced_rate_multiplier: 0.065,
           last_attempt_at: '2026-07-13T00:00:00Z',
           next_probe_at: '2026-07-13T00:30:00Z'
         }
@@ -491,12 +501,12 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(probeUpstreamBillingBatch).toHaveBeenCalledWith([11])
     const tableCalls = listAccounts.mock.calls.filter(([, pageSize]) => pageSize === 20)
-    expect(tableCalls).toHaveLength(3)
+    expect(tableCalls).toHaveLength(2)
     expect(tableCalls.at(-1)?.[0]).toBe(2)
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 
-  it('does not report a successful batch probe as failed when the list refresh fails', async () => {
+  it('does not report a successful batch probe as failed when reconciliation is skipped', async () => {
     const account = {
       id: 7,
       name: 'account-7',
@@ -508,16 +518,8 @@ describe('admin AccountsView bulk edit scope', () => {
       created_at: '2026-07-13T00:00:00Z',
       updated_at: '2026-07-13T00:00:00Z'
     }
-    let tableCallCount = 0
-    listAccounts.mockImplementation((page: number, pageSize: number) => {
-      if (pageSize === 1000) {
-        return Promise.resolve({ items: [account], total: 1, page: 1, page_size: 1000, pages: 1 })
-      }
-      tableCallCount += 1
-      return tableCallCount === 1
-        ? Promise.resolve({ items: [account], total: 1, page, page_size: pageSize, pages: 1 })
-        : Promise.reject(new Error('refresh failed'))
-    })
+    listAccounts
+      .mockResolvedValueOnce({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
     probeUpstreamBillingBatch.mockResolvedValue([
       {
         account_id: 7,
@@ -576,7 +578,7 @@ describe('admin AccountsView bulk edit scope', () => {
     consoleError.mockRestore()
   })
 
-  it('refreshes the account row after a successful single-account probe', async () => {
+  it('updates the account row after a successful single-account probe', async () => {
     const account = (rateMultiplier: number) => ({
       id: 7,
       name: 'account-7',
@@ -598,6 +600,7 @@ describe('admin AccountsView bulk edit scope', () => {
       snapshot: {
         status: 'ok',
         data: { effective_rate_multiplier: 0.065 },
+        synced_rate_multiplier: 0.065,
         last_attempt_at: '2026-07-13T00:00:00Z',
         next_probe_at: '2026-07-13T00:30:00Z'
       }
@@ -643,7 +646,7 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     expect(probeUpstreamBilling).toHaveBeenCalledWith(7)
-    expect(listAccounts.mock.calls.filter(([, pageSize]) => pageSize === 20)).toHaveLength(2)
+    expect(listAccounts.mock.calls.filter(([, pageSize]) => pageSize === 20)).toHaveLength(1)
     expect(wrapper.get('[data-test="account-rate"]').text()).toBe('0.065x')
   })
 })
