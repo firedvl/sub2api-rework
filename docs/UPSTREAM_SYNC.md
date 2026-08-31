@@ -13,8 +13,8 @@ The accepted rework baseline is defined once in
 `backend/internal/releaseinfo/metadata.json`:
 
 ```text
-"upstream_baseline": "v0.1.183"
-"upstream_baseline_sha": "e8cb019fabf8b55199436229044cbf9aa7a82564"
+"upstream_baseline": "v0.1.184"
+"upstream_baseline_sha": "e98ef32eb29aecd30d1def615912ec4dc93173f3"
 ```
 
 This document explains the baseline; scripts and builds consume the JSON record.
@@ -32,7 +32,7 @@ deploy anything.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.1.183..main v0.1.183..upstream/main
+git range-diff v0.1.184..main v0.1.184..upstream/main
 ./scripts/upstream-status.sh
 ```
 
@@ -54,6 +54,22 @@ before adopting a new baseline.
 
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
+
+## v0.1.184 Change Audit
+
+The accepted range is `v0.1.183..v0.1.184` (170 commits, 342 changed files).
+
+| Area | Audit result |
+| --- | --- |
+| Backend | Adopted Codex model-catalog, provider quota, OpenAI transport, Anthropic/Bedrock, Grok, OAuth, billing, pricing, and account-expiry fixes. |
+| Frontend | Integrated applicable account, usage, quota, settings, authentication, and payment behavior into the existing Gateway operator UI. |
+| Migrations | Imported upstream DDL as new immutable Rework migrations `233` through `235`; historical migration `232` remains unchanged. |
+| Usage | Added native-compaction and requested-reasoning-effort recording and compact operator display. |
+| Access control | Added per-user public-group restrictions and invalidated legacy API-key cache snapshots that predate the new authorization field. |
+| Gateway routing | Preserved unified keys, Composite Groups, exact account aliases, deterministic public model IDs, web search, and Gateway Integration Contract v1. |
+| Antigravity | Preserved mixed-tool compatibility and compact normalized quota presentation while importing applicable upstream fixes. |
+| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and WebSocket-disabled production policy. |
+| Verification | Full backend unit and integration suites, frontend Vitest/build/lint/Playwright, PostgreSQL fresh and `232 -> 235` migration rehearsals, static analysis, dependency audit, and secret scan passed. |
 
 ## v0.1.183 Change Audit
 

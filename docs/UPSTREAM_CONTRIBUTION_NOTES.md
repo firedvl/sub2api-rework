@@ -5,8 +5,8 @@ not an upstream issue or pull request.
 
 ## Baseline
 
-- Current revalidation release: `v0.1.183`
-- Current base commit: `e8cb019fabf8b55199436229044cbf9aa7a82564`
+- Current revalidation release: `v0.1.184`
+- Current base commit: `e98ef32eb29aecd30d1def615912ec4dc93173f3`
 - Original implementation release: `v0.1.181`
 - Original base commit: `3af5443b224823ae507a50c7b113aa50604409c8`
 - Public context: [Wei-Shaw/sub2api issue #5843](https://github.com/Wei-Shaw/sub2api/issues/5843)

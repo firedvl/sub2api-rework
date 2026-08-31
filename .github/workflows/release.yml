@@ -217,6 +217,7 @@ jobs:
           METADATA=backend/internal/releaseinfo/metadata.json
           VERSION=$(jq -er '.rework_version' "$METADATA")
           UPSTREAM=$(jq -er '.upstream_baseline' "$METADATA")
+          UPSTREAM_SHA=$(jq -er '.upstream_baseline_sha | select(test("^[0-9a-f]{40}$"))' "$METADATA")
           IMAGE=$(jq -er '.artifact_repository' "$METADATA")
           MIGRATION_MIN=$(jq -er '.migration_min' "$METADATA")
           MIGRATION_MAX=$(jq -er '.migration_max' "$METADATA")
@@ -241,6 +242,7 @@ jobs:
           jq -n \
             --arg rework_version "$VERSION" \
             --arg upstream_version "$UPSTREAM" \
+            --arg upstream_baseline_sha "$UPSTREAM_SHA" \
             --arg git_sha "$GIT_SHA" \
             --arg image "${IMAGE}:${VERSION}" \
             --arg image_digest "$DIGEST" \
@@ -262,7 +264,7 @@ jobs:
               compatibility: "approved",
               minimum_updater_version: $minimum_updater_version,
               release_notes: {
-                upstream: ("Qualified against upstream " + $upstream_version + "."),
+                upstream: ("Qualified against upstream " + $upstream_version + " (upstream_baseline_sha=" + $upstream_baseline_sha + ")."),
                 rework: $rework_notes,
                 compatibility: "Approved after release qualification checks.",
                 migrations: ("Supports schema migrations " + ($migration_min | tostring) + " through " + ($migration_max | tostring) + "."),
