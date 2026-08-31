@@ -207,6 +207,7 @@ func RegisterGatewayRoutes(
 		// /models endpoint with a client_version query and expect the ChatGPT
 		// Codex manifest format; other clients keep the OpenAI-style list.
 		gateway.GET("/models", modelsHandler)
+		gateway.GET("/gateway/capabilities", h.Gateway.Capabilities)
 		gateway.GET("/usage", h.Gateway.Usage)
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)

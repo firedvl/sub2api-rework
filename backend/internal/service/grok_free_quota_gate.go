@@ -109,7 +109,7 @@ func (s *defaultOpenAIAccountScheduler) filterGrokFreeQuotaAccounts(ctx context.
 	if s == nil || s.service == nil {
 		return accounts
 	}
-	return filterGrokFreeQuotaAccountsCore(ctx, s.service.cfg, s.service.usageLogRepo, &s.grokFreeQuotaGateCache, accounts)
+	return filterGrokFreeQuotaAccountsCore(ctx, s.service.cfg, s.service.usageLogRepo, &s.grokFreeQuotaGateCache, accounts, true)
 }
 
 // filterGrokFreeQuotaAccountsForGateway applies the same soft gate on Gateway
@@ -119,7 +119,7 @@ func (s *GatewayService) filterGrokFreeQuotaAccountsForGateway(ctx context.Conte
 	if s == nil {
 		return accounts
 	}
-	return filterGrokFreeQuotaAccountsCore(ctx, s.cfg, s.usageLogRepo, &gatewayGrokFreeQuotaGateCache, accounts)
+	return filterGrokFreeQuotaAccountsCore(ctx, s.cfg, s.usageLogRepo, &gatewayGrokFreeQuotaGateCache, accounts, true)
 }
 
 // Shared caches for non-advanced-scheduler selection paths.
@@ -136,6 +136,7 @@ func filterGrokFreeQuotaAccountsCore(
 	usageLogRepo UsageLogRepository,
 	cache *sync.Map,
 	accounts []Account,
+	refreshMissing bool,
 ) []Account {
 	if cache == nil {
 		return accounts
@@ -175,7 +176,7 @@ func filterGrokFreeQuotaAccountsCore(
 		}
 	}
 
-	if len(missingIDs) > 0 {
+	if refreshMissing && len(missingIDs) > 0 {
 		scheduleGrokFreeQuotaStatsRefresh(usageLogRepo, cache, settings, missingIDs)
 	}
 

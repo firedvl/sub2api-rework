@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gateway Integration Contract v1",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "gateway", "transport", "models"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "gateway": {
+      "$ref": "#/$defs/gateway"
+    },
+    "transport": {
+      "$ref": "#/$defs/transport"
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    }
+  },
+  "$defs": {
+    "gateway": {
+      "type": "object",
+      "required": ["version", "upstream_version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "required": ["http", "responses", "chat_completions", "sse", "websocket"],
+      "properties": {
+        "http": {
+          "type": "boolean"
+        },
+        "responses": {
+          "type": "boolean"
+        },
+        "chat_completions": {
+          "type": "boolean"
+        },
+        "sse": {
+          "type": "boolean"
+        },
+        "websocket": {
+          "type": "boolean"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "display_name", "availability", "routing", "capacity"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "availability": {
+          "enum": ["available", "degraded", "unavailable", "unknown"]
+        },
+        "capabilities": {
+          "$ref": "#/$defs/capabilities"
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        },
+        "capacity": {
+          "$ref": "#/$defs/capacity"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "reasoning": {
+          "type": "boolean"
+        },
+        "image_output": {
+          "type": "boolean"
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "routable": {
+          "type": "boolean"
+        },
+        "type": {
+          "enum": ["direct", "composite", "alias", "unknown"]
+        },
+        "candidate_paths": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "capacity": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": ["known", "partial", "unknown"]
+        },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capacity_window"
+          }
+        },
+        "limiting_remaining_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "next_reset_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": ["known", "partial"]
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["windows", "limiting_remaining_percent"]
+          }
+        }
+      ]
+    },
+    "capacity_window": {
+      "type": "object",
+      "required": ["window", "remaining_percent"],
+      "properties": {
+        "window": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remaining_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "reset_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
