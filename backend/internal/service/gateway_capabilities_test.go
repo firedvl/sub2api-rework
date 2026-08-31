@@ -337,7 +337,7 @@ func TestBuildGatewayCapabilityModelsStatesRoutesAndQueries(t *testing.T) {
 }
 
 func TestGatewayCapabilityCapacityWindowsAndAdvisorySnapshotTruth(t *testing.T) {
-	now := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	best := gatewayCapabilityTestAccount(1, PlatformOpenAI, map[string]string{"gpt-test": "gpt-test"})
 	best.Extra = map[string]any{
 		"quota_limit":       100.0,
