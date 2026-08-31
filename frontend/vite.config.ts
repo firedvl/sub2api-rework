@@ -15,7 +15,7 @@ import {
   operatorAssistantFixtureMetadata,
   OPERATOR_FIXTURE_ACCOUNTS_ETAG,
   OPERATOR_FIXTURE_TOKEN,
-} from './e2e/fixtures/operatorData'
+} from './e2e/fixtures/operatorData.ts'
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({

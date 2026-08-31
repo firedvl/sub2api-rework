@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
-import { operatorFixtureUpdateStatus } from './fixtures/operatorData'
+import { operatorFixtureUpdateStatus } from './fixtures/operatorData.ts'
 
 const readyStatus = {
   ...operatorFixtureUpdateStatus,

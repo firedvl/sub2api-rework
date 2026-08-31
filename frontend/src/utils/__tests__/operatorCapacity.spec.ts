@@ -161,6 +161,23 @@ describe('operator capacity normalization', () => {
     expect(summarizeOperatorQuota(antigravity)).toBe('28% minimum across 2 models')
   })
 
+  it('retains every normalized Antigravity model quota', () => {
+    const antigravityQuota = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      `model-${String(index + 1).padStart(2, '0')}`,
+      {
+        utilization: index * 4,
+        reset_time: new Date(Date.UTC(2026, 7, 30, 3 + index)).toISOString(),
+      },
+    ]))
+    const normalized = normalizeAccountCapacity(
+      account(1, { platform: 'antigravity' }),
+      usage({ antigravity_quota: antigravityQuota }),
+    )
+
+    expect(normalized.windows.filter((window) => window.key.startsWith('antigravity:'))).toHaveLength(20)
+    expect(normalized.windows.map((window) => window.label)).toContain('model-20')
+  })
+
   it('keeps provider windows and spend limits separate while surfacing the lowest remaining quota', () => {
     const openAIUsage = usage({
       five_hour: { utilization: 32, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 7200 },

@@ -4,7 +4,7 @@ import {
   isOperatorFixtureReadRequest,
   operatorFixtureAccounts,
   operatorFixtureProxies,
-} from '../../e2e/fixtures/operatorData'
+} from '../../e2e/fixtures/operatorData.ts'
 
 describe('operator fixture data', () => {
   it('serves representative account states and rejects normal writes', () => {
