@@ -24,6 +24,7 @@ func TestReleaseManifestFromEnvironment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, metadata.ReworkVersion, manifest.ReworkVersion)
 	require.Equal(t, metadata.UpstreamBaseline, manifest.UpstreamVersion)
+	require.Equal(t, "Qualified against upstream "+metadata.UpstreamBaseline+" (upstream_baseline_sha="+metadata.UpstreamBaselineSHA+").", manifest.ReleaseNotes.Upstream)
 	require.Equal(t, metadata.MinimumUpdaterVersion, manifest.MinimumUpdaterVersion)
 }
 

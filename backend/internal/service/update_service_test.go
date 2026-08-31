@@ -49,7 +49,7 @@ func watcherManifest(t *testing.T, compatibility updatecontract.Compatibility) [
 	manifest := updatecontract.Manifest{
 		SchemaVersion: 1, ReworkVersion: "0.1.184-rework.1", UpstreamVersion: "v0.1.184",
 		GitSHA: strings.Repeat("a", 40), Image: "ghcr.io/firedvl/sub2api-rework:0.1.184-rework.1",
-		ImageDigest: "sha256:" + strings.Repeat("b", 64), MigrationMin: 232, MigrationMax: 233,
+		ImageDigest: "sha256:" + strings.Repeat("b", 64), MigrationMin: 232, MigrationMax: 235,
 		ReleaseDate: "2026-08-28T12:00:00Z", Compatibility: compatibility,
 		MinimumUpdaterVersion: "1.0.0", ReleaseNotes: updatecontract.ReleaseNotes{Rework: "Qualified changes"},
 	}
@@ -84,7 +84,7 @@ func TestUpdateWatcherUpToDateWithoutNewRework(t *testing.T) {
 }
 
 func TestUpdateWatcherNewUpstreamIsCompatibilityPending(t *testing.T) {
-	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.1.184")}).CheckUpdate(context.Background(), true)
+	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.1.185")}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateCompatibilityPending, info.State)
 	require.Empty(t, info.LatestCompatibleRework)
@@ -154,7 +154,8 @@ func TestUpdateWatcherMalformedManifestIsBlocked(t *testing.T) {
 func TestUpdateWatcherIncompatibleMigrationIsBlocked(t *testing.T) {
 	var manifest updatecontract.Manifest
 	require.NoError(t, json.Unmarshal(watcherManifest(t, updatecontract.CompatibilityApproved), &manifest))
-	manifest.MigrationMin = 233
+	manifest.MigrationMin = 236
+	manifest.MigrationMax = 236
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	info, err := newWatcher(&updateServiceGitHubStub{
