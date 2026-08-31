@@ -411,8 +411,26 @@ const accountUsage = {
     seven_day: null,
     seven_day_sonnet: null,
     antigravity_quota: {
-      'gemini-2.5-pro': { utilization: 72, reset_time: '2026-08-30T08:00:00Z' },
-      'claude-sonnet-4-5': { utilization: 44, reset_time: '2026-08-30T08:00:00Z' },
+      'claude-opus-4-1': { utilization: 100, reset_time: '2026-08-30T03:00:00Z' },
+      'claude-sonnet-4-5': { utilization: 96, reset_time: '2026-08-30T04:00:00Z' },
+      'gemini-2.5-pro': { utilization: 92, reset_time: '2026-08-30T05:00:00Z' },
+      'claude-haiku-4-5': { utilization: 84, reset_time: '2026-08-30T06:00:00Z' },
+      'gemini-2.5-flash': { utilization: 78, reset_time: '2026-08-30T07:00:00Z' },
+      'gemini-2.5-flash-lite': { utilization: 73, reset_time: '2026-08-30T08:00:00Z' },
+      'claude-opus-4': { utilization: 68, reset_time: '2026-08-30T09:00:00Z' },
+      'claude-sonnet-4': { utilization: 62, reset_time: '2026-08-30T10:00:00Z' },
+      'gemini-2.0-pro': { utilization: 57, reset_time: '2026-08-30T11:00:00Z' },
+      'gemini-2.0-flash': { utilization: 51, reset_time: '2026-08-30T12:00:00Z' },
+      'claude-3-7-sonnet': { utilization: 46, reset_time: '2026-08-30T13:00:00Z' },
+      'claude-3-5-haiku': { utilization: 41, reset_time: '2026-08-30T14:00:00Z' },
+      'gemini-1.5-pro': { utilization: 36, reset_time: '2026-08-30T15:00:00Z' },
+      'gemini-1.5-flash': { utilization: 31, reset_time: '2026-08-30T16:00:00Z' },
+      'claude-3-opus': { utilization: 27, reset_time: '2026-08-30T17:00:00Z' },
+      'claude-3-sonnet': { utilization: 22, reset_time: '2026-08-30T18:00:00Z' },
+      'gemini-exp-1206': { utilization: 18, reset_time: '2026-08-30T19:00:00Z' },
+      'gemini-thinking-exp': { utilization: 14, reset_time: '2026-08-30T20:00:00Z' },
+      'claude-legacy-safe': { utilization: 9, reset_time: '2026-08-30T21:00:00Z' },
+      'hidden-model-search-target': { utilization: 4, reset_time: '2026-08-30T22:00:00Z' },
     },
   },
   '104': {
@@ -439,6 +457,78 @@ const accountUsage = {
     seven_day_sonnet: null,
     gemini_shared_daily: usageProgress(100, '2026-08-31T00:00:00Z'),
   },
+}
+
+export function operatorLargeCapacityFixture() {
+  const source = operatorFixtureAccounts[0]
+  const openAIAccounts = Array.from({ length: 52 }, (_, index) => {
+    const number = String(index + 1).padStart(2, '0')
+    const name = index < 20
+      ? `Exhausted pool ${number}`
+      : index < 30
+        ? `Low pool ${number}`
+        : index < 47
+          ? `Healthy pool ${number}`
+          : index === 51
+            ? 'Hidden searchable reserve 52'
+            : `Unknown reserve ${number}`
+    return {
+      ...source,
+      id: 1_000 + index,
+      name,
+      credentials: {
+        ...source.credentials,
+        email: `fixture-account-${number}@example.test`,
+      },
+      credentials_status: { ...source.credentials_status },
+      extra: {},
+      group_ids: [...source.group_ids],
+      groups: source.groups.map((group) => ({ ...group })),
+    }
+  })
+  const usage = Object.fromEntries(openAIAccounts.map((account, index) => {
+    const utilization = index < 20 ? 100 : index < 30 ? 90 - (index % 5) : index < 47 ? 20 + (index % 10) : null
+    return [String(account.id), {
+      source: 'passive',
+      updated_at: updatedAt,
+      five_hour: utilization === null ? null : usageProgress(utilization, '2026-08-30T04:00:00Z'),
+      seven_day: utilization === null ? null : usageProgress(Math.min(95, utilization + 5), '2026-09-04T00:00:00Z'),
+      seven_day_sonnet: null,
+    }]
+  }))
+  const antigravity = {
+    ...operatorFixtureAccounts[2],
+    overload_until: null,
+  }
+  const gemini = operatorFixtureAccounts[5]
+  const deepseek = {
+    ...source,
+    id: 2_000,
+    name: 'DeepSeek final reserve',
+    platform: 'deepseek' as const,
+    credentials: {},
+    credentials_status: {},
+    extra: {},
+    group_ids: [],
+    groups: [],
+  }
+
+  return {
+    accounts: [
+      ...openAIAccounts.slice(0, 49),
+      deepseek,
+      ...openAIAccounts.slice(49),
+      antigravity,
+      gemini,
+    ],
+    usage: {
+      ...usage,
+      '103': accountUsage['103'],
+      '106': accountUsage['106'],
+    },
+    hiddenAccount: openAIAccounts.at(-1)!,
+    hiddenModel: 'hidden-model-search-target',
+  }
 }
 
 const dashboardStats = {

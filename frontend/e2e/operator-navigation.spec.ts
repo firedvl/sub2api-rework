@@ -1,6 +1,10 @@
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
-import { OPERATOR_FIXTURE_NOW, operatorFixtureAccounts } from './fixtures/operatorData'
+import {
+  OPERATOR_FIXTURE_NOW,
+  operatorFixtureAccounts,
+  operatorLargeCapacityFixture,
+} from './fixtures/operatorData.ts'
 
 const primaryLinks = [
   { href: '/admin/dashboard', target: '/admin/dashboard' },
@@ -38,41 +42,35 @@ const fulfillApiData = (route: Route, data: unknown, status = 200) => (
 )
 
 async function installManyAccountMock(page: Page) {
-  const accounts = Array.from({ length: 36 }, (_, index) => {
-    const source = operatorFixtureAccounts[index % operatorFixtureAccounts.length]
-    const number = String(index + 1).padStart(2, '0')
-    return {
-      ...source,
-      id: 1_000 + index,
-      name: `Fixture account ${number}`,
-      credentials: {
-        ...source.credentials,
-        email: `fixture-account-${number}@example.test`,
-      },
-      credentials_status: { ...source.credentials_status },
-      extra: { ...source.extra },
-      group_ids: [...source.group_ids],
-      groups: source.groups.map((group) => ({ ...group })),
-    }
-  })
-
-  await installAccountListMock(page, accounts)
-
-  return accounts
+  const fixture = operatorLargeCapacityFixture()
+  await installAccountListMock(page, fixture.accounts, fixture.usage)
+  return fixture
 }
 
-async function installAccountListMock(page: Page, accounts: typeof operatorFixtureAccounts) {
+async function installAccountListMock(
+  page: Page,
+  accounts: typeof operatorFixtureAccounts,
+  usage?: Record<string, unknown>,
+) {
   await page.route('**/api/v1/admin/accounts**', async (route) => {
     const request = route.request()
-    const pathname = new URL(request.url()).pathname
+    const url = new URL(request.url())
+    const pathname = url.pathname
     if (request.method() === 'GET' && pathname === '/api/v1/admin/accounts') {
+      const pageNumber = Math.max(1, Number(url.searchParams.get('page') || 1))
+      const pageSize = Math.max(1, Number(url.searchParams.get('page_size') || accounts.length))
+      const start = (pageNumber - 1) * pageSize
       await fulfillApiData(route, {
-        items: accounts,
+        items: accounts.slice(start, start + pageSize),
         total: accounts.length,
-        page: 1,
-        page_size: accounts.length,
-        pages: 1,
+        page: pageNumber,
+        page_size: pageSize,
+        pages: Math.ceil(accounts.length / pageSize),
       })
+      return
+    }
+    if (pathname === '/api/v1/admin/accounts/usage/batch' && usage) {
+      await fulfillApiData(route, { usage, errors: {} })
       return
     }
     await route.fallback()
@@ -685,8 +683,8 @@ test.describe('operator console navigation', () => {
 
   test('keeps one Accounts scroll path and reaches the final account in both views', async ({ page }) => {
     test.setTimeout(60_000)
-    const manyAccounts = await installManyAccountMock(page)
-    const finalAccount = manyAccounts.at(-1)!
+    const { accounts: manyAccounts } = await installManyAccountMock(page)
+    const finalAccount = manyAccounts.find((account) => account.platform === 'deepseek')!
 
     for (const viewport of [
       { width: 1440, height: 900 },
@@ -700,9 +698,36 @@ test.describe('operator console navigation', () => {
       const capacityRows = page.getByTestId('account-capacity-row')
       await expect(capacityRows).toHaveCount(manyAccounts.length)
       const providerHeader = page.locator('.operator-capacity-provider-header').first()
-      const radius = await providerHeader.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderRadius))
-      expect(radius).toBeGreaterThan(0)
-      expect(radius).toBeLessThanOrEqual(8)
+      const providerStyle = await providerHeader.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return {
+          radius: Number.parseFloat(style.borderRadius),
+          boxShadow: style.boxShadow,
+          borderLeftWidth: style.borderLeftWidth,
+          borderRightWidth: style.borderRightWidth,
+          borderStyle: style.borderStyle,
+        }
+      })
+      expect(providerStyle.radius).toBeGreaterThan(0)
+      expect(providerStyle.radius).toBeLessThanOrEqual(8)
+      expect(providerStyle.boxShadow).toBe('none')
+      expect(providerStyle.borderLeftWidth).toBe(providerStyle.borderRightWidth)
+      expect(providerStyle.borderStyle).toContain('solid')
+
+      const antigravityRow = capacityRows.filter({ hasText: 'Antigravity Pro' })
+      await expect(antigravityRow.locator('.operator-capacity-row-window')).toHaveCount(3)
+      await expect(antigravityRow).toContainText('0% minimum across 20 models')
+      if (viewport.width === 1440) {
+        await antigravityRow.locator('.operator-capacity-details-toggle').click()
+        const details = antigravityRow.getByTestId('account-technical-details')
+        await expect(details.locator('.operator-capacity-window')).toHaveCount(3)
+        await expect(details).toContainText('More model limits (17)')
+        await details.getByRole('button', { name: 'Inspect a model limit' }).click()
+        await page.getByRole('textbox', { name: 'Search model limits' }).fill('hidden-model-search-target')
+        await page.getByRole('option', { name: 'hidden-model-search-target' }).click()
+        await expect(details.locator('.operator-capacity-window')).toHaveCount(3)
+        await expect(details).toContainText('hidden-model-search-target')
+      }
 
       const initialMetrics = await page.evaluate(() => ({
         documentClientHeight: document.documentElement.clientHeight,
@@ -726,10 +751,13 @@ test.describe('operator console navigation', () => {
       expect(capacityScroll.scrollTop).toBeGreaterThan(0)
 
       await page.getByRole('tab', { name: 'Technical' }).click()
+      const pagination = page.locator('.operator-account-pagination')
+      const nextPage = pagination.getByRole('button', { name: 'Next' })
+      while (await nextPage.isEnabled()) await nextPage.click()
       const technicalFinal = page.locator('.operator-account-table').getByText(finalAccount.name, { exact: true })
       await main.evaluate((element) => { element.scrollTop = element.scrollHeight })
       await expect(technicalFinal).toBeVisible()
-      await expect(page.locator('.operator-account-pagination')).toBeVisible()
+      await expect(pagination).toBeVisible()
 
       const finalMetrics = await page.evaluate(() => ({
         documentClientHeight: document.documentElement.clientHeight,
@@ -759,7 +787,7 @@ test.describe('operator console navigation', () => {
 
     const summary = page.getByTestId('account-pool-capacity')
     await expect(summary).toBeVisible()
-    await expect(summary).toContainText('21%')
+    await expect(summary).toContainText('14%')
     await expect(summary.locator('[data-testid="capacity-account-segment"]')).toHaveCount(0)
     await expect(summary.getByRole('link', { name: 'View Stats' })).toHaveAttribute('href', '/admin/stats')
 
@@ -790,7 +818,7 @@ test.describe('operator console navigation', () => {
     await expect(shortTerm.getByTestId('short-provider-gemini')).toContainText('1 known, 0 without this window')
     await expect(longTerm.getByTestId('long-provider-gemini')).toContainText('No supported window reported')
     await expect(shortTerm.getByTestId('short-provider-openai').locator('svg')).toBeVisible()
-    await expect(page.getByTestId('provider-capacity-antigravity').locator('svg')).toBeVisible()
+    await expect(page.getByTestId('provider-capacity-antigravity').locator('.stats-capacity-donut-icon svg')).toBeVisible()
 
     const inspector = page.getByTestId('stats-capacity-inspector')
     const inspectorSelect = inspector.getByLabel('Inspect capacity window')
@@ -821,6 +849,63 @@ test.describe('operator console navigation', () => {
         scrollWidth: document.documentElement.scrollWidth,
       }))
       expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+    }
+  })
+
+  test('bounds large-pool account and Antigravity model diagnostics', async ({ page }) => {
+    test.setTimeout(60_000)
+    const fixture = await installManyAccountMock(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/stats')
+
+    await expect(page.getByTestId('stats-capacity-donut-overview')).toBeVisible()
+    await expect(page.getByTestId('stats-capacity-donut-overall')).toBeVisible()
+    await expect(page.getByTestId('stats-short-term-capacity')).toBeVisible()
+    await expect(page.getByTestId('stats-long-term-capacity')).toBeVisible()
+    await expect(page.getByTestId('provider-capacity-antigravity').locator('.stats-capacity-donut-icon svg')).toBeVisible()
+
+    const inspector = page.getByTestId('stats-capacity-inspector')
+    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(5)
+    await expect(inspector.getByTestId('stats-inspector-account-summary')).toContainText(
+      '52 accounts · 20 exhausted · 5 unknown · 47 hidden',
+    )
+    await expect(inspector.getByTestId('stats-inspector-account-row').first()).toContainText('Exhausted pool')
+
+    await inspector.getByRole('button', { name: 'Inspect another account' }).click()
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill(fixture.hiddenAccount.name)
+    await page.getByRole('option', { name: fixture.hiddenAccount.name }).click()
+    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(5)
+    const hiddenAccount = inspector.getByTestId('stats-inspector-account-row').filter({ hasText: fixture.hiddenAccount.name })
+    await expect(hiddenAccount).toContainText('Quota unknown')
+    await expect(hiddenAccount).not.toContainText('0%')
+
+    await inspector.getByLabel('Inspect capacity window').selectOption('antigravity:model-limits')
+    await expect(inspector.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(inspector.getByTestId('stats-model-limit-summary')).toContainText('0% minimum across 20 models')
+    await expect(inspector).toContainText('More model limits (17)')
+    await expect(inspector.getByTestId('stats-model-limit-row').first()).toContainText('claude-opus-4-1')
+
+    await inspector.getByRole('button', { name: 'Inspect a model limit' }).click()
+    await page.getByRole('textbox', { name: 'Search model limits' }).fill(fixture.hiddenModel)
+    await page.getByRole('option', { name: fixture.hiddenModel }).click()
+    await expect(inspector.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(inspector).toContainText(fixture.hiddenModel)
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport)
+      const bounds = await page.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        inspectorRows: document.querySelectorAll('[data-testid="stats-inspector-account-row"]').length,
+        modelRows: document.querySelectorAll('[data-testid="stats-model-limit-row"]').length,
+      }))
+      expect(bounds.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(bounds.clientWidth + 1)
+      expect(bounds.inspectorRows).toBeLessThanOrEqual(5)
+      expect(bounds.modelRows).toBeLessThanOrEqual(3)
     }
   })
 

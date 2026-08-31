@@ -165,7 +165,11 @@
                 </div>
                 <div class="operator-capacity-account-quota" :title="quotaDetail(summary)">
                   <template v-if="summary.windows.length">
-                    <div v-for="window in summary.windows" :key="window.key" class="operator-capacity-row-window">
+                    <div v-if="modelWindowCount(summary) > 1" class="operator-capacity-model-summary">
+                      <strong>{{ summarizeOperatorQuota(summary) }}</strong>
+                      <span>{{ modelLimitDetail(summary) }}</span>
+                    </div>
+                    <div v-for="window in accountRowWindows(summary)" :key="window.key" class="operator-capacity-row-window">
                       <span :title="window.label">{{ window.label }}</span>
                       <div
                         class="operator-capacity-row-track"
@@ -244,36 +248,51 @@
                   <p v-if="summary.error" class="operator-capacity-account-error">{{ summary.error }}</p>
                 </div>
 
-                <div v-if="summary.windows.length" class="operator-capacity-window-grid">
-                  <div v-for="window in summary.windows" :key="window.key" class="operator-capacity-window">
-                    <div class="operator-capacity-window-label">
-                      <span :title="window.label">{{ window.label }}</span>
-                      <strong :class="capacityTone(window.remainingPercent)">
-                        {{ percentLabel(window.remainingPercent) }}
-                      </strong>
-                    </div>
-                    <div
-                      class="operator-capacity-track"
-                      role="progressbar"
-                      :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}`"
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      :aria-valuenow="Math.round(window.remainingPercent)"
-                    >
-                      <span
-                        :class="capacityTone(window.remainingPercent)"
-                        :style="{ width: `${window.remainingPercent}%` }"
-                      />
-                    </div>
-                    <div class="operator-capacity-window-detail">
-                      <span>{{ t('admin.dashboard.capacity.used', { value: formatPercent(100 - window.remainingPercent) }) }}</span>
-                      <span v-if="window.resetsAt" :title="formatReset(window.resetsAt)">
-                        {{ t('admin.dashboard.capacity.resets', { time: formatReset(window.resetsAt) }) }}
-                      </span>
-                      <span v-else-if="window.kind === 'spend'">{{ t('admin.dashboard.capacity.noReset') }}</span>
-                      <span v-else>{{ t('admin.dashboard.capacity.resetUnknown') }}</span>
+                <div v-if="summary.windows.length" class="operator-capacity-window-details">
+                  <div class="operator-capacity-window-grid">
+                    <div v-for="window in accountDetailWindows(summary)" :key="window.key" class="operator-capacity-window">
+                      <div class="operator-capacity-window-label">
+                        <span :title="window.label">{{ window.label }}</span>
+                        <strong :class="capacityTone(window.remainingPercent)">
+                          {{ percentLabel(window.remainingPercent) }}
+                        </strong>
+                      </div>
+                      <div
+                        class="operator-capacity-track"
+                        role="progressbar"
+                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}`"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        :aria-valuenow="Math.round(window.remainingPercent)"
+                      >
+                        <span
+                          :class="capacityTone(window.remainingPercent)"
+                          :style="{ width: `${window.remainingPercent}%` }"
+                        />
+                      </div>
+                      <div class="operator-capacity-window-detail">
+                        <span>{{ t('admin.dashboard.capacity.used', { value: formatPercent(100 - window.remainingPercent) }) }}</span>
+                        <span v-if="window.resetsAt" :title="formatReset(window.resetsAt)">
+                          {{ t('admin.dashboard.capacity.resets', { time: formatReset(window.resetsAt) }) }}
+                        </span>
+                        <span v-else-if="window.kind === 'spend'">{{ t('admin.dashboard.capacity.noReset') }}</span>
+                        <span v-else>{{ t('admin.dashboard.capacity.resetUnknown') }}</span>
+                      </div>
                     </div>
                   </div>
+                  <label v-if="moreModelWindowCount(summary)" class="operator-capacity-model-select">
+                    <span>{{ t('admin.stats.capacity.moreModelLimits', { count: moreModelWindowCount(summary) }) }}</span>
+                    <Select
+                      :model-value="selectedModelWindowKeys[summary.account.id]"
+                      :options="modelWindowOptions(summary)"
+                      value-key="key"
+                      label-key="label"
+                      :searchable="true"
+                      :aria-label="t('admin.stats.capacity.inspectModel')"
+                      :search-placeholder="t('admin.stats.capacity.searchModels')"
+                      @update:model-value="selectModelWindow(summary.account.id, $event)"
+                    />
+                  </label>
                 </div>
                 <div v-else class="operator-capacity-quota-unknown">
                   <strong>{{ t('admin.dashboard.capacity.quotaUnknown') }}</strong>
@@ -295,6 +314,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { formatDateTimeToMinute, formatDayAwareDateTime } from '@/utils/format'
@@ -380,6 +400,8 @@ const loadCollapsedProviders = (): Set<AccountPlatform> => {
 
 const collapsedProviders = ref(loadCollapsedProviders())
 const expandedAccountIDs = ref(new Set<number>())
+const selectedModelWindowKeys = ref<Record<number, string>>({})
+const MAX_MODEL_WINDOWS = 3
 const isProviderCollapsed = (platform: AccountPlatform) => collapsedProviders.value.has(platform)
 const providerPanelId = (platform: AccountPlatform) => `operator-provider-${platform}-accounts`
 const toggleProvider = (platform: AccountPlatform) => {
@@ -401,6 +423,46 @@ const toggleAccount = (accountID: number) => {
   if (next.has(accountID)) next.delete(accountID)
   else next.add(accountID)
   expandedAccountIDs.value = next
+}
+
+const modelWindows = (summary: OperatorAccountCapacity) => summary.windows
+  .filter((window) => window.key.startsWith('antigravity:'))
+  .sort((left, right) => {
+    const leftReset = left.resetsAt ? new Date(left.resetsAt).getTime() : Number.POSITIVE_INFINITY
+    const rightReset = right.resetsAt ? new Date(right.resetsAt).getTime() : Number.POSITIVE_INFINITY
+    return left.remainingPercent - right.remainingPercent
+      || (Number.isFinite(leftReset) ? leftReset : Number.POSITIVE_INFINITY)
+        - (Number.isFinite(rightReset) ? rightReset : Number.POSITIVE_INFINITY)
+      || left.label.localeCompare(right.label)
+  })
+const modelWindowCount = (summary: OperatorAccountCapacity) => modelWindows(summary).length
+const moreModelWindowCount = (summary: OperatorAccountCapacity) => Math.max(0, modelWindowCount(summary) - MAX_MODEL_WINDOWS)
+const selectedModelWindow = (summary: OperatorAccountCapacity) => modelWindows(summary)
+  .find((window) => window.key === selectedModelWindowKeys.value[summary.account.id]) ?? null
+const visibleModelWindows = (summary: OperatorAccountCapacity) => {
+  const visible = modelWindows(summary).slice(0, MAX_MODEL_WINDOWS)
+  const selected = selectedModelWindow(summary)
+  if (!selected || visible.some((window) => window.key === selected.key)) return visible
+  return [selected, ...visible.slice(0, MAX_MODEL_WINDOWS - 1)]
+}
+const accountRowWindows = (summary: OperatorAccountCapacity) => [
+  ...summary.windows.filter((window) => !window.key.startsWith('antigravity:')),
+  ...modelWindows(summary).slice(0, MAX_MODEL_WINDOWS),
+]
+const accountDetailWindows = (summary: OperatorAccountCapacity) => [
+  ...summary.windows.filter((window) => !window.key.startsWith('antigravity:')),
+  ...visibleModelWindows(summary),
+]
+const modelWindowOptions = (summary: OperatorAccountCapacity) => modelWindows(summary).map((window) => ({
+  key: window.key,
+  label: window.label,
+  description: `${formatPercent(window.remainingPercent)}%`,
+}))
+const selectModelWindow = (accountID: number, value: string | number | boolean | null) => {
+  selectedModelWindowKeys.value = {
+    ...selectedModelWindowKeys.value,
+    [accountID]: String(value ?? ''),
+  }
 }
 
 const recordEntries = (value: unknown): Array<[string, string]> => {
@@ -489,9 +551,15 @@ const statusTitle = (summary: OperatorAccountCapacity) => {
     ? `${status.reason} until ${formatReset(status.until)}`
     : status.reason ?? ''
 }
-const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
-  ? summary.windows.map((window) => `${window.label} ${formatPercent(window.remainingPercent)}%`).join(', ')
-  : summarizeOperatorQuota(summary)
+const modelLimitDetail = (summary: OperatorAccountCapacity) => {
+  const limiting = modelWindows(summary)[0]
+  if (!limiting) return ''
+  const reset = limiting.resetsAt
+    ? t('admin.dashboard.capacity.resets', { time: formatCompactReset(limiting.resetsAt) })
+    : t('admin.dashboard.capacity.resetUnknown')
+  return `${t('admin.stats.capacity.modelLimits')}: ${limiting.label} · ${reset}`
+}
+const quotaDetail = (summary: OperatorAccountCapacity) => summarizeOperatorQuota(summary)
 </script>
 
 <style scoped>
@@ -673,7 +741,6 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   border: 1px solid var(--operator-border-subtle);
   border-radius: var(--operator-radius);
   background: var(--operator-raised);
-  box-shadow: inset 3px 0 0 var(--operator-border);
 }
 .operator-capacity-provider-name { font-size: 1rem; }
 .operator-capacity-provider-counts {
@@ -827,6 +894,25 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.375rem 0.75rem;
 }
+.operator-capacity-model-summary {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  gap: 0.125rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.6875rem;
+}
+.operator-capacity-model-summary strong {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-capacity-model-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .operator-capacity-row-window {
   display: grid;
   min-width: 0;
@@ -945,6 +1031,21 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem 1.25rem;
+}
+.operator-capacity-window-details { min-width: 0; }
+.operator-capacity-model-select {
+  display: grid;
+  max-width: 20rem;
+  gap: 0.375rem;
+  margin-top: 1rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+}
+.operator-capacity-model-select :deep(.select-trigger) {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--operator-radius);
+  font-size: 0.75rem;
 }
 .operator-capacity-window-label { font-size: 0.875rem; }
 .operator-capacity-window-label > span {

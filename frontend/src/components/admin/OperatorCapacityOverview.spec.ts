@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
+import Select from '@/components/common/Select.vue'
 import type { Account, AccountUsageInfo } from '@/types'
 import OperatorCapacityOverview from './OperatorCapacityOverview.vue'
 
@@ -243,5 +244,49 @@ describe('OperatorCapacityOverview', () => {
     expect(rows[0].text()).toContain('0%')
     expect(wrapper.text()).not.toContain('Broken account')
     expect(wrapper.text()).not.toContain('Disabled account')
+  })
+
+  it('shows three constrained Antigravity models and selects one hidden limit', async () => {
+    const antigravityQuota = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      index === 19 ? 'hidden-model-search-target' : `model-${String(index + 1).padStart(2, '0')}`,
+      {
+        utilization: index === 0 ? 100 : Math.max(4, 95 - index * 4),
+        reset_time: new Date(Date.UTC(2026, 7, 30, 3 + index)).toISOString(),
+      },
+    ]))
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        accounts: [account(1, { platform: 'antigravity', name: 'Antigravity pool' })],
+        usageByAccountId: {
+          '1': {
+            updated_at: '2026-08-26T10:00:00Z',
+            five_hour: null,
+            seven_day: null,
+            seven_day_sonnet: null,
+            antigravity_quota: antigravityQuota,
+          },
+        },
+      },
+      global: {
+        stubs: { LoadingSpinner: true, RouterLink: true }
+      }
+    })
+
+    const row = wrapper.get('[data-testid="account-capacity-row"]')
+    expect(row.findAll('.operator-capacity-row-window')).toHaveLength(3)
+    expect(row.text()).toContain('0% minimum across 20 models')
+    expect(row.text()).toContain('model-01')
+
+    await row.get('.operator-capacity-details-toggle').trigger('click')
+    const details = row.get('[data-testid="account-technical-details"]')
+    expect(details.findAll('.operator-capacity-window')).toHaveLength(3)
+    expect(details.text()).toContain('admin.stats.capacity.moreModelLimits:17')
+
+    const select = details.findComponent(Select)
+    expect(select.props('options')).toHaveLength(20)
+    select.vm.$emit('update:modelValue', 'antigravity:hidden-model-search-target')
+    await wrapper.vm.$nextTick()
+    expect(details.findAll('.operator-capacity-window')).toHaveLength(3)
+    expect(details.text()).toContain('hidden-model-search-target')
   })
 })

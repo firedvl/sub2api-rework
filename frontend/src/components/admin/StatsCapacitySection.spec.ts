@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { Account, AccountUsageInfo } from '@/types'
+import Select from '@/components/common/Select.vue'
 import StatsCapacitySection from './StatsCapacitySection.vue'
 
 vi.mock('vue-i18n', async () => {
@@ -74,6 +75,11 @@ describe('StatsCapacitySection', () => {
 
     const shortTerm = wrapper.get('[data-testid="stats-short-term-capacity"]')
     const longTerm = wrapper.get('[data-testid="stats-long-term-capacity"]')
+    const donuts = wrapper.get('[data-testid="stats-capacity-donut-overview"]')
+    expect(donuts.get('[data-testid="stats-capacity-donut-overall"] svg').attributes('aria-label')).toContain('45%')
+    expect(donuts.get('[data-testid="provider-capacity-openai"] .stats-capacity-donut-icon svg').exists()).toBe(true)
+    expect(donuts.get('[data-testid="provider-capacity-gemini"] .stats-capacity-donut-chart svg').attributes('aria-label')).toContain('quotaUnknown')
+    expect(donuts.get('[data-testid="provider-capacity-gemini"]').text()).not.toContain('0%')
     expect(shortTerm.get('[data-testid="short-provider-openai"] svg').exists()).toBe(true)
     expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('5h')
     expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('65%')
@@ -119,5 +125,68 @@ describe('StatsCapacitySection', () => {
     expect(inspector.text()).toContain('Account 1')
     expect(inspector.text()).toContain('Account 2')
     expect(inspector.text()).toContain('admin.dashboard.capacity.quotaUnknown')
+  })
+
+  it('bounds a 52-account inspector and compacts 20 Antigravity model limits', async () => {
+    const accounts = Array.from({ length: 52 }, (_, index) => account(index + 1, {
+      name: index === 51 ? 'Hidden searchable reserve' : `Pool account ${String(index + 1).padStart(2, '0')}`,
+    }))
+    const usageByAccountId = Object.fromEntries(accounts.map((item, index) => [String(item.id), usage({
+      five_hour: index < 20
+        ? { utilization: 100, resets_at: null, remaining_seconds: null }
+        : index < 47
+          ? { utilization: index < 30 ? 90 : 20, resets_at: null, remaining_seconds: null }
+          : null,
+    })]))
+    const antigravityQuota = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      index === 19 ? 'hidden-model-search-target' : `model-${String(index + 1).padStart(2, '0')}`,
+      {
+        utilization: index === 0 ? 100 : Math.max(4, 95 - index * 4),
+        reset_time: new Date(Date.UTC(2026, 7, 30, 3 + index)).toISOString(),
+      },
+    ]))
+    const antigravity = account(100, { platform: 'antigravity', name: 'Antigravity pool' })
+
+    const wrapper = mount(StatsCapacitySection, {
+      props: {
+        accounts: [...accounts, antigravity],
+        usageByAccountId: {
+          ...usageByAccountId,
+          '100': usage({ antigravity_quota: antigravityQuota }),
+        },
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    expect(wrapper.findAll('[data-testid="stats-inspector-account-row"]')).toHaveLength(5)
+    expect(wrapper.get('[data-testid="stats-inspector-account-summary"]').text()).toContain('52 20 5 47')
+    expect(wrapper.get('[data-testid="stats-inspector-account-row"]').text()).toContain('admin.dashboard.capacity.remaining 0')
+    expect(wrapper.text()).not.toContain('Hidden searchable reserve')
+
+    const accountSelect = wrapper.findAllComponents(Select)
+      .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectAccount')!
+    expect(accountSelect.props('options')).toHaveLength(52)
+    accountSelect.vm.$emit('update:modelValue', '52')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('[data-testid="stats-inspector-account-row"]')).toHaveLength(5)
+    const hiddenAccount = wrapper.findAll('[data-testid="stats-inspector-account-row"]')
+      .find((row) => row.text().includes('Hidden searchable reserve'))!
+    expect(hiddenAccount.text()).toContain('admin.dashboard.capacity.quotaUnknown')
+    expect(hiddenAccount.text()).not.toContain('0%')
+
+    const inspectorSelect = wrapper.get('#stats-capacity-inspector-select')
+    expect(inspectorSelect.findAll('option').filter((option) => option.text().includes('Antigravity'))).toHaveLength(1)
+    await inspectorSelect.setValue('antigravity:model-limits')
+    expect(wrapper.findAll('[data-testid="stats-model-limit-row"]')).toHaveLength(3)
+    expect(wrapper.get('[data-testid="stats-model-limit-summary"]').text()).toContain('0% 20 model-01')
+    expect(wrapper.text()).toContain('admin.stats.capacity.moreModelLimits 17')
+
+    const modelSelect = wrapper.findAllComponents(Select)
+      .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectModel')!
+    expect(modelSelect.props('options')).toHaveLength(20)
+    modelSelect.vm.$emit('update:modelValue', 'antigravity:hidden-model-search-target')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('[data-testid="stats-model-limit-row"]')).toHaveLength(3)
+    expect(wrapper.text()).toContain('hidden-model-search-target')
   })
 })
