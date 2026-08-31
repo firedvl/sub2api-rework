@@ -839,6 +839,14 @@ body[data-operator-console] :is(.font-mono, code, pre) {
   background: var(--operator-background);
 }
 
+.operator-console,
+.operator-shell {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .operator-console {
   --table-header-background: color-mix(in oklch, var(--operator-muted) 70%, var(--operator-card));
   --table-body-background: var(--operator-card);
@@ -1222,9 +1230,32 @@ body[data-operator-console] .operator-status-dot.bg-gray-500 {
   border-radius: var(--operator-radius);
   background: var(--operator-card);
   color: var(--operator-foreground);
+  caret-color: var(--operator-foreground);
   box-shadow: var(--operator-shadow-xs);
   font-size: 0.875rem;
   transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+:is(body[data-operator-console], .operator-console, .auth-codex-shell) :is(input, textarea)::placeholder {
+  color: var(--operator-muted-foreground);
+  opacity: 1;
+}
+
+body[data-operator-console] {
+  scrollbar-color: var(--operator-border) transparent;
+}
+
+body[data-operator-console] ::-webkit-scrollbar-thumb {
+  background: var(--operator-border);
+}
+
+body[data-operator-console] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--operator-border) 62%, var(--operator-foreground));
+}
+
+body[data-operator-console] .operator-checkbox {
+  accent-color: var(--operator-primary);
+  color: var(--operator-primary);
 }
 
 body[data-operator-console] :is(.operator-console, .operator-dialog) .select-trigger {
@@ -2380,6 +2411,14 @@ body[data-operator-console] [class~="rounded-3xl"] {
 }
 
 @media (max-width: 1279px) {
+  .operator-header-inner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .operator-primary-nav {
+    justify-self: center;
+  }
+
   .operator-primary-link {
     padding-right: 0.625rem;
     padding-left: 0.625rem;

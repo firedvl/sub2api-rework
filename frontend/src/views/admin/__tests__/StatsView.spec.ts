@@ -161,6 +161,8 @@ describe('admin StatsView', () => {
     expect(wrapper.text()).toContain('420ms')
     expect(wrapper.get('[data-testid="stats-request-trend"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="provider-capacity-openai"]').text()).toContain('Account 1')
+    expect(wrapper.get('.stats-view').element.children[0].classList).toContain('stats-usage-section')
+    expect(wrapper.get('.stats-view').element.children[1].classList).toContain('stats-capacity-section')
   })
 
   it('keeps capacity visible when the stats snapshot fails', async () => {

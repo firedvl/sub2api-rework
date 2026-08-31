@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 
@@ -7,6 +10,11 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+
+const settingsViewSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../SettingsView.vue"),
+  "utf8",
+);
 
 const {
   getSettings,
@@ -719,6 +727,108 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("tracks saveable edits and restores the loaded baseline", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="settings-dirty-bar"]').exists()).toBe(false);
+
+    const siteName = wrapper.get<HTMLInputElement>(
+      '[data-testid="settings-site-name"]',
+    );
+    await siteName.setValue("Gateway Operator");
+
+    expect(wrapper.get('[data-testid="settings-dirty-bar"]').isVisible()).toBe(true);
+    expect(wrapper.get("form").classes()).toContain("settings-form-dirty");
+
+    await wrapper.get('[data-testid="settings-discard-button"]').trigger("click");
+    await flushPromises();
+
+    expect(siteName.element.value).toBe("Sub2API");
+    expect(wrapper.get("form").classes()).not.toContain("settings-form-dirty");
+  });
+
+  it("clears dirty state only after both settings saves succeed", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="settings-site-name"]')
+      .setValue("Gateway Operator");
+    expect(
+      wrapper
+        .get('[data-testid="settings-floating-save-button"]')
+        .attributes("type"),
+    ).toBe("submit");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ site_name: "Gateway Operator" }),
+    );
+    expect(updateWebSearchEmulationConfig).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("form").classes()).not.toContain("settings-form-dirty");
+  });
+
+  it.each(["main settings", "web search"])(
+    "keeps dirty state when the %s save fails",
+    async (failedSave) => {
+      if (failedSave === "main settings") {
+        updateSettings.mockRejectedValueOnce(new Error("main save failed"));
+      } else {
+        updateWebSearchEmulationConfig.mockRejectedValueOnce(
+          new Error("web search save failed"),
+        );
+      }
+      const wrapper = mountView();
+      await flushPromises();
+
+      await wrapper
+        .get('[data-testid="settings-site-name"]')
+        .setValue("Gateway Operator");
+      await wrapper.find("form").trigger("submit.prevent");
+      await flushPromises();
+
+      expect(updateSettings).toHaveBeenCalledTimes(1);
+      if (failedSave === "web search") {
+        expect(updateWebSearchEmulationConfig).toHaveBeenCalledTimes(1);
+      }
+      expect(wrapper.get('[data-testid="settings-dirty-bar"]').isVisible()).toBe(true);
+    },
+  );
+
+  it("ignores configured-secret flags but tracks a typed replacement secret", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const setupState = (
+      wrapper.vm as unknown as {
+        $: { setupState: { form: Record<string, unknown> } };
+      }
+    ).$.setupState;
+    setupState.form.wechat_connect_mp_app_secret_configured = false;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="settings-dirty-bar"]').exists()).toBe(false);
+
+    await openUsersTab(wrapper);
+    const secret = wrapper.get('[data-testid="wechat-connect-mp-app-secret"]');
+    await secret.setValue("replacement-secret");
+
+    expect(wrapper.get('[data-testid="settings-dirty-bar"]').isVisible()).toBe(true);
+  });
+
+  it("keeps the floating actions clear of the footer and disables their motion on request", () => {
+    expect(enSettings.settings.unsavedChanges).toBe("Unsaved changes");
+    expect(zhSettings.settings.discardChanges).toBe("放弃更改");
+    expect(settingsViewSource).toContain("bottom: calc(3.25rem + env(safe-area-inset-bottom))");
+    expect(settingsViewSource).toContain(".settings-bottom-actions");
+    expect(settingsViewSource).toContain("@media (max-width: 479px)");
+    expect(settingsViewSource).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(settingsViewSource).toMatch(
+      /settings-dirty-bar-enter-active,[\s\S]*?transition: none;/,
+    );
   });
 
   it("submits the compact home page toggle", async () => {

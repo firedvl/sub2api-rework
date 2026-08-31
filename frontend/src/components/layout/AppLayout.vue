@@ -1,10 +1,9 @@
 <template>
   <div
-    class="min-h-screen"
     :class="{
       'operator-console': isOperatorConsole,
       'fixture-review-mode': isFixtureReview,
-      'bg-gray-50 dark:bg-dark-950': !isOperatorConsole
+      'min-h-screen bg-gray-50 dark:bg-dark-950': !isOperatorConsole
     }"
   >
     <!-- Background Decoration -->
@@ -15,8 +14,8 @@
 
     <!-- Main Content Area -->
     <div
-      class="relative flex h-screen flex-col transition-all duration-300"
-      :class="isOperatorConsole ? 'operator-shell' : [sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
+      class="relative flex flex-col transition-all duration-300"
+      :class="isOperatorConsole ? 'operator-shell' : ['h-screen', sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
     >
       <!-- Header -->
       <OperatorHeader v-if="isOperatorConsole" />

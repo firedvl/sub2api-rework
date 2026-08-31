@@ -668,9 +668,10 @@ const quotaDetail = (summary: OperatorAccountCapacity) => summary.windows.length
   border-top: 1px solid var(--operator-border-subtle);
 }
 .operator-capacity-provider-header {
+  overflow: hidden;
   padding: 0;
-  border-top: 1px solid var(--operator-border-subtle);
-  border-bottom: 1px solid var(--operator-border-subtle);
+  border: 1px solid var(--operator-border-subtle);
+  border-radius: var(--operator-radius);
   background: var(--operator-raised);
   box-shadow: inset 3px 0 0 var(--operator-border);
 }

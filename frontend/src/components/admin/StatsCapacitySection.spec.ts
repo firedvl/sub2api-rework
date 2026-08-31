@@ -51,7 +51,7 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
 })
 
 describe('StatsCapacitySection', () => {
-  it('renders pool partitions and exposes chart details through hover and selection', async () => {
+  it('separates actual short and long windows, preserves unknowns, and renders provider icons', () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
         accounts: [
@@ -62,63 +62,32 @@ describe('StatsCapacitySection', () => {
         usageByAccountId: {
           '1': usage({
             five_hour: { utilization: 20, resets_at: null, remaining_seconds: null },
-            seven_day: { utilization: 10, resets_at: null, remaining_seconds: null },
+            seven_day: { utilization: 60, resets_at: null, remaining_seconds: null },
           }),
           '2': usage({
-            five_hour: { utilization: 60, resets_at: null, remaining_seconds: null },
+            five_hour: { utilization: 50, resets_at: null, remaining_seconds: null },
           }),
         },
       },
       global: { stubs: { LoadingSpinner: true } },
     })
 
-    const global = wrapper.get('[data-testid="global-capacity-donut"]')
-    expect(global.get('[data-testid="capacity-used-segment"]').attributes('style')).toContain('40 60')
-    expect(global.findAll('[data-testid="capacity-account-segment"]')).toHaveLength(2)
-    expect(global.text()).not.toContain('Unknown Gemini')
-    expect(global.text()).toContain('admin.dashboard.capacity.poolContribution 40')
-    expect(global.text()).toContain('admin.dashboard.capacity.poolContribution 20')
+    const shortTerm = wrapper.get('[data-testid="stats-short-term-capacity"]')
+    const longTerm = wrapper.get('[data-testid="stats-long-term-capacity"]')
+    expect(shortTerm.get('[data-testid="short-provider-openai"] svg').exists()).toBe(true)
+    expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('5h')
+    expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('65%')
+    expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('admin.stats.capacity.windowCoverage 2 0')
+    expect(shortTerm.get('[data-testid="short-provider-gemini"]').text()).toContain('admin.stats.capacity.notReported')
 
-    const firstAccountSegment = global.findAll('[data-testid="capacity-account-segment"]')[0]
-    await firstAccountSegment.trigger('mouseenter')
-    expect(global.get('.stats-capacity-tooltip').text()).toContain('Account 2')
-    await firstAccountSegment.trigger('click')
-    expect(firstAccountSegment.attributes('aria-pressed')).toBe('true')
-    expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Account 2')
-
-    await global.get('.select-trigger').trigger('click')
-    const unknownOption = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
-      .find((option) => option.textContent?.includes('admin.dashboard.capacity.quotaUnknown'))
-    expect(unknownOption).toBeDefined()
-    unknownOption?.click()
-    await wrapper.vm.$nextTick()
-    expect(global.get('[data-testid="capacity-selected-detail"]').text()).toContain('Unknown Gemini')
-
-    const openAI = wrapper.get('[data-testid="provider-capacity-donut-openai"]')
-    expect(openAI.get('[data-testid="capacity-used-segment"]').attributes('style')).toContain('40 60')
-    expect(openAI.findAll('[data-testid="capacity-account-segment"]')).toHaveLength(2)
-
-    const openAIStats = wrapper.get('[data-testid="provider-capacity-openai"] .stats-provider-stats')
-    expect(openAIStats.findAll('dt').map((node) => node.text())).toEqual([
-      'admin.dashboard.capacity.quotaCoverage',
-      'admin.dashboard.capacity.schedulable',
-      'admin.dashboard.capacity.lowestCapacity',
-      'admin.dashboard.capacity.nextReset',
-    ])
-    expect(openAIStats.findAll('dd').map((node) => node.text())[0]).toBe('2/2')
-    expect(openAIStats.text()).toContain('40%')
-    expect(openAIStats.text()).toContain('Account 2')
-
-    const gemini = wrapper.get('[data-testid="provider-capacity-donut-gemini"]')
-    expect(gemini.get('[data-testid="capacity-unknown-ring"]').attributes('tabindex')).toBe('0')
-    expect(gemini.find('[data-testid="capacity-used-segment"]').exists()).toBe(false)
-    expect(gemini.get('svg').attributes('aria-label')).toContain('admin.dashboard.capacity.quotaUnknown')
-    const geminiStats = wrapper.get('[data-testid="provider-capacity-gemini"] .stats-provider-stats')
-    expect(geminiStats.findAll('dd').map((node) => node.text())[0]).toBe('0/1')
-    expect(geminiStats.text()).toContain('admin.dashboard.capacity.unknownCount 1')
+    expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('7d')
+    expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('40%')
+    expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('admin.stats.capacity.windowCoverage 1 1')
+    expect(longTerm.get('[data-testid="long-provider-gemini"]').text()).toContain('admin.stats.capacity.notReported')
+    expect(wrapper.get('[data-testid="provider-capacity-gemini"]').text()).toContain('admin.stats.capacity.coverage 0 1')
   })
 
-  it('keeps provider windows collapsed until requested', async () => {
+  it('uses one compact native inspector for account contributions and missing windows', async () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
         accounts: [account(1), account(2)],
@@ -135,16 +104,20 @@ describe('StatsCapacitySection', () => {
       global: { stubs: { LoadingSpinner: true } },
     })
 
-    const provider = wrapper.get('[data-testid="provider-capacity-openai"]')
-    const details = provider.get('details.stats-window-section')
-    expect(details.attributes('open')).toBeUndefined()
-    await details.get('summary').trigger('click')
-    expect(details.attributes('open')).toBe('')
-    expect(provider.text()).toContain('5h')
-    expect(provider.text()).toContain('7d')
-    expect(provider.text()).toContain('admin.stats.capacity.windowCoverage 2 0')
-    expect(provider.text()).toContain('admin.stats.capacity.windowCoverage 1 1')
-    expect(provider.text()).toContain('admin.dashboard.capacity.poolContribution 40')
-    expect(provider.text()).toContain('admin.dashboard.capacity.poolContribution 25')
+    const inspector = wrapper.get('[data-testid="stats-capacity-inspector"]')
+    const select = inspector.get('select')
+    expect(select.findAll('option').map((option) => option.text())).toEqual([
+      'OpenAI · 5h',
+      'OpenAI · 7d',
+    ])
+    expect(inspector.text()).toContain('Account 1')
+    expect(inspector.text()).toContain('Account 2')
+
+    await select.setValue('openai:seven_day')
+    expect(inspector.text()).toContain('OpenAI · 7d')
+    expect(inspector.text()).toContain('admin.stats.capacity.windowCoverage 1 1')
+    expect(inspector.text()).toContain('Account 1')
+    expect(inspector.text()).toContain('Account 2')
+    expect(inspector.text()).toContain('admin.dashboard.capacity.quotaUnknown')
   })
 })

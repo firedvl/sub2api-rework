@@ -734,7 +734,7 @@ const adminSettings = {
   password_reset_enabled: false,
   account_auto_pause_enabled: true,
   account_quota_notify_enabled: true,
-  account_quota_notify_emails: ['ops@example.test'],
+  account_quota_notify_emails: [{ email: 'ops@example.test', disabled: false, verified: true }],
   openai_auto_warmup_enabled: false,
   custom_menu_items: [],
   default_subscriptions: [],
@@ -1061,7 +1061,19 @@ export function getOperatorFixtureData(
 
   if (pathname === '/api/v1/admin/settings/admin-api-key') return { exists: true, masked_key: 's2a_review_****' }
   if (pathname === '/api/v1/admin/settings/web-search-emulation') {
-    return { enabled: true, providers: [{ provider: 'openai', enabled: true, model: 'gpt-5.2' }] }
+    return {
+      enabled: true,
+      providers: [{
+        type: 'brave',
+        api_key: '',
+        api_key_configured: true,
+        quota_limit: 1_000,
+        quota_used: 128,
+        subscribed_at: 1_754_006_400,
+        proxy_id: 41,
+        expires_at: null,
+      }],
+    }
   }
   if (pathname === '/api/v1/admin/settings/email-templates') {
     return { events: [], locales: ['en'], templates: [], placeholders: [] }

@@ -1,15 +1,6 @@
 <template>
   <AppLayout>
     <div class="stats-view">
-      <StatsCapacitySection
-        :accounts="capacityAccounts"
-        :usage-by-account-id="capacityUsageByAccountId"
-        :errors-by-account-id="capacityErrorsByAccountId"
-        :loading="capacityLoading"
-        :error="capacityError"
-        @retry="loadCapacity"
-      />
-
       <section class="stats-usage-section" :aria-labelledby="usageTitleId">
         <header class="stats-section-header">
           <div>
@@ -79,6 +70,14 @@
         </template>
       </section>
 
+      <StatsCapacitySection
+        :accounts="capacityAccounts"
+        :usage-by-account-id="capacityUsageByAccountId"
+        :errors-by-account-id="capacityErrorsByAccountId"
+        :loading="capacityLoading"
+        :error="capacityError"
+        @retry="loadCapacity"
+      />
     </div>
   </AppLayout>
 </template>

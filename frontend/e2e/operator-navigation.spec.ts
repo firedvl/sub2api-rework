@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
-import { OPERATOR_FIXTURE_NOW } from './fixtures/operatorData'
+import { OPERATOR_FIXTURE_NOW, operatorFixtureAccounts } from './fixtures/operatorData'
 
 const primaryLinks = [
   { href: '/admin/dashboard', target: '/admin/dashboard' },
@@ -29,7 +29,105 @@ const operatorPopupPalette = {
   muted: 'rgb(163, 163, 163)',
 }
 
+const fulfillApiData = (route: Route, data: unknown, status = 200) => (
+  route.fulfill({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify({ code: status >= 400 ? status : 0, message: status >= 400 ? 'fixture failure' : 'ok', data }),
+  })
+)
+
+async function installManyAccountMock(page: Page) {
+  const accounts = Array.from({ length: 36 }, (_, index) => {
+    const source = operatorFixtureAccounts[index % operatorFixtureAccounts.length]
+    const number = String(index + 1).padStart(2, '0')
+    return {
+      ...source,
+      id: 1_000 + index,
+      name: `Fixture account ${number}`,
+      credentials: {
+        ...source.credentials,
+        email: `fixture-account-${number}@example.test`,
+      },
+      credentials_status: { ...source.credentials_status },
+      extra: { ...source.extra },
+      group_ids: [...source.group_ids],
+      groups: source.groups.map((group) => ({ ...group })),
+    }
+  })
+
+  await installAccountListMock(page, accounts)
+
+  return accounts
+}
+
+async function installAccountListMock(page: Page, accounts: typeof operatorFixtureAccounts) {
+  await page.route('**/api/v1/admin/accounts**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() === 'GET' && pathname === '/api/v1/admin/accounts') {
+      await fulfillApiData(route, {
+        items: accounts,
+        total: accounts.length,
+        page: 1,
+        page_size: accounts.length,
+        pages: 1,
+      })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+interface WritableSettingsState {
+  failMain: boolean
+  failWebSearch: boolean
+  delay: number
+  mainSaves: number
+  webSearchSaves: number
+}
+
+async function installWritableSettingsMock(page: Page): Promise<WritableSettingsState> {
+  const state: WritableSettingsState = {
+    failMain: false,
+    failWebSearch: false,
+    delay: 0,
+    mainSaves: 0,
+    webSearchSaves: 0,
+  }
+
+  await page.route('**/api/v1/admin/settings**', async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() !== 'PUT') {
+      await route.fallback()
+      return
+    }
+    if (state.delay) await new Promise((resolve) => setTimeout(resolve, state.delay))
+
+    if (pathname === '/api/v1/admin/settings') {
+      state.mainSaves += 1
+      await fulfillApiData(route, state.failMain ? {} : request.postDataJSON(), state.failMain ? 500 : 200)
+      return
+    }
+    if (pathname === '/api/v1/admin/settings/web-search-emulation') {
+      state.webSearchSaves += 1
+      await fulfillApiData(route, state.failWebSearch ? {} : request.postDataJSON(), state.failWebSearch ? 500 : 200)
+      return
+    }
+    await route.fallback()
+  })
+
+  return state
+}
+
 function expectDarkNeutralSurface(color: string, label: string) {
+  if (color.startsWith('oklch(')) {
+    const [lightness, chroma] = color.match(/[\d.]+/g)?.map(Number) ?? []
+    expect(lightness, `${label} must stay dark`).toBeLessThan(0.3)
+    expect(chroma, `${label} must stay neutral`).toBeLessThanOrEqual(0.01)
+    return
+  }
   expect(color, `${label} must resolve to an RGB color`).toMatch(/^rgba?\(/)
   const channels = color.match(/[\d.]+/g)?.map(Number) ?? []
   const [red, green, blue, alpha = 1] = channels
@@ -171,7 +269,7 @@ test.describe('operator console navigation', () => {
     await installOperatorApiMock(loginPage)
     await loginPage.goto('/login')
 
-    await expect(loginPage.getByRole('heading', { level: 1, name: 'Gateway' })).toBeVisible()
+    await expect(loginPage.getByRole('heading', { level: 1, name: 'Gateway' })).toBeVisible({ timeout: 15_000 })
     await expect(loginPage.locator('.auth-codex-brand p')).toHaveText('AI Gateway')
     await expect(loginPage.locator('.auth-codex-copyright')).toHaveText('Powered by Sub2API Rework')
     await expect(loginPage.locator('.auth-codex-logo img')).toHaveAttribute('src', '/logo.svg')
@@ -269,6 +367,15 @@ test.describe('operator console navigation', () => {
 
       const trigger = page.getByRole('button', { name: 'Ask Gateway' })
       await expect(trigger).toBeVisible()
+
+      if (reviewCase.width >= 1024) {
+        const navBox = await page.locator('.operator-primary-nav').boundingBox()
+        const triggerBox = await trigger.boundingBox()
+        expect(navBox).not.toBeNull()
+        expect(triggerBox).not.toBeNull()
+        expect(navBox!.x + navBox!.width).toBeLessThanOrEqual(triggerBox!.x)
+      }
+
       await trigger.click()
 
       const dialog = page.getByRole('dialog', { name: 'Ask Gateway' })
@@ -576,7 +683,78 @@ test.describe('operator console navigation', () => {
     }
   })
 
-  test('keeps Overview compact and shows normalized global and provider capacity on Stats', async ({ page }) => {
+  test('keeps one Accounts scroll path and reaches the final account in both views', async ({ page }) => {
+    test.setTimeout(60_000)
+    const manyAccounts = await installManyAccountMock(page)
+    const finalAccount = manyAccounts.at(-1)!
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport)
+      await page.goto('/admin/accounts')
+
+      const main = page.locator('main.operator-main')
+      const capacityRows = page.getByTestId('account-capacity-row')
+      await expect(capacityRows).toHaveCount(manyAccounts.length)
+      const providerHeader = page.locator('.operator-capacity-provider-header').first()
+      const radius = await providerHeader.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderRadius))
+      expect(radius).toBeGreaterThan(0)
+      expect(radius).toBeLessThanOrEqual(8)
+
+      const initialMetrics = await page.evaluate(() => ({
+        documentClientHeight: document.documentElement.clientHeight,
+        documentScrollHeight: document.documentElement.scrollHeight,
+        windowScrollY: window.scrollY,
+      }))
+      expect(initialMetrics.documentScrollHeight, `${viewport.width}px document tail`).toBeLessThanOrEqual(
+        initialMetrics.documentClientHeight + 1,
+      )
+      expect(initialMetrics.windowScrollY).toBe(0)
+
+      await main.evaluate((element) => { element.scrollTop = element.scrollHeight })
+      const finalCapacityRow = capacityRows.filter({ hasText: finalAccount.name })
+      await expect(finalCapacityRow).toBeVisible()
+      const capacityScroll = await main.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      }))
+      expect(capacityScroll.scrollHeight).toBeGreaterThan(capacityScroll.clientHeight)
+      expect(capacityScroll.scrollTop).toBeGreaterThan(0)
+
+      await page.getByRole('tab', { name: 'Technical' }).click()
+      const technicalFinal = page.locator('.operator-account-table').getByText(finalAccount.name, { exact: true })
+      await main.evaluate((element) => { element.scrollTop = element.scrollHeight })
+      await expect(technicalFinal).toBeVisible()
+      await expect(page.locator('.operator-account-pagination')).toBeVisible()
+
+      const finalMetrics = await page.evaluate(() => ({
+        documentClientHeight: document.documentElement.clientHeight,
+        documentScrollHeight: document.documentElement.scrollHeight,
+        windowScrollY: window.scrollY,
+      }))
+      expect(finalMetrics.documentScrollHeight).toBeLessThanOrEqual(finalMetrics.documentClientHeight + 1)
+      expect(finalMetrics.windowScrollY).toBe(0)
+    }
+  })
+
+  test('promotes Gateway usage and separates short and long capacity on Stats', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const unknownAccount = {
+      ...operatorFixtureAccounts[0],
+      id: 999,
+      name: 'OpenAI quota unknown',
+      type: 'apikey',
+      credentials: {},
+      credentials_status: { has_api_key: true },
+      extra: {},
+      group_ids: [...operatorFixtureAccounts[0].group_ids],
+      groups: operatorFixtureAccounts[0].groups.map((group) => ({ ...group })),
+    }
+    await installAccountListMock(page, [...operatorFixtureAccounts, unknownAccount])
     await page.goto('/admin/dashboard')
 
     const summary = page.getByTestId('account-pool-capacity')
@@ -588,58 +766,62 @@ test.describe('operator console navigation', () => {
     await summary.getByRole('link', { name: 'View Stats' }).click()
     await expect(page).toHaveURL(/\/admin\/stats$/)
 
-    const global = page.getByTestId('global-capacity-donut')
-    await expect(global).toContainText('21%')
-    await expect(global.locator('[data-testid="capacity-account-segment"]')).toHaveCount(4)
-    await expect(global.locator('svg[role="img"]')).toHaveAttribute('aria-label', /21% available, 79% Used capacity/)
-    await expect(global).not.toContainText('Gemini Recovery')
+    const usage = page.locator('.stats-usage-section')
+    await expect(usage).toContainText('Gateway usage')
+    await expect(usage).toContainText(/4,286.*RPM/s)
+    await expect(usage).toContainText(/5\.5M.*TPM/s)
+    await expect(usage).toContainText('Actual cost')
+    await expect(usage).toContainText('Account cost')
+    await expect(usage).toContainText('Average response')
+    await expect(page.getByTestId('stats-request-trend')).toBeVisible()
+    expect(await usage.evaluate((element, capacitySelector) => (
+      Boolean(element.compareDocumentPosition(document.querySelector(capacitySelector)!) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ), '.stats-capacity-section')).toBe(true)
 
-    const usedSegment = global.getByTestId('capacity-used-segment')
-    const usedBounds = await usedSegment.boundingBox()
-    expect(usedBounds).not.toBeNull()
-    await page.mouse.move(
-      (usedBounds?.x ?? 0) + (usedBounds?.width ?? 0) / 2,
-      (usedBounds?.y ?? 0) + 2,
-    )
-    await expect(global.locator('.stats-capacity-tooltip')).toBeVisible()
-    const firstSegment = global.locator('[data-testid="capacity-account-segment"]').first()
-    await firstSegment.focus()
-    await page.keyboard.press('Enter')
-    await expect(firstSegment).toHaveAttribute('aria-pressed', 'true')
+    const shortTerm = page.getByTestId('stats-short-term-capacity')
+    const longTerm = page.getByTestId('stats-long-term-capacity')
+    await expect(shortTerm).toContainText('5h / short-term capacity')
+    await expect(longTerm).toContainText('Weekly / total capacity')
+    await expect(shortTerm.getByTestId('short-provider-openai')).toContainText('68%')
+    await expect(longTerm.getByTestId('long-provider-openai')).toContainText('52%')
+    await expect(longTerm.getByTestId('long-provider-anthropic')).toContainText('4%')
+    await expect(shortTerm.getByTestId('short-provider-gemini')).toContainText('0%')
+    await expect(shortTerm.getByTestId('short-provider-openai')).toContainText('1 known, 1 without this window')
+    await expect(shortTerm.getByTestId('short-provider-gemini')).toContainText('1 known, 0 without this window')
+    await expect(longTerm.getByTestId('long-provider-gemini')).toContainText('No supported window reported')
+    await expect(shortTerm.getByTestId('short-provider-openai').locator('svg')).toBeVisible()
+    await expect(page.getByTestId('provider-capacity-antigravity').locator('svg')).toBeVisible()
 
-    const segmentSelect = global.getByRole('button', { name: 'Inspect segment' })
-    await segmentSelect.focus()
+    const inspector = page.getByTestId('stats-capacity-inspector')
+    const inspectorSelect = inspector.getByLabel('Inspect capacity window')
+    await expect(inspectorSelect).toBeVisible()
+    await expect(inspector.locator('select')).toHaveCount(1)
+    await inspectorSelect.focus()
     await page.keyboard.press('ArrowDown')
-    await expect(page.getByRole('listbox')).toBeFocused()
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('Enter')
-    await expect(segmentSelect).toBeFocused()
-    await expect(global.getByTestId('capacity-selected-detail')).toContainText('Claude Primary')
+    await expect(inspectorSelect).toBeFocused()
+    await expect(inspectorSelect).toHaveValue('openai:seven_day')
+    await expect(inspector).toContainText('OpenAI · 7d')
+    await expect(inspector).toContainText('Codex Team West')
+    await expect(inspector).toContainText('OpenAI quota unknown')
+    await expect(inspector).toContainText('Quota unknown')
 
-    const openAI = page.getByTestId('provider-capacity-openai')
-    await expect(openAI).toContainText('52%')
-    const openAIWindows = openAI.locator('details.stats-window-section')
-    await expect(openAIWindows).not.toHaveAttribute('open', '')
-    await openAIWindows.locator('summary').click()
-    await expect(openAIWindows).toHaveAttribute('open', '')
-    await expect(openAI).toContainText('5h')
-    await expect(openAI).toContainText('7d')
-    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
-    await expect(openAI.getByTestId('provider-capacity-donut-openai').locator('[data-testid="capacity-used-segment"]')).toBeVisible()
+    const [shortBox, longBox] = await Promise.all([shortTerm.boundingBox(), longTerm.boundingBox()])
+    expect(shortBox).not.toBeNull()
+    expect(longBox).not.toBeNull()
+    expect(longBox!.x).toBeGreaterThanOrEqual(shortBox!.x + shortBox!.width - 1)
 
-    const anthropic = page.getByTestId('provider-capacity-anthropic')
-    await expect(anthropic).toContainText('4%')
-    await expect(anthropic.getByTestId('provider-capacity-donut-anthropic').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
-
-    const antigravity = page.getByTestId('provider-capacity-antigravity')
-    await expect(antigravity).toContainText('28%')
-    await expect(antigravity.getByTestId('provider-capacity-donut-antigravity').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
-
-    const gemini = page.getByTestId('provider-capacity-gemini')
-    await expect(gemini).toContainText('0%')
-    await expect(gemini).toContainText('Gemini Quota Limited')
-    await expect(gemini).not.toContainText('1 unknown')
-    await expect(gemini.getByTestId('provider-capacity-donut-gemini').locator('[data-testid="capacity-account-segment"]')).toHaveCount(1)
+    for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport)
+      const [compactShort, compactLong] = await Promise.all([shortTerm.boundingBox(), longTerm.boundingBox()])
+      expect(compactShort).not.toBeNull()
+      expect(compactLong).not.toBeNull()
+      expect(compactLong!.y).toBeGreaterThanOrEqual(compactShort!.y + compactShort!.height - 1)
+      const overflow = await page.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }))
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+    }
   })
 
   test('drills from Overview into filtered operator states and expands account details', async ({ page }) => {
@@ -752,6 +934,33 @@ test.describe('operator console navigation', () => {
     const inactiveContextBorder = await page.locator('.operator-context-link:not(.operator-context-link-active)').first()
       .evaluate((element) => getComputedStyle(element).borderBottomColor)
     expect(inactiveContextBorder).toBe('rgba(0, 0, 0, 0)')
+
+    const localeTrigger = page.locator('.operator-locale-trigger')
+    await localeTrigger.hover()
+    expectDarkNeutralSurface(
+      await localeTrigger.evaluate((element) => getComputedStyle(element).backgroundColor),
+      'language trigger hover',
+    )
+    await localeTrigger.focus()
+    await page.keyboard.press('Enter')
+    const localeMenu = page.locator('.operator-header .operator-menu')
+    const selectedLocale = localeMenu.getByRole('menuitemradio', { name: /English/ })
+    await expectNeutralOperatorMenu(page, localeMenu, selectedLocale, 'selected')
+    await expect(selectedLocale).toHaveAttribute('aria-checked', 'true')
+    await localeMenu.getByRole('menuitemradio', { name: /中文/ }).hover()
+    expectDarkNeutralSurface(
+      await localeMenu.getByRole('menuitemradio', { name: /中文/ })
+        .evaluate((element) => getComputedStyle(element).backgroundColor),
+      'language option hover',
+    )
+    await selectedLocale.click()
+    await expect(localeMenu).toBeHidden()
+    await localeTrigger.focus()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Tab')
+    await expect(selectedLocale).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(localeMenu).toBeHidden()
 
     await page.getByRole('tab', { name: 'Technical' }).click()
 
@@ -961,6 +1170,29 @@ test.describe('operator console navigation', () => {
       page.locator('.select-dropdown-portal'),
       page.locator('.select-dropdown-portal .select-option-focused'),
     )
+    await page.keyboard.press('Escape')
+
+    const webSearchHeading = page.getByRole('heading', { name: 'Web Search Emulation' })
+    await webSearchHeading.scrollIntoViewIfNeeded()
+    const webSearchCard = webSearchHeading.locator('xpath=../..')
+    const providerCard = webSearchCard.locator('.rounded-lg.border.border-gray-200').first()
+    await providerCard.locator(':scope > div').first().click({ position: { x: 12, y: 12 } })
+    const proxyTrigger = providerCard.locator('.select-trigger').last()
+    await expect(proxyTrigger).toContainText('US West relay')
+    await proxyTrigger.click()
+    const proxyMenu = providerCard.locator('.select-dropdown.operator-menu')
+    const proxyOption = proxyMenu.locator('.select-option').filter({ hasText: 'EU standby relay' })
+    await expectNeutralOperatorMenu(page, proxyMenu, proxyOption)
+    const proxySearchColors = await proxyMenu.locator('.select-search-input').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { color: style.color, caret: style.caretColor }
+    })
+    expect(proxySearchColors).toEqual({
+      color: operatorPopupPalette.foreground,
+      caret: operatorPopupPalette.foreground,
+    })
+    await page.keyboard.press('Escape')
+    await expect(proxyMenu).toBeHidden()
   })
 
   test('uses neutral Create, Edit, and Bulk Edit dialog surfaces and callouts', async ({ page }) => {
@@ -1111,6 +1343,94 @@ test.describe('operator console navigation', () => {
     expect(header!.y).toBeLessThanOrEqual(1)
     expect(tabBar!.y).toBeGreaterThanOrEqual(mainRegion!.y + scroll.paddingTop - 1)
     expect(tabBar!.y).toBeLessThanOrEqual(mainRegion!.y + scroll.paddingTop + 1)
+  })
+
+  test('keeps Settings save, failure, discard, mobile, and footer states reachable', async ({ page }) => {
+    test.setTimeout(60_000)
+    const writable = await installWritableSettingsMock(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/settings')
+
+    const siteName = page.getByTestId('settings-site-name')
+    const dirtyBar = page.getByTestId('settings-dirty-bar')
+    const discard = page.getByTestId('settings-discard-button')
+    const floatingSave = page.getByTestId('settings-floating-save-button')
+    const main = page.locator('main.operator-main')
+    await expect(siteName).toHaveValue('Sub2API')
+    await expect(dirtyBar).toHaveCount(0)
+
+    await siteName.fill('Gateway draft')
+    await expect(dirtyBar).toBeVisible()
+    await expect(dirtyBar).toContainText('Unsaved changes')
+    await main.evaluate((element) => { element.scrollTop = element.scrollHeight / 2 })
+    await expect(dirtyBar).toBeVisible()
+    expect(await dirtyBar.evaluate((element) => getComputedStyle(element).position)).toBe('fixed')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const [mobileBar, mobileStatus] = await Promise.all([
+      dirtyBar.boundingBox(),
+      page.locator('.operator-status-bar').boundingBox(),
+    ])
+    expect(mobileBar).not.toBeNull()
+    expect(mobileStatus).not.toBeNull()
+    expect(mobileBar!.x).toBeGreaterThanOrEqual(0)
+    expect(mobileBar!.x + mobileBar!.width).toBeLessThanOrEqual(390)
+    expect(mobileBar!.y + mobileBar!.height).toBeLessThanOrEqual(mobileStatus!.y)
+    await expect(discard).toBeVisible()
+    await expect(floatingSave).toBeVisible()
+
+    await discard.click()
+    await expect(siteName).toHaveValue('Sub2API')
+    await expect(dirtyBar).toHaveCount(0)
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    writable.failMain = true
+    await siteName.fill('Gateway failed save')
+    await floatingSave.click()
+    await expect.poll(() => writable.mainSaves).toBe(1)
+    await expect(dirtyBar).toBeVisible()
+    await expect(floatingSave).toBeEnabled()
+    await expect(siteName).toHaveValue('Gateway failed save')
+
+    await discard.click()
+    await expect(siteName).toHaveValue('Sub2API')
+    writable.failMain = false
+    writable.delay = 250
+    await siteName.fill('Gateway saved')
+    await floatingSave.click()
+    await expect(floatingSave).toBeDisabled()
+    await expect(floatingSave).toHaveAttribute('aria-busy', 'true')
+    await expect.poll(() => writable.mainSaves).toBe(2)
+    await expect.poll(() => writable.webSearchSaves).toBe(1)
+    await expect(dirtyBar).toHaveCount(0)
+    await expect(siteName).toHaveValue('Gateway saved')
+
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await siteName.fill('Gateway reduced motion')
+    await expect(dirtyBar).toBeVisible()
+    expect(await dirtyBar.evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration)))
+      .toBeLessThanOrEqual(0.001)
+    await discard.click()
+    await expect(siteName).toHaveValue('Gateway saved')
+
+    const bottomActions = page.locator('.settings-bottom-actions')
+    await bottomActions.scrollIntoViewIfNeeded()
+    const spacing = await bottomActions.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        marginTop: Number.parseFloat(style.marginTop),
+        paddingBottom: Number.parseFloat(style.paddingBottom),
+      }
+    })
+    expect(spacing.marginTop).toBeGreaterThanOrEqual(32)
+    expect(spacing.paddingBottom).toBeGreaterThanOrEqual(32)
+    const [bottomBox, statusBox] = await Promise.all([
+      bottomActions.boundingBox(),
+      page.locator('.operator-status-bar').boundingBox(),
+    ])
+    expect(bottomBox).not.toBeNull()
+    expect(statusBox).not.toBeNull()
+    expect(bottomBox!.y + bottomBox!.height).toBeLessThanOrEqual(statusBox!.y + 1)
   })
 
   test('stacks Activity health and metrics at compact desktop width', async ({ page }) => {
