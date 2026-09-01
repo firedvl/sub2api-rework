@@ -88,6 +88,9 @@ describe('StatsCapacitySection', () => {
     expect(overall.get('svg').attributes('aria-label')).toContain('admin.stats.capacity.mixedAverageLimitingQuota')
     expect(openAI.get('[data-testid="stats-capacity-donut-basis"]').text()).toBe('admin.stats.capacity.averageLimitingQuota')
     expect(openAI.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('admin.stats.capacity.averageLimitingQuota')
+    expect(openAI.get('[data-testid="stats-capacity-donut-coverage"]').text()).toContain('2 0')
+    expect(openAI.get('[data-testid="stats-capacity-donut-limit"]').text()).toContain('Account 1 · 7d40%')
+    expect(openAI.find('.stats-capacity-donut-value span').exists()).toBe(false)
     expect(openAI.text()).toContain('Account 1 · 7d')
     expect(unknown.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('quotaUnknown')
     expect(unknown.text()).not.toContain('0%')
@@ -257,6 +260,10 @@ describe('StatsCapacitySection', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.findAll('[data-testid="stats-model-limit-row"]')).toHaveLength(3)
     expect(wrapper.get('[data-testid="stats-model-limit-summary"]').text()).toContain('0% 20 model-01')
+    const googleCapacity = wrapper.get('[data-testid="provider-capacity-antigravity"]')
+    expect(googleCapacity.text()).toContain('Google')
+    expect(googleCapacity.get('[data-provider-brand="google"]').exists()).toBe(true)
+    expect(wrapper.get('.stats-inspector-summary > div span').text()).toContain('Google')
 
     const modelSelect = wrapper.findAllComponents(Select)
       .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectModel')!
