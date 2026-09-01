@@ -89,9 +89,10 @@ describe('StatsCapacitySection', () => {
     expect(openAI.get('[data-testid="stats-capacity-donut-basis"]').text()).toBe('admin.stats.capacity.averageLimitingQuota')
     expect(openAI.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('admin.stats.capacity.averageLimitingQuota')
     expect(openAI.get('[data-testid="stats-capacity-donut-coverage"]').text()).toContain('2 0')
-    expect(openAI.get('[data-testid="stats-capacity-donut-limit"]').text()).toContain('Account 1 · 7d40%')
+    expect(openAI.get('[data-testid="stats-capacity-donut-limit"]').text()).toContain('Account 140%')
+    expect(openAI.get('[data-testid="stats-capacity-donut-quota"]').text()).toContain('7d')
     expect(openAI.find('.stats-capacity-donut-value span').exists()).toBe(false)
-    expect(openAI.text()).toContain('Account 1 · 7d')
+    expect(openAI.text()).toContain('Account 1')
     expect(unknown.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('quotaUnknown')
     expect(unknown.text()).not.toContain('0%')
     expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('5h')
@@ -227,7 +228,7 @@ describe('StatsCapacitySection', () => {
     const antigravityQuota = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
       index === 19 ? 'hidden-model-search-target' : `model-${String(index + 1).padStart(2, '0')}`,
       {
-        utilization: index === 0 ? 100 : Math.max(4, 95 - index * 4),
+        utilization: 100,
         reset_time: new Date(Date.UTC(2026, 7, 30, 3 + index)).toISOString(),
       },
     ]))
@@ -262,7 +263,17 @@ describe('StatsCapacitySection', () => {
     expect(wrapper.get('[data-testid="stats-model-limit-summary"]').text()).toContain('0% 20 model-01')
     const googleCapacity = wrapper.get('[data-testid="provider-capacity-antigravity"]')
     expect(googleCapacity.text()).toContain('Google')
-    expect(googleCapacity.get('[data-provider-brand="google"]').exists()).toBe(true)
+    expect(googleCapacity.findAll('dl > div')).toHaveLength(4)
+    expect(googleCapacity.get('[data-testid="stats-capacity-donut-limit"]').text()).toContain('Antigravity pool')
+    expect(googleCapacity.get('[data-testid="stats-capacity-donut-quota"]').text()).toContain('model-01 · +19')
+    expect(googleCapacity.get('[data-testid="stats-capacity-donut-quota"]').attributes('title')).toContain('hidden-model-search-target')
+    expect(googleCapacity.text()).not.toContain('model-02')
+    expect(googleCapacity.text()).not.toContain('hidden-model-search-target')
+    const googleIcon = googleCapacity.get('[data-provider-brand="google"]')
+    expect(googleIcon.attributes('fill')).toBe('currentColor')
+    expect(googleIcon.findAll('path')).toHaveLength(4)
+    expect(googleIcon.get('path').attributes('d')).toMatch(/^M23 12\.245/)
+    expect(googleIcon.html()).not.toMatch(/#[0-9a-f]{6}/i)
     expect(wrapper.get('.stats-inspector-summary > div span').text()).toContain('Google')
 
     const modelSelect = wrapper.findAllComponents(Select)

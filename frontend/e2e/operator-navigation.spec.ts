@@ -817,7 +817,9 @@ test.describe('operator console navigation', () => {
     await expect(tokenTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*6,396,500 Tokens/)
 
     const requestBars = requestTrend.getByTestId('stats-trend-bar')
+    expect(await requestBars.first().locator('span').evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(20)
     await requestBars.nth(2).focus()
+    await expect(requestBars.nth(2)).toHaveClass(/is-active/)
     await expect(requestTrend.getByTestId('stats-trend-tooltip')).toContainText('684 Requests')
     await page.keyboard.press('ArrowRight')
     await expect(requestTrend.getByTestId('stats-trend-tooltip')).toContainText('792 Requests')
@@ -826,7 +828,9 @@ test.describe('operator console navigation', () => {
 
     const tokenBars = tokenTrend.getByTestId('stats-trend-bar')
     await tokenBars.nth(2).hover()
-    await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toContainText('988,000 Tokens')
+    await expect(tokenBars.nth(2)).toHaveClass(/is-active/)
+    expect(await tokenBars.nth(2).locator('span').evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none')
+    await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toContainText('988.0K Tokens')
     await page.mouse.move(0, 0)
     await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
 
@@ -866,8 +870,22 @@ test.describe('operator console navigation', () => {
     await expect(shortTerm.getByTestId('short-provider-openai').locator('svg')).toBeVisible()
     const googleCapacity = page.getByTestId('provider-capacity-antigravity')
     await expect(googleCapacity).toContainText('Google')
-    await expect(googleCapacity.locator('[data-provider-brand="google"]')).toBeVisible()
+    const googleIcon = googleCapacity.locator('[data-provider-brand="google"]')
+    await expect(googleIcon).toBeVisible()
+    await expect(googleIcon).toHaveAttribute('fill', 'currentColor')
+    await expect(googleIcon.locator('path').first()).toHaveAttribute('d', /^M23 12\.245/)
+    expect(await googleIcon.locator('path').evaluateAll((paths) => paths.every((path) => !path.getAttribute('fill')))).toBe(true)
     await expect(googleCapacity.locator('path[d^="M19.35 10.04"]')).toHaveCount(0)
+    const capacityCards = page.locator('.stats-capacity-donut')
+    await expect(capacityCards).toHaveCount(5)
+    const capacityCardMetrics = await capacityCards.evaluateAll((cards) => cards.map((card) => ({
+      height: card.getBoundingClientRect().height,
+      metadataRows: card.querySelectorAll('dl > div').length,
+      clientWidth: card.clientWidth,
+      scrollWidth: card.scrollWidth,
+    })))
+    expect(new Set(capacityCardMetrics.map((card) => Math.round(card.height))).size).toBe(1)
+    expect(capacityCardMetrics.every((card) => card.metadataRows === 4 && card.scrollWidth <= card.clientWidth)).toBe(true)
     await expect(page.getByTestId('stats-capacity-donut-overall'))
       .toContainText('Mixed-provider average · limiting quota · not pooled')
     await expect(page.getByTestId('stats-capacity-donut-overall').locator('.stats-capacity-donut-chart svg'))
@@ -980,7 +998,11 @@ test.describe('operator console navigation', () => {
     await expect(page.getByTestId('stats-capacity-donut-overall')).toBeVisible()
     await expect(page.getByTestId('stats-short-term-capacity')).toBeVisible()
     await expect(page.getByTestId('stats-long-term-capacity')).toBeVisible()
-    await expect(page.getByTestId('provider-capacity-antigravity').locator('.stats-capacity-donut-icon svg')).toBeVisible()
+    const googleCapacity = page.getByTestId('provider-capacity-antigravity')
+    await expect(googleCapacity.locator('.stats-capacity-donut-icon svg')).toBeVisible()
+    await expect(googleCapacity.getByTestId('stats-capacity-donut-quota')).toHaveText('claude-opus-4-1 · +19')
+    await expect(googleCapacity).not.toContainText('hidden-model-search-target')
+    await expect(googleCapacity.getByTestId('stats-capacity-donut-quota')).toHaveAttribute('title', /hidden-model-search-target/)
 
     const inspector = page.getByTestId('stats-capacity-inspector')
     const detail = inspector.getByTestId('stats-selected-account-detail')

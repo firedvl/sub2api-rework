@@ -53,19 +53,25 @@
           unknown: capacity.unknownCount,
         }) }}</dd>
       </div>
-      <div
-        v-if="capacity.lowestAccount && capacity.lowestRemaining !== null"
-        data-testid="stats-capacity-donut-limit"
-      >
+      <div data-testid="stats-capacity-donut-limit">
         <dt>{{ t('admin.stats.capacity.limitingAccount') }}</dt>
         <dd class="stats-capacity-donut-limit">
-          <span :title="capacity.lowestAccount.account.name">{{ limitingAccountLabel }}</span>
-          <strong :class="capacityTone(capacity.lowestRemaining)">{{ formatPercent(capacity.lowestRemaining) }}%</strong>
+          <span :title="capacity.lowestAccount?.account.name">{{ limitingAccountLabel }}</span>
+          <strong
+            v-if="capacity.lowestRemaining !== null"
+            :class="capacityTone(capacity.lowestRemaining)"
+          >{{ formatPercent(capacity.lowestRemaining) }}%</strong>
+          <small
+            data-testid="stats-capacity-donut-quota"
+            :title="limitingQuotaTitle"
+          >{{ limitingQuotaLabel }}</small>
         </dd>
       </div>
-      <div v-if="capacity.nextReset" data-testid="stats-capacity-donut-reset">
+      <div data-testid="stats-capacity-donut-reset">
         <dt>{{ t('admin.stats.capacity.nextReset') }}</dt>
-        <dd>{{ formatCompactReset(capacity.nextReset) }}</dd>
+        <dd class="stats-capacity-donut-summary">
+          {{ capacity.nextReset ? formatCompactReset(capacity.nextReset) : t('common.unknown') }}
+        </dd>
       </div>
     </dl>
   </article>
@@ -95,15 +101,20 @@ const capacityTone = (value: number) => {
   if (value <= 20) return 'is-limited'
   return 'is-healthy'
 }
-const limitingAccountLabel = computed(() => {
+const limitingWindows = computed(() => {
   const account = props.capacity.lowestAccount
-  if (!account || props.capacity.lowestRemaining === null) return ''
-  const windows = account.windows
+  if (!account || props.capacity.lowestRemaining === null) return []
+  return account.windows
     .filter((window) => window.remainingPercent === props.capacity.lowestRemaining)
-    .map((window) => window.label)
-  return windows.length
-    ? `${account.account.name} · ${windows.join(' / ')}`
-    : account.account.name
+})
+const limitingAccountLabel = computed(() => (
+  props.capacity.lowestAccount?.account.name ?? t('common.unknown')
+))
+const limitingQuotaTitle = computed(() => limitingWindows.value.map((window) => window.label).join(' / '))
+const limitingQuotaLabel = computed(() => {
+  const labels = limitingWindows.value.map((window) => window.label)
+  if (!labels.length) return t('common.unknown')
+  return labels.length === 1 ? labels[0] : `${labels[0]} · +${labels.length - 1}`
 })
 const chartLabel = computed(() => {
   const coverage = t('admin.stats.capacity.coverage', {
@@ -120,10 +131,13 @@ const chartLabel = computed(() => {
 <style scoped>
 .stats-capacity-donut {
   display: grid;
+  height: 100%;
   min-width: 0;
-  grid-template-columns: 6rem minmax(0, 1fr);
+  grid-template-columns: 5.75rem minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   align-items: start;
-  gap: 0.75rem 1rem;
+  gap: 0.625rem 0.875rem;
+  overflow: hidden;
   padding: 1rem;
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
@@ -161,7 +175,7 @@ const chartLabel = computed(() => {
 
 .stats-capacity-donut-chart {
   position: relative;
-  width: 6rem;
+  width: 5.75rem;
   aspect-ratio: 1;
   align-self: center;
 }
@@ -204,11 +218,12 @@ const chartLabel = computed(() => {
   display: grid;
   min-width: 0;
   align-self: stretch;
+  grid-template-rows: repeat(4, minmax(0, auto));
 }
 
 .stats-capacity-donut dl > div {
   min-width: 0;
-  padding: 0.4rem 0;
+  padding: 0.3rem 0;
   border-bottom: 1px solid var(--operator-border-subtle);
 }
 
@@ -226,19 +241,31 @@ const chartLabel = computed(() => {
   color: var(--operator-foreground);
   font-size: 0.6875rem;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+}
+
+.stats-capacity-donut-summary,
+.stats-capacity-donut-limit span,
+.stats-capacity-donut-limit small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stats-capacity-donut-limit {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  justify-content: space-between;
   gap: 0.375rem;
 }
 
-.stats-capacity-donut-limit span { min-width: 0; overflow-wrap: anywhere; }
 .stats-capacity-donut-limit strong { flex: 0 0 auto; }
+.stats-capacity-donut-limit small {
+  grid-column: 1 / -1;
+  color: var(--operator-muted-foreground);
+  font-size: 0.625rem;
+}
 .stats-capacity-donut-limit .is-healthy { color: var(--operator-success); }
 .stats-capacity-donut-limit .is-limited { color: var(--operator-warning); }
 .stats-capacity-donut-limit .is-exhausted { color: var(--operator-danger); }

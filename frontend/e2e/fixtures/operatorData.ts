@@ -500,6 +500,13 @@ export function operatorLargeCapacityFixture() {
     ...operatorFixtureAccounts[2],
     overload_until: null,
   }
+  const antigravityUsage = {
+    ...accountUsage['103'],
+    antigravity_quota: Object.fromEntries(Object.entries(accountUsage['103'].antigravity_quota).map(([model, quota]) => [
+      model,
+      { ...quota, utilization: 100 },
+    ])),
+  }
   const gemini = operatorFixtureAccounts[5]
   const deepseek = {
     ...source,
@@ -523,7 +530,7 @@ export function operatorLargeCapacityFixture() {
     ],
     usage: {
       ...usage,
-      '103': accountUsage['103'],
+      '103': antigravityUsage,
       '106': accountUsage['106'],
     },
     hiddenAccount: openAIAccounts.at(-1)!,
