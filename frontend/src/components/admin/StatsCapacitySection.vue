@@ -331,7 +331,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   gemini: 'Gemini',
-  antigravity: 'Antigravity',
+  antigravity: 'Google',
   grok: 'Grok',
   kimi: 'Kimi',
   zhipu: 'Zhipu',
@@ -548,7 +548,7 @@ const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapac
 
 .stats-capacity-overview {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
   gap: 0.75rem;
 }
 .stats-capacity-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
@@ -667,6 +667,7 @@ const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapac
 }
 
 @media (max-width: 640px) {
+  .stats-capacity-overview { grid-template-columns: 1fr; }
   .stats-section-header,
   .stats-inspector-control,
   .stats-account-models-heading { align-items: flex-start; flex-direction: column; }

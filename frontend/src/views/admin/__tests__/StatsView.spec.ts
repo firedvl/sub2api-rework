@@ -93,14 +93,14 @@ const account = (id: number): Account => ({
   session_window_status: null,
 })
 
-const trendPoint = (date: string, requests: number): TrendDataPoint => ({
+const trendPoint = (date: string, requests: number, totalTokens = 0): TrendDataPoint => ({
   date,
   requests,
   input_tokens: 0,
   output_tokens: 0,
   cache_creation_tokens: 0,
   cache_read_tokens: 0,
-  total_tokens: 0,
+  total_tokens: totalTokens,
   cost: 0,
   actual_cost: 0,
 })
@@ -114,7 +114,8 @@ const mockTrend = (trend: TrendDataPoint[], granularity: 'day' | 'hour' = 'day')
   })
 }
 
-const mountView = () => mount(StatsView, {
+const mountView = (attachTo?: Element) => mount(StatsView, {
+  ...(attachTo ? { attachTo } : {}),
   global: {
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
@@ -162,6 +163,7 @@ describe('admin StatsView', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    document.body.innerHTML = ''
   })
 
   it('loads supported metrics, trend, all account pages, and non-force usage', async () => {
@@ -182,34 +184,41 @@ describe('admin StatsView', () => {
     expect(wrapper.text()).toContain('$0.75')
     expect(wrapper.text()).toContain('420ms')
     expect(wrapper.get('[data-testid="stats-request-trend"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="stats-token-trend"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="provider-capacity-openai"]').text()).toContain('Account 1')
     expect(wrapper.get('.stats-view').element.children[0].classList).toContain('stats-usage-section')
     expect(wrapper.get('.stats-view').element.children[1].classList).toContain('stats-capacity-section')
   })
 
-  it('renders an accessible hourly line and area chart with exact points, summaries, and tooltip controls', async () => {
+  it('renders coordinated hourly bar charts with exact summaries, tooltips, and keyboard navigation', async () => {
     mockTrend([
-      trendPoint('2026-08-25T00:00:00Z', 0),
-      trendPoint('2026-08-25T01:00:00Z', 10),
-      trendPoint('2026-08-25T02:00:00Z', 20),
-      trendPoint('2026-08-25T03:00:00Z', 50),
+      trendPoint('2026-08-25T00:00:00Z', 0, 0),
+      trendPoint('2026-08-25T01:00:00Z', 10, 100),
+      trendPoint('2026-08-25T02:00:00Z', 20, 300),
+      trendPoint('2026-08-25T03:00:00Z', 50, 600),
     ], 'hour')
 
-    const wrapper = mountView()
+    const wrapper = mountView(document.body)
     await flushPromises()
 
-    const chart = wrapper.get('[data-testid="stats-request-trend"]')
-    const points = chart.findAll('[data-testid="stats-trend-point"]')
-    expect(points).toHaveLength(4)
-    expect(chart.get('[data-testid="stats-trend-total"]').text()).toBe('80')
-    expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('20')
-    expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('50')
-    expect(chart.get('.stats-trend-line').attributes('d')).toMatch(/^M .+ L .+ L .+ L /)
-    expect(chart.get('.stats-trend-area').attributes('d')).toMatch(/^M .+ L .+ Z$/)
-    expect(chart.findAll('.stats-trend-grid-line')).toHaveLength(4)
-    expect(chart.get('[role="group"]').attributes('aria-label')).toContain('admin.stats.usage.recentHourlyPeriods 4')
-    expect(chart.findAll('.stats-trend-x-label')).toHaveLength(4)
-    expect(points.map((point) => point.attributes('aria-label'))).toEqual([
+    const requestChart = wrapper.get('[data-testid="stats-request-trend"]')
+    const tokenChart = wrapper.get('[data-testid="stats-token-trend"]')
+    const requestBars = requestChart.findAll('[data-testid="stats-trend-bar"]')
+    const tokenBars = tokenChart.findAll('[data-testid="stats-trend-bar"]')
+
+    expect(requestBars).toHaveLength(4)
+    expect(tokenBars).toHaveLength(4)
+    expect(requestChart.get('[data-testid="stats-trend-total"]').text()).toBe('80')
+    expect(requestChart.get('[data-testid="stats-trend-average"]').text()).toBe('20')
+    expect(requestChart.get('[data-testid="stats-trend-peak"]').text()).toBe('50')
+    expect(tokenChart.get('[data-testid="stats-trend-total"]').text()).toBe('1.0K')
+    expect(tokenChart.get('[data-testid="stats-trend-average"]').text()).toBe('250')
+    expect(tokenChart.get('[data-testid="stats-trend-peak"]').text()).toBe('600')
+    expect(requestChart.findAll('.stats-bar-grid-line')).toHaveLength(4)
+    expect(requestChart.get('[role="group"]').attributes('aria-label')).toContain('admin.stats.usage.recentHourlyPeriods 4')
+    expect(tokenChart.get('[role="group"]').attributes('aria-label')).toContain('1,000 admin.stats.usage.tokens')
+    expect(requestChart.findAll('.stats-bar-x-label')).toHaveLength(4)
+    expect(requestBars.map((bar) => bar.attributes('aria-label'))).toEqual([
       expect.stringContaining(': 0 admin.stats.usage.requests'),
       expect.stringContaining(': 10 admin.stats.usage.requests'),
       expect.stringContaining(': 20 admin.stats.usage.requests'),
@@ -217,15 +226,22 @@ describe('admin StatsView', () => {
     ])
     expect(wrapper.find('.stats-view select').exists()).toBe(false)
 
-    await points[2].trigger('focus')
-    expect(chart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('20 admin.stats.usage.requests')
-    expect(points[2].attributes('aria-describedby')).toBe('stats-request-trend-tooltip')
+    await requestBars[1].trigger('focus')
+    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('10 admin.stats.usage.requests')
+    await requestBars[1].trigger('keydown', { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(requestBars[2].element)
+    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('20 admin.stats.usage.requests')
+    expect(requestBars[2].attributes('aria-describedby')).toBe('stats-request-trend-tooltip')
 
-    await points[2].trigger('keydown', { key: 'Escape' })
-    expect(chart.find('[data-testid="stats-trend-tooltip"]').exists()).toBe(false)
+    await requestBars[2].trigger('keydown', { key: 'Escape' })
+    expect(requestChart.find('[data-testid="stats-trend-tooltip"]').exists()).toBe(false)
 
-    await points[3].trigger('focus')
-    expect(chart.get('[data-testid="stats-trend-tooltip"]').classes()).toContain('is-below')
+    await tokenBars[2].trigger('mouseenter')
+    expect(tokenChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('300 admin.stats.usage.tokens')
+    await tokenBars[2].trigger('mouseleave')
+    await requestBars[3].trigger('focus')
+    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').classes()).toContain('is-below')
+    wrapper.unmount()
   })
 
   it('keeps a single zero-request period on the baseline', async () => {
@@ -235,14 +251,14 @@ describe('admin StatsView', () => {
     await flushPromises()
 
     const chart = wrapper.get('[data-testid="stats-request-trend"]')
-    const point = chart.get('[data-testid="stats-trend-point"]')
+    const point = chart.get('[data-testid="stats-trend-bar"]')
     expect(chart.get('[data-testid="stats-trend-total"]').text()).toBe('0')
     expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('0')
     expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('0')
-    expect(point.attributes('style')).toContain('top: 78%')
-    expect(chart.get('.stats-trend-line').attributes('d')).toMatch(/^M /)
-    expect(chart.get('.stats-trend-line').attributes('d')).not.toContain(' L ')
-    expect(chart.get('.stats-trend-area').attributes('d')).toContain(' Z')
+    expect(point.classes()).toContain('is-zero')
+    expect(point.attributes('style')).toContain('left: 50%')
+    expect(point.attributes('style')).toContain('bottom: 22%')
+    expect(point.attributes('style')).toContain('height: 1.25%')
   })
 
   it('plots equal request values without collapsing the chart', async () => {
@@ -256,9 +272,9 @@ describe('admin StatsView', () => {
     await flushPromises()
 
     const chart = wrapper.get('[data-testid="stats-request-trend"]')
-    const points = chart.findAll('[data-testid="stats-trend-point"]')
+    const points = chart.findAll('[data-testid="stats-trend-bar"]')
     expect(points).toHaveLength(3)
-    expect(new Set(points.map((point) => point.attributes('style')?.match(/top: ([^;]+)/)?.[1]))).toHaveLength(1)
+    expect(new Set(points.map((point) => point.attributes('style')?.match(/height: ([^;]+)/)?.[1]))).toHaveLength(1)
     expect(chart.get('[data-testid="stats-trend-total"]').text()).toBe('21')
     expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('7')
     expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('7')
