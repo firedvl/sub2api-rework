@@ -41,6 +41,7 @@
           left: `${point.x}%`,
           bottom: `${100 - CHART_BASELINE}%`,
           height: `${Math.max(point.height, MIN_BAR_HEIGHT)}%`,
+          width: `${barWidth}%`,
         }"
         :aria-label="pointLabel(point)"
         :aria-describedby="activeIndex === index ? tooltipId : undefined"
@@ -78,7 +79,7 @@
         :style="tooltipStyle"
         data-testid="stats-trend-tooltip"
       >
-        <strong>{{ formatNumber(activePoint.value) }} {{ unit }}</strong>
+        <strong>{{ formatCompact(activePoint.value) }} {{ unit }}</strong>
         <span>{{ formatTimestamp(activePoint.date) }}</span>
       </div>
     </div>
@@ -103,6 +104,7 @@ const CHART_BASELINE = 78
 const CHART_LEFT = 8
 const CHART_RIGHT = 92
 const MIN_BAR_HEIGHT = 1.25
+const MAX_BAR_WIDTH = 14
 const chartRoot = ref<HTMLElement | null>(null)
 const activeIndex = ref<number | null>(null)
 const tooltipId = computed(() => `${props.testId}-tooltip`)
@@ -129,6 +131,11 @@ const chartPoints = computed(() => props.points.map((point, index, points) => {
     y: CHART_BASELINE - height,
   }
 }))
+const barWidth = computed(() => {
+  if (chartPoints.value.length <= 1) return MAX_BAR_WIDTH
+  const spacing = (CHART_RIGHT - CHART_LEFT) / (chartPoints.value.length - 1)
+  return Math.min(MAX_BAR_WIDTH, spacing * 0.84)
+})
 const gridLines = computed(() => [1, 2 / 3, 1 / 3, 0].map((ratio) => ({
   ratio,
   value: Math.round(scaleMaximum.value * ratio),
@@ -221,7 +228,6 @@ const focusBar = (index: number) => {
 
 .stats-trend-bar {
   position: absolute;
-  width: 1.5rem;
   min-height: 0.4rem;
   transform: translateX(-50%);
   border: 0;
@@ -230,15 +236,18 @@ const focusBar = (index: number) => {
 }
 .stats-trend-bar > span {
   position: absolute;
-  inset: 0 auto 0 50%;
-  width: 0.42rem;
-  transform: translateX(-50%);
+  inset: 0;
+  border: 1px solid var(--operator-card);
   border-radius: 2px 2px 0 0;
   background: var(--operator-foreground);
-  opacity: 0.78;
+  opacity: 0.72;
 }
 .stats-trend-bar:hover > span,
-.stats-trend-bar.is-active > span { opacity: 1; }
+.stats-trend-bar.is-active > span {
+  border-color: var(--operator-focus);
+  box-shadow: 0 0 0 1px var(--operator-focus), 0 2px 6px rgb(0 0 0 / 18%);
+  opacity: 1;
+}
 .stats-trend-bar.is-zero > span { height: 2px; top: auto; }
 .stats-trend-bar:focus-visible { outline: 2px solid var(--operator-focus); outline-offset: 2px; border-radius: 2px; }
 

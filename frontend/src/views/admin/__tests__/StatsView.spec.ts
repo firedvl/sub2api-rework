@@ -224,9 +224,11 @@ describe('admin StatsView', () => {
       expect.stringContaining(': 20 admin.stats.usage.requests'),
       expect.stringContaining(': 50 admin.stats.usage.requests'),
     ])
+    expect(Number.parseFloat(requestBars[0].attributes('style')!.match(/width: ([\d.]+)%/)![1])).toBeGreaterThan(6)
     expect(wrapper.find('.stats-view select').exists()).toBe(false)
 
     await requestBars[1].trigger('focus')
+    expect(requestBars[1].classes()).toContain('is-active')
     expect(requestChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('10 admin.stats.usage.requests')
     await requestBars[1].trigger('keydown', { key: 'ArrowRight' })
     expect(document.activeElement).toBe(requestBars[2].element)
@@ -241,6 +243,30 @@ describe('admin StatsView', () => {
     await tokenBars[2].trigger('mouseleave')
     await requestBars[3].trigger('focus')
     expect(requestChart.get('[data-testid="stats-trend-tooltip"]').classes()).toContain('is-below')
+    wrapper.unmount()
+  })
+
+  it('compacts large tooltip headlines while preserving exact accessible values and timestamps', async () => {
+    const date = '2026-08-25T02:00:00Z'
+    mockTrend([trendPoint(date, 20_800, 2_800_000_000)], 'hour')
+
+    const wrapper = mountView(document.body)
+    await flushPromises()
+
+    const requestBar = wrapper.get('[data-testid="stats-request-trend"] [data-testid="stats-trend-bar"]')
+    const tokenBar = wrapper.get('[data-testid="stats-token-trend"] [data-testid="stats-trend-bar"]')
+
+    await requestBar.trigger('focus')
+    const requestTooltip = wrapper.get('[data-testid="stats-request-trend"] [data-testid="stats-trend-tooltip"]')
+    expect(requestTooltip.get('strong').text()).toBe('20.8K admin.stats.usage.requests')
+    expect(requestTooltip.get('span').text()).toBe(new Date(date).toLocaleString())
+    expect(requestBar.attributes('aria-label')).toContain('20,800 admin.stats.usage.requests')
+
+    await tokenBar.trigger('focus')
+    const tokenTooltip = wrapper.get('[data-testid="stats-token-trend"] [data-testid="stats-trend-tooltip"]')
+    expect(tokenTooltip.get('strong').text()).toBe('2.8B admin.stats.usage.tokens')
+    expect(tokenTooltip.get('span').text()).toBe(new Date(date).toLocaleString())
+    expect(tokenBar.attributes('aria-label')).toContain('2,800,000,000 admin.stats.usage.tokens')
     wrapper.unmount()
   })
 
