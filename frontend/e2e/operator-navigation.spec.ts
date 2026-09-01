@@ -801,7 +801,33 @@ test.describe('operator console navigation', () => {
     await expect(usage).toContainText('Actual cost')
     await expect(usage).toContainText('Account cost')
     await expect(usage).toContainText('Average response')
-    await expect(page.getByTestId('stats-request-trend')).toBeVisible()
+    const trend = page.getByTestId('stats-request-trend')
+    await expect(trend).toBeVisible()
+    await expect(trend.locator('.stats-trend-line')).toBeVisible()
+    await expect(trend.locator('.stats-trend-area')).toBeVisible()
+    await expect(trend.getByTestId('stats-trend-point')).toHaveCount(6)
+    await expect(trend.getByTestId('stats-trend-total')).toHaveText('4.3K')
+    await expect(trend.getByTestId('stats-trend-average')).toHaveText('714.3')
+    await expect(trend.getByTestId('stats-trend-peak')).toHaveText('946')
+    await expect(trend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*4,286 Requests/)
+
+    const trendPoint = trend.getByTestId('stats-trend-point').nth(2)
+    await trendPoint.focus()
+    await expect(trend.getByTestId('stats-trend-tooltip')).toContainText('684 Requests')
+    await page.keyboard.press('Escape')
+    await expect(trend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
+
+    const peakPoint = trend.getByTestId('stats-trend-point').nth(4)
+    await peakPoint.focus()
+    const [chartBox, peakTooltipBox] = await Promise.all([
+      trend.getByRole('group').boundingBox(),
+      trend.getByTestId('stats-trend-tooltip').boundingBox(),
+    ])
+    expect(chartBox).not.toBeNull()
+    expect(peakTooltipBox).not.toBeNull()
+    expect(peakTooltipBox!.y).toBeGreaterThanOrEqual(chartBox!.y)
+    expect(peakTooltipBox!.y + peakTooltipBox!.height).toBeLessThanOrEqual(chartBox!.y + chartBox!.height)
+    await page.keyboard.press('Escape')
     expect(await usage.evaluate((element, capacitySelector) => (
       Boolean(element.compareDocumentPosition(document.querySelector(capacitySelector)!) & Node.DOCUMENT_POSITION_FOLLOWING)
     ), '.stats-capacity-section')).toBe(true)
@@ -819,31 +845,88 @@ test.describe('operator console navigation', () => {
     await expect(longTerm.getByTestId('long-provider-gemini')).toContainText('No supported window reported')
     await expect(shortTerm.getByTestId('short-provider-openai').locator('svg')).toBeVisible()
     await expect(page.getByTestId('provider-capacity-antigravity').locator('.stats-capacity-donut-icon svg')).toBeVisible()
+    await expect(page.getByTestId('stats-capacity-donut-overall'))
+      .toContainText('Mixed providers · average of each account’s limiting quota · not pooled capacity')
+    await expect(page.getByTestId('stats-capacity-donut-overall').locator('.stats-capacity-donut-chart svg'))
+      .toHaveAccessibleName(/Mixed providers · average of each account’s limiting quota · not pooled capacity:/)
+    await expect(page.getByTestId('provider-capacity-openai'))
+      .toContainText('Average of each account’s limiting quota · not pooled capacity')
+    await expect(page.getByTestId('provider-capacity-openai').locator('.stats-capacity-donut-chart svg'))
+      .toHaveAccessibleName(/OpenAI, Average of each account’s limiting quota · not pooled capacity:/)
 
     const inspector = page.getByTestId('stats-capacity-inspector')
-    const inspectorSelect = inspector.getByLabel('Inspect capacity window')
-    await expect(inspectorSelect).toBeVisible()
-    await expect(inspector.locator('select')).toHaveCount(1)
-    await inspectorSelect.focus()
+    const detail = inspector.getByTestId('stats-selected-account-detail')
+    const accountTrigger = inspector.getByRole('button', { name: 'Inspect account' })
+    await expect(page.locator('.stats-view select')).toHaveCount(0)
+    await expect(detail).toHaveCount(1)
+    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(0)
+    await expect(inspector.getByText('Inspect capacity window')).toHaveCount(0)
+    await openNeutralOperatorSelect(page, accountTrigger)
+
+    await accountTrigger.press('ArrowDown')
+    const accountSearch = page.getByRole('textbox', { name: 'Search accounts' })
+    await expect(accountSearch).toBeFocused()
+    await accountSearch.fill('Codex Team West')
+    await page.getByRole('option', { name: /Codex Team West/ }).click()
+    await expect(detail).toContainText('Codex Team West')
+    await expect(detail.getByTestId('stats-account-capacity-window')).toHaveCount(2)
+    await expect(detail).toContainText('5h')
+    await expect(detail).toContainText('68%')
+    await expect(detail).toContainText('7d')
+    await expect(detail).toContainText('52%')
+    await expect(detail.getByTestId('stats-account-limiting-window')).toContainText('7d · 52% remaining')
+    await expect(detail).toContainText('Schedulable')
+    await expect(detail).toContainText('Passive quota state')
+    await expect(detail).toContainText('OpenAI Production, Balanced Coding Route')
+    await expect(detail).not.toContainText('codex-west@example.test')
+
+    await accountTrigger.press('ArrowDown')
+    await expect(accountSearch).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(accountTrigger).toHaveAttribute('aria-expanded', 'false')
+    await expect(accountTrigger).toBeFocused()
+    await expect(page.locator('body > .select-dropdown-portal')).toHaveCount(0)
+
+    await accountTrigger.press('ArrowDown')
     await page.keyboard.press('ArrowDown')
-    await expect(inspectorSelect).toBeFocused()
-    await expect(inspectorSelect).toHaveValue('openai:seven_day')
-    await expect(inspector).toContainText('OpenAI · 7d')
-    await expect(inspector).toContainText('Codex Team West')
-    await expect(inspector).toContainText('OpenAI quota unknown')
-    await expect(inspector).toContainText('Quota unknown')
+    await page.keyboard.press('Enter')
+    await expect(detail).toContainText('Gemini Quota Limited')
+
+    await accountTrigger.click()
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill('Antigravity Pro')
+    await page.getByRole('option', { name: /Antigravity Pro/ }).click()
+    await expect(detail).toContainText('Antigravity Pro')
+    await expect(detail.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(inspector.getByRole('button', { name: 'Inspect a model limit' })).toBeVisible()
+
+    await accountTrigger.click()
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill('OpenAI quota unknown')
+    await page.getByRole('option', { name: /OpenAI quota unknown/ }).click()
+    await expect(detail).toContainText('OpenAI quota unknown')
+    await expect(detail.getByTestId('stats-account-capacity-unknown')).toBeVisible()
+    await expect(detail).not.toContainText('0%')
+
+    await accountTrigger.click()
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill('Gemini Quota Limited')
+    await page.getByRole('option', { name: /Gemini Quota Limited/ }).click()
+    await expect(detail.getByTestId('stats-account-capacity-window')).toHaveCount(1)
+    await expect(detail).toContainText('Daily')
+    await expect(detail).toContainText('0%')
 
     const [shortBox, longBox] = await Promise.all([shortTerm.boundingBox(), longTerm.boundingBox()])
     expect(shortBox).not.toBeNull()
     expect(longBox).not.toBeNull()
     expect(longBox!.x).toBeGreaterThanOrEqual(shortBox!.x + shortBox!.width - 1)
 
-    for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+    for (const [viewportIndex, viewport] of [{ width: 1024, height: 768 }, { width: 390, height: 844 }].entries()) {
       await page.setViewportSize(viewport)
       const [compactShort, compactLong] = await Promise.all([shortTerm.boundingBox(), longTerm.boundingBox()])
       expect(compactShort).not.toBeNull()
       expect(compactLong).not.toBeNull()
       expect(compactLong!.y).toBeGreaterThanOrEqual(compactShort!.y + compactShort!.height - 1)
+      await trend.getByTestId('stats-trend-point').nth(viewportIndex === 0 ? 0 : 5).focus()
+      await expect(trend.getByTestId('stats-trend-tooltip')).toBeVisible()
+      await page.keyboard.press('Escape')
       const overflow = await page.evaluate(() => ({
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
@@ -865,31 +948,45 @@ test.describe('operator console navigation', () => {
     await expect(page.getByTestId('provider-capacity-antigravity').locator('.stats-capacity-donut-icon svg')).toBeVisible()
 
     const inspector = page.getByTestId('stats-capacity-inspector')
-    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(5)
-    await expect(inspector.getByTestId('stats-inspector-account-summary')).toContainText(
-      '52 accounts · 20 exhausted · 5 unknown · 47 hidden',
-    )
-    await expect(inspector.getByTestId('stats-inspector-account-row').first()).toContainText('Exhausted pool')
+    const detail = inspector.getByTestId('stats-selected-account-detail')
+    const accountTrigger = inspector.getByRole('button', { name: 'Inspect account' })
+    await expect(detail).toHaveCount(1)
+    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(0)
+    await expect(page.locator('.stats-view select')).toHaveCount(0)
+    await expect(detail).toContainText('Antigravity Pro')
+    await expect(detail.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(detail.getByTestId('stats-model-limit-summary')).toContainText('0% minimum across 20 models')
+    await expect(detail).toContainText('More model limits (17)')
 
-    await inspector.getByRole('button', { name: 'Inspect another account' }).click()
+    const closedDocumentHeight = await page.evaluate(() => document.documentElement.scrollHeight)
+    await accountTrigger.click()
+    await expect(page.getByRole('option')).toHaveCount(fixture.accounts.length)
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(closedDocumentHeight)
+
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill('Exhausted pool 01')
+    await page.getByRole('option', { name: /Exhausted pool 01/ }).click()
+    await expect(detail).toContainText('Exhausted pool 01')
+    await expect(detail.getByTestId('stats-account-capacity-window')).toHaveCount(2)
+    await expect(detail.getByTestId('stats-account-limiting-window')).toContainText('5h · 0% remaining')
+
+    await accountTrigger.click()
     await page.getByRole('textbox', { name: 'Search accounts' }).fill(fixture.hiddenAccount.name)
-    await page.getByRole('option', { name: fixture.hiddenAccount.name }).click()
-    await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(5)
-    const hiddenAccount = inspector.getByTestId('stats-inspector-account-row').filter({ hasText: fixture.hiddenAccount.name })
-    await expect(hiddenAccount).toContainText('Quota unknown')
-    await expect(hiddenAccount).not.toContainText('0%')
+    await page.getByRole('option', { name: new RegExp(fixture.hiddenAccount.name) }).click()
+    await expect(detail).toContainText(fixture.hiddenAccount.name)
+    await expect(detail.getByTestId('stats-account-capacity-unknown')).toBeVisible()
+    await expect(detail).not.toContainText('0%')
 
-    await inspector.getByLabel('Inspect capacity window').selectOption('antigravity:model-limits')
-    await expect(inspector.getByTestId('stats-model-limit-row')).toHaveCount(3)
-    await expect(inspector.getByTestId('stats-model-limit-summary')).toContainText('0% minimum across 20 models')
-    await expect(inspector).toContainText('More model limits (17)')
-    await expect(inspector.getByTestId('stats-model-limit-row').first()).toContainText('claude-opus-4-1')
+    await accountTrigger.click()
+    await page.getByRole('textbox', { name: 'Search accounts' }).fill('Antigravity Pro')
+    await page.getByRole('option', { name: /Antigravity Pro/ }).click()
+    await expect(detail.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(detail.getByTestId('stats-model-limit-row').first()).toContainText('claude-opus-4-1')
 
     await inspector.getByRole('button', { name: 'Inspect a model limit' }).click()
     await page.getByRole('textbox', { name: 'Search model limits' }).fill(fixture.hiddenModel)
-    await page.getByRole('option', { name: fixture.hiddenModel }).click()
-    await expect(inspector.getByTestId('stats-model-limit-row')).toHaveCount(3)
-    await expect(inspector).toContainText(fixture.hiddenModel)
+    await page.getByRole('option', { name: new RegExp(fixture.hiddenModel) }).click()
+    await expect(detail.getByTestId('stats-model-limit-row')).toHaveCount(3)
+    await expect(detail).toContainText(fixture.hiddenModel)
 
     for (const viewport of [
       { width: 1440, height: 900 },
@@ -900,12 +997,16 @@ test.describe('operator console navigation', () => {
       const bounds = await page.evaluate(() => ({
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
+        selectedDetails: document.querySelectorAll('[data-testid="stats-selected-account-detail"]').length,
         inspectorRows: document.querySelectorAll('[data-testid="stats-inspector-account-row"]').length,
         modelRows: document.querySelectorAll('[data-testid="stats-model-limit-row"]').length,
+        nativeSelects: document.querySelectorAll('.stats-view select').length,
       }))
       expect(bounds.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(bounds.clientWidth + 1)
-      expect(bounds.inspectorRows).toBeLessThanOrEqual(5)
+      expect(bounds.selectedDetails).toBe(1)
+      expect(bounds.inspectorRows).toBe(0)
       expect(bounds.modelRows).toBeLessThanOrEqual(3)
+      expect(bounds.nativeSelects).toBe(0)
     }
   })
 

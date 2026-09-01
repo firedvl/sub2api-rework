@@ -27,7 +27,8 @@
     <template v-else>
       <div class="stats-capacity-overview" data-testid="stats-capacity-donut-overview">
         <StatsCapacityDonut
-          :title="t('admin.dashboard.capacity.poolTitle')"
+          :title="t('admin.stats.capacity.aggregateTitle')"
+          :basis="t('admin.stats.capacity.mixedAverageLimitingQuota')"
           :capacity="normalizedPool"
           test-id="stats-capacity-donut-overall"
         />
@@ -35,6 +36,7 @@
           v-for="provider in providerDetails"
           :key="provider.platform"
           :title="providerLabel(provider.platform)"
+          :basis="t('admin.stats.capacity.averageLimitingQuota')"
           :capacity="provider"
           :platform="provider.platform"
           :test-id="`provider-capacity-${provider.platform}`"
@@ -113,77 +115,102 @@
             <h3 :id="inspectorTitleId">{{ t('admin.stats.capacity.inspectorTitle') }}</h3>
             <p>{{ t('admin.stats.capacity.inspectorDescription') }}</p>
           </div>
-          <label :for="inspectorSelectId">
-            <span class="sr-only">{{ t('admin.stats.capacity.inspectWindow') }}</span>
-            <select
-              :id="inspectorSelectId"
-              class="operator-control"
-              :value="resolvedInspectionKey"
-              @change="selectInspection"
-              @keydown.down.prevent="stepInspection(1)"
-              @keydown.up.prevent="stepInspection(-1)"
+          <label class="stats-account-select">
+            <span>{{ t('admin.stats.capacity.accountSelector') }}</span>
+            <Select
+              :model-value="resolvedAccountKey"
+              :options="accountOptions"
+              value-key="key"
+              label-key="label"
+              :searchable="true"
+              :aria-label="t('admin.stats.capacity.inspectAccount')"
+              :search-placeholder="t('admin.stats.capacity.searchAccounts')"
+              @update:model-value="selectAccount"
             >
-              <option v-for="option in inspectionOptions" :key="option.key" :value="option.key">
-                {{ option.label }}
-              </option>
-            </select>
+              <template #option="{ option }">
+                <span class="stats-select-option">
+                  <strong>{{ option.label }}</strong>
+                  <small>{{ option.description }}</small>
+                </span>
+              </template>
+            </Select>
           </label>
         </div>
 
-        <div v-if="selectedInspection" class="stats-inspector-detail" aria-live="polite">
-          <div class="stats-inspector-summary">
+        <div v-if="selectedAccount" class="stats-inspector-detail" aria-live="polite" data-testid="stats-selected-account-detail">
+          <header class="stats-inspector-summary">
             <span class="stats-provider-icon" aria-hidden="true">
-              <ProviderIcon :provider="selectedInspection.platform" :size="18" />
+              <ProviderIcon :provider="selectedAccount.account.platform" :size="18" />
             </span>
             <div>
-              <strong>{{ providerLabel(selectedInspection.platform) }} · {{ inspectionDetailLabel }}</strong>
-              <span>{{ inspectionCoverageLabel }}</span>
+              <strong>{{ selectedAccount.account.name }}</strong>
+              <span>{{ providerLabel(selectedAccount.account.platform) }} · {{ accountTypeLabel(selectedAccount.account.type) }}</span>
             </div>
-            <strong :class="capacityTone(inspectionRemaining)">
-              {{ remainingLabel(inspectionRemaining) }}
+            <strong class="stats-account-status" :class="`is-${selectedStatus.status}`">
+              {{ t(`admin.stats.capacity.status.${selectedStatus.status}`) }}
             </strong>
-          </div>
+          </header>
 
-          <template v-if="selectedInspection.kind === 'window'">
-            <div class="stats-inspector-tools">
-              <p data-testid="stats-inspector-account-summary">{{ inspectionAccountSummary }}</p>
-              <label v-if="inspectionAccounts.length > MAX_INSPECTION_ACCOUNTS" class="stats-target-select">
-                <span>{{ t('admin.stats.capacity.inspectAccount') }}</span>
-                <Select
-                  :model-value="selectedInspectionAccountKey"
-                  :options="inspectionAccountOptions"
-                  value-key="key"
-                  label-key="label"
-                  :searchable="true"
-                  :aria-label="t('admin.stats.capacity.inspectAccount')"
-                  :search-placeholder="t('admin.stats.capacity.searchAccounts')"
-                  @update:model-value="selectInspectionAccount"
-                />
-              </label>
-            </div>
-            <ul
-              class="stats-inspector-accounts"
-              :aria-label="t('admin.stats.capacity.windowContributions', { window: selectedInspection.window.label })"
-            >
-              <li
-                v-for="entry in visibleInspectionAccounts"
-                :key="entry.summary.account.id"
-                :class="{ 'is-unknown': entry.remainingPercent === null }"
-                data-testid="stats-inspector-account-row"
+          <p v-if="selectedStatus.reason" class="stats-account-note">
+            {{ selectedStatus.reason }}
+            <template v-if="selectedStatus.until">
+              · {{ t('admin.stats.capacity.until', { time: formatCompactReset(selectedStatus.until) }) }}
+            </template>
+          </p>
+
+          <section class="stats-account-capacity" :aria-labelledby="accountCapacityTitleId">
+            <header>
+              <div>
+                <h4 :id="accountCapacityTitleId">{{ t('admin.stats.capacity.accountCapacity') }}</h4>
+                <p v-if="limitingWindow" data-testid="stats-account-limiting-window">
+                  {{ t('admin.stats.capacity.limitingWindow', {
+                    window: limitingWindow.label,
+                    value: remainingLabel(limitingWindow.remainingPercent),
+                  }) }}
+                </p>
+                <p v-else>{{ t('admin.dashboard.capacity.quotaUnknown') }}</p>
+              </div>
+            </header>
+
+            <div v-if="selectedNonModelWindows.length" class="stats-account-window-grid">
+              <article
+                v-for="window in selectedNonModelWindows"
+                :key="window.key"
+                data-testid="stats-account-capacity-window"
               >
-                <span>{{ entry.summary.account.name }}</span>
-                <span v-if="entry.remainingPercent !== null">
-                  {{ t('admin.dashboard.capacity.remaining', { value: formatPercent(entry.remainingPercent) }) }} ·
-                  {{ t('admin.dashboard.capacity.poolContribution', { value: formatPercent(entry.contributionPercent as number) }) }}
-                </span>
-                <span v-else>{{ t('admin.dashboard.capacity.quotaUnknown') }}</span>
-              </li>
-            </ul>
-          </template>
+                <div class="stats-window-row-heading">
+                  <strong>{{ window.label }}</strong>
+                  <strong :class="capacityTone(window.remainingPercent)">{{ remainingLabel(window.remainingPercent) }}</strong>
+                </div>
+                <div
+                  class="stats-window-track"
+                  role="progressbar"
+                  :aria-label="accountWindowAriaLabel(selectedAccount.account.platform, window)"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="Math.round(window.remainingPercent)"
+                >
+                  <span :class="capacityTone(window.remainingPercent)" :style="{ width: `${window.remainingPercent}%` }" />
+                </div>
+                <p>
+                  {{ window.resetsAt
+                    ? t('admin.dashboard.capacity.resets', { time: formatCompactReset(window.resetsAt) })
+                    : t('admin.dashboard.capacity.resetUnknown') }}
+                </p>
+              </article>
+            </div>
 
-          <template v-else>
-            <div class="stats-inspector-tools">
-              <p data-testid="stats-model-limit-summary">{{ modelLimitSummary }}</p>
+            <p v-else-if="!selectedModelWindows.length" class="stats-account-empty" data-testid="stats-account-capacity-unknown">
+              {{ t('admin.stats.capacity.noAccountTelemetry') }}
+            </p>
+          </section>
+
+          <section v-if="selectedModelWindows.length" class="stats-account-models" :aria-labelledby="modelCapacityTitleId">
+            <div class="stats-account-models-heading">
+              <div>
+                <h4 :id="modelCapacityTitleId">{{ t('admin.stats.capacity.modelCapacity') }}</h4>
+                <p data-testid="stats-model-limit-summary">{{ modelLimitSummary }}</p>
+              </div>
               <label v-if="moreModelCount" class="stats-target-select">
                 <span>{{ t('admin.stats.capacity.moreModelLimits', { count: moreModelCount }) }}</span>
                 <Select
@@ -198,7 +225,7 @@
                 />
               </label>
             </div>
-            <ul class="stats-model-limits" :aria-label="t('admin.stats.capacity.modelLimits')">
+            <ul class="stats-model-limits" :aria-label="t('admin.stats.capacity.modelCapacity')">
               <li v-for="window in visibleModelWindows" :key="window.key" data-testid="stats-model-limit-row">
                 <div class="stats-window-row-heading">
                   <strong :title="window.label">{{ window.label }}</strong>
@@ -207,26 +234,51 @@
                 <div
                   class="stats-window-track"
                   role="progressbar"
-                  :aria-label="windowAriaLabel(selectedInspection.platform, window)"
+                  :aria-label="accountWindowAriaLabel(selectedAccount.account.platform, window)"
                   aria-valuemin="0"
                   aria-valuemax="100"
-                  :aria-valuenow="window.remainingPercent === null ? undefined : Math.round(window.remainingPercent)"
+                  :aria-valuenow="Math.round(window.remainingPercent)"
                 >
-                  <span
-                    v-if="window.remainingPercent !== null"
-                    :class="capacityTone(window.remainingPercent)"
-                    :style="{ width: `${window.remainingPercent}%` }"
-                  />
+                  <span :class="capacityTone(window.remainingPercent)" :style="{ width: `${window.remainingPercent}%` }" />
                 </div>
                 <p>
-                  {{ t('admin.stats.capacity.windowCoverage', { known: window.knownCount, unknown: window.unknownCount }) }}
-                  <template v-if="window.nextReset">
-                    · {{ t('admin.dashboard.capacity.resets', { time: formatCompactReset(window.nextReset) }) }}
-                  </template>
+                  {{ window.resetsAt
+                    ? t('admin.dashboard.capacity.resets', { time: formatCompactReset(window.resetsAt) })
+                    : t('admin.dashboard.capacity.resetUnknown') }}
                 </p>
               </li>
             </ul>
-          </template>
+          </section>
+
+          <section class="stats-account-operational" :aria-labelledby="operationalTitleId">
+            <h4 :id="operationalTitleId">{{ t('admin.stats.capacity.operational') }}</h4>
+            <dl>
+              <div>
+                <dt>{{ t('admin.stats.capacity.schedulable') }}</dt>
+                <dd>{{ selectedAccount.account.schedulable ? t('common.yes') : t('common.no') }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('admin.stats.capacity.accountType') }}</dt>
+                <dd>{{ accountTypeLabel(selectedAccount.account.type) }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('admin.stats.capacity.providerPool') }}</dt>
+                <dd>{{ t('admin.dashboard.capacity.accountCount', { count: selectedProviderAccountCount }) }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('admin.stats.capacity.snapshotSource') }}</dt>
+                <dd>{{ snapshotSourceLabel }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('admin.stats.capacity.snapshotUpdated') }}</dt>
+                <dd>{{ selectedUsage?.updated_at ? formatCompactReset(selectedUsage.updated_at) : t('common.unknown') }}</dd>
+              </div>
+              <div>
+                <dt>{{ t('admin.stats.capacity.groups') }}</dt>
+                <dd>{{ selectedAccount.groups.length ? selectedAccount.groups.join(', ') : t('admin.stats.capacity.noGroups') }}</dd>
+              </div>
+            </dl>
+          </section>
         </div>
       </section>
     </template>
@@ -247,6 +299,7 @@ import {
   buildWindowCapacities,
   classifyOperatorAccount,
   type OperatorAccountCapacity,
+  type OperatorCapacityWindow,
   type OperatorProviderCapacity,
   type OperatorWindowCapacity,
 } from '@/utils/operatorCapacity'
@@ -269,8 +322,9 @@ const emit = defineEmits<{ retry: [] }>()
 const { t } = useI18n()
 const sectionTitleId = 'stats-capacity-title'
 const inspectorTitleId = 'stats-capacity-inspector-title'
-const inspectorSelectId = 'stats-capacity-inspector-select'
-const MAX_INSPECTION_ACCOUNTS = 5
+const accountCapacityTitleId = 'stats-account-capacity-title'
+const modelCapacityTitleId = 'stats-account-model-capacity-title'
+const operationalTitleId = 'stats-account-operational-title'
 const MAX_MODEL_WINDOWS = 3
 
 const providerLabel = (platform: AccountPlatform) => ({
@@ -352,120 +406,64 @@ const windowsForPanel = (provider: ProviderDetail, panel: CapacityPanelKey) => (
   panel === 'short' ? provider.shortWindows : provider.longWindows
 )
 
-interface WindowInspectionOption {
-  key: string
-  label: string
-  platform: AccountPlatform
-  kind: 'window'
-  window: OperatorWindowCapacity
-}
-interface ModelInspectionOption {
-  key: string
-  label: string
-  platform: AccountPlatform
-  kind: 'models'
-  windows: OperatorWindowCapacity[]
-}
-type InspectionOption = WindowInspectionOption | ModelInspectionOption
-
-const inspectionOptions = computed<InspectionOption[]>(() => providerDetails.value.flatMap((provider) => {
-  const options: InspectionOption[] = provider.windows
-    .filter((window) => !isModelWindow(window))
-    .map((window) => ({
-      key: `${provider.platform}:${window.key}`,
-      label: `${providerLabel(provider.platform)} · ${window.label}`,
-      platform: provider.platform,
-      kind: 'window',
-      window,
-    }))
-  if (provider.modelWindows.length) {
-    options.push({
-      key: `${provider.platform}:model-limits`,
-      label: `${providerLabel(provider.platform)} · ${t('admin.stats.capacity.modelLimits')} (${provider.modelWindows.length})`,
-      platform: provider.platform,
-      kind: 'models',
-      windows: provider.modelWindows,
-    })
-  }
-  return options
-}))
-const selectedInspectionKey = ref('')
-const resolvedInspectionKey = computed(() => inspectionOptions.value.some((option) => option.key === selectedInspectionKey.value)
-  ? selectedInspectionKey.value
-  : inspectionOptions.value[0]?.key ?? '')
-const selectedInspection = computed(() => inspectionOptions.value.find((option) => option.key === resolvedInspectionKey.value) ?? null)
-const selectedInspectionAccountKey = ref('')
 const selectedModelKey = ref('')
-const setInspectionKey = (value: string) => {
-  selectedInspectionKey.value = value
-  selectedInspectionAccountKey.value = ''
+const selectedAccountKey = ref('')
+const accountTypeLabel = (type: string) => ({
+  oauth: 'OAuth',
+  apikey: 'API key',
+  'setup-token': 'Setup token',
+})[type] ?? type
+const diagnosticAccountRank = (summary: OperatorAccountCapacity) => {
+  const status = classifyOperatorAccount(summary).status
+  if (summary.lowestRemaining === 0) return 0
+  if (status === 'limited' || (summary.lowestRemaining !== null && summary.lowestRemaining <= 20)) return 1
+  if (status === 'error' || status === 'disabled' || summary.health !== 'healthy' || summary.lowestRemaining === null) return 2
+  return 3
+}
+const inspectionAccounts = computed(() => summaries.value.slice().sort((left, right) => (
+  diagnosticAccountRank(left) - diagnosticAccountRank(right)
+  || (left.lowestRemaining ?? Number.POSITIVE_INFINITY) - (right.lowestRemaining ?? Number.POSITIVE_INFINITY)
+  || left.account.name.localeCompare(right.account.name)
+  || left.account.id - right.account.id
+)))
+const accountOptions = computed(() => inspectionAccounts.value.map((summary) => ({
+  key: String(summary.account.id),
+  label: summary.account.name,
+  description: `${providerLabel(summary.account.platform)} · ${accountTypeLabel(summary.account.type)}`,
+})))
+const resolvedAccountKey = computed(() => inspectionAccounts.value.some(
+  (summary) => String(summary.account.id) === selectedAccountKey.value,
+) ? selectedAccountKey.value : String(inspectionAccounts.value[0]?.account.id ?? ''))
+const selectedAccount = computed(() => inspectionAccounts.value.find(
+  (summary) => String(summary.account.id) === resolvedAccountKey.value,
+) ?? null)
+const selectAccount = (value: string | number | boolean | null) => {
+  selectedAccountKey.value = String(value ?? '')
   selectedModelKey.value = ''
 }
-const selectInspection = (event: Event) => setInspectionKey((event.target as HTMLSelectElement).value)
-const stepInspection = (direction: -1 | 1) => {
-  const currentIndex = inspectionOptions.value.findIndex((option) => option.key === resolvedInspectionKey.value)
-  const nextIndex = Math.min(
-    inspectionOptions.value.length - 1,
-    Math.max(0, currentIndex + direction),
-  )
-  setInspectionKey(inspectionOptions.value[nextIndex]?.key ?? '')
-}
-
-interface InspectionAccount {
-  summary: OperatorAccountCapacity
-  remainingPercent: number | null
-  contributionPercent: number | null
-}
-const diagnosticAccountRank = (entry: InspectionAccount) => {
-  if (entry.remainingPercent === 0) return 0
-  if (entry.remainingPercent !== null && entry.remainingPercent <= 20) return 1
-  if (classifyOperatorAccount(entry.summary).status !== 'active' || entry.summary.health !== 'healthy') return 2
-  if (entry.remainingPercent === null) return 3
-  return 4
-}
-const inspectionAccounts = computed<InspectionAccount[]>(() => {
-  if (selectedInspection.value?.kind !== 'window') return []
-  return [
-    ...selectedInspection.value.window.segments.map((segment) => ({
-      summary: segment.summary,
-      remainingPercent: segment.remainingPercent,
-      contributionPercent: segment.contributionPercent,
-    })),
-    ...selectedInspection.value.window.unknownAccounts.map((summary) => ({
-      summary,
-      remainingPercent: null,
-      contributionPercent: null,
-    })),
-  ].sort((left, right) => (
-    diagnosticAccountRank(left) - diagnosticAccountRank(right)
-    || (left.remainingPercent ?? Number.POSITIVE_INFINITY) - (right.remainingPercent ?? Number.POSITIVE_INFINITY)
-    || left.summary.account.name.localeCompare(right.summary.account.name)
-    || left.summary.account.id - right.summary.account.id
-  ))
+const selectedStatus = computed(() => selectedAccount.value
+  ? classifyOperatorAccount(selectedAccount.value)
+  : { status: 'disabled' as const, reason: null, until: null })
+const selectedUsage = computed(() => selectedAccount.value
+  ? props.usageByAccountId[String(selectedAccount.value.account.id)] ?? null
+  : null)
+const selectedProviderAccountCount = computed(() => providerDetails.value.find(
+  (provider) => provider.platform === selectedAccount.value?.account.platform,
+)?.accounts.length ?? 0)
+const snapshotSourceLabel = computed(() => {
+  if (selectedUsage.value?.source === 'passive') return t('admin.stats.capacity.passiveSnapshot')
+  if (selectedUsage.value?.source === 'active') return t('admin.stats.capacity.activeSnapshot')
+  return t('admin.stats.capacity.snapshotNotReported')
 })
-const inspectionAccountOptions = computed(() => inspectionAccounts.value.map((entry) => ({
-  key: String(entry.summary.account.id),
-  label: entry.summary.account.name,
-  description: entry.summary.identity || `Account ${entry.summary.account.id}`,
-})))
-const selectedInspectionAccount = computed(() => inspectionAccounts.value.find(
-  (entry) => String(entry.summary.account.id) === selectedInspectionAccountKey.value,
+const selectedNonModelWindows = computed(() => selectedAccount.value?.windows.filter(
+  (window) => !window.key.startsWith('antigravity:'),
+) ?? [])
+const selectedModelWindows = computed(() => selectedAccount.value?.windows.filter(
+  (window) => window.key.startsWith('antigravity:'),
+) ?? [])
+const limitingWindow = computed(() => selectedAccount.value?.windows.find(
+  (window) => window.remainingPercent === selectedAccount.value?.lowestRemaining,
 ) ?? null)
-const visibleInspectionAccounts = computed(() => {
-  const visible = inspectionAccounts.value.slice(0, MAX_INSPECTION_ACCOUNTS)
-  const selected = selectedInspectionAccount.value
-  if (!selected || visible.some((entry) => entry.summary.account.id === selected.summary.account.id)) return visible
-  return [selected, ...visible.slice(0, MAX_INSPECTION_ACCOUNTS - 1)]
-})
-const selectInspectionAccount = (value: string | number | boolean | null) => {
-  selectedInspectionAccountKey.value = String(value ?? '')
-}
-const inspectionAccountSummary = computed(() => t('admin.stats.capacity.inspectionSummary', {
-  total: inspectionAccounts.value.length,
-  exhausted: inspectionAccounts.value.filter((entry) => entry.remainingPercent === 0).length,
-  unknown: inspectionAccounts.value.filter((entry) => entry.remainingPercent === null).length,
-  hidden: Math.max(0, inspectionAccounts.value.length - MAX_INSPECTION_ACCOUNTS),
-}))
 
 const resetTimestamp = (value: string | null) => {
   if (!value) return Number.POSITIVE_INFINITY
@@ -473,10 +471,9 @@ const resetTimestamp = (value: string | null) => {
   return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY
 }
 const prioritizedModelWindows = computed(() => {
-  if (selectedInspection.value?.kind !== 'models') return []
-  return selectedInspection.value.windows.slice().sort((left, right) => (
-    (left.remainingPercent ?? Number.POSITIVE_INFINITY) - (right.remainingPercent ?? Number.POSITIVE_INFINITY)
-    || resetTimestamp(left.nextReset) - resetTimestamp(right.nextReset)
+  return selectedModelWindows.value.slice().sort((left, right) => (
+    left.remainingPercent - right.remainingPercent
+    || resetTimestamp(left.resetsAt) - resetTimestamp(right.resetsAt)
     || left.label.localeCompare(right.label)
   ))
 })
@@ -505,26 +502,6 @@ const modelLimitSummary = computed(() => limitingModel.value
     })
   : t('admin.dashboard.capacity.quotaUnknown'))
 
-const inspectionDetailLabel = computed(() => {
-  const inspection = selectedInspection.value
-  if (!inspection) return ''
-  return inspection.kind === 'window' ? inspection.window.label : t('admin.stats.capacity.modelLimits')
-})
-const inspectionRemaining = computed(() => {
-  const inspection = selectedInspection.value
-  if (!inspection) return null
-  return inspection.kind === 'window' ? inspection.window.remainingPercent : limitingModel.value?.remainingPercent ?? null
-})
-const inspectionCoverageLabel = computed(() => {
-  const inspection = selectedInspection.value
-  if (!inspection) return ''
-  if (inspection.kind === 'models') return modelLimitSummary.value
-  return t('admin.stats.capacity.windowCoverage', {
-    known: inspection.window.knownCount,
-    unknown: inspection.window.unknownCount,
-  })
-})
-
 const windowAriaLabel = (platform: AccountPlatform, window: OperatorWindowCapacity) => {
   const value = window.remainingPercent === null
     ? t('admin.dashboard.capacity.quotaUnknown')
@@ -533,6 +510,12 @@ const windowAriaLabel = (platform: AccountPlatform, window: OperatorWindowCapaci
     ? t('admin.dashboard.capacity.nextLimitingReset', { time: formatReset(window.nextReset) })
     : t('admin.dashboard.capacity.resetUnknown')
   return `${providerLabel(platform)} ${window.label}: ${value}. ${reset}`
+}
+const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapacityWindow) => {
+  const reset = window.resetsAt
+    ? t('admin.dashboard.capacity.resets', { time: formatReset(window.resetsAt) })
+    : t('admin.dashboard.capacity.resetUnknown')
+  return `${providerLabel(platform)} ${window.label}: ${formatPercent(window.remainingPercent)}% ${t('admin.stats.capacity.normalizedRemaining')}. ${reset}`
 }
 </script>
 
@@ -614,6 +597,9 @@ const windowAriaLabel = (platform: AccountPlatform, window: OperatorWindowCapaci
 .is-limited { color: var(--operator-warning); }
 .is-exhausted { color: var(--operator-danger); }
 .is-unknown { color: var(--operator-muted-foreground); }
+.is-active { color: var(--operator-success); }
+.is-error { color: var(--operator-danger); }
+.is-disabled { color: var(--operator-muted-foreground); }
 
 .stats-inspector-control {
   display: flex;
@@ -623,9 +609,18 @@ const windowAriaLabel = (platform: AccountPlatform, window: OperatorWindowCapaci
   padding: 1rem 1.125rem;
   border-bottom: 1px solid var(--operator-border);
 }
-.stats-inspector-control label { min-width: min(18rem, 100%); }
-.stats-inspector-control select { width: 100%; min-height: 2.25rem; padding: 0.375rem 2rem 0.375rem 0.625rem; font-size: 0.75rem; }
-.stats-inspector-detail { padding: 1rem 1.125rem; }
+.stats-account-select { display: grid; width: min(22rem, 100%); gap: 0.35rem; color: var(--operator-muted-foreground); font-size: 0.6875rem; }
+.stats-account-select :deep(.select-trigger),
+.stats-target-select :deep(.select-trigger) {
+  min-height: 2.25rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--operator-radius);
+  font-size: 0.75rem;
+}
+.stats-select-option { display: grid; min-width: 0; gap: 0.125rem; }
+.stats-select-option strong { overflow: hidden; color: inherit; font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.stats-select-option small { overflow: hidden; color: var(--operator-muted-foreground); font-size: 0.625rem; text-overflow: ellipsis; white-space: nowrap; }
+.stats-inspector-detail { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(15rem, 0.75fr); gap: 1rem 1.25rem; padding: 1rem 1.125rem 1.125rem; }
 .stats-inspector-summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -636,57 +631,52 @@ const windowAriaLabel = (platform: AccountPlatform, window: OperatorWindowCapaci
 }
 .stats-inspector-summary > div { display: grid; min-width: 0; gap: 0.125rem; }
 .stats-inspector-summary span { color: var(--operator-muted-foreground); }
-.stats-inspector-tools {
-  display: flex;
-  min-width: 0;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.875rem;
-  color: var(--operator-muted-foreground);
-  font-size: 0.6875rem;
-}
+.stats-inspector-summary,
+.stats-account-note,
+.stats-account-models { grid-column: 1 / -1; }
+.stats-account-status { padding: 0.25rem 0.5rem; border: 1px solid currentColor; border-radius: 999px; font-size: 0.625rem; line-height: 1; }
+.stats-account-note { padding: 0.625rem 0.75rem; border: 1px solid var(--operator-border-subtle); border-radius: var(--operator-radius); background: var(--operator-raised); color: var(--operator-muted-foreground); font-size: 0.6875rem; }
+.stats-account-capacity,
+.stats-account-operational,
+.stats-account-models { min-width: 0; padding-top: 0.875rem; border-top: 1px solid var(--operator-border-subtle); }
+.stats-account-capacity h4,
+.stats-account-operational h4,
+.stats-account-models h4 { color: var(--operator-foreground); font-size: 0.75rem; font-weight: 650; }
+.stats-account-capacity header p,
+.stats-account-models-heading p,
+.stats-account-empty { margin-top: 0.2rem; color: var(--operator-muted-foreground); font-size: 0.6875rem; }
+.stats-account-window-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.75rem; }
+.stats-account-window-grid article,
+.stats-model-limits li { min-width: 0; padding: 0.75rem; border: 1px solid var(--operator-border-subtle); border-radius: var(--operator-radius); background: var(--operator-raised); }
+.stats-account-window-grid article > p { margin-top: 0.375rem; color: var(--operator-muted-foreground); font-size: 0.6875rem; }
+.stats-account-operational dl { display: grid; gap: 0.625rem; margin-top: 0.75rem; }
+.stats-account-operational dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--operator-border-subtle); font-size: 0.6875rem; }
+.stats-account-operational dl > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.stats-account-operational dt { color: var(--operator-muted-foreground); }
+.stats-account-operational dd { color: var(--operator-foreground); text-align: right; overflow-wrap: anywhere; }
+.stats-account-models-heading { display: flex; min-width: 0; align-items: end; justify-content: space-between; gap: 1rem; }
 .stats-target-select { display: grid; width: min(19rem, 100%); gap: 0.35rem; }
-.stats-target-select :deep(.select-trigger) {
-  min-height: 2.25rem;
-  padding: 0.375rem 0.625rem;
-  border-radius: var(--operator-radius);
-  font-size: 0.75rem;
-}
-.stats-inspector-accounts,
-.stats-model-limits { display: grid; gap: 0.375rem; margin-top: 0.875rem; }
-.stats-inspector-accounts li {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding-top: 0.375rem;
-  border-top: 1px solid var(--operator-border-subtle);
-  color: var(--operator-foreground);
-  font-size: 0.6875rem;
-}
-.stats-inspector-accounts li span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.stats-inspector-accounts li span:last-child { color: var(--operator-muted-foreground); text-align: right; }
-.stats-model-limits { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
-.stats-model-limits li {
-  min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid var(--operator-border-subtle);
-  border-radius: var(--operator-radius);
-  background: var(--operator-raised);
-}
+.stats-target-select > span { color: var(--operator-muted-foreground); font-size: 0.6875rem; }
+.stats-model-limits { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.875rem; }
 
 @media (max-width: 1024px) {
   .stats-capacity-comparison { grid-template-columns: 1fr; }
+  .stats-inspector-detail { grid-template-columns: 1fr; }
+  .stats-account-capacity,
+  .stats-account-operational { grid-column: 1; }
 }
 
 @media (max-width: 640px) {
   .stats-section-header,
   .stats-inspector-control,
-  .stats-inspector-tools { align-items: flex-start; flex-direction: column; }
-  .stats-inspector-control label,
+  .stats-account-models-heading { align-items: flex-start; flex-direction: column; }
+  .stats-account-select,
   .stats-target-select { width: 100%; min-width: 0; }
-  .stats-inspector-accounts li { flex-direction: column; gap: 0.125rem; }
-  .stats-inspector-accounts li span:last-child { text-align: left; }
+  .stats-inspector-summary { grid-template-columns: auto minmax(0, 1fr); }
+  .stats-account-status { grid-column: 2; justify-self: start; }
+  .stats-account-window-grid,
   .stats-model-limits { grid-template-columns: 1fr; }
+  .stats-account-operational dl > div { grid-template-columns: 1fr; gap: 0.125rem; }
+  .stats-account-operational dd { text-align: left; }
 }
 </style>
