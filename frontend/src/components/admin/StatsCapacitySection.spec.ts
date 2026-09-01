@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { Account, AccountUsageInfo } from '@/types'
 import Select from '@/components/common/Select.vue'
@@ -44,6 +44,7 @@ const account = (id: number, overrides: Partial<Account> = {}): Account => ({
 })
 
 const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
+  source: 'passive',
   updated_at: '2026-08-25T00:00:00Z',
   five_hour: null,
   seven_day: null,
@@ -51,8 +52,12 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
   ...overrides,
 })
 
+afterEach(() => {
+  document.body.querySelectorAll('.select-dropdown-portal').forEach((element) => element.remove())
+})
+
 describe('StatsCapacitySection', () => {
-  it('separates actual short and long windows, preserves unknowns, and renders provider icons', () => {
+  it('separates actual windows and labels normalized donut semantics without turning unknown into zero', () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
         accounts: [
@@ -75,59 +80,137 @@ describe('StatsCapacitySection', () => {
 
     const shortTerm = wrapper.get('[data-testid="stats-short-term-capacity"]')
     const longTerm = wrapper.get('[data-testid="stats-long-term-capacity"]')
-    const donuts = wrapper.get('[data-testid="stats-capacity-donut-overview"]')
-    expect(donuts.get('[data-testid="stats-capacity-donut-overall"] svg').attributes('aria-label')).toContain('45%')
-    expect(donuts.get('[data-testid="provider-capacity-openai"] .stats-capacity-donut-icon svg').exists()).toBe(true)
-    expect(donuts.get('[data-testid="provider-capacity-gemini"] .stats-capacity-donut-chart svg').attributes('aria-label')).toContain('quotaUnknown')
-    expect(donuts.get('[data-testid="provider-capacity-gemini"]').text()).not.toContain('0%')
-    expect(shortTerm.get('[data-testid="short-provider-openai"] svg').exists()).toBe(true)
+    const overall = wrapper.get('[data-testid="stats-capacity-donut-overall"]')
+    const openAI = wrapper.get('[data-testid="provider-capacity-openai"]')
+    const unknown = wrapper.get('[data-testid="provider-capacity-gemini"]')
+
+    expect(overall.get('[data-testid="stats-capacity-donut-basis"]').text()).toBe('admin.stats.capacity.mixedAverageLimitingQuota')
+    expect(overall.get('svg').attributes('aria-label')).toContain('admin.stats.capacity.mixedAverageLimitingQuota')
+    expect(openAI.get('[data-testid="stats-capacity-donut-basis"]').text()).toBe('admin.stats.capacity.averageLimitingQuota')
+    expect(openAI.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('admin.stats.capacity.averageLimitingQuota')
+    expect(openAI.text()).toContain('Account 1 · 7d')
+    expect(unknown.get('.stats-capacity-donut-chart svg').attributes('aria-label')).toContain('quotaUnknown')
+    expect(unknown.text()).not.toContain('0%')
     expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('5h')
     expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('65%')
-    expect(shortTerm.get('[data-testid="short-provider-openai"]').text()).toContain('admin.stats.capacity.windowCoverage 2 0')
-    expect(shortTerm.get('[data-testid="short-provider-gemini"]').text()).toContain('admin.stats.capacity.notReported')
-
     expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('7d')
     expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('40%')
-    expect(longTerm.get('[data-testid="long-provider-openai"]').text()).toContain('admin.stats.capacity.windowCoverage 1 1')
-    expect(longTerm.get('[data-testid="long-provider-gemini"]').text()).toContain('admin.stats.capacity.notReported')
-    expect(wrapper.get('[data-testid="provider-capacity-gemini"]').text()).toContain('admin.stats.capacity.coverage 0 1')
   })
 
-  it('uses one compact native inspector for account contributions and missing windows', async () => {
+  it('qualifies mixed-window averages as non-pooled capacity', () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {
-        accounts: [account(1), account(2)],
+        accounts: [
+          account(1),
+          account(2, {
+            name: 'Daily spend account',
+            platform: 'grok',
+            type: 'api_key',
+            quota_daily_limit: 100,
+            quota_daily_used: 10,
+          }),
+        ],
         usageByAccountId: {
           '1': usage({
-            five_hour: { utilization: 20, resets_at: null, remaining_seconds: null },
-            seven_day: { utilization: 60, resets_at: null, remaining_seconds: null },
-          }),
-          '2': usage({
-            five_hour: { utilization: 50, resets_at: null, remaining_seconds: null },
+            seven_day: { utilization: 90, resets_at: null, remaining_seconds: null },
           }),
         },
       },
       global: { stubs: { LoadingSpinner: true } },
     })
 
-    const inspector = wrapper.get('[data-testid="stats-capacity-inspector"]')
-    const select = inspector.get('select')
-    expect(select.findAll('option').map((option) => option.text())).toEqual([
-      'OpenAI · 5h',
-      'OpenAI · 7d',
-    ])
-    expect(inspector.text()).toContain('Account 1')
-    expect(inspector.text()).toContain('Account 2')
-
-    await select.setValue('openai:seven_day')
-    expect(inspector.text()).toContain('OpenAI · 7d')
-    expect(inspector.text()).toContain('admin.stats.capacity.windowCoverage 1 1')
-    expect(inspector.text()).toContain('Account 1')
-    expect(inspector.text()).toContain('Account 2')
-    expect(inspector.text()).toContain('admin.dashboard.capacity.quotaUnknown')
+    const overall = wrapper.get('[data-testid="stats-capacity-donut-overall"]')
+    expect(overall.text()).toContain('50%')
+    expect(overall.get('[data-testid="stats-capacity-donut-basis"]').text()).toBe('admin.stats.capacity.mixedAverageLimitingQuota')
+    expect(overall.get('svg').attributes('aria-label')).toContain('admin.stats.capacity.mixedAverageLimitingQuota')
   })
 
-  it('bounds a 52-account inspector and compacts 20 Antigravity model limits', async () => {
+  it('defaults to the most constrained account and shows one selected account with every reported window', async () => {
+    const wrapper = mount(StatsCapacitySection, {
+      props: {
+        accounts: [
+          account(1, {
+            name: 'Healthy account',
+            credentials: { api_key: 'never-render-this-secret', email: 'safe@example.test' },
+          }),
+          account(2, { name: 'Exhausted account' }),
+          account(3, { name: 'Unknown account', platform: 'gemini' }),
+        ],
+        usageByAccountId: {
+          '1': usage({
+            five_hour: { utilization: 20, resets_at: '2026-08-25T20:00:00Z', remaining_seconds: 7200 },
+            seven_day: { utilization: 60, resets_at: '2026-08-29T00:00:00Z', remaining_seconds: 345600 },
+          }),
+          '2': usage({
+            five_hour: { utilization: 100, resets_at: '2026-08-25T21:00:00Z', remaining_seconds: 10800 },
+          }),
+        },
+      },
+      global: { stubs: { LoadingSpinner: true, Transition: false } },
+    })
+
+    const inspector = wrapper.get('[data-testid="stats-capacity-inspector"]')
+    const accountSelect = wrapper.findAllComponents(Select)
+      .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectAccount')!
+
+    expect(inspector.find('select').exists()).toBe(false)
+    expect(inspector.find('.stats-inspector-accounts').exists()).toBe(false)
+    expect(inspector.find('[data-testid="stats-inspector-account-row"]').exists()).toBe(false)
+    expect(accountSelect.props('searchable')).toBe(true)
+    expect(accountSelect.props('options')).toHaveLength(3)
+    expect(inspector.get('[data-testid="stats-selected-account-detail"]').text()).toContain('Exhausted account')
+    expect(inspector.findAll('[data-testid="stats-account-capacity-window"]')).toHaveLength(1)
+    expect(inspector.get('[data-testid="stats-account-limiting-window"]').text()).toContain('5h 0%')
+    expect(inspector.text()).toContain('admin.stats.capacity.status.limited')
+
+    accountSelect.vm.$emit('update:modelValue', '1')
+    await wrapper.vm.$nextTick()
+
+    const detail = inspector.get('[data-testid="stats-selected-account-detail"]')
+    expect(detail.text()).toContain('Healthy account')
+    expect(detail.findAll('[data-testid="stats-account-capacity-window"]')).toHaveLength(2)
+    expect(detail.text()).toContain('5h')
+    expect(detail.text()).toContain('80%')
+    expect(detail.text()).toContain('7d')
+    expect(detail.text()).toContain('40%')
+    expect(detail.get('[data-testid="stats-account-limiting-window"]').text()).toContain('7d 40%')
+    expect(detail.text()).toContain('admin.stats.capacity.passiveSnapshot')
+    expect(detail.text()).not.toContain('never-render-this-secret')
+    expect(detail.text()).not.toContain('safe@example.test')
+  })
+
+  it('uses the shared searchable combobox keyboard contract on Stats', async () => {
+    const wrapper = mount(StatsCapacitySection, {
+      attachTo: document.body,
+      props: {
+        accounts: [account(1), account(2, { platform: 'gemini', name: 'Gemini reserve' })],
+        usageByAccountId: {},
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    const trigger = wrapper.get('button[aria-label="admin.stats.capacity.inspectAccount"]')
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    const listbox = document.body.querySelector<HTMLElement>('[role="listbox"]')!
+    const search = document.body.querySelector<HTMLInputElement>('[aria-label="admin.stats.capacity.searchAccounts"]')!
+
+    expect(listbox).not.toBeNull()
+    expect(search).not.toBeNull()
+    search.value = 'gemini'
+    search.dispatchEvent(new Event('input'))
+    await wrapper.vm.$nextTick()
+    expect(listbox.querySelectorAll('[role="option"]')).toHaveLength(1)
+    expect(listbox.textContent).toContain('Gemini reserve')
+
+    listbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await wrapper.vm.$nextTick()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger.element)
+    await vi.waitFor(() => expect(document.body.querySelector('[role="listbox"]')).toBeNull())
+    wrapper.unmount()
+  })
+
+  it('keeps a 50+ account pool compact and limits Antigravity to three searchable model rows', async () => {
     const accounts = Array.from({ length: 52 }, (_, index) => account(index + 1, {
       name: index === 51 ? 'Hidden searchable reserve' : `Pool account ${String(index + 1).padStart(2, '0')}`,
     }))
@@ -158,28 +241,22 @@ describe('StatsCapacitySection', () => {
       global: { stubs: { LoadingSpinner: true } },
     })
 
-    expect(wrapper.findAll('[data-testid="stats-inspector-account-row"]')).toHaveLength(5)
-    expect(wrapper.get('[data-testid="stats-inspector-account-summary"]').text()).toContain('52 20 5 47')
-    expect(wrapper.get('[data-testid="stats-inspector-account-row"]').text()).toContain('admin.dashboard.capacity.remaining 0')
-    expect(wrapper.text()).not.toContain('Hidden searchable reserve')
-
     const accountSelect = wrapper.findAllComponents(Select)
       .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectAccount')!
-    expect(accountSelect.props('options')).toHaveLength(52)
+    expect(accountSelect.props('options')).toHaveLength(53)
+    expect(wrapper.findAll('[data-testid="stats-selected-account-detail"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="stats-inspector-account-row"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="stats-selected-account-detail"]').text()).toContain('Antigravity pool')
+
     accountSelect.vm.$emit('update:modelValue', '52')
     await wrapper.vm.$nextTick()
-    expect(wrapper.findAll('[data-testid="stats-inspector-account-row"]')).toHaveLength(5)
-    const hiddenAccount = wrapper.findAll('[data-testid="stats-inspector-account-row"]')
-      .find((row) => row.text().includes('Hidden searchable reserve'))!
-    expect(hiddenAccount.text()).toContain('admin.dashboard.capacity.quotaUnknown')
-    expect(hiddenAccount.text()).not.toContain('0%')
+    expect(wrapper.get('[data-testid="stats-selected-account-detail"]').text()).toContain('Hidden searchable reserve')
+    expect(wrapper.get('[data-testid="stats-account-capacity-unknown"]').exists()).toBe(true)
 
-    const inspectorSelect = wrapper.get('#stats-capacity-inspector-select')
-    expect(inspectorSelect.findAll('option').filter((option) => option.text().includes('Antigravity'))).toHaveLength(1)
-    await inspectorSelect.setValue('antigravity:model-limits')
+    accountSelect.vm.$emit('update:modelValue', '100')
+    await wrapper.vm.$nextTick()
     expect(wrapper.findAll('[data-testid="stats-model-limit-row"]')).toHaveLength(3)
     expect(wrapper.get('[data-testid="stats-model-limit-summary"]').text()).toContain('0% 20 model-01')
-    expect(wrapper.text()).toContain('admin.stats.capacity.moreModelLimits 17')
 
     const modelSelect = wrapper.findAllComponents(Select)
       .find((component) => component.props('ariaLabel') === 'admin.stats.capacity.inspectModel')!
@@ -187,6 +264,6 @@ describe('StatsCapacitySection', () => {
     modelSelect.vm.$emit('update:modelValue', 'antigravity:hidden-model-search-target')
     await wrapper.vm.$nextTick()
     expect(wrapper.findAll('[data-testid="stats-model-limit-row"]')).toHaveLength(3)
-    expect(wrapper.text()).toContain('hidden-model-search-target')
+    expect(wrapper.get('[data-testid="stats-selected-account-detail"]').text()).toContain('hidden-model-search-target')
   })
 })

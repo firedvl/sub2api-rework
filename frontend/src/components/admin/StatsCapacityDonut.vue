@@ -4,7 +4,10 @@
       <span v-if="platform" class="stats-capacity-donut-icon" aria-hidden="true">
         <ProviderIcon :provider="platform" :size="18" />
       </span>
-      <strong>{{ title }}</strong>
+      <div>
+        <strong>{{ title }}</strong>
+        <span data-testid="stats-capacity-donut-basis">{{ basis }}</span>
+      </div>
     </header>
 
     <div class="stats-capacity-donut-chart">
@@ -38,7 +41,7 @@
             ? t('common.unknown')
             : `${formatPercent(capacity.remainingPercent)}%` }}
         </strong>
-        <span>{{ t('admin.dashboard.capacity.poolAvailable') }}</span>
+        <span>{{ t('admin.stats.capacity.averageLimitingRemaining') }}</span>
       </div>
     </div>
 
@@ -49,7 +52,7 @@
       }) }}
     </p>
     <p v-if="capacity.lowestAccount && capacity.lowestRemaining !== null" class="stats-capacity-donut-limit">
-      <span :title="capacity.lowestAccount.account.name">{{ capacity.lowestAccount.account.name }}</span>
+      <span :title="capacity.lowestAccount.account.name">{{ limitingAccountLabel }}</span>
       <strong :class="capacityTone(capacity.lowestRemaining)">{{ formatPercent(capacity.lowestRemaining) }}%</strong>
     </p>
     <p v-if="capacity.nextReset">
@@ -68,6 +71,7 @@ import type { AccountPlatform } from '@/types'
 
 const props = defineProps<{
   title: string
+  basis: string
   capacity: OperatorNormalizedCapacityAggregate
   platform?: AccountPlatform
   testId: string
@@ -81,15 +85,25 @@ const capacityTone = (value: number) => {
   if (value <= 20) return 'is-limited'
   return 'is-healthy'
 }
+const limitingAccountLabel = computed(() => {
+  const account = props.capacity.lowestAccount
+  if (!account || props.capacity.lowestRemaining === null) return ''
+  const windows = account.windows
+    .filter((window) => window.remainingPercent === props.capacity.lowestRemaining)
+    .map((window) => window.label)
+  return windows.length
+    ? `${account.account.name} · ${windows.join(' / ')}`
+    : account.account.name
+})
 const chartLabel = computed(() => {
   const coverage = t('admin.stats.capacity.coverage', {
     known: props.capacity.knownCount,
     unknown: props.capacity.unknownCount,
   })
   if (props.capacity.remainingPercent === null) {
-    return `${props.title}: ${t('admin.dashboard.capacity.quotaUnknown')}. ${coverage}`
+    return `${props.title}, ${props.basis}: ${t('admin.dashboard.capacity.quotaUnknown')}. ${coverage}`
   }
-  return `${props.title}: ${formatPercent(props.capacity.remainingPercent)}% ${t('admin.dashboard.capacity.poolAvailable')}. ${coverage}`
+  return `${props.title}, ${props.basis}: ${formatPercent(props.capacity.remainingPercent)}% ${t('admin.stats.capacity.averageLimitingRemaining')}. ${coverage}`
 })
 </script>
 
@@ -119,10 +133,22 @@ const chartLabel = computed(() => {
   font-size: 0.8125rem;
 }
 
-.stats-capacity-donut header > strong {
+.stats-capacity-donut header > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.stats-capacity-donut header strong {
   overflow: hidden;
   line-height: 1.2;
   white-space: normal;
+}
+
+.stats-capacity-donut header span:not(.stats-capacity-donut-icon) {
+  color: var(--operator-muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 500;
 }
 
 .stats-capacity-donut-limit > span {
