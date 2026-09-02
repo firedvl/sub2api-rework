@@ -33,9 +33,10 @@ const operatorPopupPalette = {
   muted: 'rgb(163, 163, 163)',
 }
 
-const fulfillApiData = (route: Route, data: unknown, status = 200) => (
+const fulfillApiData = (route: Route, data: unknown, status = 200, headers?: Record<string, string>) => (
   route.fulfill({
     status,
+    headers,
     contentType: 'application/json',
     body: JSON.stringify({ code: status >= 400 ? status : 0, message: status >= 400 ? 'fixture failure' : 'ok', data }),
   })
@@ -75,6 +76,80 @@ async function installAccountListMock(
     }
     await route.fallback()
   })
+}
+
+interface MutableAccountRefreshState {
+  account: (typeof operatorFixtureAccounts)[number]
+  utilization: number
+  etag: string
+  tableStatuses: number[]
+  batchForces: boolean[]
+}
+
+async function installMutableAccountRefreshMock(page: Page): Promise<MutableAccountRefreshState> {
+  const state: MutableAccountRefreshState = {
+    account: {
+      ...operatorFixtureAccounts[0],
+      name: 'Refresh fixture initial',
+      extra: { ...operatorFixtureAccounts[0].extra },
+      group_ids: [...operatorFixtureAccounts[0].group_ids],
+      groups: operatorFixtureAccounts[0].groups.map((group) => ({ ...group })),
+    },
+    utilization: 20,
+    etag: '"refresh-a"',
+    tableStatuses: [],
+    batchForces: [],
+  }
+
+  await page.route('**/api/v1/admin/accounts**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const pathname = url.pathname
+    if (request.method() === 'GET' && pathname === '/api/v1/admin/accounts') {
+      const isTableRequest = url.searchParams.has('include_scheduler_score')
+      if (isTableRequest && request.headers()['if-none-match'] === state.etag) {
+        state.tableStatuses.push(304)
+        await route.fulfill({ status: 304, headers: { etag: state.etag } })
+        return
+      }
+
+      if (isTableRequest) state.tableStatuses.push(200)
+      const pageNumber = Math.max(1, Number(url.searchParams.get('page') || 1))
+      const pageSize = Math.max(1, Number(url.searchParams.get('page_size') || 20))
+      await fulfillApiData(route, {
+        items: pageNumber === 1 ? [{ ...state.account }] : [],
+        total: 1,
+        page: pageNumber,
+        page_size: pageSize,
+        pages: 1,
+      }, 200, { etag: state.etag })
+      return
+    }
+    if (request.method() === 'POST' && pathname === '/api/v1/admin/accounts/usage/batch') {
+      const body = request.postDataJSON() as { force?: boolean }
+      state.batchForces.push(body.force === true)
+      await fulfillApiData(route, {
+        usage: {
+          [String(state.account.id)]: {
+            source: 'passive',
+            updated_at: '2026-09-02T00:00:00Z',
+            five_hour: {
+              utilization: state.utilization,
+              resets_at: '2026-09-02T05:00:00Z',
+              remaining_seconds: 3600,
+            },
+            seven_day: null,
+            seven_day_sonnet: null,
+          },
+        },
+        errors: {},
+      })
+      return
+    }
+    await route.fallback()
+  })
+
+  return state
 }
 
 interface WritableSettingsState {
@@ -132,6 +207,33 @@ function expectDarkNeutralSurface(color: string, label: string) {
   expect(alpha, `${label} must be opaque`).toBe(1)
   expect(Math.max(red, green, blue), `${label} must stay dark`).toBeLessThan(70)
   expect(Math.max(red, green, blue) - Math.min(red, green, blue), `${label} must stay neutral`).toBeLessThanOrEqual(8)
+}
+
+async function expectStatsBandGeometry(chart: Locator, label: string) {
+  const metrics = await chart.getByRole('group').evaluate((element) => {
+    const bars = [...element.querySelectorAll<HTMLElement>('.stats-trend-bar > span')].map((bar) => {
+      const bounds = bar.getBoundingClientRect()
+      return { left: bounds.left, right: bounds.right, width: bounds.width }
+    })
+    const plot = element.querySelector<HTMLElement>('.stats-bar-grid-line')!.getBoundingClientRect()
+    const labelRight = Math.max(...[...element.querySelectorAll<HTMLElement>('.stats-bar-y-label')]
+      .map((item) => item.getBoundingClientRect().right))
+    return {
+      bars,
+      plot: { left: plot.left, right: plot.right },
+      labelRight,
+    }
+  })
+
+  expect(metrics.bars.length, `${label} bars`).toBeGreaterThan(0)
+  for (const [index, bar] of metrics.bars.entries()) {
+    expect(bar.left, `${label} bar ${index} left bound`).toBeGreaterThanOrEqual(metrics.plot.left - 1)
+    expect(bar.right, `${label} bar ${index} right bound`).toBeLessThanOrEqual(metrics.plot.right + 1)
+    if (index > 0) {
+      expect(bar.left - metrics.bars[index - 1].right, `${label} gap ${index - 1}-${index}`).toBeGreaterThanOrEqual(0.5)
+    }
+  }
+  expect(metrics.bars[0].left, `${label} Y-axis clearance`).toBeGreaterThanOrEqual(metrics.labelRight + 2)
 }
 
 async function expectNeutralOperatorMenu(
@@ -607,6 +709,68 @@ test.describe('operator console navigation', () => {
     await expect(capacityDetails).toHaveCount(6)
   })
 
+  test('updates Accounts after manual and auto refresh without reloading the route', async ({ page }) => {
+    test.setTimeout(60_000)
+    const state = await installMutableAccountRefreshMock(page)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/admin/accounts')
+
+    const capacityRows = page.getByTestId('account-capacity-row')
+    const capacityRow = capacityRows.first()
+    await expect(capacityRows).toHaveCount(1)
+    await expect(capacityRow).toContainText('Refresh fixture initial')
+    await expect(capacityRow).toContainText('80%')
+    await page.evaluate(() => { (window as any).__accountsRefreshRouteMarker = 'mounted' })
+
+    state.account = {
+      ...state.account,
+      name: 'Refresh fixture manual',
+      current_concurrency: 2,
+      updated_at: '2026-09-02T00:01:00Z',
+    }
+    state.utilization = 46
+    const createButton = page.getByRole('button', { name: 'Create Account' })
+    const manualRefresh = createButton.locator('..').locator('button').first()
+    await manualRefresh.click()
+    await expect(capacityRow).toContainText('Refresh fixture manual')
+    await expect(capacityRow).toContainText('54%')
+    expect(state.batchForces.at(-1)).toBe(true)
+    expect(await page.evaluate(() => (window as any).__accountsRefreshRouteMarker)).toBe('mounted')
+
+    state.tableStatuses.length = 0
+    state.batchForces.length = 0
+    const autoRefresh = page.getByTitle('Auto Refresh')
+    await autoRefresh.click()
+    await page.getByRole('button', { name: '5 seconds', exact: true }).click()
+    await page.getByRole('button', { name: 'Enable auto refresh' }).click()
+    await autoRefresh.click()
+    await expect(autoRefresh).toContainText('Auto refresh: 5s')
+
+    await page.clock.runFor(5_000)
+    await expect.poll(() => state.tableStatuses).toEqual([200])
+    await expect(autoRefresh).toContainText('Auto refresh: 5s')
+
+    state.utilization = 53
+    await page.clock.runFor(5_000)
+    await expect.poll(() => state.tableStatuses).toEqual([200, 304])
+    await expect(capacityRow).toContainText('47%')
+    expect(state.batchForces.at(-1)).toBe(false)
+
+    state.etag = '"refresh-b"'
+    state.account = {
+      ...state.account,
+      name: 'Refresh fixture auto',
+      updated_at: '2026-09-02T00:02:00Z',
+    }
+    state.utilization = 35
+    await page.clock.runFor(5_000)
+    await expect.poll(() => state.tableStatuses).toEqual([200, 304, 200])
+    await expect(capacityRows).toHaveCount(1)
+    await expect(capacityRow).toContainText('Refresh fixture auto')
+    await expect(capacityRow).toContainText('65%')
+    expect(await page.evaluate(() => (window as any).__accountsRefreshRouteMarker)).toBe('mounted')
+  })
+
   test('keeps technical sticky columns aligned at every review width', async ({ page }) => {
     test.setTimeout(60_000)
 
@@ -815,26 +979,10 @@ test.describe('operator console navigation', () => {
     await expect(tokenTrend.getByTestId('stats-trend-peak')).toHaveText('1.4M')
     await expect(requestTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*4,286 Requests/)
     await expect(tokenTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*6,396,500 Tokens/)
+    await expectStatsBandGeometry(requestTrend, '1440px request chart')
+    await expectStatsBandGeometry(tokenTrend, '1440px token chart')
 
     const requestBars = requestTrend.getByTestId('stats-trend-bar')
-    const expectLeftPlotClearance = async (chart: Locator, label: string) => {
-      const metrics = await chart.getByRole('group').evaluate((element) => {
-        const firstBar = element.querySelector<HTMLElement>('.stats-trend-bar > span')!
-        const plotLine = element.querySelector<HTMLElement>('.stats-bar-grid-line')!
-        const yLabels = [...element.querySelectorAll<HTMLElement>('.stats-bar-y-label')]
-        const bar = firstBar.getBoundingClientRect()
-        const plot = plotLine.getBoundingClientRect()
-        return {
-          barLeft: bar.left,
-          plotLeft: plot.left,
-          labelRight: Math.max(...yLabels.map((item) => item.getBoundingClientRect().right)),
-        }
-      })
-      expect(metrics.barLeft, `${label} first bar must stay inside the plot`).toBeGreaterThanOrEqual(metrics.plotLeft - 1)
-      expect(metrics.barLeft, `${label} first bar must clear Y-axis labels`).toBeGreaterThanOrEqual(metrics.labelRight + 2)
-    }
-
-    await expectLeftPlotClearance(requestTrend, 'request chart')
     expect(await requestBars.first().locator('span').evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(20)
     await requestBars.nth(2).focus()
     await expect(requestBars.nth(2)).toHaveClass(/is-active/)
@@ -845,7 +993,6 @@ test.describe('operator console navigation', () => {
     await expect(requestTrend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
 
     const tokenBars = tokenTrend.getByTestId('stats-trend-bar')
-    await expectLeftPlotClearance(tokenTrend, 'token chart')
     await tokenBars.nth(2).hover()
     await expect(tokenBars.nth(2)).toHaveClass(/is-active/)
     expect(await tokenBars.nth(2).locator('span').evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none')
@@ -1024,8 +1171,8 @@ test.describe('operator console navigation', () => {
       await tokenBars.nth(viewportIndex === 0 ? 5 : 0).focus()
       await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toBeVisible()
       await page.keyboard.press('Escape')
-      await expectLeftPlotClearance(requestTrend, `${viewport.width}px request chart`)
-      await expectLeftPlotClearance(tokenTrend, `${viewport.width}px token chart`)
+      await expectStatsBandGeometry(requestTrend, `${viewport.width}px request chart`)
+      await expectStatsBandGeometry(tokenTrend, `${viewport.width}px token chart`)
       const overflow = await page.evaluate(() => ({
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,

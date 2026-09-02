@@ -1561,4 +1561,42 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('7d S')
     expect(wrapper.text()).not.toContain('7d F')
   })
+
+  it('syncs refreshed parent usage for non-managed cells without discarding data on errors', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: { utilization: 10, resets_at: null, remaining_seconds: null }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3003, platform: 'anthropic', type: 'oauth' })
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization'],
+            template: '<div class="usage-bar">{{ label }}|{{ utilization }}</div>'
+          },
+          AccountQuotaInfo: true,
+        }
+      }
+    })
+
+    await flushPromises()
+    expect(wrapper.text()).toContain('5h|10')
+
+    await wrapper.setProps({
+      batchedUsage: {
+        five_hour: { utilization: 65, resets_at: null, remaining_seconds: null }
+      }
+    })
+    expect(wrapper.text()).toContain('5h|65')
+
+    await wrapper.setProps({ batchedUsage: null, batchedUsageError: 'batch failed' })
+    expect(wrapper.text()).toContain('5h|65')
+
+    await wrapper.setProps({ batchedUsageError: null })
+    expect(wrapper.text()).not.toContain('5h|65')
+    expect(wrapper.text()).toContain('-')
+  })
 })

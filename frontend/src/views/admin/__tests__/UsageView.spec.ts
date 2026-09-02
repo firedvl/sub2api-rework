@@ -162,6 +162,43 @@ const GroupDistributionChartStub = {
     </div>
   `,
 }
+const RefreshUsageFiltersStub = {
+  emits: ['refresh'],
+  template: '<button data-test="usage-refresh" @click="$emit(\'refresh\')">refresh</button>',
+}
+const RefreshUsageTableStub = {
+  props: ['data'],
+  template: '<div data-test="usage-log">{{ data[0]?.model }}</div>',
+}
+const RefreshUsageStatsStub = {
+  props: ['stats'],
+  template: '<div data-test="usage-stats">{{ stats?.total_requests }}</div>',
+}
+const RefreshModelChartStub = {
+  props: ['modelStats'],
+  template: '<div data-test="usage-model">{{ modelStats[0]?.model }}</div>',
+}
+const RefreshGroupChartStub = {
+  props: ['groupStats'],
+  template: '<div data-test="usage-group">{{ groupStats[0]?.group_name }}</div>',
+}
+const RefreshTrendStub = {
+  props: ['trendData'],
+  template: '<div data-test="usage-trend">{{ trendData[0]?.input_tokens }}</div>',
+}
+const RefreshErrorTableStub = {
+  props: ['rows'],
+  template: '<div data-test="usage-error">{{ rows[0]?.message }}</div>',
+}
+const RefreshRankingStub = defineComponent({
+  setup(_, { expose }) {
+    const refreshes = ref(0)
+    expose({ reload: () => { refreshes.value += 1 } })
+    return { refreshes }
+  },
+  template: '<div data-test="usage-ranking-refreshes">{{ refreshes }}</div>',
+})
+let usageRefreshRevision = 1
 
 const mountRouteFilteredUsageView = () => mount(UsageView, {
   global: { stubs: {
@@ -457,6 +494,103 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('admin UsageView refresh integration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    usageRefreshRevision = 1
+
+    list.mockReset().mockImplementation(async () => ({
+      items: [{ id: usageRefreshRevision, model: `log-${usageRefreshRevision}` }],
+      total: 1,
+      pages: 1,
+    }))
+    getStats.mockReset().mockImplementation(async () => ({
+      total_requests: usageRefreshRevision * 100,
+      total_input_tokens: usageRefreshRevision,
+      total_output_tokens: usageRefreshRevision,
+      total_cache_tokens: 0,
+      total_tokens: usageRefreshRevision * 2,
+      total_cost: usageRefreshRevision,
+      total_actual_cost: usageRefreshRevision,
+      average_duration_ms: usageRefreshRevision,
+    }))
+    getModelStats.mockReset().mockImplementation(async () => ({
+      models: [{ model: `model-${usageRefreshRevision}`, total_tokens: usageRefreshRevision }],
+    }))
+    getSnapshotV2.mockReset().mockImplementation(async () => ({
+      trend: [{ date: '2026-09-02T00:00:00Z', input_tokens: usageRefreshRevision }],
+      models: [],
+      groups: [{ group_id: usageRefreshRevision, group_name: `group-${usageRefreshRevision}` }],
+    }))
+    listErrorLogs.mockReset().mockImplementation(async () => ({
+      items: [{ id: usageRefreshRevision, message: `error-${usageRefreshRevision}` }],
+      total: 1,
+      pages: 1,
+    }))
+    getById.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('replaces every mounted Usage surface and bypasses cached stats', async () => {
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub,
+        UsageStatsCards: RefreshUsageStatsStub,
+        UsageFilters: RefreshUsageFiltersStub,
+        UsageTable: RefreshUsageTableStub,
+        UsageExportProgress: true,
+        UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true,
+        AuditLogModal: true,
+        Pagination: true,
+        Select: true,
+        DateRangePicker: true,
+        Icon: true,
+        TokenUsageTrend: RefreshTrendStub,
+        ModelDistributionChart: RefreshModelChartStub,
+        GroupDistributionChart: RefreshGroupChartStub,
+        EndpointDistributionChart: true,
+        UserTokenRanking: RefreshRankingStub,
+        OpsErrorLogTable: RefreshErrorTableStub,
+        OpsErrorDetailModal: true,
+      } },
+    })
+    await vi.advanceTimersByTimeAsync(120)
+    await flushPromises()
+    const root = wrapper.element
+
+    expect(wrapper.get('[data-test="usage-log"]').text()).toBe('log-1')
+    expect(wrapper.get('[data-test="usage-stats"]').text()).toBe('100')
+    expect(wrapper.get('[data-test="usage-model"]').text()).toBe('model-1')
+    expect(wrapper.get('[data-test="usage-group"]').text()).toBe('group-1')
+    expect(wrapper.get('[data-test="usage-trend"]').text()).toBe('1')
+
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[2].trigger('click')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="usage-error"]').text()).toBe('error-1')
+    expect(wrapper.get('[data-test="usage-ranking-refreshes"]').text()).toBe('0')
+
+    usageRefreshRevision = 2
+    await wrapper.get('[data-test="usage-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.element).toBe(root)
+    expect(wrapper.get('[data-test="usage-log"]').text()).toBe('log-2')
+    expect(wrapper.get('[data-test="usage-stats"]').text()).toBe('200')
+    expect(wrapper.get('[data-test="usage-model"]').text()).toBe('model-2')
+    expect(wrapper.get('[data-test="usage-group"]').text()).toBe('group-2')
+    expect(wrapper.get('[data-test="usage-trend"]').text()).toBe('2')
+    expect(wrapper.get('[data-test="usage-error"]').text()).toBe('error-2')
+    expect(wrapper.get('[data-test="usage-ranking-refreshes"]').text()).toBe('1')
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ nocache: 1 }))
   })
 })
 
