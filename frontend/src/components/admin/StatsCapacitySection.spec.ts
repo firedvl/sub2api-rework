@@ -57,6 +57,25 @@ afterEach(() => {
 })
 
 describe('StatsCapacitySection', () => {
+  it('keeps high remaining percentages inside the shared four-row card structure', () => {
+    const wrapper = mount(StatsCapacitySection, {
+      props: {
+        accounts: [account(1)],
+        usageByAccountId: {
+          '1': usage({
+            five_hour: { utilization: 0, resets_at: null, remaining_seconds: null },
+          }),
+        },
+      },
+      global: { stubs: { LoadingSpinner: true } },
+    })
+
+    const card = wrapper.get('[data-testid="provider-capacity-openai"]')
+    expect(card.get('.stats-capacity-donut-value').text()).toBe('100%')
+    expect(card.findAll('dl > div')).toHaveLength(4)
+    expect(card.get('.stats-capacity-donut-chart svg').exists()).toBe(true)
+  })
+
   it('separates actual windows and labels normalized donut semantics without turning unknown into zero', () => {
     const wrapper = mount(StatsCapacitySection, {
       props: {

@@ -136,9 +136,9 @@ const chartLabel = computed(() => {
   grid-template-columns: 5.75rem minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   align-items: start;
-  gap: 0.625rem 0.875rem;
+  gap: 0.875rem 1rem;
   overflow: hidden;
-  padding: 1rem;
+  padding: 1.125rem;
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius);
   background: var(--operator-card);
@@ -152,7 +152,7 @@ const chartLabel = computed(() => {
   min-width: 0;
   align-items: center;
   gap: 0.5rem;
-  min-height: 2rem;
+  min-height: 2.125rem;
   color: var(--operator-foreground);
   font-size: 0.8125rem;
 }
@@ -203,15 +203,17 @@ const chartLabel = computed(() => {
 .stats-capacity-donut-value {
   position: absolute;
   inset: 50% auto auto 50%;
-  width: 4.5rem;
+  width: 5rem;
   transform: translate(-50%, -50%);
   text-align: center;
 }
 
 .stats-capacity-donut-value strong {
   color: var(--operator-foreground);
-  font-size: 1.25rem;
-  line-height: 1.1;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .stats-capacity-donut dl {
@@ -223,7 +225,7 @@ const chartLabel = computed(() => {
 
 .stats-capacity-donut dl > div {
   min-width: 0;
-  padding: 0.3rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--operator-border-subtle);
 }
 

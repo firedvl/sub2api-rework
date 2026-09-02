@@ -208,6 +208,10 @@ describe('admin StatsView', () => {
 
     expect(requestBars).toHaveLength(4)
     expect(tokenBars).toHaveLength(4)
+    expect(requestBars[0].classes()).toContain('is-first')
+    expect(requestBars[requestBars.length - 1].classes()).toContain('is-last')
+    expect(tokenBars[0].classes()).toContain('is-first')
+    expect(tokenBars[tokenBars.length - 1].classes()).toContain('is-last')
     expect(requestChart.get('[data-testid="stats-trend-total"]').text()).toBe('80')
     expect(requestChart.get('[data-testid="stats-trend-average"]').text()).toBe('20')
     expect(requestChart.get('[data-testid="stats-trend-peak"]').text()).toBe('50')
