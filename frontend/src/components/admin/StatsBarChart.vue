@@ -39,8 +39,6 @@
         :class="{
           'is-active': activeIndex === index,
           'is-zero': point.value === 0,
-          'is-first': chartPoints.length > 1 && index === 0,
-          'is-last': chartPoints.length > 1 && index === chartPoints.length - 1,
         }"
         :style="{
           left: `${point.x}%`,
@@ -68,9 +66,9 @@
         :key="`x-${point.date}`"
         class="stats-bar-x-label"
         :class="{
-          'is-first': index === 0,
+          'is-first': chartPoints.length > 1 && index === 0,
           'is-middle': index > 0 && index < chartPoints.length - 1,
-          'is-last': index === chartPoints.length - 1,
+          'is-last': chartPoints.length > 1 && index === chartPoints.length - 1,
         }"
         :style="{ left: `${point.x}%` }"
       >{{ formatTick(point.date) }}</span>
@@ -126,20 +124,18 @@ const scaleMaximum = computed(() => {
 const chartPoints = computed(() => props.points.map((point, index, points) => {
   const value = Number(point.value) || 0
   const height = value / scaleMaximum.value * (CHART_BASELINE - CHART_TOP)
+  const bandWidth = (CHART_RIGHT - CHART_LEFT) / Math.max(points.length, 1)
   return {
     ...point,
     value,
     height,
-    x: points.length === 1
-      ? 50
-      : CHART_LEFT + index / (points.length - 1) * (CHART_RIGHT - CHART_LEFT),
+    x: CHART_LEFT + (index + 0.5) * bandWidth,
     y: CHART_BASELINE - height,
   }
 }))
 const barWidth = computed(() => {
-  if (chartPoints.value.length <= 1) return MAX_BAR_WIDTH
-  const spacing = (CHART_RIGHT - CHART_LEFT) / (chartPoints.value.length - 1)
-  return Math.min(MAX_BAR_WIDTH, spacing * 0.84)
+  const bandWidth = (CHART_RIGHT - CHART_LEFT) / Math.max(chartPoints.value.length, 1)
+  return Math.min(MAX_BAR_WIDTH, bandWidth * 0.9)
 })
 const gridLines = computed(() => [1, 2 / 3, 1 / 3, 0].map((ratio) => ({
   ratio,
@@ -239,8 +235,6 @@ const focusBar = (index: number) => {
   background: transparent;
   cursor: default;
 }
-.stats-trend-bar.is-first { transform: none; }
-.stats-trend-bar.is-last { transform: translateX(-100%); }
 .stats-trend-bar > span {
   position: absolute;
   inset: 0;

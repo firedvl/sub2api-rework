@@ -68,7 +68,7 @@
             @update:searchQuery="debouncedReload"
           />
           <AccountTableActions
-            :loading="loading"
+            :loading="loading || refreshing || autoRefreshFetching"
             @refresh="handleManualRefresh"
             @create="showCreate = true"
           >
@@ -437,7 +437,6 @@
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
-              :manual-refresh-token="usageManualRefreshToken"
               :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
               :batched-usage-loading="usageBatchLoadingByAccountId[String(row.id)] === true"
@@ -874,6 +873,8 @@ const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30
 const autoRefreshCountdown = ref(0)
 const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
+const autoRefreshLastAttemptAt = ref(Date.now())
+const refreshing = ref(false)
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
@@ -883,7 +884,6 @@ const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const pendingFleetRefresh = ref(false)
-const usageManualRefreshToken = ref(0)
 
 const desktopViewportQuery = '(min-width: 768px)'
 const isDesktopViewport = ref(
@@ -936,6 +936,44 @@ const setUsageBatchState = (accountID: number, usage: AccountUsageInfo | null, e
   }
 }
 
+const applyUsageBatchState = (
+  accountIDs: number[],
+  usageMap: Record<string, AccountUsageInfo | null | undefined>,
+  errorMap: Record<string, string | null | undefined>,
+  requestTokensByAccount?: Record<string, number>
+) => {
+  const now = Date.now()
+  const nextUsage = { ...usageBatchByAccountId.value }
+  const nextErrors = { ...usageBatchErrorByAccountId.value }
+  const nextLoading = { ...usageBatchLoadingByAccountId.value }
+
+  for (const accountID of accountIDs) {
+    const key = String(accountID)
+    if (
+      requestTokensByAccount &&
+      (usageBatchRequestTokenByAccountId.value[key] ?? 0) !== requestTokensByAccount[key]
+    ) {
+      continue
+    }
+
+    const usage = usageMap[key]
+    const error = errorMap[key] ?? null
+    if (usage) {
+      nextUsage[key] = usage
+      usageBatchCache.set(accountID, { data: usage, ts: now })
+    } else if (!error) {
+      nextUsage[key] = null
+      usageBatchCache.delete(accountID)
+    }
+    nextErrors[key] = error
+    nextLoading[key] = false
+  }
+
+  usageBatchByAccountId.value = nextUsage
+  usageBatchErrorByAccountId.value = nextErrors
+  usageBatchLoadingByAccountId.value = nextLoading
+}
+
 const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) => {
   if (usageBatchByAccountId.value[String(accountID)] === usage) return
   setUsageBatchState(accountID, usage, null)
@@ -957,46 +995,14 @@ const flushQueuedUsageBatch = async () => {
 
   try {
     const result = await adminAPI.accounts.getBatchUsage(accountIDs, force)
-
-    const usageMap = result.usage ?? {}
-    const errorMap = result.errors ?? {}
-    const now = Date.now()
-    const nextUsage = { ...usageBatchByAccountId.value }
-    const nextErrors = { ...usageBatchErrorByAccountId.value }
-    const nextLoading = { ...usageBatchLoadingByAccountId.value }
-
-    for (const accountID of accountIDs) {
-      const key = String(accountID)
-      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== requestTokensByAccount[key]) {
-        continue
-      }
-      const usage = usageMap[key] ?? null
-      nextUsage[key] = usage
-      nextErrors[key] = errorMap[key] ?? null
-      nextLoading[key] = false
-      if (usage) {
-        usageBatchCache.set(accountID, { data: usage, ts: now })
-      } else {
-        usageBatchCache.delete(accountID)
-      }
-    }
-
-    usageBatchByAccountId.value = nextUsage
-    usageBatchErrorByAccountId.value = nextErrors
-    usageBatchLoadingByAccountId.value = nextLoading
+    applyUsageBatchState(accountIDs, result.usage ?? {}, result.errors ?? {}, requestTokensByAccount)
   } catch (error) {
-    const nextErrors = { ...usageBatchErrorByAccountId.value }
-    const nextLoading = { ...usageBatchLoadingByAccountId.value }
-    for (const accountID of accountIDs) {
-      const key = String(accountID)
-      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== requestTokensByAccount[key]) {
-        continue
-      }
-      nextErrors[key] = 'Failed'
-      nextLoading[key] = false
-    }
-    usageBatchErrorByAccountId.value = nextErrors
-    usageBatchLoadingByAccountId.value = nextLoading
+    applyUsageBatchState(
+      accountIDs,
+      {},
+      Object.fromEntries(accountIDs.map((id) => [String(id), 'Failed'])),
+      requestTokensByAccount
+    )
     console.error('Failed to load account usage batch:', error)
   }
 }
@@ -1195,6 +1201,7 @@ const setAutoRefreshEnabled = (enabled: boolean) => {
   autoRefreshEnabled.value = enabled
   saveAutoRefreshToStorage()
   if (enabled) {
+    autoRefreshLastAttemptAt.value = Date.now()
     autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
     resumeAutoRefresh()
   } else {
@@ -1207,6 +1214,7 @@ const setAutoRefreshInterval = (seconds: (typeof autoRefreshIntervals)[number]) 
   autoRefreshIntervalSeconds.value = seconds
   saveAutoRefreshToStorage()
   if (autoRefreshEnabled.value) {
+    autoRefreshLastAttemptAt.value = Date.now()
     autoRefreshCountdown.value = seconds
   }
 }
@@ -1338,6 +1346,8 @@ const loadFleetCapacity = async (forceUsage = false) => {
   const currentSeq = ++fleetLoadSeq
   fleetLoading.value = true
   fleetError.value = false
+  let usageAccountIDs: number[] = []
+  let usageRequestTokens: Record<string, number> = {}
 
   try {
     const pageSize = 1000
@@ -1351,28 +1361,63 @@ const loadFleetCapacity = async (forceUsage = false) => {
     }
     if (currentSeq !== fleetLoadSeq) return
 
-    const usageAccountIDs = rows.filter(supportsBatchAccountUsage).map((account) => account.id)
+    usageAccountIDs = rows.filter(supportsBatchAccountUsage).map((account) => account.id)
     let usage: Record<string, AccountUsageInfo | null> = {}
     let errors: Record<string, string | null> = {}
+    let usageLoaded = true
     if (usageAccountIDs.length) {
+      const nextTokens = { ...usageBatchRequestTokenByAccountId.value }
+      const nextLoading = { ...usageBatchLoadingByAccountId.value }
+      for (const accountID of usageAccountIDs) {
+        const key = String(accountID)
+        const token = ++usageBatchRequestToken
+        nextTokens[key] = token
+        nextLoading[key] = true
+        usageRequestTokens[key] = token
+      }
+      usageBatchRequestTokenByAccountId.value = nextTokens
+      usageBatchLoadingByAccountId.value = nextLoading
+
       try {
         const result = await adminAPI.accounts.getBatchUsage(usageAccountIDs, forceUsage)
         usage = result.usage ?? {}
         errors = result.errors ?? {}
       } catch (error) {
+        usageLoaded = false
         errors = Object.fromEntries(usageAccountIDs.map((id) => [String(id), 'Failed']))
         console.error('Failed to load fleet account usage:', error)
       }
     }
     if (currentSeq !== fleetLoadSeq) return
 
+    const previousFleetUsage = fleetUsageByAccountId.value
+    const nextFleetUsage: Record<string, AccountUsageInfo | null> = {}
+    const nextFleetErrors: Record<string, string | null> = {}
+    for (const accountID of usageAccountIDs) {
+      const key = String(accountID)
+      const error = errors[key] ?? null
+      nextFleetUsage[key] = usage[key] ?? (error ? previousFleetUsage[key] ?? null : null)
+      nextFleetErrors[key] = error
+    }
+
     fleetAccounts.value = rows
-    fleetUsageByAccountId.value = usage
-    fleetUsageErrorByAccountId.value = errors
+    fleetUsageByAccountId.value = nextFleetUsage
+    fleetUsageErrorByAccountId.value = nextFleetErrors
+    applyUsageBatchState(usageAccountIDs, usage, errors, usageRequestTokens)
+    return usageLoaded
   } catch (error) {
     if (currentSeq !== fleetLoadSeq) return
+    if (usageAccountIDs.length) {
+      applyUsageBatchState(
+        usageAccountIDs,
+        {},
+        Object.fromEntries(usageAccountIDs.map((id) => [String(id), 'Failed'])),
+        usageRequestTokens
+      )
+    }
     fleetError.value = true
     console.error('Failed to load filtered account fleet:', error)
+    return false
   } finally {
     if (currentSeq === fleetLoadSeq) fleetLoading.value = false
   }
@@ -1392,12 +1437,21 @@ const load = async (options: AccountLoadOptions = {}) => {
   if (isFirstLoad.value) {
     requestParams.lite = '1'
   }
-  await Promise.all([baseLoad(), loadFleetCapacity(options.forceFleetUsage ?? false)])
+  const [tableResult, fleetResult] = await Promise.allSettled([
+    baseLoad(),
+    loadFleetCapacity(options.forceFleetUsage ?? false)
+  ])
   if (isFirstLoad.value) {
     isFirstLoad.value = false
     delete requestParams.lite
   }
+  if (tableResult.status === 'rejected') throw tableResult.reason
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
+  return (
+    fleetResult.status === 'fulfilled' &&
+    fleetResult.value !== false &&
+    todayStatsError.value === null
+  )
 }
 
 const reload = async () => {
@@ -1710,7 +1764,7 @@ const refreshAccountsIncrementally = async () => {
     }
     upstreamBillingNow.value = Date.now()
 
-    await refreshTodayStatsBatch()
+    await Promise.all([loadFleetCapacity(), refreshTodayStatsBatch()])
   } catch (error) {
     console.error('Auto refresh failed:', error)
   } finally {
@@ -1719,17 +1773,39 @@ const refreshAccountsIncrementally = async () => {
 }
 
 const handleManualRefresh = async () => {
-  await Promise.all([load({ forceFleetUsage: true }), loadUpstreamBillingProbeGlobalState()])
-  // Force usage cells to refetch /usage on explicit user refresh.
-  usageManualRefreshToken.value += 1
+  if (refreshing.value || autoRefreshFetching.value || loading.value || fleetLoading.value) return
+  refreshing.value = true
+  try {
+    const results = await Promise.allSettled([
+      load({ forceFleetUsage: true }),
+      loadUpstreamBillingProbeGlobalState()
+    ])
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    const incomplete = results.some((result) => result.status === 'fulfilled' && result.value === false)
+    if (rejected || incomplete) {
+      appStore.showError(
+        rejected
+          ? extractApiErrorMessage(rejected.reason, t('common.error'))
+          : t('common.error')
+      )
+      return
+    }
+
+    autoRefreshLastAttemptAt.value = Date.now()
+    if (autoRefreshEnabled.value) autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
+  } finally {
+    refreshing.value = false
+  }
 }
 
 const loadUpstreamBillingProbeGlobalState = async () => {
   try {
     const settings = await adminAPI.accounts.getUpstreamBillingProbeSettings()
     upstreamBillingProbeGloballyEnabled.value = settings.enabled
+    return true
   } catch (error) {
     console.error('Failed to load upstream billing probe settings:', error)
+    return false
   }
 }
 
@@ -1788,17 +1864,53 @@ const openTLSFingerprintProfiles = () => {
 const syncPendingListChanges = async () => {
   hasPendingListSync.value = false
   await load()
-  // Keep behavior consistent with manual refresh.
-  usageManualRefreshToken.value += 1
+}
+
+const autoRefreshPaused = () => (
+  document.hidden ||
+  loading.value ||
+  fleetLoading.value ||
+  refreshing.value ||
+  autoRefreshFetching.value ||
+  isAnyModalOpen.value ||
+  menu.show ||
+  showAccountToolsDropdown.value ||
+  showAutoRefreshDropdown.value
+)
+
+const runAutoRefreshAttempt = async () => {
+  if (!autoRefreshEnabled.value || autoRefreshPaused()) return false
+  autoRefreshLastAttemptAt.value = Date.now()
+  await refreshAccountsIncrementally()
+  autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
+  return true
+}
+
+const handleVisibilityChange = () => {
+  if (document.hidden || !autoRefreshEnabled.value) return
+  if (inAutoRefreshSilentWindow()) {
+    autoRefreshCountdown.value = Math.max(
+      0,
+      Math.ceil((autoRefreshSilentUntil.value - Date.now()) / 1000)
+    )
+    return
+  }
+
+  const intervalMs = autoRefreshIntervalSeconds.value * 1000
+  const elapsedMs = Date.now() - autoRefreshLastAttemptAt.value
+  if (elapsedMs < intervalMs) {
+    autoRefreshCountdown.value = Math.max(1, Math.ceil((intervalMs - elapsedMs) / 1000))
+    return
+  }
+
+  autoRefreshCountdown.value = 0
+  void runAutoRefreshAttempt()
 }
 
 const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
   async () => {
     if (!autoRefreshEnabled.value) return
-    if (document.hidden) return
-    if (loading.value || autoRefreshFetching.value) return
-    if (isAnyModalOpen.value) return
-    if (menu.show || showAccountToolsDropdown.value || showAutoRefreshDropdown.value) return
+    if (autoRefreshPaused()) return
     if (inAutoRefreshSilentWindow()) {
       autoRefreshCountdown.value = Math.max(
         0,
@@ -1807,13 +1919,13 @@ const { pause: pauseAutoRefresh, resume: resumeAutoRefresh } = useIntervalFn(
       return
     }
 
-    if (autoRefreshCountdown.value <= 0) {
-      autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
-      await refreshAccountsIncrementally()
+    if (autoRefreshCountdown.value > 1) {
+      autoRefreshCountdown.value -= 1
       return
     }
 
-    autoRefreshCountdown.value -= 1
+    autoRefreshCountdown.value = 0
+    await runAutoRefreshAttempt()
   },
   1000,
   { immediate: false }
@@ -2798,6 +2910,7 @@ const handleDropdownEscape = (event: KeyboardEvent) => {
 }
 
 onMounted(async () => {
+  autoRefreshLastAttemptAt.value = Date.now()
   if (typeof window !== 'undefined') {
     desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
     isDesktopViewport.value = desktopViewportMediaQuery.matches
@@ -2831,6 +2944,7 @@ onMounted(async () => {
   window.addEventListener('resize', handleViewportResize)
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleDropdownEscape)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 
   if (autoRefreshEnabled.value) {
     autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
@@ -2841,6 +2955,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  pauseAutoRefresh()
   fleetLoadSeq += 1
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
@@ -2852,6 +2967,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleViewportResize)
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleDropdownEscape)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (desktopViewportMediaQuery && desktopViewportListener) {
     if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
       desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)

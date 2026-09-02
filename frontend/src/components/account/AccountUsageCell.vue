@@ -1593,6 +1593,17 @@ watch(
   { immediate: true, deep: true }
 )
 
+watch(
+  () => [props.batchedUsage, props.batchedUsageError, props.batchedUsageLoading] as const,
+  ([usage, batchError, batchLoading]) => {
+    if (isBatchManaged.value || batchLoading || batchError) return
+    usageInfo.value = usage ?? null
+    if (usage) _usageCache.set(props.account.id, { data: usage, ts: Date.now() })
+    else _usageCache.delete(props.account.id)
+  },
+  { deep: true }
+)
+
 watch(isBatchManaged, (managed, wasManaged) => {
   if (managed && !wasManaged) {
     syncManagedUsageState()
