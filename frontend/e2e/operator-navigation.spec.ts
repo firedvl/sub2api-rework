@@ -933,6 +933,53 @@ test.describe('operator console navigation', () => {
     }
   })
 
+  for (const gridCase of [
+    { name: '2 cards', accounts: [operatorFixtureAccounts[0]], cardCount: 2 },
+    { name: '3 cards', accounts: [operatorFixtureAccounts[0], operatorFixtureAccounts[2]], cardCount: 3 },
+    { name: '4 cards', accounts: [operatorFixtureAccounts[0], operatorFixtureAccounts[2], operatorFixtureAccounts[5]], cardCount: 4 },
+    { name: 'more than 4 cards', accounts: [operatorFixtureAccounts[0], operatorFixtureAccounts[1], operatorFixtureAccounts[2], operatorFixtureAccounts[5]], cardCount: 5 },
+  ]) {
+    test(`fills the Capacity row with ${gridCase.name}`, async ({ page }) => {
+      await installAccountListMock(page, gridCase.accounts)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto('/admin/stats')
+
+      const overview = page.getByTestId('stats-capacity-donut-overview')
+      const cards = overview.locator('.stats-capacity-donut')
+      await expect(cards).toHaveCount(gridCase.cardCount)
+      const metrics = await overview.evaluate((element) => {
+        const gridBounds = element.getBoundingClientRect()
+        const cardBounds = Array.from(element.children).map((child) => child.getBoundingClientRect())
+        const firstRow = cardBounds.filter((bounds) => Math.abs(bounds.top - cardBounds[0].top) < 1)
+        return {
+          gridWidth: gridBounds.width,
+          firstRowWidth: firstRow.at(-1)!.right - firstRow[0].left,
+          cardWidths: cardBounds.map((bounds) => bounds.width),
+        }
+      })
+      expect(metrics.firstRowWidth).toBeGreaterThanOrEqual(metrics.gridWidth - 1)
+      expect(Math.max(...metrics.cardWidths) - Math.min(...metrics.cardWidths)).toBeLessThanOrEqual(1)
+
+      if (gridCase.cardCount === 3) {
+        for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+          await page.setViewportSize(viewport)
+          const layout = await overview.evaluate((element) => ({
+            gridWidth: element.getBoundingClientRect().width,
+            cardWidths: Array.from(element.children).map((child) => child.getBoundingClientRect().width),
+            cardTops: Array.from(element.children).map((child) => child.getBoundingClientRect().top),
+            clientWidth: document.documentElement.clientWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+          }))
+          expect(layout.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(layout.clientWidth + 1)
+          if (viewport.width === 390) {
+            expect(layout.cardWidths.every((width) => Math.abs(width - layout.gridWidth) <= 1)).toBe(true)
+            expect(new Set(layout.cardTops.map(Math.round)).size).toBe(gridCase.cardCount)
+          }
+        }
+      }
+    })
+  }
+
   test('promotes Gateway usage and separates short and long capacity on Stats', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const unknownAccount = {
