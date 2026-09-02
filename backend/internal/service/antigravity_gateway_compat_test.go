@@ -89,7 +89,7 @@ func newAntigravityCompatAccount(accountType string) *Account {
 			"access_token": "stale-account-token",
 			"project_id":   "project-3757",
 			"model_mapping": map[string]any{
-				"gemini-3.1-pro-high":      "gemini-3.1-pro-high",
+				"gemini-3.1-pro-high":      "gemini-pro-agent",
 				"claude-sonnet-4-5":        "claude-sonnet-4-5",
 				"claude-opus-4-6-thinking": "claude-opus-4-6-thinking",
 			},
@@ -230,12 +230,12 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 	tests := []struct {
 		name      string
 		tools     string
-		wantField bool
+		wantMixed bool
 	}{
 		{
 			name:      "mixed server and client tools",
 			tools:     `[{"name":"get_weather","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}]`,
-			wantField: true,
+			wantMixed: true,
 		},
 		{
 			name:  "client tools only",
@@ -244,6 +244,10 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 		{
 			name:  "server tools only",
 			tools: `[{"type":"web_search_20250305","name":"web_search"}]`,
+		},
+		{
+			name:  "no tools",
+			tools: `[]`,
 		},
 	}
 
@@ -259,15 +263,27 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 			request, ok := wrapped["request"].(map[string]any)
 			require.True(t, ok)
 			toolConfig, exists := request["toolConfig"].(map[string]any)
-			if !tt.wantField {
+			if !tt.wantMixed {
 				require.False(t, exists)
 				return
 			}
 			require.True(t, exists)
 			require.Equal(t, true, toolConfig["includeServerSideToolInvocations"])
+			require.Equal(t, "VALIDATED", gjson.GetBytes(body, "request.toolConfig.functionCallingConfig.mode").String())
 			require.NotContains(t, toolConfig, "include_server_side_tool_invocations")
 		})
 	}
+}
+
+func TestEnableMixedGeminiToolInvocationsPreservesFunctionCallingConfig(t *testing.T) {
+	body := []byte(`{"tools":[{"functionDeclarations":[{"name":"get_weather"}]},{"googleSearch":{}}],"toolConfig":{"functionCallingConfig":{"mode":"AUTO","allowedFunctionNames":["get_weather"]}}}`)
+
+	got, err := enableMixedGeminiToolInvocations(body)
+
+	require.NoError(t, err)
+	require.Equal(t, "AUTO", gjson.GetBytes(got, "toolConfig.functionCallingConfig.mode").String())
+	require.Equal(t, "get_weather", gjson.GetBytes(got, "toolConfig.functionCallingConfig.allowedFunctionNames.0").String())
+	require.True(t, gjson.GetBytes(got, "toolConfig.includeServerSideToolInvocations").Bool())
 }
 
 func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) {
@@ -344,6 +360,15 @@ func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) 
 			"request.toolConfig.includeServerSideToolInvocations",
 		).Bool(),
 	)
+	require.Equal(
+		t,
+		"VALIDATED",
+		gjson.GetBytes(
+			requestBody,
+			"request.toolConfig.functionCallingConfig.mode",
+		).String(),
+	)
+	require.False(t, gjson.GetBytes(requestBody, "request.tool_config").Exists())
 
 	require.Equal(
 		t,
@@ -573,10 +598,11 @@ func TestAntigravityCompatRoutesByMappedModelFamily(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		model         string
+		wantModel     string
 		wantSessionID bool
 	}{
-		{model: "gemini-3.1-pro-high", wantSessionID: false},
-		{model: "claude-sonnet-4-5", wantSessionID: true},
+		{model: "gemini-3.1-pro-high", wantModel: "gemini-pro-agent", wantSessionID: false},
+		{model: "claude-sonnet-4-5", wantModel: "claude-sonnet-4-5", wantSessionID: true},
 	}
 
 	for _, tt := range tests {
@@ -597,7 +623,7 @@ func TestAntigravityCompatRoutesByMappedModelFamily(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Len(t, upstream.requestBodies, 1)
-			require.Equal(t, tt.model, gjson.GetBytes(upstream.requestBodies[0], "model").String())
+			require.Equal(t, tt.wantModel, gjson.GetBytes(upstream.requestBodies[0], "model").String())
 			require.Equal(t, tt.wantSessionID, gjson.GetBytes(upstream.requestBodies[0], "request.sessionId").Exists())
 		})
 	}

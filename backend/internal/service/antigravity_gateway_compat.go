@@ -328,6 +328,9 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 		toolConfig = make(map[string]any)
 		request["toolConfig"] = toolConfig
 	}
+	if functionConfig, ok := toolConfig["functionCallingConfig"].(map[string]any); !ok || functionConfig == nil {
+		toolConfig["functionCallingConfig"] = map[string]any{"mode": "VALIDATED"}
+	}
 	toolConfig["includeServerSideToolInvocations"] = true
 	return json.Marshal(request)
 }
