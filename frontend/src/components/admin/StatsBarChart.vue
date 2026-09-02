@@ -36,7 +36,12 @@
         :key="point.date"
         type="button"
         class="stats-trend-bar"
-        :class="{ 'is-active': activeIndex === index, 'is-zero': point.value === 0 }"
+        :class="{
+          'is-active': activeIndex === index,
+          'is-zero': point.value === 0,
+          'is-first': chartPoints.length > 1 && index === 0,
+          'is-last': chartPoints.length > 1 && index === chartPoints.length - 1,
+        }"
         :style="{
           left: `${point.x}%`,
           bottom: `${100 - CHART_BASELINE}%`,
@@ -101,7 +106,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const CHART_TOP = 6
 const CHART_BASELINE = 78
-const CHART_LEFT = 8
+const CHART_LEFT = 12
 const CHART_RIGHT = 92
 const MIN_BAR_HEIGHT = 1.25
 const MAX_BAR_WIDTH = 14
@@ -126,7 +131,7 @@ const chartPoints = computed(() => props.points.map((point, index, points) => {
     value,
     height,
     x: points.length === 1
-      ? (CHART_LEFT + CHART_RIGHT) / 2
+      ? 50
       : CHART_LEFT + index / (points.length - 1) * (CHART_RIGHT - CHART_LEFT),
     y: CHART_BASELINE - height,
   }
@@ -208,7 +213,7 @@ const focusBar = (index: number) => {
 .stats-bar-grid-line {
   position: absolute;
   right: 0;
-  left: 8%;
+  left: 12%;
   height: 1px;
   background: var(--operator-border-subtle);
 }
@@ -234,6 +239,8 @@ const focusBar = (index: number) => {
   background: transparent;
   cursor: default;
 }
+.stats-trend-bar.is-first { transform: none; }
+.stats-trend-bar.is-last { transform: translateX(-100%); }
 .stats-trend-bar > span {
   position: absolute;
   inset: 0;

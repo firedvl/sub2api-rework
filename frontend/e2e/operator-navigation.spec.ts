@@ -817,6 +817,24 @@ test.describe('operator console navigation', () => {
     await expect(tokenTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*6,396,500 Tokens/)
 
     const requestBars = requestTrend.getByTestId('stats-trend-bar')
+    const expectLeftPlotClearance = async (chart: Locator, label: string) => {
+      const metrics = await chart.getByRole('group').evaluate((element) => {
+        const firstBar = element.querySelector<HTMLElement>('.stats-trend-bar > span')!
+        const plotLine = element.querySelector<HTMLElement>('.stats-bar-grid-line')!
+        const yLabels = [...element.querySelectorAll<HTMLElement>('.stats-bar-y-label')]
+        const bar = firstBar.getBoundingClientRect()
+        const plot = plotLine.getBoundingClientRect()
+        return {
+          barLeft: bar.left,
+          plotLeft: plot.left,
+          labelRight: Math.max(...yLabels.map((item) => item.getBoundingClientRect().right)),
+        }
+      })
+      expect(metrics.barLeft, `${label} first bar must stay inside the plot`).toBeGreaterThanOrEqual(metrics.plotLeft - 1)
+      expect(metrics.barLeft, `${label} first bar must clear Y-axis labels`).toBeGreaterThanOrEqual(metrics.labelRight + 2)
+    }
+
+    await expectLeftPlotClearance(requestTrend, 'request chart')
     expect(await requestBars.first().locator('span').evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(20)
     await requestBars.nth(2).focus()
     await expect(requestBars.nth(2)).toHaveClass(/is-active/)
@@ -827,6 +845,7 @@ test.describe('operator console navigation', () => {
     await expect(requestTrend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
 
     const tokenBars = tokenTrend.getByTestId('stats-trend-bar')
+    await expectLeftPlotClearance(tokenTrend, 'token chart')
     await tokenBars.nth(2).hover()
     await expect(tokenBars.nth(2)).toHaveClass(/is-active/)
     expect(await tokenBars.nth(2).locator('span').evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none')
@@ -883,9 +902,34 @@ test.describe('operator console navigation', () => {
       metadataRows: card.querySelectorAll('dl > div').length,
       clientWidth: card.clientWidth,
       scrollWidth: card.scrollWidth,
+      padding: Number.parseFloat(getComputedStyle(card).paddingTop),
+      rowGap: Number.parseFloat(getComputedStyle(card).rowGap),
+      columnGap: Number.parseFloat(getComputedStyle(card).columnGap),
     })))
     expect(new Set(capacityCardMetrics.map((card) => Math.round(card.height))).size).toBe(1)
     expect(capacityCardMetrics.every((card) => card.metadataRows === 4 && card.scrollWidth <= card.clientWidth)).toBe(true)
+    expect(capacityCardMetrics.every((card) => card.padding >= 18 && card.rowGap >= 14 && card.columnGap >= 16)).toBe(true)
+    const donutValueFit = await capacityCards.first().locator('.stats-capacity-donut-value').evaluate((element) => {
+      const value = element.querySelector<HTMLElement>('strong')!
+      const chart = element.closest<HTMLElement>('.stats-capacity-donut-chart')!
+      const original = value.textContent
+      value.textContent = '100.00%'
+      const chartBounds = chart.getBoundingClientRect()
+      const valueBounds = value.getBoundingClientRect()
+      const metrics = {
+        fontSize: Number.parseFloat(getComputedStyle(value).fontSize),
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        left: valueBounds.left - chartBounds.left,
+        right: chartBounds.right - valueBounds.right,
+      }
+      value.textContent = original
+      return metrics
+    })
+    expect(donutValueFit.fontSize).toBeLessThanOrEqual(16)
+    expect(donutValueFit.scrollWidth).toBeLessThanOrEqual(donutValueFit.clientWidth)
+    expect(donutValueFit.left).toBeGreaterThanOrEqual(4)
+    expect(donutValueFit.right).toBeGreaterThanOrEqual(4)
     await expect(page.getByTestId('stats-capacity-donut-overall'))
       .toContainText('Mixed-provider average · limiting quota · not pooled')
     await expect(page.getByTestId('stats-capacity-donut-overall').locator('.stats-capacity-donut-chart svg'))
@@ -980,6 +1024,8 @@ test.describe('operator console navigation', () => {
       await tokenBars.nth(viewportIndex === 0 ? 5 : 0).focus()
       await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toBeVisible()
       await page.keyboard.press('Escape')
+      await expectLeftPlotClearance(requestTrend, `${viewport.width}px request chart`)
+      await expectLeftPlotClearance(tokenTrend, `${viewport.width}px token chart`)
       const overflow = await page.evaluate(() => ({
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
