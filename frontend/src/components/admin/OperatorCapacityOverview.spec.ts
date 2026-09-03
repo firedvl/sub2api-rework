@@ -274,8 +274,10 @@ describe('OperatorCapacityOverview', () => {
 
     const row = wrapper.get('[data-testid="account-capacity-row"]')
     const providerToggle = wrapper.get('[data-testid="provider-toggle-antigravity"]')
-    expect(providerToggle.text()).toContain('Google')
-    expect(providerToggle.get('[data-provider-brand="google"]').exists()).toBe(true)
+    expect(providerToggle.text()).toContain('Antigravity')
+    expect(providerToggle.text()).not.toContain('Google')
+    expect(providerToggle.get('[data-provider-brand="antigravity"]').exists()).toBe(true)
+    expect(providerToggle.find('[data-provider-brand="google"]').exists()).toBe(false)
     expect(row.findAll('.operator-capacity-row-window')).toHaveLength(3)
     expect(row.text()).toContain('0% minimum across 20 models')
     expect(row.text()).toContain('model-01')

@@ -331,7 +331,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   openai: 'OpenAI',
   anthropic: 'Anthropic',
   gemini: 'Gemini',
-  antigravity: 'Google',
+  antigravity: 'Antigravity',
   grok: 'Grok',
   kimi: 'Kimi',
   zhipu: 'Zhipu',
