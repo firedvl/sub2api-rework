@@ -265,12 +265,14 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 			toolConfig, exists := request["toolConfig"].(map[string]any)
 			if !tt.wantMixed {
 				require.False(t, exists)
+				require.False(t, gjson.GetBytes(body, "request.tool_config").Exists())
 				return
 			}
 			require.True(t, exists)
 			require.Equal(t, true, toolConfig["includeServerSideToolInvocations"])
 			require.Equal(t, "VALIDATED", gjson.GetBytes(body, "request.toolConfig.functionCallingConfig.mode").String())
-			require.NotContains(t, toolConfig, "include_server_side_tool_invocations")
+			require.True(t, gjson.GetBytes(body, "request.tool_config.include_server_side_tool_invocations").Bool())
+			require.Equal(t, "VALIDATED", gjson.GetBytes(body, "request.tool_config.function_calling_config.mode").String())
 		})
 	}
 }
@@ -284,6 +286,9 @@ func TestEnableMixedGeminiToolInvocationsPreservesFunctionCallingConfig(t *testi
 	require.Equal(t, "AUTO", gjson.GetBytes(got, "toolConfig.functionCallingConfig.mode").String())
 	require.Equal(t, "get_weather", gjson.GetBytes(got, "toolConfig.functionCallingConfig.allowedFunctionNames.0").String())
 	require.True(t, gjson.GetBytes(got, "toolConfig.includeServerSideToolInvocations").Bool())
+	require.Equal(t, "AUTO", gjson.GetBytes(got, "tool_config.function_calling_config.mode").String())
+	require.Equal(t, "get_weather", gjson.GetBytes(got, "tool_config.function_calling_config.allowed_function_names.0").String())
+	require.True(t, gjson.GetBytes(got, "tool_config.include_server_side_tool_invocations").Bool())
 }
 
 func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) {
@@ -368,7 +373,8 @@ func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) 
 			"request.toolConfig.functionCallingConfig.mode",
 		).String(),
 	)
-	require.False(t, gjson.GetBytes(requestBody, "request.tool_config").Exists())
+	require.True(t, gjson.GetBytes(requestBody, "request.tool_config.include_server_side_tool_invocations").Bool())
+	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.tool_config.function_calling_config.mode").String())
 
 	require.Equal(
 		t,
@@ -390,6 +396,36 @@ func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) 
 	require.Contains(t, recorder.Body.String(), `"namespace":"shell"`)
 	require.Contains(t, recorder.Body.String(), `"name":"exec"`)
 	require.NotContains(t, recorder.Body.String(), `"name":"shell__exec"`)
+}
+
+func TestAntigravityCompatResponsesSerializesLiveMixedToolAliases(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
+	body := []byte(`{
+		"model":"gemini-3.1-pro-high",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],
+		"stream":true,
+		"tools":[
+			{"type":"web_search"},
+			{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}
+		]
+	}`)
+	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
+
+	result, err := svc.ForwardAsResponses(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+	requestBody := upstream.requestBodies[0]
+	require.Equal(t, "gemini-pro-agent", gjson.GetBytes(requestBody, "model").String())
+	require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
+	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.toolConfig.functionCallingConfig.mode").String())
+	require.True(t, gjson.GetBytes(requestBody, "request.tool_config.include_server_side_tool_invocations").Bool())
+	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.tool_config.function_calling_config.mode").String())
+	require.Equal(t, "get_weather", gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations.0.name").String())
+	require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
 }
 
 func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *testing.T) {
@@ -416,6 +452,7 @@ func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *te
 	require.Len(t, upstream.requestBodies, 1)
 	requestBody := upstream.requestBodies[0]
 	require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
+	require.False(t, gjson.GetBytes(requestBody, "request.tool_config").Exists())
 	require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
 	require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
 	require.True(t, gjson.GetBytes(requestBody, "request.tools.2.codeExecution").Exists())

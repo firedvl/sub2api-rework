@@ -49,13 +49,12 @@ Add `alpha_search` to the existing Composite endpoint values and classify
 same public model independently. This reuses the existing string field and
 route resolver, so it needs no schema migration or new provider abstraction.
 
-## Confirmed Limitation
+## Mixed Native Search Wire Compatibility
 
-This work does not make native Antigravity mixed search viable. Some live
-Antigravity transports reject `googleSearch` with custom function declarations
-in one request even when `toolConfig.includeServerSideToolInvocations` is set.
-Standalone Codex search avoids that request shape; it does not change the
-upstream capability.
+Live Antigravity `v1internal` transports require both tool-config naming forms
+for mixed `googleSearch` and custom function declarations. The compatibility
+path now emits the canonical camelCase object and its snake_case alias only for
+mixed requests. Standalone Codex search remains available as a separate route.
 
 ## Suggested Verification
 
