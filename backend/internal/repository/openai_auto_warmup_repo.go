@@ -20,6 +20,14 @@ func NewOpenAIAutoWarmupAttemptRepository(db *sql.DB) service.OpenAIAutoWarmupAt
 }
 
 func (r *openAIAutoWarmupRepository) Claim(ctx context.Context, accountID int64, windowType string, resetAt time.Time) (*service.OpenAIAutoWarmupAttempt, bool, error) {
+	return r.claim(ctx, accountID, windowType, resetAt, 0)
+}
+
+func (r *openAIAutoWarmupRepository) ClaimDormant(ctx context.Context, accountID int64, windowType string, resetAt time.Time, retryAfter time.Duration) (*service.OpenAIAutoWarmupAttempt, bool, error) {
+	return r.claim(ctx, accountID, windowType, resetAt, retryAfter)
+}
+
+func (r *openAIAutoWarmupRepository) claim(ctx context.Context, accountID int64, windowType string, resetAt time.Time, retryAfter time.Duration) (*service.OpenAIAutoWarmupAttempt, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
@@ -30,15 +38,26 @@ func (r *openAIAutoWarmupRepository) Claim(ctx context.Context, accountID int64,
 		return nil, false, err
 	}
 	var existingID int64
-	err = tx.QueryRowContext(ctx, `
-		SELECT id
-		FROM openai_auto_warmup_attempts
-		WHERE account_id = $1
-		  AND window_type = $2
-		  AND reset_at BETWEEN $3 AND $4
-		LIMIT 1`,
-		accountID, windowType, resetAt.Add(-openAIAutoWarmupResetJitter), resetAt.Add(openAIAutoWarmupResetJitter),
-	).Scan(&existingID)
+	if retryAfter > 0 {
+		err = tx.QueryRowContext(ctx, `
+			SELECT id
+			FROM openai_auto_warmup_attempts
+			WHERE account_id = $1
+			  AND window_type = $2
+			  AND attempted_at >= NOW() - ($3 * INTERVAL '1 second')
+			ORDER BY attempted_at DESC
+			LIMIT 1`, accountID, windowType, int64(retryAfter/time.Second)).Scan(&existingID)
+	} else {
+		err = tx.QueryRowContext(ctx, `
+			SELECT id
+			FROM openai_auto_warmup_attempts
+			WHERE account_id = $1
+			  AND window_type = $2
+			  AND reset_at BETWEEN $3 AND $4
+			LIMIT 1`,
+			accountID, windowType, resetAt.Add(-openAIAutoWarmupResetJitter), resetAt.Add(openAIAutoWarmupResetJitter),
+		).Scan(&existingID)
+	}
 	if err == nil {
 		if err = tx.Commit(); err != nil {
 			return nil, false, err

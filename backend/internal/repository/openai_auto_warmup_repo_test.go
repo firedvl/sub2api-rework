@@ -54,6 +54,45 @@ func TestOpenAIAutoWarmupRepositoryClaim(t *testing.T) {
 		require.Equal(t, service.OpenAIAutoWarmupStatusPending, attempt.Status)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
+
+	t.Run("recent dormant attempt blocks reset drift", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("(?s)SELECT id.*attempted_at >= NOW\\(\\) - \\(\\$3 \\* INTERVAL '1 second'\\)").
+			WithArgs(int64(42), "5h", int64((5*time.Hour)/time.Second)).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+		mock.ExpectCommit()
+
+		attempt, claimed, err := (&openAIAutoWarmupRepository{db: db}).ClaimDormant(context.Background(), 42, "5h", now.Add(time.Minute), 5*time.Hour)
+		require.NoError(t, err)
+		require.False(t, claimed)
+		require.Nil(t, attempt)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("dormant attempt is claimed after retry floor", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("(?s)SELECT id.*attempted_at >= NOW\\(\\) - \\(\\$3 \\* INTERVAL '1 second'\\)").
+			WithArgs(int64(42), "5h", int64((5*time.Hour)/time.Second)).
+			WillReturnError(sql.ErrNoRows)
+		mock.ExpectQuery("(?s)INSERT INTO openai_auto_warmup_attempts.*RETURNING id, attempted_at").
+			WithArgs(int64(42), "5h", now).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "attempted_at"}).AddRow(8, now))
+		mock.ExpectCommit()
+
+		attempt, claimed, err := (&openAIAutoWarmupRepository{db: db}).ClaimDormant(context.Background(), 42, "5h", now, 5*time.Hour)
+		require.NoError(t, err)
+		require.True(t, claimed)
+		require.Equal(t, int64(8), attempt.ID)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
 }
 
 func TestOpenAIAutoWarmupRepositoryCompletePersistsOutcomeAndUsage(t *testing.T) {

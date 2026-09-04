@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -106,6 +107,24 @@ func (r *autoWarmupAttemptMemoryRepo) Claim(_ context.Context, accountID int64, 
 	return attempt, true, nil
 }
 
+func (r *autoWarmupAttemptMemoryRepo) ClaimDormant(_ context.Context, accountID int64, windowType string, resetAt time.Time, retryAfter time.Duration) (*OpenAIAutoWarmupAttempt, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	for _, attempt := range r.attempts {
+		if attempt.AccountID == accountID && attempt.WindowType == windowType && now.Sub(attempt.AttemptedAt) < retryAfter {
+			return nil, false, nil
+		}
+	}
+	r.nextID++
+	attempt := &OpenAIAutoWarmupAttempt{
+		ID: r.nextID, AccountID: accountID, WindowType: windowType,
+		ResetAt: resetAt.UTC(), AttemptedAt: now, Status: OpenAIAutoWarmupStatusPending,
+	}
+	r.attempts = append(r.attempts, attempt)
+	return attempt, true, nil
+}
+
 func (r *autoWarmupAttemptMemoryRepo) Complete(_ context.Context, attemptID int64, completion OpenAIAutoWarmupCompletion) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -170,6 +189,7 @@ func newAutoWarmupTestAccount(id int64, now time.Time) *Account {
 			"codex_5h_used_percent":         20.0,
 			"codex_5h_window_minutes":       300,
 			"codex_5h_reset_at":             now.Add(-time.Minute).UTC().Format(time.RFC3339),
+			"codex_usage_updated_at":        now.Add(-time.Minute).UTC().Format(time.RFC3339),
 		},
 	}
 }
@@ -182,6 +202,13 @@ func newAutoWarmupTestUsage(resetAfter time.Duration, used float64) *OpenAIQuota
 			LimitWindowSeconds: int64((5 * time.Hour).Seconds()), ResetAfterSeconds: int64(resetAfter.Seconds()),
 		},
 	}}
+}
+
+func setDormantOpenAIObservation(account *Account, observedAt time.Time) {
+	account.Extra["codex_5h_used_percent"] = 0.0
+	account.Extra["codex_5h_window_minutes"] = 300
+	account.Extra["codex_5h_reset_at"] = observedAt.Add(5 * time.Hour).UTC().Format(time.RFC3339)
+	account.Extra["codex_usage_updated_at"] = observedAt.UTC().Format(time.RFC3339)
 }
 
 func newAutoWarmupTestService(t testing.TB, accountRepo AccountRepository, attempts OpenAIAutoWarmupAttemptRepository, sender openAIAutoWarmupSender, global bool) *OpenAIQuotaAutoResetService {
@@ -244,6 +271,95 @@ func TestAssessOpenAIAutoWarmupWindowRequiresFreshPrimaryWindow(t *testing.T) {
 	require.True(t, ok, "confirmed quota recovery may prove the old window ended before its stored reset")
 }
 
+func TestOpenAIAutoWarmupClassifiesDormantButNotAnchoredWindow(t *testing.T) {
+	t0 := time.Now().UTC().Truncate(time.Second)
+	t1 := t0.Add(time.Minute)
+
+	t.Run("sliding observation after minimum gap", func(t *testing.T) {
+		account := newAutoWarmupTestAccount(1, t0)
+		setDormantOpenAIObservation(account, t0)
+		window, ok := assessOpenAIAutoWarmupWindow(account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t0.Add(45*time.Second))
+		require.True(t, ok)
+		require.True(t, window.dormant)
+	})
+
+	t.Run("sliding idle window is warmed once then anchored window is left alone", func(t *testing.T) {
+		account := newAutoWarmupTestAccount(1, t0)
+		setDormantOpenAIObservation(account, t0)
+		repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+		attempts := &autoWarmupAttemptMemoryRepo{}
+		sender := &autoWarmupSenderStub{}
+		service := newAutoWarmupTestService(t, repo, attempts, sender, true)
+
+		window, ok := assessOpenAIAutoWarmupWindow(account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t1)
+		require.True(t, ok)
+		require.True(t, window.dormant)
+		service.maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t1)
+		require.Equal(t, int32(1), sender.calls.Load())
+
+		anchoredReset := t1.Add(5 * time.Hour)
+		setDormantOpenAIObservation(account, t1)
+		account.Extra["codex_5h_reset_at"] = anchoredReset.Format(time.RFC3339)
+		t2 := t1.Add(time.Minute)
+		service.maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(anchoredReset.Sub(t2), 0), false, t2)
+		require.Equal(t, int32(1), sender.calls.Load())
+		require.Equal(t, 1, attempts.attemptCount())
+	})
+
+	for _, jitter := range []time.Duration{0, -5 * time.Second, 5 * time.Second, 30 * time.Second} {
+		t.Run("anchored reset jitter "+jitter.String(), func(t *testing.T) {
+			account := newAutoWarmupTestAccount(2, t0)
+			setDormantOpenAIObservation(account, t0)
+			fixedReset := t0.Add(5 * time.Hour)
+			usage := newAutoWarmupTestUsage(fixedReset.Add(jitter).Sub(t1), 0)
+			window, ok := assessOpenAIAutoWarmupWindow(account, usage, false, t1)
+			require.False(t, ok)
+			require.False(t, window.dormant)
+		})
+	}
+}
+
+func TestOpenAIAutoWarmupDormantWindowGates(t *testing.T) {
+	t0 := time.Now().UTC().Truncate(time.Second)
+	t1 := t0.Add(time.Minute)
+	tests := []struct {
+		name   string
+		global bool
+		mutate func(*Account, *OpenAIQuotaUsage)
+	}{
+		{name: "global off", global: false},
+		{name: "account off", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) { a.Extra[OpenAIAutoWarmupEnabledExtraKey] = false }},
+		{name: "shadow", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) { parent := int64(99); a.ParentAccountID = &parent }},
+		{name: "inactive", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) { a.Status = StatusDisabled }},
+		{name: "unschedulable", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) { a.Schedulable = false }},
+		{name: "temporary cooldown", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) {
+			until := time.Now().Add(time.Hour)
+			a.TempUnschedulableUntil = &until
+		}},
+		{name: "rate limited", global: true, mutate: func(a *Account, _ *OpenAIQuotaUsage) { reset := t1.Add(time.Hour); a.RateLimitResetAt = &reset }},
+		{name: "exhausted", global: true, mutate: func(_ *Account, u *OpenAIQuotaUsage) { u.RateLimit.LimitReached = true }},
+		{name: "malformed", global: true, mutate: func(_ *Account, u *OpenAIQuotaUsage) { u.RateLimit.PrimaryWindow.UsedPercent = math.NaN() }},
+		{name: "missing utilization", global: true, mutate: func(_ *Account, u *OpenAIQuotaUsage) { u.RateLimit.PrimaryWindow.usedPercentPresent = false }},
+		{name: "wrong primary window", global: true, mutate: func(_ *Account, u *OpenAIQuotaUsage) {
+			u.RateLimit.PrimaryWindow.LimitWindowSeconds = int64(time.Hour.Seconds())
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := newAutoWarmupTestAccount(1, t0)
+			setDormantOpenAIObservation(account, t0)
+			usage := newAutoWarmupTestUsage(5*time.Hour, 0)
+			if test.mutate != nil {
+				test.mutate(account, usage)
+			}
+			sender := &autoWarmupSenderStub{}
+			service := newAutoWarmupTestService(t, &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}, &autoWarmupAttemptMemoryRepo{}, sender, test.global)
+			service.maybeWarmFreshOpenAIWindow(context.Background(), account, usage, false, t1)
+			require.Zero(t, sender.calls.Load())
+		})
+	}
+}
+
 func TestOpenAIAutoWarmupFlagsDedupFailureAndRestart(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	usage := newAutoWarmupTestUsage(5*time.Hour, 0)
@@ -298,17 +414,44 @@ func TestOpenAIAutoWarmupFlagsDedupFailureAndRestart(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, OpenAIAutoWarmupStatusFailed, state.Status)
 	})
+
+	t.Run("sliding reset drift stays deduplicated across scanner and service restarts", func(t *testing.T) {
+		t0 := now
+		account := newAutoWarmupTestAccount(4, t0)
+		setDormantOpenAIObservation(account, t0)
+		repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+		attempts := &autoWarmupAttemptMemoryRepo{}
+		sender := &autoWarmupSenderStub{err: errors.New("synthetic failure")}
+		newAutoWarmupTestService(t, repo, attempts, sender, true).
+			maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t0.Add(time.Minute))
+		newAutoWarmupTestService(t, repo, attempts, sender, true).
+			maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t0.Add(2*time.Minute))
+
+		require.Equal(t, int32(1), sender.calls.Load())
+		require.Equal(t, 1, attempts.attemptCount())
+		require.Equal(t, OpenAIAutoWarmupStatusFailed, attempts.completions[1].Status)
+
+		attempts.mu.Lock()
+		attempts.attempts[0].AttemptedAt = time.Now().UTC().Add(-openAIAutoWarmupDormantRetry - time.Minute)
+		attempts.mu.Unlock()
+		newAutoWarmupTestService(t, repo, attempts, sender, true).
+			maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(5*time.Hour, 0), false, t0.Add(3*time.Minute))
+		require.Equal(t, int32(2), sender.calls.Load())
+		require.Equal(t, 2, attempts.attemptCount())
+	})
 }
 
 func TestOpenAIAutoWarmupConcurrencyIsBounded(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
+	t0 := time.Now().UTC().Truncate(time.Second)
+	now := t0.Add(time.Minute)
 	release := make(chan struct{})
 	started := make(chan struct{}, 8)
 	sender := &autoWarmupSenderStub{release: release, started: started}
 	attempts := &autoWarmupAttemptMemoryRepo{}
 	accounts := make(map[int64]*Account, 8)
 	for id := int64(1); id <= 8; id++ {
-		accounts[id] = newAutoWarmupTestAccount(id, now)
+		accounts[id] = newAutoWarmupTestAccount(id, t0)
+		setDormantOpenAIObservation(accounts[id], t0)
 	}
 	service := newAutoWarmupTestService(t, &autoWarmupAccountRepo{accounts: accounts}, attempts, sender, true)
 

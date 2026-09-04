@@ -18,6 +18,13 @@ const (
 
 	openAIAutoWarmupWindowType   = "5h"
 	openAIAutoWarmupResetAdvance = time.Minute
+	openAIAutoWarmupWindowLength = 5 * time.Hour
+	openAIAutoWarmupMinGap       = 30 * time.Second
+	openAIAutoWarmupMaxGap       = 2 * openAIAutoResetSnapshotTTL
+	openAIAutoWarmupHorizonSlack = 2 * time.Minute
+	openAIAutoWarmupAdvanceSlack = 15 * time.Second
+	openAIAutoWarmupIdleMaxUsed  = 0.1
+	openAIAutoWarmupDormantRetry = 5 * time.Hour
 )
 
 type OpenAIAutoWarmupAttempt struct {
@@ -54,6 +61,7 @@ type OpenAIAutoWarmupCompletion struct {
 
 type OpenAIAutoWarmupAttemptRepository interface {
 	Claim(ctx context.Context, accountID int64, windowType string, resetAt time.Time) (*OpenAIAutoWarmupAttempt, bool, error)
+	ClaimDormant(ctx context.Context, accountID int64, windowType string, resetAt time.Time, retryAfter time.Duration) (*OpenAIAutoWarmupAttempt, bool, error)
 	Complete(ctx context.Context, attemptID int64, completion OpenAIAutoWarmupCompletion) error
 }
 
@@ -82,12 +90,17 @@ type OpenAIAutoWarmupState struct {
 
 type openAIAutoWarmupWindow struct {
 	resetAt time.Time
+	dormant bool
 }
 
 func assessOpenAIAutoWarmupWindow(account *Account, usage *OpenAIQuotaUsage, recovered bool, now time.Time) (openAIAutoWarmupWindow, bool) {
-	if account == nil || usage == nil || usage.RateLimit == nil ||
+	if !IsOpenAIAutoWarmupConfigurable(account) || !account.IsActive() || !account.Schedulable || usage == nil || usage.RateLimit == nil ||
 		!usage.RateLimit.allowedPresent || !usage.RateLimit.limitReachedPresent ||
 		!usage.RateLimit.Allowed || usage.RateLimit.LimitReached {
+		return openAIAutoWarmupWindow{}, false
+	}
+	fiveHourWindow := openAIAutoWarmupFiveHourWindow(usage.RateLimit)
+	if fiveHourWindow == nil || !fiveHourWindow.usedPercentPresent {
 		return openAIAutoWarmupWindow{}, false
 	}
 	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
@@ -97,21 +110,74 @@ func assessOpenAIAutoWarmupWindow(account *Account, usage *OpenAIQuotaUsage, rec
 	}
 	newWindowMinutes := int(parseExtraFloat64(updates["codex_5h_window_minutes"]))
 	oldWindowMinutes := int(parseExtraFloat64(account.Extra["codex_5h_window_minutes"]))
-	if newWindowMinutes <= 0 || oldWindowMinutes <= 0 || newWindowMinutes != oldWindowMinutes || newWindowMinutes > 360 {
+	if newWindowMinutes != int(openAIAutoWarmupWindowLength/time.Minute) || oldWindowMinutes != newWindowMinutes {
 		return openAIAutoWarmupWindow{}, false
 	}
 	oldReset, err := parseTime(strings.TrimSpace(fmt.Sprint(account.Extra["codex_5h_reset_at"])))
-	if err != nil || oldReset.IsZero() || newReset.Sub(oldReset) < openAIAutoWarmupResetAdvance {
+	if err != nil || oldReset.IsZero() {
 		return openAIAutoWarmupWindow{}, false
 	}
 	used := parseExtraFloat64(updates["codex_5h_used_percent"])
 	if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used >= 100 {
 		return openAIAutoWarmupWindow{}, false
 	}
-	if !recovered && now.Before(oldReset) {
+	if recovered || !now.Before(oldReset) {
+		if newReset.Sub(oldReset) < openAIAutoWarmupResetAdvance {
+			return openAIAutoWarmupWindow{}, false
+		}
+		return openAIAutoWarmupWindow{resetAt: newReset.UTC()}, true
+	}
+	if !isDormantOpenAIAutoWarmupWindow(account, usage, fiveHourWindow, updates, oldReset, newReset, used) {
 		return openAIAutoWarmupWindow{}, false
 	}
-	return openAIAutoWarmupWindow{resetAt: newReset.UTC()}, true
+	return openAIAutoWarmupWindow{resetAt: newReset.UTC(), dormant: true}, true
+}
+
+func openAIAutoWarmupFiveHourWindow(rateLimit *OpenAIRateLimit) *OpenAIRateLimitWindow {
+	if rateLimit == nil {
+		return nil
+	}
+	for _, window := range []*OpenAIRateLimitWindow{rateLimit.PrimaryWindow, rateLimit.SecondaryWindow} {
+		if window != nil && time.Duration(window.LimitWindowSeconds)*time.Second == openAIAutoWarmupWindowLength {
+			return window
+		}
+	}
+	return nil
+}
+
+func isDormantOpenAIAutoWarmupWindow(account *Account, usage *OpenAIQuotaUsage, fiveHourWindow *OpenAIRateLimitWindow, updates map[string]any, oldReset, newReset time.Time, newUsed float64) bool {
+	if !account.IsSchedulable() || account.RateLimitedAt != nil || account.RateLimitResetAt != nil || newUsed > openAIAutoWarmupIdleMaxUsed ||
+		usage.RateLimit.PrimaryWindow != fiveHourWindow {
+		return false
+	}
+	oldUsed, hasOldUsed := resolveAccountExtraNumber(account.Extra, "codex_5h_used_percent")
+	if !hasOldUsed || math.IsNaN(oldUsed) || math.IsInf(oldUsed, 0) || oldUsed < 0 || oldUsed > openAIAutoWarmupIdleMaxUsed {
+		return false
+	}
+	oldObserved, err := parseTime(strings.TrimSpace(fmt.Sprint(account.Extra["codex_usage_updated_at"])))
+	if err != nil || oldObserved.IsZero() {
+		return false
+	}
+	newObserved, err := parseTime(strings.TrimSpace(fmt.Sprint(updates["codex_usage_updated_at"])))
+	if err != nil || newObserved.IsZero() {
+		return false
+	}
+	elapsed := newObserved.Sub(oldObserved)
+	if elapsed < openAIAutoWarmupMinGap || elapsed > openAIAutoWarmupMaxGap {
+		return false
+	}
+	if absOpenAIAutoWarmupDuration(oldReset.Sub(oldObserved)-openAIAutoWarmupWindowLength) > openAIAutoWarmupHorizonSlack ||
+		absOpenAIAutoWarmupDuration(newReset.Sub(newObserved)-openAIAutoWarmupWindowLength) > openAIAutoWarmupHorizonSlack {
+		return false
+	}
+	return absOpenAIAutoWarmupDuration(newReset.Sub(oldReset)-elapsed) <= openAIAutoWarmupAdvanceSlack
+}
+
+func absOpenAIAutoWarmupDuration(value time.Duration) time.Duration {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (s *OpenAIQuotaAutoResetService) maybeWarmFreshOpenAIWindow(ctx context.Context, previous *Account, usage *OpenAIQuotaUsage, recovered bool, now time.Time) {
@@ -122,7 +188,14 @@ func (s *OpenAIQuotaAutoResetService) maybeWarmFreshOpenAIWindow(ctx context.Con
 	if !ok {
 		return
 	}
-	attempt, claimed, err := s.warmupAttempts.Claim(ctx, previous.ID, openAIAutoWarmupWindowType, window.resetAt)
+	var attempt *OpenAIAutoWarmupAttempt
+	var claimed bool
+	var err error
+	if window.dormant {
+		attempt, claimed, err = s.warmupAttempts.ClaimDormant(ctx, previous.ID, openAIAutoWarmupWindowType, window.resetAt, openAIAutoWarmupDormantRetry)
+	} else {
+		attempt, claimed, err = s.warmupAttempts.Claim(ctx, previous.ID, openAIAutoWarmupWindowType, window.resetAt)
+	}
 	if err != nil {
 		slog.Warn("openai_auto_warmup_claim_failed", "account_id", previous.ID, "error_code", infraerrors.Reason(err))
 		return
@@ -130,6 +203,10 @@ func (s *OpenAIQuotaAutoResetService) maybeWarmFreshOpenAIWindow(ctx context.Con
 	if !claimed || attempt == nil {
 		return
 	}
+	if window.dormant {
+		slog.Info("openai_auto_warmup_idle_confirmed", "account_id", previous.ID, "reset_at", window.resetAt)
+	}
+	slog.Info("openai_auto_warmup_claimed", "account_id", previous.ID, "attempt_id", attempt.ID, "dormant", window.dormant)
 	s.persistOpenAIAutoWarmupState(ctx, previous.ID, &OpenAIAutoWarmupState{
 		Status: OpenAIAutoWarmupStatusPending, WindowType: openAIAutoWarmupWindowType,
 		ResetAt: window.resetAt.Format(time.RFC3339), AttemptedAt: attempt.AttemptedAt.UTC().Format(time.RFC3339),

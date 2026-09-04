@@ -82,3 +82,50 @@ func TestOpenAIAutoWarmupRepositoryClaimsOnceAcrossReplicas(t *testing.T) {
 	require.Equal(t, 5, inputTokens)
 	require.Equal(t, 1, outputTokens)
 }
+
+func TestOpenAIAutoWarmupRepositoryDormantClaimIgnoresSlidingResetDrift(t *testing.T) {
+	ctx := context.Background()
+	var accountID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		INSERT INTO accounts (name, platform, type, status, schedulable, credentials, extra)
+		VALUES ($1, 'openai', 'oauth', 'active', TRUE, '{}'::jsonb, '{}'::jsonb)
+		RETURNING id`, "auto-warmup-dormant-race-"+time.Now().UTC().Format("20060102150405.000000000"),
+	).Scan(&accountID))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
+	})
+
+	repositories := []*openAIAutoWarmupRepository{{db: integrationDB}, {db: integrationDB}}
+	start := make(chan struct{})
+	type dormantClaimResult struct {
+		claimed bool
+		err     error
+	}
+	results := make(chan dormantClaimResult, len(repositories))
+	var wg sync.WaitGroup
+	baseReset := time.Now().UTC().Truncate(time.Second).Add(5 * time.Hour)
+	for index, repo := range repositories {
+		wg.Add(1)
+		go func(repo *openAIAutoWarmupRepository, resetAt time.Time) {
+			defer wg.Done()
+			<-start
+			_, claimed, err := repo.ClaimDormant(ctx, accountID, "5h", resetAt, 5*time.Hour)
+			results <- dormantClaimResult{claimed: claimed, err: err}
+		}(repo, baseReset.Add(time.Duration(index)*time.Minute))
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	claimed := 0
+	for result := range results {
+		require.NoError(t, result.err)
+		if result.claimed {
+			claimed++
+		}
+	}
+	require.Equal(t, 1, claimed)
+	_, claimedAgain, err := repositories[0].ClaimDormant(ctx, accountID, "5h", baseReset.Add(2*time.Minute), 5*time.Hour)
+	require.NoError(t, err)
+	require.False(t, claimedAgain)
+}
