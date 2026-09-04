@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -148,6 +151,28 @@ type autoWarmupSenderStub struct {
 	calls   atomic.Int32
 	current atomic.Int32
 	max     atomic.Int32
+}
+
+type autoWarmupHTTPUpstream struct {
+	request  *http.Request
+	body     []byte
+	proxyURL string
+	do       func(*http.Request, []byte) (*http.Response, error)
+}
+
+func (u *autoWarmupHTTPUpstream) Do(req *http.Request, proxyURL string, _ int64, _ int) (*http.Response, error) {
+	u.request = req
+	u.proxyURL = proxyURL
+	if req != nil && req.Body != nil {
+		u.body, _ = io.ReadAll(req.Body)
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(strings.NewReader(string(u.body)))
+	}
+	return u.do(req, u.body)
+}
+
+func (u *autoWarmupHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
 func (s *autoWarmupSenderStub) SendOpenAIAutoWarmup(context.Context, int64) (*OpenAIAutoWarmupResult, error) {
@@ -565,12 +590,32 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 	account.ProxyID = &proxyID
 	account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: proxyAddress.IP.String(), Port: proxyAddress.Port}
 	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-warm"}},
-		Body: io.NopCloser(gjsonReader(`{"id":"resp-warm","usage":{"input_tokens":5,"output_tokens":1}}`)),
+	upstream := &autoWarmupHTTPUpstream{do: func(req *http.Request, body []byte) (*http.Response, error) {
+		if !gjson.GetBytes(body, "stream").Bool() || gjson.GetBytes(body, "max_output_tokens").Exists() ||
+			gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "parallel_tool_calls").Exists() ||
+			req.Header.Get("Accept") != "text/event-stream" || req.Header.Get("originator") == "" {
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-rejected"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_request","message":"unsupported warm-up request contract"}}`)),
+			}, nil
+		}
+		headers := http.Header{"Content-Type": []string{"text/event-stream"}}
+		headers.Set("X-Request-Id", "req-warm")
+		headers.Set("x-codex-primary-used-percent", "12")
+		headers.Set("x-codex-primary-reset-after-seconds", "18000")
+		headers.Set("x-codex-primary-window-minutes", "300")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     headers,
+			Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-warm\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n")),
+		}, nil
 	}}
 	settingService, _ := newAutoWarmupTestSettingService(t, true)
-	service := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}, settingService: settingService}
+	service := &OpenAIGatewayService{
+		accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}, settingService: settingService,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Nanosecond),
+	}
 
 	result, err := service.SendOpenAIAutoWarmup(context.Background(), account.ID)
 	require.NoError(t, err)
@@ -578,19 +623,149 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 	require.Equal(t, "req-warm", result.RequestID)
 	require.Equal(t, "resp-warm", result.ResponseID)
 	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Len(t, upstream.requests, 1)
-	require.Equal(t, account.Proxy.URL(), upstream.lastProxyURL)
-	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
-	require.Equal(t, "Bearer synthetic-token", upstream.lastReq.Header.Get("Authorization"))
-	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
-	require.Equal(t, "gpt-test", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, openAIAutoWarmupPrompt, gjson.GetBytes(upstream.lastBody, "input").String())
-	require.Equal(t, int64(openAIAutoWarmupMaxOutput), gjson.GetBytes(upstream.lastBody, "max_output_tokens").Int())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
-	require.Empty(t, gjson.GetBytes(upstream.lastBody, "tools").Array())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "web_search").Exists())
+	require.NotNil(t, upstream.request)
+	require.Equal(t, account.Proxy.URL(), upstream.proxyURL)
+	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.request.Context()))
+	require.Equal(t, "Bearer synthetic-token", upstream.request.Header.Get("Authorization"))
+	require.Equal(t, "synthetic-account", upstream.request.Header.Get("chatgpt-account-id"))
+	require.Equal(t, codexCLIUserAgent, upstream.request.Header.Get("User-Agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, upstream.request.Header.Get("originator"))
+	require.Equal(t, codexCLIVersion, upstream.request.Header.Get("version"))
+	require.Equal(t, "responses=experimental", upstream.request.Header.Get("OpenAI-Beta"))
+	require.Equal(t, chatgptCodexURL, upstream.request.URL.String())
+	require.Equal(t, "gpt-test", gjson.GetBytes(upstream.body, "model").String())
+	require.Equal(t, openAIAutoWarmupPrompt, gjson.GetBytes(upstream.body, "instructions").String())
+	require.Equal(t, openAIAutoWarmupInput, gjson.GetBytes(upstream.body, "input.0.content").String())
+	require.True(t, gjson.GetBytes(upstream.body, "stream").Bool())
+	require.False(t, gjson.GetBytes(upstream.body, "store").Bool())
+	require.False(t, gjson.GetBytes(upstream.body, "max_output_tokens").Exists())
+	require.False(t, gjson.GetBytes(upstream.body, "parallel_tool_calls").Exists())
+	require.False(t, gjson.GetBytes(upstream.body, "tools").Exists())
+	require.Eventually(t, func() bool {
+		stored, getErr := repo.GetByID(context.Background(), account.ID)
+		if getErr != nil {
+			return false
+		}
+		used, ok := resolveAccountExtraNumber(stored.Extra, "codex_5h_used_percent")
+		return ok && used == 12
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestOpenAIGatewayServiceCapturesSanitizedAutoWarmupRejection(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	account := newAutoWarmupTestAccount(12, now)
+	manifestProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-test"}]}`)
+	}))
+	defer manifestProxy.Close()
+	proxyAddress, ok := manifestProxy.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	proxyID := int64(8)
+	account.ProxyID = &proxyID
+	account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: proxyAddress.IP.String(), Port: proxyAddress.Port}
+	originalModelsURL := chatgptCodexModelsURL
+	chatgptCodexModelsURL = "http://models.invalid/codex/models"
+	t.Cleanup(func() { chatgptCodexModelsURL = originalModelsURL })
+
+	upstream := &autoWarmupHTTPUpstream{do: func(_ *http.Request, _ []byte) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-rejected"}},
+			Body: io.NopCloser(strings.NewReader(
+				`{"error":{"code":"invalid_request","message":"unsupported request; access_token=secret-value"}}`,
+			)),
+		}, nil
+	}}
+	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	settingService, _ := newAutoWarmupTestSettingService(t, true)
+	service := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}, settingService: settingService}
+
+	result, err := service.SendOpenAIAutoWarmup(context.Background(), account.ID)
+
+	require.Error(t, err)
+	require.Equal(t, "OPENAI_AUTO_WARMUP_UPSTREAM_REJECTED", infraerrors.Reason(err))
+	require.Equal(t, http.StatusBadRequest, result.UpstreamStatus)
+	require.Equal(t, "invalid_request", result.UpstreamErrorCode)
+	require.Equal(t, "unsupported request; access_token=***", result.UpstreamErrorMessage)
+	require.Equal(t, "req-rejected", result.RequestID)
+	require.NotContains(t, err.Error(), "secret-value")
+	stored, getErr := repo.GetByID(context.Background(), account.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, StatusActive, stored.Status)
+}
+
+func TestOpenAIGatewayServiceAutoWarmupHonorsCallerTimeout(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	account := newAutoWarmupTestAccount(13, now)
+	manifestProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-test"}]}`)
+	}))
+	defer manifestProxy.Close()
+	proxyAddress, ok := manifestProxy.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	proxyID := int64(9)
+	account.ProxyID = &proxyID
+	account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: proxyAddress.IP.String(), Port: proxyAddress.Port}
+	originalModelsURL := chatgptCodexModelsURL
+	chatgptCodexModelsURL = "http://models.invalid/codex/models"
+	t.Cleanup(func() { chatgptCodexModelsURL = originalModelsURL })
+
+	upstream := &autoWarmupHTTPUpstream{do: func(req *http.Request, _ []byte) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}}
+	settingService, _ := newAutoWarmupTestSettingService(t, true)
+	service := &OpenAIGatewayService{
+		accountRepo:  &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}},
+		httpUpstream: upstream, cfg: &config.Config{}, settingService: settingService,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := service.SendOpenAIAutoWarmup(ctx, account.ID)
+
+	require.Error(t, err)
+	require.Equal(t, "OPENAI_AUTO_WARMUP_UPSTREAM_FAILED", infraerrors.Reason(err))
+	require.ErrorIs(t, context.Cause(ctx), context.DeadlineExceeded)
+}
+
+func TestResolveOpenAIAutoWarmupModelPrefersEligibleLightweightModelAcrossManifestOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest string
+		want     string
+	}{
+		{name: "preferred model second", manifest: `{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-5.4-mini"}]}`, want: "gpt-5.4-mini"},
+		{name: "preferred model first", manifest: `{"models":[{"slug":"gpt-5.4-mini"},{"slug":"gpt-5.6-sol"}]}`, want: "gpt-5.4-mini"},
+		{name: "unsupported preferred model skipped", manifest: `{"models":[{"slug":"gpt-5.4-mini","supported_in_api":false},{"slug":"gpt-5.6-terra"}]}`, want: "gpt-5.6-terra"},
+		{name: "manifest fallback", manifest: `{"models":[{"slug":"gpt-test"},{"slug":"gpt-other"}]}`, want: "gpt-test"},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := newAutoWarmupTestAccount(int64(100+index), time.Now())
+			manifestProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, test.manifest)
+			}))
+			defer manifestProxy.Close()
+			proxyAddress, ok := manifestProxy.Listener.Addr().(*net.TCPAddr)
+			require.True(t, ok)
+			proxyID := int64(20 + index)
+			account.ProxyID = &proxyID
+			account.Proxy = &Proxy{ID: proxyID, Protocol: "http", Host: proxyAddress.IP.String(), Port: proxyAddress.Port}
+			originalModelsURL := chatgptCodexModelsURL
+			chatgptCodexModelsURL = "http://models.invalid/codex/models"
+			t.Cleanup(func() { chatgptCodexModelsURL = originalModelsURL })
+			service := &OpenAIGatewayService{accountRepo: &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}, cfg: &config.Config{}}
+
+			got, err := service.resolveOpenAIAutoWarmupModel(context.Background(), account, "synthetic-token")
+
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
 }
 
 func TestOpenAIGatewayServiceRejectsUnsafeAutoWarmupBeforeNetwork(t *testing.T) {
@@ -716,18 +891,3 @@ func TestOpenAIAutoWarmupAccountSettingRejectsUnsupportedAccounts(t *testing.T) 
 		})
 	}
 }
-
-type stringReadCloser struct{ value string }
-
-func (r *stringReadCloser) Read(buffer []byte) (int, error) {
-	if r.value == "" {
-		return 0, io.EOF
-	}
-	n := copy(buffer, r.value)
-	r.value = r.value[n:]
-	return n, nil
-}
-
-func (r *stringReadCloser) Close() error { return nil }
-
-func gjsonReader(value string) *stringReadCloser { return &stringReadCloser{value: value} }

@@ -28,13 +28,13 @@ The fix is useful independently of web search: Antigravity forwarding should
 reuse the same client-tool mapping for request conversion and for buffered and
 streaming response restoration.
 
-## Mixed Native Search Limitation
+## Mixed Native Search
 
-Lowering client tools does not make native Antigravity mixed search viable. The
-observed transport still rejects a request containing both native
-`googleSearch` and custom `functionDeclarations`, even when
-`toolConfig.includeServerSideToolInvocations` is present. This project does not
-claim that native mixed search is fixed.
+Antigravity's `v1internal` transport requires both canonical camelCase and
+snake_case tool-config aliases for mixed native search and function calling.
+Mixed requests therefore retain `toolConfig.includeServerSideToolInvocations`
+and also emit `tool_config.include_server_side_tool_invocations`. Search-only,
+function-only, and no-tool requests remain unchanged.
 
 The implemented alternative is Codex standalone search: advertise `web.run` as
 a client-side tool, keep it beside normal function tools in the inference

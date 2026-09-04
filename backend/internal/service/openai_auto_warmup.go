@@ -66,11 +66,14 @@ type OpenAIAutoWarmupAttemptRepository interface {
 }
 
 type OpenAIAutoWarmupResult struct {
-	Model      string
-	RequestID  string
-	ResponseID string
-	Usage      OpenAIUsage
-	Latency    time.Duration
+	Model                string
+	RequestID            string
+	ResponseID           string
+	Usage                OpenAIUsage
+	Latency              time.Duration
+	UpstreamStatus       int
+	UpstreamErrorCode    string
+	UpstreamErrorMessage string
 }
 
 type openAIAutoWarmupSender interface {
@@ -276,7 +279,17 @@ func (s *OpenAIQuotaAutoResetService) completeOpenAIAutoWarmup(ctx context.Conte
 	}
 	s.persistOpenAIAutoWarmupState(completeCtx, accountID, state)
 	if sendErr != nil {
-		slog.Warn("openai_auto_warmup_failed", "account_id", accountID, "attempt_id", attempt.ID, "error_code", completion.ErrorCode)
+		args := []any{"account_id", accountID, "attempt_id", attempt.ID, "error_code", completion.ErrorCode}
+		if result != nil {
+			args = append(args,
+				"model", result.Model,
+				"request_id", result.RequestID,
+				"upstream_status", result.UpstreamStatus,
+				"upstream_error_code", result.UpstreamErrorCode,
+				"upstream_error", result.UpstreamErrorMessage,
+			)
+		}
+		slog.Warn("openai_auto_warmup_failed", args...)
 		return
 	}
 	slog.Info("openai_auto_warmup_succeeded", "account_id", accountID, "attempt_id", attempt.ID, "model", completion.Model, "input_tokens", completion.InputTokens, "output_tokens", completion.OutputTokens)

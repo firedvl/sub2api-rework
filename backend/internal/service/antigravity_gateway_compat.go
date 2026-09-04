@@ -328,10 +328,23 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 		toolConfig = make(map[string]any)
 		request["toolConfig"] = toolConfig
 	}
-	if functionConfig, ok := toolConfig["functionCallingConfig"].(map[string]any); !ok || functionConfig == nil {
-		toolConfig["functionCallingConfig"] = map[string]any{"mode": "VALIDATED"}
+	functionConfig, _ := toolConfig["functionCallingConfig"].(map[string]any)
+	if functionConfig == nil {
+		functionConfig = make(map[string]any)
+		toolConfig["functionCallingConfig"] = functionConfig
+	}
+	if mode, ok := functionConfig["mode"]; !ok || strings.TrimSpace(fmt.Sprint(mode)) == "" {
+		functionConfig["mode"] = "VALIDATED"
 	}
 	toolConfig["includeServerSideToolInvocations"] = true
+	snakeFunctionConfig := map[string]any{"mode": functionConfig["mode"]}
+	if allowedNames, ok := functionConfig["allowedFunctionNames"]; ok {
+		snakeFunctionConfig["allowed_function_names"] = allowedNames
+	}
+	request["tool_config"] = map[string]any{
+		"function_calling_config":              snakeFunctionConfig,
+		"include_server_side_tool_invocations": true,
+	}
 	return json.Marshal(request)
 }
 
