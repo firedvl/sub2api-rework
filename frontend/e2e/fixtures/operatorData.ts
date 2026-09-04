@@ -366,7 +366,7 @@ export const operatorFixtureAccounts = [
     groups: accountGroup(11),
   }),
   makeAccount(106, 'Gemini Quota Limited', 'gemini', 'oauth', {
-    credentials: { email: 'gemini-healthy@example.test', tier_id: 'google_ai_pro' },
+    credentials: { email: 'gemini-healthy@example.test', oauth_type: 'google_one', tier_id: 'google_ai_pro' },
     credentials_status: { has_access_token: true, has_refresh_token: true },
     current_concurrency: 0,
     group_ids: [13],

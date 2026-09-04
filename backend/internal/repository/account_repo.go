@@ -1110,6 +1110,23 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderAsc)
+	if sortBy == "reset_5h_at" || sortBy == "reset_7d_at" {
+		direction := "ASC"
+		tieOrder := entsql.Asc
+		if sortOrder == pagination.SortOrderDesc {
+			direction = "DESC"
+			tieOrder = entsql.Desc
+		}
+		key := "codex_5h_reset_at"
+		if sortBy == "reset_7d_at" {
+			key = "codex_7d_reset_at"
+		}
+		return []func(*entsql.Selector){func(s *entsql.Selector) {
+			expression := accountResetAtSortExpression(s.C(dbaccount.FieldExtra), key)
+			s.OrderExpr(entsql.Expr(expression + " " + direction + " NULLS LAST"))
+			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
+		}}
+	}
 	if sortBy == "upstream_billing_rate" {
 		direction := "ASC"
 		tieOrder := entsql.Asc
@@ -1163,6 +1180,19 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		return []func(*entsql.Selector){dbent.Asc(dbaccount.FieldName), dbent.Asc(dbaccount.FieldID)}
 	}
 	return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(dbaccount.FieldID)}
+}
+
+func accountResetAtSortExpression(extra, key string) string {
+	value := "(" + extra + " ->> '" + key + "')"
+	validRFC3339 := "'^([0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?(Z|[+-](0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)$'"
+	year := "substring(" + value + " from 1 for 4)::int"
+	month := "substring(" + value + " from 6 for 2)::int"
+	day := "substring(" + value + " from 9 for 2)::int"
+	lastDay := "extract(day from (make_date(" + year + ", " + month + ", 1) + interval '1 month - 1 day'))::int"
+	timestamp := value + "::timestamptz"
+	return "(CASE WHEN " + value + " ~ " + validRFC3339 +
+		" THEN CASE WHEN " + day + " <= " + lastDay +
+		" THEN CASE WHEN " + timestamp + " > CURRENT_TIMESTAMP THEN " + timestamp + " END END END)"
 }
 
 func upstreamBillingRateSortExpression(extra string) string {

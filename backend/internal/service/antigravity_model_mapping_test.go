@@ -77,6 +77,12 @@ func TestAntigravityGatewayService_GetMappedModel(t *testing.T) {
 
 		// 3. 默认映射中的透传（映射到自己）
 		{
+			name:           "默认映射透传 - claude-fable-5-1",
+			requestedModel: "claude-fable-5-1",
+			accountMapping: nil,
+			expected:       "claude-fable-5-1",
+		},
+		{
 			name:           "默认映射透传 - claude-fable-5",
 			requestedModel: "claude-fable-5",
 			accountMapping: nil,
@@ -233,6 +239,7 @@ func TestAntigravityGatewayService_IsModelSupported(t *testing.T) {
 		expected bool
 	}{
 		// 直接支持
+		{"直接支持 - claude-fable-5-1", "claude-fable-5-1", true},
 		{"直接支持 - claude-fable-5", "claude-fable-5", true},
 		{"直接支持 - claude-sonnet-4-5", "claude-sonnet-4-5", true},
 		{"直接支持 - gemini-3-flash", "gemini-3-flash", true},
@@ -316,5 +323,29 @@ func TestMapAntigravityModel_WildcardTargetEqualsRequest(t *testing.T) {
 			got := mapAntigravityModel(account, tt.requestedModel)
 			require.Equal(t, tt.expected, got, "mapAntigravityModel(%q) = %q, want %q", tt.requestedModel, got, tt.expected)
 		})
+	}
+}
+
+func TestMapAntigravityModelUsesSafeDiscoveredInventory(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformAntigravity,
+		Credentials: map[string]any{},
+		Extra: map[string]any{UpstreamModelInventoryExtraKey: UpstreamModelInventorySnapshot{
+			Source: "upstream",
+			Models: []string{
+				"gemini-4-flash",
+				"gemini-pro-agent",
+				"gemini-3-flash-agentsvg",
+				"chat_20706",
+				"tab_jump_flash_lite_preview",
+			},
+		}},
+	}
+
+	require.Equal(t, "gemini-4-flash", mapAntigravityModel(account, "gemini-4-flash"))
+	require.Equal(t, "gemini-pro-agent", mapAntigravityModel(account, "gemini-3.1-pro-high"))
+	require.Equal(t, "gemini-pro-agent", mapAntigravityModel(account, "gemini-pro-agent"), "existing internal alias remains routable but is suppressed from the public catalog")
+	for _, internalID := range []string{"gemini-3-flash-agentsvg", "chat_20706", "tab_jump_flash_lite_preview"} {
+		require.Empty(t, mapAntigravityModel(account, internalID), "internal ID %q must not become a public route", internalID)
 	}
 }

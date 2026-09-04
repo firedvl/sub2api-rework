@@ -350,7 +350,7 @@ describe('operator capacity normalization', () => {
     expect(pool.unknownCount).toBe(1)
   })
 
-  it('aggregates matching windows across known accounts and excludes missing windows', () => {
+  it('aggregates effective 5h per account and excludes missing windows', () => {
     const first = normalizeAccountCapacity(account(1), usage({
       five_hour: { utilization: 20, resets_at: '2026-08-25T22:00:00Z', remaining_seconds: 3600 },
       seven_day: { utilization: 60, resets_at: '2026-08-30T00:00:00Z', remaining_seconds: 360000 },
@@ -366,13 +366,14 @@ describe('operator capacity normalization', () => {
     )
 
     expect(windows.find((window) => window.key === 'five_hour')).toMatchObject({
-      remainingPercent: 65,
-      usedPercent: 35,
+      label: 'Effective 5h',
+      remainingPercent: 45,
+      usedPercent: 55,
       knownCount: 2,
       unknownCount: 1,
       nextReset: '2026-08-25T21:00:00Z',
       segments: [
-        { remainingPercent: 80, contributionPercent: 40 },
+        { remainingPercent: 40, contributionPercent: 20 },
         { remainingPercent: 50, contributionPercent: 25 },
       ],
     })
@@ -383,5 +384,48 @@ describe('operator capacity normalization', () => {
       unknownCount: 2,
       segments: [{ remainingPercent: 40, contributionPercent: 40 }],
     })
+  })
+
+  it('bounds each effective 5h value by weekly quota without treating missing weekly as zero', () => {
+    const summaries = [
+      normalizeAccountCapacity(account(1), usage({
+        five_hour: { utilization: 10, resets_at: null, remaining_seconds: null },
+        seven_day: { utilization: 100, resets_at: '2026-09-01T00:00:00Z', remaining_seconds: 3600 },
+      })),
+      normalizeAccountCapacity(account(2), usage({
+        five_hour: { utilization: 20, resets_at: null, remaining_seconds: null },
+        seven_day: { utilization: 75, resets_at: null, remaining_seconds: null },
+      })),
+      normalizeAccountCapacity(account(3), usage({
+        five_hour: { utilization: 85, resets_at: null, remaining_seconds: null },
+        seven_day: { utilization: 10, resets_at: null, remaining_seconds: null },
+      })),
+      normalizeAccountCapacity(account(4), usage({
+        five_hour: { utilization: 30, resets_at: null, remaining_seconds: null },
+      })),
+    ]
+
+    const effective = buildWindowCapacities(summaries)
+      .find((window) => window.key === 'five_hour')!
+
+    expect(effective.segments.map((segment) => segment.remainingPercent)).toEqual([0, 25, 15, 70])
+    expect(effective.remainingPercent).toBe(27.5)
+    expect(summaries[0].windows.find((window) => window.key === 'five_hour')?.remainingPercent).toBe(90)
+    expect(summaries[0].windows.find((window) => window.key === 'seven_day')?.remainingPercent).toBe(0)
+  })
+
+  it('applies weekly limits before fleet averaging', () => {
+    const effective = buildWindowCapacities([
+      normalizeAccountCapacity(account(1), usage({
+        five_hour: { utilization: 10, resets_at: null, remaining_seconds: null },
+        seven_day: { utilization: 100, resets_at: null, remaining_seconds: null },
+      })),
+      normalizeAccountCapacity(account(2), usage({
+        five_hour: { utilization: 80, resets_at: null, remaining_seconds: null },
+        seven_day: { utilization: 0, resets_at: null, remaining_seconds: null },
+      })),
+    ]).find((window) => window.key === 'five_hour')!
+
+    expect(effective.remainingPercent).toBe(10)
   })
 })

@@ -765,7 +765,8 @@ func TestSyncUpstreamModelCatalogDoesNotOverwriteSnapshotWhenRegistryFails(t *te
 		Code:    UpstreamModelMetadataIncompleteCode,
 		Message: "Model IDs were synced, but capability metadata is incomplete.",
 	}}, catalog.Warnings)
-	require.Nil(t, repo.updates, "a failed metadata enrichment must not erase a previously saved snapshot")
+	require.NotNil(t, repo.updates[UpstreamModelInventoryExtraKey])
+	require.NotContains(t, repo.updates, UpstreamModelMetadataExtraKey, "a failed metadata enrichment must not erase a previously saved snapshot")
 }
 
 func TestSyncUpstreamModelCatalogDoesNotPersistPartialMetadataWhenRegistryFails(t *testing.T) {
@@ -792,7 +793,28 @@ func TestSyncUpstreamModelCatalogDoesNotPersistPartialMetadataWhenRegistryFails(
 	require.Equal(t, []string{"partially-described-model"}, catalog.Models)
 	require.Equal(t, "Partial Model", catalog.Metadata["partially-described-model"].DisplayName)
 	require.Equal(t, UpstreamModelMetadataIncompleteCode, catalog.Warnings[0].Code)
-	require.Nil(t, repo.updates, "partial metadata must not replace a more complete persisted snapshot")
+	require.NotNil(t, repo.updates[UpstreamModelInventoryExtraKey])
+	require.NotContains(t, repo.updates, UpstreamModelMetadataExtraKey, "partial metadata must not replace a more complete persisted snapshot")
+}
+
+func TestSyncUpstreamModelCatalogPersistsIDInventoryWithoutMetadata(t *testing.T) {
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"gemini-4-flash"},{"id":"gemini-4-flash"}]}`))},
+		{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(`{"error":"unavailable"}`))},
+	}}
+	repo := &upstreamModelMetadataRepoStub{}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}
+	account := &Account{
+		ID: 102, Platform: PlatformGemini, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "key", "base_url": "https://generativelanguage.googleapis.com/v1beta"},
+	}
+
+	catalog, err := svc.SyncUpstreamModelCatalog(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gemini-4-flash"}, catalog.Models)
+	require.Equal(t, "gemini-4-flash", account.GetModelMapping()["gemini-4-flash"])
+	require.NotNil(t, repo.updates[UpstreamModelInventoryExtraKey])
+	require.NotContains(t, repo.updates, UpstreamModelMetadataExtraKey)
 }
 
 func TestFetchUpstreamSupportedModelsUsesConfiguredBodyLimit(t *testing.T) {
