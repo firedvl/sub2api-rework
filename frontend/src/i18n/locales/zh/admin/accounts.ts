@@ -145,6 +145,8 @@ export default {
         priority: '优先级',
         billingRateMultiplier: '账号倍率',
         upstreamBillingRate: '上游声明倍率',
+        reset5hAt: '5 小时重置',
+        reset7dAt: '每周重置',
         weight: '权重',
         schedulerScore: '调度权值',
         status: '状态',

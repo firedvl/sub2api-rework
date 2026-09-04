@@ -8,7 +8,7 @@ export default {
       description: '每个窗口对已上报账号等权平均，缺失窗口单独显示为未知。',
       coverage: '{known} 个已知，{unknown} 个未知',
       shortTermTitle: '5 小时 / 短期容量',
-      shortTermDescription: '各供应商实际上报的 5 小时、每日和分钟窗口。',
+      shortTermDescription: '有效 5 小时容量受各账号每周额度约束；其他短期窗口使用供应商上报值。',
       longTermTitle: '每周 / 总容量',
       longTermDescription: '实际 7 天、每月、每周支出和总支出窗口。',
       notReported: '未上报支持的窗口',

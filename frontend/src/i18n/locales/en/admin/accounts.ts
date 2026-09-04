@@ -249,6 +249,8 @@ export default {
         priority: 'Priority',
         billingRateMultiplier: 'Billing Rate',
         upstreamBillingRate: 'Upstream Declared Rate',
+        reset5hAt: '5h Reset',
+        reset7dAt: 'Weekly Reset',
         weight: 'Weight',
         schedulerScore: 'Scheduler Score',
         status: 'Status',

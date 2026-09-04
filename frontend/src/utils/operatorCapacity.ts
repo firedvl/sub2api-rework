@@ -581,7 +581,10 @@ export function buildWindowCapacities(
   for (const summary of capacityAccounts) {
     for (const window of summary.windows) {
       if (!windowsByKey.has(window.key)) {
-        windowsByKey.set(window.key, { label: window.label, kind: window.kind })
+        windowsByKey.set(window.key, {
+          label: window.key === 'five_hour' ? 'Effective 5h' : window.label,
+          kind: window.kind,
+        })
       }
     }
   }
@@ -589,7 +592,18 @@ export function buildWindowCapacities(
   return Array.from(windowsByKey.entries()).map(([key, definition]) => {
     const known = capacityAccounts.flatMap((summary) => {
       const window = summary.windows.find((candidate) => candidate.key === key)
-      return window ? [{ summary, window }] : []
+      if (!window) return []
+      if (key !== 'five_hour') return [{ summary, window }]
+      const weekly = summary.windows.find((candidate) => candidate.key === 'seven_day')
+      if (!weekly || weekly.remainingPercent >= window.remainingPercent) return [{ summary, window }]
+      return [{
+        summary,
+        window: {
+          ...window,
+          remainingPercent: weekly.remainingPercent,
+          resetsAt: weekly.resetsAt,
+        },
+      }]
     })
     const knownAccountIDs = new Set(known.map(({ summary }) => summary.account.id))
     const unknownAccounts = capacityAccounts.filter((summary) => !knownAccountIDs.has(summary.account.id))

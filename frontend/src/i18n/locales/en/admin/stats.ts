@@ -8,7 +8,7 @@ export default {
       description: 'Each window averages reporting accounts equally. Missing windows remain visible as unknown.',
       coverage: '{known} known, {unknown} unknown',
       shortTermTitle: '5h / short-term capacity',
-      shortTermDescription: 'Actual five-hour, daily, and minute windows reported by each provider.',
+      shortTermDescription: 'Effective 5h capacity is bounded by each account’s weekly quota; other short windows use provider values.',
       longTermTitle: 'Weekly / total capacity',
       longTermDescription: 'Actual seven-day, monthly, weekly spend, and total spend windows.',
       notReported: 'No supported window reported',

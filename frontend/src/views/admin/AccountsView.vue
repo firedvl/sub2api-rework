@@ -497,6 +497,12 @@
               @probe="handleProbeUpstreamBilling(row)"
             />
           </template>
+          <template #cell-reset_5h_at="{ row }">
+            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatQuotaReset(row.extra?.codex_5h_reset_at) }}</span>
+          </template>
+          <template #cell-reset_7d_at="{ row }">
+            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatQuotaReset(row.extra?.codex_7d_reset_at) }}</span>
+          </template>
           <template #cell-priority="{ value }">
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
           </template>
@@ -840,6 +846,8 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'priority',
   'rate_multiplier',
   'upstream_billing_rate',
+  'reset_5h_at',
+  'reset_7d_at',
   'last_used_at',
   'created_at',
   'expires_at'
@@ -2157,6 +2165,8 @@ const allColumns = computed(() => {
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: true },
+    { key: 'reset_5h_at', label: t('admin.accounts.columns.reset5hAt'), sortable: true },
+    { key: 'reset_7d_at', label: t('admin.accounts.columns.reset7dAt'), sortable: true },
     { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
@@ -2165,6 +2175,12 @@ const allColumns = computed(() => {
   )
   return c
 })
+
+function formatQuotaReset(value: unknown): string {
+  return typeof value === 'string' && Number.isFinite(new Date(value).getTime())
+    ? formatDateTime(value)
+    : '-'
+}
 
 // Columns that can be toggled (exclude select, name, and actions)
 const toggleableColumns = computed(() =>
