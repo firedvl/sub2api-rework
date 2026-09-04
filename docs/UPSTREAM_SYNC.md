@@ -13,8 +13,8 @@ The accepted rework baseline is defined once in
 `backend/internal/releaseinfo/metadata.json`:
 
 ```text
-"upstream_baseline": "v0.1.184"
-"upstream_baseline_sha": "e98ef32eb29aecd30d1def615912ec4dc93173f3"
+"upstream_baseline": "v0.2.0"
+"upstream_baseline_sha": "aa236488351eb71e120fc2b6fb32e36b0374c918"
 ```
 
 This document explains the baseline; scripts and builds consume the JSON record.
@@ -32,7 +32,7 @@ deploy anything.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.1.184..main v0.1.184..upstream/main
+git range-diff v0.2.0..main v0.2.0..upstream/main
 ./scripts/upstream-status.sh
 ```
 
@@ -54,6 +54,22 @@ before adopting a new baseline.
 
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
+
+## v0.2.0 Change Audit
+
+The accepted range is `v0.1.184..v0.2.0` (86 commits, 182 changed files).
+
+| Area | Audit result |
+| --- | --- |
+| Backend | Adopted OpenAI Fast group policy, reasoning-effort policy, Kimi native Responses, Claude Fable 5.1, scheduler projection, API-key identity, model cooldown, and Anthropic fallback fixes. |
+| Frontend | Added the upstream Fast and reasoning controls while preserving the Gateway operator UI, then added Rework model inventory, capacity, quota-help, and Auto Warm-up controls. |
+| Migrations | Imported colliding upstream semantics as new immutable Rework migrations `236` through `239`; historical migration `235` remains unchanged. |
+| Model catalog | Preserved Composite publication and added provider-discovered Antigravity and native Gemini inventories with public normalization, deduplication, aliasing, and internal identifier suppression. |
+| Capacity | Sorts accounts by the soonest 5-hour and weekly resets and bounds effective 5-hour capacity by weekly quota. |
+| Auto Warm-up | Added filtered fleet bulk management and restart-safe dormant-window detection with PostgreSQL claim deduplication, a five-hour retry floor, and four-request concurrency. |
+| Gateway routing | Preserved unified keys, Composite Groups, `/v1/models`, `/v1/gateway/capabilities`, and Antigravity mixed built-in/function-tool compatibility. |
+| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and WebSocket-disabled production policy. |
+| Verification | Release qualification covers backend unit and integration suites, frontend Vitest/build/lint/Playwright, PostgreSQL fresh and `235 -> 239` migration rehearsals, static analysis, dependency audit, and secret scan. |
 
 ## v0.1.184 Change Audit
 
@@ -162,8 +178,9 @@ attempts remain deduplicated for that window; a later window remains eligible.
 The sender refreshes OAuth credentials, resolves a current Codex model through
 the account's normal route, preserves proxy and identity behavior, and sends a
 non-streaming Responses request with no tools and a four-token output limit.
-Idle-window initialization is not attempted because current provider quota data
-does not identify that state reliably enough to act without guessing.
+Dormant or sliding five-hour windows require two observations before warm-up.
+Anchored resets and jitter remain ineligible, and a failed dormant attempt stays
+deduplicated for at least five hours.
 
 Data and API additions:
 

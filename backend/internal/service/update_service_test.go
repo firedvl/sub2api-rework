@@ -47,11 +47,11 @@ func (s *updateServiceGitHubStub) FetchReleaseAsset(context.Context, string, int
 func watcherManifest(t *testing.T, compatibility updatecontract.Compatibility) []byte {
 	t.Helper()
 	manifest := updatecontract.Manifest{
-		SchemaVersion: 1, ReworkVersion: "0.1.184-rework.1", UpstreamVersion: "v0.1.184",
-		GitSHA: strings.Repeat("a", 40), Image: "ghcr.io/firedvl/sub2api-rework:0.1.184-rework.1",
-		ImageDigest: "sha256:" + strings.Repeat("b", 64), MigrationMin: 232, MigrationMax: 235,
-		ReleaseDate: "2026-08-28T12:00:00Z", Compatibility: compatibility,
-		MinimumUpdaterVersion: "1.0.0", ReleaseNotes: updatecontract.ReleaseNotes{Rework: "Qualified changes"},
+		SchemaVersion: 1, ReworkVersion: "0.2.0-rework.1", UpstreamVersion: "v0.2.0",
+		GitSHA: strings.Repeat("a", 40), Image: "ghcr.io/firedvl/sub2api-rework:0.2.0-rework.1",
+		ImageDigest: "sha256:" + strings.Repeat("b", 64), MigrationMin: 235, MigrationMax: 239,
+		ReleaseDate: "2026-09-04T12:00:00Z", Compatibility: compatibility,
+		MinimumUpdaterVersion: "1.1.3", ReleaseNotes: updatecontract.ReleaseNotes{Rework: "Qualified changes"},
 	}
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)
@@ -60,9 +60,9 @@ func watcherManifest(t *testing.T, compatibility updatecontract.Compatibility) [
 
 func newWatcher(client *updateServiceGitHubStub) *UpdateService {
 	svc := NewUpdateService(&updateServiceCacheStub{}, client, BuildInfo{
-		Version: "0.1.183-rework.1", Commit: "abc", Date: "2026-08-28T12:00:00Z", BuildType: "release",
+		Version: "0.1.184-rework.8", Commit: "abc", Date: "2026-09-04T12:00:00Z", BuildType: "release",
 	})
-	svc.now = func() time.Time { return time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC) }
+	svc.now = func() time.Time { return time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC) }
 	return svc
 }
 
@@ -77,14 +77,14 @@ func reworkRelease(tag string) *GitHubRelease {
 }
 
 func TestUpdateWatcherUpToDateWithoutNewRework(t *testing.T) {
-	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.1.183")}).CheckUpdate(context.Background(), true)
+	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.2.0")}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpToDate, info.State)
 	require.False(t, info.Installable)
 }
 
 func TestUpdateWatcherNewUpstreamIsCompatibilityPending(t *testing.T) {
-	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.1.185")}).CheckUpdate(context.Background(), true)
+	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstreamRelease("v0.2.1")}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateCompatibilityPending, info.State)
 	require.Empty(t, info.LatestCompatibleRework)
@@ -92,7 +92,7 @@ func TestUpdateWatcherNewUpstreamIsCompatibilityPending(t *testing.T) {
 }
 
 func TestUpdateWatcherPrereleaseUpstreamIsIgnored(t *testing.T) {
-	upstream := upstreamRelease("v0.1.184-beta.1")
+	upstream := upstreamRelease("v0.2.1-beta.1")
 	upstream.Prerelease = true
 	info, err := newWatcher(&updateServiceGitHubStub{upstream: upstream}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -102,18 +102,18 @@ func TestUpdateWatcherPrereleaseUpstreamIsIgnored(t *testing.T) {
 
 func TestUpdateWatcherApprovedManifestIsReady(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.2.0-rework.1")},
 		manifest: watcherManifest(t, updatecontract.CompatibilityApproved),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateReady, info.State)
-	require.Equal(t, "0.1.184-rework.1", info.LatestCompatibleRework)
+	require.Equal(t, "0.2.0-rework.1", info.LatestCompatibleRework)
 	require.True(t, info.Installable)
 }
 
 func TestUpdateWatcherPendingBuildIsNotInstallable(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.2.0-rework.1")},
 		manifest: watcherManifest(t, updatecontract.CompatibilityPending),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestUpdateWatcherPendingBuildIsNotInstallable(t *testing.T) {
 
 func TestUpdateWatcherBlockedBuildIsNotInstallable(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")},
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.2.0-rework.1")},
 		manifest: watcherManifest(t, updatecontract.CompatibilityBlocked),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
@@ -132,10 +132,10 @@ func TestUpdateWatcherBlockedBuildIsNotInstallable(t *testing.T) {
 }
 
 func TestUpdateWatcherMissingManifestIsBlocked(t *testing.T) {
-	release := reworkRelease("v0.1.184-rework.1")
+	release := reworkRelease("v0.2.0-rework.1")
 	release.Assets = nil
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{release},
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{release},
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
@@ -144,7 +144,7 @@ func TestUpdateWatcherMissingManifestIsBlocked(t *testing.T) {
 
 func TestUpdateWatcherMalformedManifestIsBlocked(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")}, manifest: []byte(`{"image":"attacker"}`),
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.2.0-rework.1")}, manifest: []byte(`{"image":"attacker"}`),
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
@@ -154,12 +154,12 @@ func TestUpdateWatcherMalformedManifestIsBlocked(t *testing.T) {
 func TestUpdateWatcherIncompatibleMigrationIsBlocked(t *testing.T) {
 	var manifest updatecontract.Manifest
 	require.NoError(t, json.Unmarshal(watcherManifest(t, updatecontract.CompatibilityApproved), &manifest))
-	manifest.MigrationMin = 236
-	manifest.MigrationMax = 236
+	manifest.MigrationMin = 240
+	manifest.MigrationMax = 240
 	data, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.184"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.1")}, manifest: data,
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.2.0-rework.1")}, manifest: data,
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateBlocked, info.State)
@@ -168,7 +168,7 @@ func TestUpdateWatcherIncompatibleMigrationIsBlocked(t *testing.T) {
 
 func TestUpdateWatcherCurrentReworkVersionIsUpToDate(t *testing.T) {
 	info, err := newWatcher(&updateServiceGitHubStub{
-		upstream: upstreamRelease("v0.1.183"), rework: []*GitHubRelease{reworkRelease("v0.1.183-rework.1")},
+		upstream: upstreamRelease("v0.2.0"), rework: []*GitHubRelease{reworkRelease("v0.1.184-rework.8")},
 	}).CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpToDate, info.State)
@@ -176,7 +176,7 @@ func TestUpdateWatcherCurrentReworkVersionIsUpToDate(t *testing.T) {
 }
 
 func TestNewestReworkReleaseFiltersAndOrdersCandidates(t *testing.T) {
-	draft := reworkRelease("v0.1.184-rework.1")
+	draft := reworkRelease("v0.2.0-rework.1")
 	draft.Draft = true
 	tests := []struct {
 		name     string
@@ -184,20 +184,21 @@ func TestNewestReworkReleaseFiltersAndOrdersCandidates(t *testing.T) {
 		want     string
 	}{
 		{name: "draft", releases: []*GitHubRelease{draft}},
+		{name: "lower release", releases: []*GitHubRelease{reworkRelease("v0.1.184-rework.7")}},
 		{name: "arbitrary prereleases", releases: []*GitHubRelease{
-			{TagName: "v0.1.184-beta.1", Prerelease: true},
-			{TagName: "v0.1.184-rc.1", Prerelease: true},
+			{TagName: "v0.2.0-beta.1", Prerelease: true},
+			{TagName: "v0.2.0-rc.1", Prerelease: true},
 			{TagName: "random-test", Prerelease: true},
 			{TagName: "nightly", Prerelease: true},
 		}},
 		{name: "newest qualified release", releases: []*GitHubRelease{
-			reworkRelease("v0.1.183-rework.2"),
-			reworkRelease("v0.1.184-rework.1"),
-		}, want: "v0.1.184-rework.1"},
+			reworkRelease("v0.1.184-rework.7"),
+			reworkRelease("v0.2.0-rework.1"),
+		}, want: "v0.2.0-rework.1"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			candidate := newestReworkRelease(test.releases, "0.1.183-rework.1")
+			candidate := newestReworkRelease(test.releases, "0.1.184-rework.8")
 			if test.want == "" {
 				require.Nil(t, candidate)
 				return
@@ -210,11 +211,11 @@ func TestNewestReworkReleaseFiltersAndOrdersCandidates(t *testing.T) {
 
 func TestUpdateWatcherUsesCachedStatusWhenGitHubFails(t *testing.T) {
 	cache := &updateServiceCacheStub{}
-	good := NewUpdateService(cache, &updateServiceGitHubStub{upstream: upstreamRelease("v0.1.183")}, BuildInfo{Version: "0.1.183-rework.1"})
+	good := NewUpdateService(cache, &updateServiceGitHubStub{upstream: upstreamRelease("v0.2.0")}, BuildInfo{Version: "0.1.184-rework.8"})
 	_, err := good.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 
-	failing := NewUpdateService(cache, &updateServiceGitHubStub{latestErr: errors.New("token in unsafe detail")}, BuildInfo{Version: "0.1.183-rework.1"})
+	failing := NewUpdateService(cache, &updateServiceGitHubStub{latestErr: errors.New("token in unsafe detail")}, BuildInfo{Version: "0.1.184-rework.8"})
 	info, err := failing.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.True(t, info.Cached)
