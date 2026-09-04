@@ -68,6 +68,41 @@ func TestGatewayService_isModelSupportedByAccount_AntigravityNoMapping(t *testin
 	require.False(t, svc.isModelSupportedByAccount(account, "gpt-4"))
 }
 
+func TestAvailableModelIDsIncludesSafeDiscoveriesAndDeduplicatesProviders(t *testing.T) {
+	accounts := []Account{
+		{
+			ID: 1, Platform: PlatformAntigravity, Credentials: map[string]any{},
+			Extra: map[string]any{UpstreamModelInventoryExtraKey: UpstreamModelInventorySnapshot{
+				Models: []string{"gemini-4-flash", "gemini-pro-agent", "chat_20706", "tab_flash_lite_preview"},
+			}},
+		},
+		{
+			ID: 2, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{},
+			Extra: map[string]any{UpstreamModelInventoryExtraKey: UpstreamModelInventorySnapshot{
+				Models: []string{"models/gemini-4-flash", "models/gemini-4-pro"},
+			}},
+		},
+	}
+
+	antigravityModels := availableModelIDsFromAccounts(accounts, PlatformAntigravity)
+	require.Contains(t, antigravityModels, "gemini-4-flash")
+	require.Contains(t, antigravityModels, "gemini-3.1-pro-high")
+	require.NotContains(t, antigravityModels, "gemini-pro-agent")
+	require.NotContains(t, antigravityModels, "chat_20706")
+	require.NotContains(t, antigravityModels, "tab_flash_lite_preview")
+
+	geminiModels := availableModelIDsFromAccounts(accounts, PlatformGemini)
+	require.Contains(t, geminiModels, "gemini-4-flash")
+	require.Contains(t, geminiModels, "gemini-4-pro")
+
+	combined := append(append([]string{}, antigravityModels...), geminiModels...)
+	seen := make(map[string]struct{})
+	for _, model := range combined {
+		seen[model] = struct{}{}
+	}
+	require.Contains(t, seen, "gemini-4-flash")
+}
+
 // TestGatewayService_isModelSupportedByAccountWithContext_ThinkingMode 测试 thinking 模式下的模型支持检查
 // 验证调度时使用映射后的最终模型名（包括 thinking 后缀）来检查 model_mapping 支持
 func TestGatewayService_isModelSupportedByAccountWithContext_ThinkingMode(t *testing.T) {

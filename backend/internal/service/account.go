@@ -605,6 +605,7 @@ func (a *Account) GetModelMapping() map[string]string {
 	}
 
 	mapping := a.resolveModelMapping(rawMapping)
+	mapping = a.mergeDiscoveredModelMapping(mapping)
 	if !rawSigReady {
 		rawSig = modelMappingSignature(rawMapping)
 	}
@@ -617,6 +618,61 @@ func (a *Account) GetModelMapping() map[string]string {
 	a.modelMappingCacheRawSig = rawSig
 	a.modelMappingCacheRuntimeVersion = runtimeVersion
 	return mapping
+}
+
+func (a *Account) mergeDiscoveredModelMapping(mapping map[string]string) map[string]string {
+	snapshot := a.GetUpstreamModelInventorySnapshot()
+	if snapshot == nil || (a.Platform != PlatformAntigravity && a.Platform != PlatformGemini) {
+		return mapping
+	}
+	result := make(map[string]string, len(mapping)+len(snapshot.Models))
+	for publicID, upstreamID := range mapping {
+		result[publicID] = upstreamID
+	}
+	for _, upstreamID := range snapshot.Models {
+		publicID, target := discoveredPublicModelMapping(a.Platform, upstreamID)
+		if publicID == "" || target == "" {
+			continue
+		}
+		if _, exists := result[publicID]; !exists {
+			result[publicID] = target
+		}
+	}
+	if a.Platform == PlatformAntigravity {
+		applyAntigravityGemini31ProAliases(result)
+	}
+	return result
+}
+
+func discoveredPublicModelMapping(platform, upstreamID string) (string, string) {
+	upstreamID = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(upstreamID), "models/"))
+	if upstreamID == "" {
+		return "", ""
+	}
+	if platform == PlatformGemini {
+		if strings.HasPrefix(upstreamID, "gemini-") {
+			return upstreamID, upstreamID
+		}
+		return "", ""
+	}
+	if platform != PlatformAntigravity {
+		return "", ""
+	}
+	if upstreamID == domain.AntigravityGemini31ProAgentModel {
+		return "gemini-3.1-pro-high", upstreamID
+	}
+	if !isPublicAntigravityModelID(upstreamID) {
+		return "", ""
+	}
+	return upstreamID, upstreamID
+}
+
+func isPublicAntigravityModelID(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || model == "gemini-3-flash-agentsvg" || strings.HasPrefix(model, "chat_") || strings.HasPrefix(model, "tab_") {
+		return false
+	}
+	return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-") || strings.HasPrefix(model, "gpt-oss-")
 }
 
 func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]string {

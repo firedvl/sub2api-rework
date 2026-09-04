@@ -1433,7 +1433,10 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 		}
 		hasAnyMapping = true
 		for model := range mapping {
-			modelSet[model] = struct{}{}
+			model = publicCatalogModelID(account, model)
+			if model != "" {
+				modelSet[model] = struct{}{}
+			}
 		}
 	}
 	if !hasAnyMapping {
@@ -1445,6 +1448,19 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 	}
 	sort.Strings(models)
 	return models
+}
+
+func publicCatalogModelID(account *Account, model string) string {
+	model = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(model), "models/"))
+	if model == "" || strings.Contains(model, "*") {
+		return ""
+	}
+	if account != nil && account.Platform == PlatformAntigravity {
+		if model == "gemini-pro-agent" || (!explicitModelMappingClaims(*account, model) && !isPublicAntigravityModelID(model)) {
+			return ""
+		}
+	}
+	return model
 }
 
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {

@@ -325,3 +325,27 @@ func TestMapAntigravityModel_WildcardTargetEqualsRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestMapAntigravityModelUsesSafeDiscoveredInventory(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformAntigravity,
+		Credentials: map[string]any{},
+		Extra: map[string]any{UpstreamModelInventoryExtraKey: UpstreamModelInventorySnapshot{
+			Source: "upstream",
+			Models: []string{
+				"gemini-4-flash",
+				"gemini-pro-agent",
+				"gemini-3-flash-agentsvg",
+				"chat_20706",
+				"tab_jump_flash_lite_preview",
+			},
+		}},
+	}
+
+	require.Equal(t, "gemini-4-flash", mapAntigravityModel(account, "gemini-4-flash"))
+	require.Equal(t, "gemini-pro-agent", mapAntigravityModel(account, "gemini-3.1-pro-high"))
+	require.Equal(t, "gemini-pro-agent", mapAntigravityModel(account, "gemini-pro-agent"), "existing internal alias remains routable but is suppressed from the public catalog")
+	for _, internalID := range []string{"gemini-3-flash-agentsvg", "chat_20706", "tab_jump_flash_lite_preview"} {
+		require.Empty(t, mapAntigravityModel(account, internalID), "internal ID %q must not become a public route", internalID)
+	}
+}
