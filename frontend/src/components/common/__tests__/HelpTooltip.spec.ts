@@ -11,6 +11,14 @@ function getTooltipElement(): HTMLDivElement {
   return tooltip
 }
 
+function getDialogElement(): HTMLDivElement {
+  const dialog = document.body.querySelector('[role="dialog"]')
+  if (!(dialog instanceof HTMLDivElement)) {
+    throw new Error('dialog element not found')
+  }
+  return dialog
+}
+
 describe('HelpTooltip', () => {
   afterEach(() => {
     document.body.innerHTML = ''
@@ -74,6 +82,97 @@ describe('HelpTooltip', () => {
     document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()
     expect(tooltip.style.display).toBe('none')
+
+    wrapper.unmount()
+  })
+
+  it('keeps interactive content open across the trigger-to-panel hover path', async () => {
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { interactive: true, ariaLabel: 'Quota help' },
+      slots: {
+        trigger: '?',
+        default: '<a href="#docs">Official Docs</a>',
+      },
+    })
+
+    const trigger = wrapper.get('button[aria-label="Quota help"]')
+    const dialog = getDialogElement()
+
+    await trigger.trigger('mouseenter')
+    expect(dialog.style.display).not.toBe('none')
+
+    trigger.element.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: dialog }))
+    await nextTick()
+    expect(dialog.style.display).not.toBe('none')
+
+    dialog.dispatchEvent(new MouseEvent('mouseenter'))
+    dialog.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: document.body }))
+    await nextTick()
+    expect(dialog.style.display).toBe('none')
+
+    wrapper.unmount()
+  })
+
+  it('supports focus, links, Escape, and outside-click dismissal', async () => {
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { interactive: true, ariaLabel: 'Quota help' },
+      slots: {
+        trigger: '?',
+        default: '<a href="#docs">Official Docs</a>',
+      },
+    })
+
+    const trigger = wrapper.get<HTMLButtonElement>('button[aria-label="Quota help"]')
+    const dialog = getDialogElement()
+    const link = dialog.querySelector('a')
+    if (!(link instanceof HTMLAnchorElement)) throw new Error('docs link not found')
+
+    trigger.element.focus()
+    await nextTick()
+    expect(dialog.style.display).not.toBe('none')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+
+    await trigger.trigger('keydown', { key: 'Tab' })
+    await nextTick()
+    expect(document.activeElement).toBe(link)
+    expect(dialog.style.display).not.toBe('none')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(dialog.style.display).toBe('none')
+    expect(document.activeElement).toBe(trigger.element)
+
+    await trigger.trigger('click')
+    const clicked = vi.fn((event: Event) => event.preventDefault())
+    link.addEventListener('click', clicked)
+    link.click()
+    expect(clicked).toHaveBeenCalledOnce()
+    expect(dialog.style.display).not.toBe('none')
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+    expect(dialog.style.display).toBe('none')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the first click open after focus and toggles closed on the second click', async () => {
+    const wrapper = mount(HelpTooltip, {
+      attachTo: document.body,
+      props: { interactive: true, ariaLabel: 'Quota help' },
+    })
+
+    const trigger = wrapper.get<HTMLButtonElement>('button[aria-label="Quota help"]')
+    const dialog = getDialogElement()
+
+    trigger.element.focus()
+    await trigger.trigger('click')
+    expect(dialog.style.display).not.toBe('none')
+
+    await trigger.trigger('click')
+    expect(dialog.style.display).toBe('none')
 
     wrapper.unmount()
   })

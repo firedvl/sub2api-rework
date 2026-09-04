@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { Account } from '@/types'
 
 const { getUsage } = vi.hoisted(() => ({
@@ -104,6 +105,33 @@ describe('AccountUsageCell', () => {
         dispatchEvent: vi.fn(),
       }))
     })
+  })
+
+  it('uses an interactive Gemini quota popover with the official docs link', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      attachTo: document.body,
+      props: {
+        account: makeAccount({
+          platform: 'gemini',
+          type: 'oauth',
+          credentials: { oauth_type: 'google_one', tier_id: 'google_ai_pro' },
+        }),
+      },
+      global: { stubs: { UsageProgressBar: true, AccountQuotaInfo: true } },
+    })
+
+    await flushPromises()
+
+    const help = wrapper.getComponent(HelpTooltip)
+    expect(help.props('interactive')).toBe(true)
+    await help.get('button').trigger('click')
+
+    const link = document.body.querySelector('[role="dialog"] a')
+    expect(link).toBeInstanceOf(HTMLAnchorElement)
+    expect(link?.getAttribute('href')).toBe('https://developers.google.com/gemini-code-assist/resources/quotas')
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
+
+    wrapper.unmount()
   })
 
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {

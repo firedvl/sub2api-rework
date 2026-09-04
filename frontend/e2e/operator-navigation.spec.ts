@@ -709,6 +709,46 @@ test.describe('operator console navigation', () => {
     await expect(capacityDetails).toHaveCount(6)
   })
 
+  test('keeps Google One quota help interactive across pointer, keyboard, and mobile input', async ({ page }) => {
+    await page.context().route('https://developers.google.com/**', (route) => route.fulfill({
+      contentType: 'text/html',
+      body: '<title>Quota docs fixture</title>',
+    }))
+    await page.goto('/admin/accounts')
+    await page.getByRole('tab', { name: 'Technical' }).click()
+
+    const trigger = page.getByRole('button', { name: 'Gemini Quota & Limit Policy (Reference)' }).last()
+    const dialog = page.getByRole('dialog', { name: 'Gemini Quota & Limit Policy (Reference)' })
+    await trigger.hover()
+    await expect(dialog).toBeVisible()
+    await dialog.hover()
+    await expect(dialog).toBeVisible()
+
+    await page.mouse.click(4, 4)
+    await expect(dialog).toBeHidden()
+    await trigger.focus()
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press('Tab')
+    const docs = dialog.getByRole('link', { name: 'Official Docs' })
+    await expect(docs).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await expect(trigger).toBeFocused()
+
+    await trigger.click()
+    const popupPromise = page.waitForEvent('popup')
+    await docs.click()
+    const popup = await popupPromise
+    await expect(popup).toHaveURL('https://developers.google.com/gemini-code-assist/resources/quotas')
+    await popup.close()
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.mouse.click(4, 4)
+    await trigger.click()
+    await expect(dialog).toBeVisible()
+  })
+
   test('updates Accounts after manual and auto refresh without reloading the route', async ({ page }) => {
     test.setTimeout(60_000)
     const state = await installMutableAccountRefreshMock(page)
@@ -1073,7 +1113,7 @@ test.describe('operator console navigation', () => {
     const longTerm = page.getByTestId('stats-long-term-capacity')
     await expect(shortTerm).toContainText('5h / short-term capacity')
     await expect(longTerm).toContainText('Weekly / total capacity')
-    await expect(shortTerm.getByTestId('short-provider-openai')).toContainText('68%')
+    await expect(shortTerm.getByTestId('short-provider-openai')).toContainText('52%')
     await expect(longTerm.getByTestId('long-provider-openai')).toContainText('52%')
     await expect(longTerm.getByTestId('long-provider-anthropic')).toContainText('4%')
     await expect(shortTerm.getByTestId('short-provider-gemini')).toContainText('0%')
