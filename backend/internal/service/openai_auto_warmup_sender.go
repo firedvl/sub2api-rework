@@ -11,11 +11,13 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 const (
 	openAIAutoWarmupPrompt         = "Reply with OK only."
-	openAIAutoWarmupMaxOutput      = 4
+	openAIAutoWarmupInput          = "OK"
+	openAIAutoWarmupPreferredModel = "gpt-5.4-mini"
 	openAIAutoWarmupRequestLimit   = 1 << 20
 	openAIAutoWarmupRequestTimeout = 15 * time.Second
 )
@@ -37,15 +39,16 @@ func (s *OpenAIGatewayService) SendOpenAIAutoWarmup(ctx context.Context, account
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(map[string]any{
-		"model":               model,
-		"input":               openAIAutoWarmupPrompt,
-		"tools":               []any{},
-		"parallel_tool_calls": false,
-		"store":               false,
-		"max_output_tokens":   openAIAutoWarmupMaxOutput,
-		"stream":              false,
-	})
+	payload := map[string]any{
+		"model":        model,
+		"instructions": openAIAutoWarmupPrompt,
+		"input":        openAIAutoWarmupInput,
+	}
+	transform := applyCodexOAuthTransformWithOptions(payload, codexOAuthTransformOptions{SkipDefaultInstructions: true})
+	if transform.Error != nil {
+		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_AUTO_WARMUP_REQUEST_FAILED", "normalize request: %v", transform.Error)
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_AUTO_WARMUP_REQUEST_FAILED", "encode request: %v", err)
 	}
@@ -71,8 +74,8 @@ func (s *OpenAIGatewayService) SendOpenAIAutoWarmup(ctx context.Context, account
 	}
 	req.Host = "chatgpt.com"
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("OpenAI-Beta", "responses=experimental")
+	req.Header.Set("Accept", "text/event-stream")
+	ensureCodexIdentityHeaders(req.Header)
 	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 
 	proxyURL := ""
@@ -100,18 +103,28 @@ func (s *OpenAIGatewayService) SendOpenAIAutoWarmup(ctx context.Context, account
 		s.updateCodexUsageSnapshot(requestCtx, account.ID, snapshot)
 	}
 	result := &OpenAIAutoWarmupResult{
-		Model: model, RequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
-		ResponseID: extractOpenAIResponseIDFromJSONBytes(responseBody), Latency: latency,
-	}
-	if usage, ok := extractOpenAIUsageFromJSONBytes(responseBody); ok {
-		result.Usage = usage
+		Model: model, RequestID: strings.TrimSpace(resp.Header.Get("x-request-id")), Latency: latency,
+		UpstreamStatus: resp.StatusCode,
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		result.UpstreamErrorCode = truncateString(strings.TrimSpace(extractUpstreamErrorCode(responseBody)), 120)
+		result.UpstreamErrorMessage = truncateString(logredact.RedactText(sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))), 512)
+		if result.UpstreamErrorMessage == "" {
+			result.UpstreamErrorMessage = http.StatusText(resp.StatusCode)
+		}
 		s.handleOpenAIAccountUpstreamError(requestCtx, account, resp.StatusCode, resp.Header, responseBody, model)
-		return result, infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_UPSTREAM_REJECTED", "OpenAI warm-up request returned status %d", resp.StatusCode)
+		return result, infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_UPSTREAM_REJECTED", "OpenAI warm-up request returned status %d: %s", resp.StatusCode, result.UpstreamErrorMessage)
 	}
-	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		return result, infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_RESPONSE_UNEXPECTED", "OpenAI warm-up returned an unexpected streaming response")
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return result, infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_RESPONSE_UNEXPECTED", "OpenAI warm-up returned a non-streaming response")
+	}
+	finalResponse, ok := extractCodexFinalResponse(string(responseBody))
+	if !ok {
+		return result, infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_RESPONSE_UNEXPECTED", "OpenAI warm-up stream did not contain a completed response")
+	}
+	result.ResponseID = extractOpenAIResponseIDFromJSONBytes(finalResponse)
+	if usage, ok := extractOpenAIUsageFromJSONBytes(finalResponse); ok {
+		result.Usage = usage
 	}
 	return result, nil
 }
@@ -158,16 +171,26 @@ func (s *OpenAIGatewayService) resolveOpenAIAutoWarmupModel(ctx context.Context,
 	}
 	var envelope struct {
 		Models []struct {
-			Slug string `json:"slug"`
+			Slug           string `json:"slug"`
+			SupportedInAPI *bool  `json:"supported_in_api"`
 		} `json:"models"`
 	}
 	if manifest == nil || json.Unmarshal(manifest.Body, &envelope) != nil {
 		return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "Codex models manifest is invalid")
 	}
+	models := make([]string, 0, len(envelope.Models))
 	for _, model := range envelope.Models {
-		if slug := strings.TrimSpace(model.Slug); slug != "" {
+		slug := strings.TrimSpace(model.Slug)
+		if slug == "" || model.SupportedInAPI != nil && !*model.SupportedInAPI {
+			continue
+		}
+		if slug == openAIAutoWarmupPreferredModel {
 			return slug, nil
 		}
+		models = append(models, slug)
+	}
+	if len(models) > 0 {
+		return models[0], nil
 	}
 	return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE", "Codex models manifest has no usable model")
 }
