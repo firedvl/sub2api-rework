@@ -26,6 +26,8 @@ func TestReleaseManifestFromEnvironment(t *testing.T) {
 	require.Equal(t, metadata.UpstreamBaseline, manifest.UpstreamVersion)
 	require.Equal(t, "Qualified against upstream "+metadata.UpstreamBaseline+" (upstream_baseline_sha="+metadata.UpstreamBaselineSHA+").", manifest.ReleaseNotes.Upstream)
 	require.Equal(t, metadata.MinimumUpdaterVersion, manifest.MinimumUpdaterVersion)
+	require.Equal(t, metadata.MigrationMin, manifest.MigrationMin)
+	require.Equal(t, metadata.MigrationMax, manifest.MigrationMax)
 }
 
 const trustedRepository = "ghcr.io/firedvl/sub2api-rework"
