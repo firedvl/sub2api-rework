@@ -333,7 +333,7 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 		functionConfig = make(map[string]any)
 		toolConfig["functionCallingConfig"] = functionConfig
 	}
-	if strings.TrimSpace(fmt.Sprint(functionConfig["mode"])) == "" {
+	if mode, ok := functionConfig["mode"]; !ok || strings.TrimSpace(fmt.Sprint(mode)) == "" {
 		functionConfig["mode"] = "VALIDATED"
 	}
 	toolConfig["includeServerSideToolInvocations"] = true

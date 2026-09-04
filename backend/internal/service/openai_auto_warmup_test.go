@@ -600,16 +600,15 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_request","message":"unsupported warm-up request contract"}}`)),
 			}, nil
 		}
+		headers := http.Header{"Content-Type": []string{"text/event-stream"}}
+		headers.Set("X-Request-Id", "req-warm")
+		headers.Set("x-codex-primary-used-percent", "12")
+		headers.Set("x-codex-primary-reset-after-seconds", "18000")
+		headers.Set("x-codex-primary-window-minutes", "300")
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header: http.Header{
-				"Content-Type":                        []string{"text/event-stream"},
-				"X-Request-Id":                        []string{"req-warm"},
-				"x-codex-primary-used-percent":        []string{"12"},
-				"x-codex-primary-reset-after-seconds": []string{"18000"},
-				"x-codex-primary-window-minutes":      []string{"300"},
-			},
-			Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-warm\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n")),
+			Header:     headers,
+			Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-warm\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n")),
 		}, nil
 	}}
 	settingService, _ := newAutoWarmupTestSettingService(t, true)
