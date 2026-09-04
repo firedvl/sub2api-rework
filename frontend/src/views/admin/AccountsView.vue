@@ -293,6 +293,7 @@
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
           @edit-selected="openBulkEditSelected"
           @edit-filtered="openBulkEditFiltered"
+          @edit-auto-warmup-eligible="openBulkEditAutoWarmupEligible"
           @clear="clearSelection"
           @select-page="selectPage"
           @select-all-results="handleSelectAllResults"
@@ -396,8 +397,20 @@
             <AccountCapacityCell :account="row" />
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <span
+                v-if="isOpenAIAutoWarmupConfigurable(row)"
+                :class="[
+                  'inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium',
+                  row.extra?.auto_warmup_enabled
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+                ]"
+                data-testid="account-auto-warmup-status"
+              >
+                {{ t(row.extra?.auto_warmup_enabled ? 'admin.accounts.autoWarmup.on' : 'admin.accounts.autoWarmup.off') }}
+              </span>
             </div>
           </template>
           <template #cell-schedulable="{ row }">
@@ -605,6 +618,7 @@
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
       :target="bulkEditTarget ?? undefined"
+      :global-auto-warmup-enabled="globalAutoWarmupEnabled"
       :proxies="proxies"
       :groups="groups"
       @close="showBulkEdit = false"
@@ -675,6 +689,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
+import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
@@ -683,7 +698,11 @@ const authStore = useAuthStore()
 const route = inject(routeLocationKey, null)
 
 type AccountView = 'capacity' | 'technical'
-const accountView = ref<AccountView>('capacity')
+const routeAccountView = Array.isArray(route?.query.view) ? route.query.view[0] : route?.query.view
+const accountView = ref<AccountView>(routeAccountView === 'technical' ? 'technical' : 'capacity')
+const routeAutoWarmup = Array.isArray(route?.query.auto_warmup)
+  ? route.query.auto_warmup[0]
+  : route?.query.auto_warmup
 type CapacitySort = 'capacity' | 'name' | 'status'
 const routeOperatorStatus = Array.isArray(route?.query.operator_status)
   ? route.query.operator_status[0]
@@ -746,6 +765,7 @@ type AccountBulkEditTarget =
         group?: string
         search?: string
         privacy_mode?: string
+        auto_warmup?: string
         sort_by?: string
         sort_order?: AccountSortOrder
       }
@@ -801,6 +821,7 @@ const menuTrigger = ref<HTMLElement | null>(null)
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
+const globalAutoWarmupEnabled = ref(false)
 const upstreamBillingNow = ref(Date.now())
 const upstreamBillingRateETag = ref<string | null>(null)
 const upstreamBillingRateRefreshing = ref(false)
@@ -1274,6 +1295,7 @@ const {
     type: '',
     status: '',
     privacy_mode: '',
+    auto_warmup: ['enabled', 'disabled'].includes(String(routeAutoWarmup)) ? String(routeAutoWarmup) : '',
     group: '',
     search: '',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
@@ -1347,6 +1369,7 @@ const buildFleetFilters = () => ({
   status: params.status || '',
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
+  auto_warmup: params.auto_warmup || '',
   search: params.search || ''
 })
 
@@ -1480,6 +1503,7 @@ const buildUpstreamBillingRateFilters = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    auto_warmup: typeof rawParams.auto_warmup === 'string' ? rawParams.auto_warmup : '',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
   }
@@ -1752,6 +1776,7 @@ const refreshAccountsIncrementally = async () => {
         type?: string
         status?: string
         privacy_mode?: string
+        auto_warmup?: string
         group?: string
         search?: string
         sort_by?: string
@@ -2435,6 +2460,7 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    auto_warmup: typeof rawParams.auto_warmup === 'string' ? rawParams.auto_warmup : '',
     sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
     sort_order: sortOrder
   }
@@ -2496,6 +2522,19 @@ const openBulkEditFiltered = async () => {
   showBulkEdit.value = true
 }
 
+const openBulkEditAutoWarmupEligible = async () => {
+  const filters = { ...buildBulkEditFilterSnapshot(), auto_warmup: 'eligible' }
+  const preview = await adminAPI.accounts.list(1, 1, filters)
+  bulkEditTarget.value = {
+    mode: 'filtered',
+    filters,
+    previewCount: preview.total,
+    selectedPlatforms: ['openai'],
+    selectedTypes: ['oauth']
+  }
+  showBulkEdit.value = true
+}
+
 const handleBulkUpdated = () => {
   showBulkEdit.value = false
   bulkEditTarget.value = null
@@ -2515,6 +2554,7 @@ const buildAccountQueryFilters = () => ({
   status: params.status || '',
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
+  auto_warmup: params.auto_warmup || '',
   search: params.search || '',
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
@@ -2523,6 +2563,12 @@ const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
+  if (filters.auto_warmup) {
+    if (!isOpenAIAutoWarmupConfigurable(account)) return false
+    const enabled = account.extra?.auto_warmup_enabled === true
+    if (filters.auto_warmup === 'enabled' && !enabled) return false
+    if (filters.auto_warmup === 'disabled' && enabled) return false
+  }
   if (filters.status) {
     const now = Date.now()
     const rateLimitResetAt = account.rate_limit_reset_at ? new Date(account.rate_limit_reset_at).getTime() : Number.NaN
@@ -2942,9 +2988,11 @@ onMounted(async () => {
 
   load()
   loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
+  const settingsRequest = adminAPI.settings?.getSettings?.() ?? Promise.resolve(null)
+  const [proxiesResult, groupsResult, settingsResult] = await Promise.allSettled([
     adminAPI.proxies.getAll(),
-    adminAPI.groups.getAll()
+    adminAPI.groups.getAll(),
+    settingsRequest
   ])
   if (proxiesResult.status === 'fulfilled') {
     proxies.value = proxiesResult.value
@@ -2955,6 +3003,13 @@ onMounted(async () => {
     groups.value = groupsResult.value
   } else {
     console.error('Failed to load groups:', groupsResult.reason)
+  }
+  if (settingsResult.status === 'fulfilled') {
+    if (settingsResult.value) {
+      globalAutoWarmupEnabled.value = settingsResult.value.openai_auto_warmup_enabled === true
+    }
+  } else {
+    console.error('Failed to load Auto Warm-up setting:', settingsResult.reason)
   }
   window.addEventListener('scroll', handleScroll, true)
   window.addEventListener('resize', handleViewportResize)

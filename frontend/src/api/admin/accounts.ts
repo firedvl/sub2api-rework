@@ -47,6 +47,7 @@ export async function list(
     group?: string
     search?: string
     privacy_mode?: string
+    auto_warmup?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string
@@ -89,6 +90,7 @@ export async function getUpstreamBillingRatesWithEtag(
     group?: string
     search?: string
     privacy_mode?: string
+    auto_warmup?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -122,6 +124,7 @@ export async function listWithEtag(
     group?: string
     search?: string
     privacy_mode?: string
+    auto_warmup?: string
     lite?: string
     include_scheduler_score?: string
     sort_by?: string
@@ -513,6 +516,9 @@ export async function bulkUpdate(
   success_ids?: number[]
   failed_ids?: number[]
   long_context_inherited_count?: number
+  auto_warmup_updated_count?: number
+  auto_warmup_skipped_count?: number
+  auto_warmup_skipped_ids?: number[]
   results: Array<{ account_id: number; success: boolean; error?: string }>
   }> {
   const payload = Array.isArray(accountIdsOrPayload)
@@ -527,6 +533,9 @@ export async function bulkUpdate(
     success_ids?: number[]
     failed_ids?: number[]
     long_context_inherited_count?: number
+    auto_warmup_updated_count?: number
+    auto_warmup_skipped_count?: number
+    auto_warmup_skipped_ids?: number[]
     results: Array<{ account_id: number; success: boolean; error?: string }>
   }>('/admin/accounts/bulk-update', payload)
   return data

@@ -51,6 +51,12 @@ func ResolveOpenAIAutoResetCreditConfig(account *Account) OpenAIAutoResetCreditC
 }
 
 func isOpenAIAutoResetCreditAccount(account *Account) bool {
+	return IsOpenAIAutoWarmupConfigurable(account)
+}
+
+// IsOpenAIAutoWarmupConfigurable matches the account type exposed by the
+// individual Auto Warm-up editor: OpenAI OAuth parent accounts only.
+func IsOpenAIAutoWarmupConfigurable(account *Account) bool {
 	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow()
 }
 

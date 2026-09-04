@@ -5054,6 +5054,20 @@
               </div>
 
               <div
+                v-if="form.openai_auto_warmup_enabled && autoWarmupEnabledAccountCount === 0"
+                class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+                data-testid="openai-auto-warmup-zero-accounts"
+              >
+                {{ t("admin.settings.openaiAutoWarmup.zeroAccounts") }}
+                <a
+                  class="ml-1 font-medium underline"
+                  href="/admin/accounts?view=technical&auto_warmup=disabled"
+                >
+                  {{ t("admin.settings.openaiAutoWarmup.manageAccounts") }}
+                </a>
+              </div>
+
+              <div
                 v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
               >
@@ -8933,6 +8947,7 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const autoWarmupEnabledAccountCount = ref<number | null>(null);
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -11154,6 +11169,17 @@ async function loadSettings() {
   }
 }
 
+async function loadAutoWarmupEnabledAccountCount() {
+  try {
+    const result = await adminAPI.accounts.list(1, 1, {
+      auto_warmup: "enabled",
+    });
+    autoWarmupEnabledAccountCount.value = result.total;
+  } catch (error) {
+    console.error("Failed to load Auto Warm-up account count:", error);
+  }
+}
+
 async function loadSubscriptionGroups() {
   try {
     const groups = await adminAPI.groups.getAll();
@@ -12766,7 +12792,12 @@ async function handleDeleteProvider() {
 }
 
 onMounted(() => {
+  const requestedTab = new URLSearchParams(window.location.search).get("tab");
+  if (settingsTabs.some((tab) => tab.key === requestedTab)) {
+    activeTab.value = requestedTab as SettingsTab;
+  }
   loadSettings();
+  loadAutoWarmupEnabledAccountCount();
   loadSubscriptionGroups();
   loadAdminApiKey();
   loadUpstreamBillingProbeSettings();

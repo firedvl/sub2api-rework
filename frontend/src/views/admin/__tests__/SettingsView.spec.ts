@@ -34,6 +34,7 @@ const {
   updateUpstreamBillingProbeSettings,
   getOllamaCloudUsageSettings,
   updateOllamaCloudUsageSettings,
+  listAccounts,
   getGroups,
   listProxies,
   getProviders,
@@ -75,6 +76,13 @@ const {
     debounce_minutes: 1,
   }),
   updateOllamaCloudUsageSettings: vi.fn().mockImplementation(async (payload) => payload),
+  listAccounts: vi.fn().mockResolvedValue({
+    items: [],
+    total: 1,
+    page: 1,
+    page_size: 1,
+    pages: 1,
+  }),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -107,6 +115,7 @@ vi.mock("@/api", () => ({
       getBetaPolicySettings,
     },
     accounts: {
+      list: listAccounts,
       getUpstreamBillingProbeSettings,
       updateUpstreamBillingProbeSettings,
       getOllamaCloudUsageSettings,
@@ -1398,6 +1407,60 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({ openai_auto_warmup_enabled: true }),
     );
+  });
+
+  it("warns when Auto Warm-up is global-only and links to disabled eligible accounts", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_auto_warmup_enabled: true,
+    });
+    listAccounts.mockClear().mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 1,
+      pages: 0,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const notice = wrapper.get('[data-testid="openai-auto-warmup-zero-accounts"]');
+    expect(notice.text()).toContain("admin.settings.openaiAutoWarmup.zeroAccounts");
+    expect(notice.get("a").attributes("href")).toBe(
+      "/admin/accounts?view=technical&auto_warmup=disabled",
+    );
+    expect(listAccounts).toHaveBeenCalledWith(1, 1, { auto_warmup: "enabled" });
+  });
+
+  it("hides the global-only warning when an eligible account is enabled", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_auto_warmup_enabled: true,
+    });
+    listAccounts.mockClear().mockResolvedValueOnce({
+      items: [],
+      total: 1,
+      page: 1,
+      page_size: 1,
+      pages: 1,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(wrapper.find('[data-testid="openai-auto-warmup-zero-accounts"]').exists()).toBe(false);
+  });
+
+  it("opens the Gateway tab from the query link", async () => {
+    window.history.replaceState({}, "", "/admin/settings?tab=gateway");
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get("#settings-tab-gateway").attributes("aria-selected")).toBe("true");
+    window.history.replaceState({}, "", "/");
   });
 
   it("summarizes target and other-model actions, then switches to all models", async () => {

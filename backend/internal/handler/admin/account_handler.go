@@ -168,6 +168,7 @@ type BulkUpdateAccountsRequest struct {
 	Credentials             map[string]any            `json:"credentials"`
 	Extra                   map[string]any            `json:"extra"`
 	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
+	AutoWarmupEnabled       *bool                     `json:"auto_warmup_enabled"`
 	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
@@ -178,6 +179,7 @@ type BulkUpdateAccountFilters struct {
 	Group       string `json:"group"`
 	Search      string `json:"search"`
 	PrivacyMode string `json:"privacy_mode"`
+	AutoWarmup  string `json:"auto_warmup"`
 }
 
 // CheckMixedChannelRequest represents check mixed channel risk request
@@ -504,6 +506,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	status := c.Query("status")
 	search := c.Query("search")
 	privacyMode := strings.TrimSpace(c.Query("privacy_mode"))
+	autoWarmup := strings.TrimSpace(c.Query("auto_warmup"))
+	if !isValidAutoWarmupFilter(autoWarmup) {
+		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_AUTO_WARMUP_FILTER", "invalid Auto Warm-up filter"))
+		return
+	}
 	sortBy := c.DefaultQuery("sort_by", "name")
 	sortOrder := c.DefaultQuery("sort_order", "asc")
 	// 标准化和验证 search 参数
@@ -533,7 +540,14 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	var accounts []service.Account
+	var total int64
+	var err error
+	if autoWarmup != "" {
+		accounts, total, err = h.adminService.ListAccountsWithAutoWarmupFilter(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, autoWarmup, sortBy, sortOrder)
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -2081,6 +2095,13 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.Filters != nil {
+		req.Filters.AutoWarmup = strings.TrimSpace(req.Filters.AutoWarmup)
+		if !isValidAutoWarmupFilter(req.Filters.AutoWarmup) {
+			response.ErrorFrom(c, infraerrors.BadRequest("INVALID_AUTO_WARMUP_FILTER", "invalid Auto Warm-up filter"))
+			return
+		}
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -2106,7 +2127,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.GroupIDs != nil ||
 		len(req.Credentials) > 0 ||
 		len(req.Extra) > 0 ||
-		req.ProbeEnabled != nil
+		req.ProbeEnabled != nil ||
+		req.AutoWarmupEnabled != nil
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
@@ -2128,6 +2150,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		ProbeEnabled:          req.ProbeEnabled,
+		AutoWarmupEnabled:     req.AutoWarmupEnabled,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
@@ -2152,6 +2175,10 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func isValidAutoWarmupFilter(value string) bool {
+	return value == "" || value == "eligible" || value == "enabled" || value == "disabled"
+}
+
 func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *service.BulkUpdateAccountFilters {
 	if filters == nil {
 		return nil
@@ -2163,6 +2190,7 @@ func toServiceBulkUpdateAccountFilters(filters *BulkUpdateAccountFilters) *servi
 		Group:       filters.Group,
 		Search:      filters.Search,
 		PrivacyMode: filters.PrivacyMode,
+		AutoWarmup:  filters.AutoWarmup,
 	}
 }
 

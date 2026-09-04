@@ -432,7 +432,9 @@ export default {
       },
       openaiAutoWarmup: {
         title: 'OpenAI 自动预热',
-        description: 'OpenAI 配额窗口恢复后，为单独开启的 OAuth 账号发送一个小请求；默认关闭。'
+        description: 'OpenAI 配额窗口恢复后，为单独开启的 OAuth 账号发送一个小请求；默认关闭。',
+        zeroAccounts: '自动预热已全局开启，但没有符合条件的 OpenAI OAuth 账号启用该功能。',
+        manageAccounts: '管理账号'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',

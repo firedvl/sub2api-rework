@@ -439,7 +439,9 @@ export default {
       },
       openaiAutoWarmup: {
         title: 'OpenAI automatic warm-up',
-        description: 'After a recovered OpenAI quota window, send a small request for individually enabled OAuth accounts. Disabled by default.'
+        description: 'After a recovered OpenAI quota window, send a small request for individually enabled OAuth accounts. Disabled by default.',
+        zeroAccounts: 'Auto Warm-up is enabled globally, but no eligible OpenAI OAuth accounts are enabled.',
+        manageAccounts: 'Manage accounts'
       },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',

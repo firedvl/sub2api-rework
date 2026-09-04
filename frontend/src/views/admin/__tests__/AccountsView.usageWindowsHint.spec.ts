@@ -244,6 +244,7 @@ describe('admin AccountsView usage windows hint', () => {
       status: '',
       group: '',
       privacy_mode: '',
+      auto_warmup: '',
       search: '',
     })
     expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.any(Object))

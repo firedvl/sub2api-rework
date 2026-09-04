@@ -109,6 +109,79 @@ describe('BulkEditAccountModal', () => {
     )
   })
 
+  it('自动预热默认不修改，开启和关闭使用顶层字段', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth'],
+      globalAutoWarmupEnabled: true
+    })
+
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      status: 'active'
+    })
+
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+    await wrapper.get('[data-testid="bulk-edit-auto-warmup-select"]').setValue('enabled')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      status: 'active',
+      auto_warmup_enabled: true
+    })
+
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+    await wrapper.get('[data-testid="bulk-edit-auto-warmup-select"]').setValue('disabled')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      status: 'active',
+      auto_warmup_enabled: false
+    })
+  })
+
+  it('全局开关关闭时允许配置并显示导航提示', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth'],
+      globalAutoWarmupEnabled: false
+    })
+
+    await wrapper.get('[data-testid="bulk-edit-auto-warmup-select"]').setValue('enabled')
+
+    const warning = wrapper.get('[data-testid="bulk-edit-auto-warmup-global-off"]')
+    expect(warning.text()).toContain('admin.accounts.bulkEdit.autoWarmupGlobalOff')
+    expect(warning.get('a').attributes('href')).toBe('/admin/settings?tab=gateway')
+  })
+
+  it('自动预热结果显示更新和跳过数量', async () => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockResolvedValueOnce({
+      success: 2,
+      failed: 0,
+      auto_warmup_updated_count: 1,
+      auto_warmup_skipped_count: 1,
+      results: []
+    } as any)
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai', 'anthropic'],
+      selectedTypes: ['oauth'],
+      globalAutoWarmupEnabled: true
+    })
+
+    await wrapper.get('[data-testid="bulk-edit-auto-warmup-select"]').setValue('enabled')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.bulkEdit.autoWarmupResult')
+    expect(translate).toHaveBeenCalledWith('admin.accounts.bulkEdit.autoWarmupResult', {
+      success: 2,
+      updated: 1,
+      skipped: 1
+    })
+  })
+
   it('后端拒绝修改同步账号倍率时展示专用错误', async () => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockRejectedValueOnce({
       status: 409,
