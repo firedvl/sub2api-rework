@@ -21,6 +21,31 @@
         </p>
       </div>
 
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-auto-warmup">
+        <label id="bulk-edit-auto-warmup-label" class="input-label">
+          {{ t('admin.accounts.autoWarmup.title') }}
+        </label>
+        <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.bulkEdit.autoWarmupHint') }}
+        </p>
+        <Select
+          v-model="autoWarmupMode"
+          :options="autoWarmupOptions"
+          data-testid="bulk-edit-auto-warmup-select"
+          aria-labelledby="bulk-edit-auto-warmup-label"
+        />
+        <div
+          v-if="autoWarmupMode === 'enabled' && !globalAutoWarmupEnabled"
+          class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
+          data-testid="bulk-edit-auto-warmup-global-off"
+        >
+          {{ t('admin.accounts.bulkEdit.autoWarmupGlobalOff') }}
+          <a class="ml-1 font-medium underline" href="/admin/settings?tab=gateway">
+            {{ t('admin.accounts.bulkEdit.openGatewaySettings') }}
+          </a>
+        </div>
+      </div>
+
       <!-- Mixed platform warning -->
       <div v-if="isMixedPlatform" class="operator-callout operator-callout-warning rounded-lg bg-amber-50 p-4 dark:bg-amber-900/20">
         <p class="text-sm text-amber-700 dark:text-amber-400">
@@ -1530,6 +1555,7 @@ interface Props {
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
+  globalAutoWarmupEnabled?: boolean
 }
 
 const props = defineProps<Props>()
@@ -1540,6 +1566,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const globalAutoWarmupEnabled = computed(() => props.globalAutoWarmupEnabled === true)
 
 // Platform awareness
 const targetMode = computed(() => props.target?.mode ?? 'selected')
@@ -1670,6 +1697,13 @@ const enableCodexCLIOnlyAppServer = ref(false)
 const enableOpenAICompactMode = ref(false)
 const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
+type AutoWarmupMode = 'unchanged' | 'enabled' | 'disabled'
+const autoWarmupMode = ref<AutoWarmupMode>('unchanged')
+const autoWarmupOptions = computed(() => [
+  { value: 'unchanged', label: t('admin.accounts.bulkEdit.noChange') },
+  { value: 'enabled', label: t('admin.accounts.bulkEdit.enable') },
+  { value: 'disabled', label: t('admin.accounts.bulkEdit.disable') }
+])
 
 // State - field values
 const submitting = ref(false)
@@ -1939,6 +1973,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     updates.proxy_id = proxyId.value === null ? 0 : proxyId.value
+  }
+
+  if (autoWarmupMode.value !== 'unchanged') {
+    updates.auto_warmup_enabled = autoWarmupMode.value === 'enabled'
   }
 
   if (enableConcurrency.value) {
@@ -2226,6 +2264,7 @@ const handleSubmit = async () => {
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
     enableRpmLimit.value ||
+    autoWarmupMode.value !== 'unchanged' ||
     userMsgQueueMode.value !== null
 
   if (!hasAnyFieldEnabled) {
@@ -2287,8 +2326,18 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
     const success = res.success || 0
     const failed = res.failed || 0
     const inherited = res.long_context_inherited_count || 0
+    const warmupUpdated = res.auto_warmup_updated_count || 0
+    const warmupSkipped = res.auto_warmup_skipped_count || 0
 
-    if (success > 0 && failed === 0) {
+    if (autoWarmupMode.value !== 'unchanged' && failed === 0) {
+      const message = t('admin.accounts.bulkEdit.autoWarmupResult', {
+        success,
+        updated: warmupUpdated,
+        skipped: warmupSkipped
+      })
+      if (success > 0 || warmupUpdated > 0) appStore.showSuccess(message)
+      else appStore.showInfo(message)
+    } else if (success > 0 && failed === 0) {
       if (inherited > 0) {
         appStore.showSuccess(t('admin.accounts.bulkEdit.successWithInherited', {
           count: success,
@@ -2306,7 +2355,7 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
       appStore.showError(t('admin.accounts.bulkEdit.failed'))
     }
 
-    if (success > 0) {
+    if (success > 0 || warmupSkipped > 0) {
       pendingUpdatesForConfirm.value = null
       emit('updated')
       handleClose()
@@ -2378,6 +2427,7 @@ watch(
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
+      autoWarmupMode.value = 'unchanged'
 
       // Reset all values
       baseUrl.value = ''

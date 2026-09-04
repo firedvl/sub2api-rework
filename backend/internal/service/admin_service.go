@@ -70,6 +70,7 @@ type AdminService interface {
 
 	// Account management
 	ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error)
+	ListAccountsWithAutoWarmupFilter(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup, sortBy, sortOrder string) ([]Account, int64, error)
 	// ListAccountsForSchedulerScoreFilter 返回符合过滤条件的全部账号（不分页），
 	// 作为账号列表页计算 OpenAI 调度分数的过滤范围池。
 	ListAccountsForSchedulerScoreFilter(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error)
@@ -432,20 +433,21 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	AccountIDs     []int64
-	Filters        *BulkUpdateAccountFilters
-	Name           string
-	ProxyID        *int64
-	Concurrency    *int
-	Priority       *int
-	RateMultiplier *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor     *int
-	Status         string
-	Schedulable    *bool
-	GroupIDs       *[]int64
-	Credentials    map[string]any
-	Extra          map[string]any
-	ProbeEnabled   *bool
+	AccountIDs        []int64
+	Filters           *BulkUpdateAccountFilters
+	Name              string
+	ProxyID           *int64
+	Concurrency       *int
+	Priority          *int
+	RateMultiplier    *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor        *int
+	Status            string
+	Schedulable       *bool
+	GroupIDs          *[]int64
+	Credentials       map[string]any
+	Extra             map[string]any
+	ProbeEnabled      *bool
+	AutoWarmupEnabled *bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -458,6 +460,7 @@ type BulkUpdateAccountFilters struct {
 	Group       string
 	Search      string
 	PrivacyMode string
+	AutoWarmup  string
 }
 
 // BulkUpdateAccountResult captures the result for a single account update.
@@ -504,6 +507,9 @@ type BulkUpdateAccountsResult struct {
 	FailedIDs                 []int64                   `json:"failed_ids"`
 	Results                   []BulkUpdateAccountResult `json:"results"`
 	LongContextInheritedCount int                       `json:"long_context_inherited_count,omitempty"`
+	AutoWarmupUpdatedCount    int                       `json:"auto_warmup_updated_count,omitempty"`
+	AutoWarmupSkippedCount    int                       `json:"auto_warmup_skipped_count,omitempty"`
+	AutoWarmupSkippedIDs      []int64                   `json:"auto_warmup_skipped_ids,omitempty"`
 }
 
 type CreateProxyInput struct {

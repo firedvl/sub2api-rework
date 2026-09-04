@@ -19,6 +19,8 @@ type accountRepoStubForBulkUpdate struct {
 	bulkUpdateErr       error
 	bulkUpdateIDs       []int64
 	bulkUpdateCalls     int
+	bulkUpdateIDCalls   [][]int64
+	bulkUpdates         []AccountBulkUpdate
 	lastBulkUpdate      AccountBulkUpdate
 	bindGroupErrByID    map[int64]error
 	bindGroupsCalls     []int64
@@ -56,10 +58,30 @@ func (s *accountRepoStubForBulkUpdate) BulkUpdate(_ context.Context, ids []int64
 	s.bulkUpdateCalls++
 	s.bulkUpdateIDs = append([]int64{}, ids...)
 	s.lastBulkUpdate = updates
+	s.bulkUpdateIDCalls = append(s.bulkUpdateIDCalls, append([]int64{}, ids...))
+	s.bulkUpdates = append(s.bulkUpdates, updates)
 	if s.bulkUpdateErr != nil {
 		return 0, s.bulkUpdateErr
 	}
 	return int64(len(ids)), nil
+}
+
+func (s *accountRepoStubForBulkUpdate) ListWithAutoWarmupFilter(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, _ string) ([]Account, *pagination.PaginationResult, error) {
+	s.listCalled = true
+	s.lastListParams = params
+	s.lastListFilters.platform = platform
+	s.lastListFilters.accountType = accountType
+	s.lastListFilters.status = status
+	s.lastListFilters.search = search
+	s.lastListFilters.groupID = groupID
+	s.lastListFilters.privacyMode = privacyMode
+	if s.listErr != nil {
+		return nil, nil, s.listErr
+	}
+	if s.listResult != nil {
+		return s.listData, s.listResult, nil
+	}
+	return s.listData, &pagination.PaginationResult{Total: int64(len(s.listData))}, nil
 }
 
 func requireApplicationErrorReason(t *testing.T, err error, reason string) {
@@ -164,6 +186,98 @@ func TestAdminService_BulkUpdateAccounts_AllSuccessIDs(t *testing.T) {
 	require.ElementsMatch(t, []int64{1, 2, 3}, result.SuccessIDs)
 	require.Empty(t, result.FailedIDs)
 	require.Len(t, result.Results, 3)
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoWarmupMixedEligibility(t *testing.T) {
+	parentID := int64(1)
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAIAutoWarmupStateExtraKey: map[string]any{"status": "succeeded"}}},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth},
+		{ID: 4, Platform: PlatformGemini, Type: AccountTypeOAuth},
+		{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	enabled := true
+	status := StatusActive
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:        []int64{1, 2, 3, 4, 5},
+		Status:            status,
+		AutoWarmupEnabled: &enabled,
+		Extra: map[string]any{
+			OpenAIAutoWarmupEnabledExtraKey: true,
+			OpenAIAutoWarmupStateExtraKey:   map[string]any{"status": "failed"},
+			"operator_note":                 "preserve",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 5, result.Success)
+	require.Equal(t, 1, result.AutoWarmupUpdatedCount)
+	require.Equal(t, 4, result.AutoWarmupSkippedCount)
+	require.ElementsMatch(t, []int64{2, 3, 4, 5}, result.AutoWarmupSkippedIDs)
+	require.Equal(t, 2, repo.bulkUpdateCalls)
+	require.Equal(t, []int64{1, 2, 3, 4, 5}, repo.bulkUpdateIDCalls[0])
+	require.Equal(t, []int64{1}, repo.bulkUpdateIDCalls[1])
+	require.Equal(t, "preserve", repo.bulkUpdates[0].Extra["operator_note"])
+	require.NotContains(t, repo.bulkUpdates[0].Extra, OpenAIAutoWarmupEnabledExtraKey)
+	require.NotContains(t, repo.bulkUpdates[0].Extra, OpenAIAutoWarmupStateExtraKey)
+	require.Equal(t, map[string]any{OpenAIAutoWarmupEnabledExtraKey: true}, repo.bulkUpdates[1].Extra)
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoWarmupNoChange(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{}
+	svc := &adminServiceImpl{accountRepo: repo}
+	schedulable := false
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:  []int64{1},
+		Schedulable: &schedulable,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, 1, repo.bulkUpdateCalls)
+	require.Empty(t, repo.lastBulkUpdate.Extra)
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoWarmupDisable(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+	}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	enabled := false
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:        []int64{1},
+		AutoWarmupEnabled: &enabled,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, 1, result.AutoWarmupUpdatedCount)
+	require.Equal(t, false, repo.lastBulkUpdate.Extra[OpenAIAutoWarmupEnabledExtraKey])
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoWarmupUnsupportedOnlySkips(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+	}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	enabled := true
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:        []int64{2},
+		AutoWarmupEnabled: &enabled,
+	})
+
+	require.NoError(t, err)
+	require.Zero(t, result.Success)
+	require.Zero(t, result.Failed)
+	require.Equal(t, 1, result.AutoWarmupSkippedCount)
+	require.Equal(t, []int64{2}, result.AutoWarmupSkippedIDs)
+	require.Zero(t, repo.bulkUpdateCalls)
 }
 
 func TestAdminService_BulkUpdateAccounts_RejectsRateChangeForSyncedAccounts(t *testing.T) {

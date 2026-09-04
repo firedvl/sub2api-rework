@@ -29,6 +29,19 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 	return accounts, result.Total, nil
 }
 
+func (s *adminServiceImpl) ListAccountsWithAutoWarmupFilter(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup, sortBy, sortOrder string) ([]Account, int64, error) {
+	repo, ok := s.accountRepo.(AccountAutoWarmupFilterRepository)
+	if !ok {
+		return nil, 0, errors.New("account repository does not support Auto Warm-up filtering")
+	}
+	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
+	accounts, result, err := repo.ListWithAutoWarmupFilter(ctx, params, platform, accountType, status, search, groupID, privacyMode, autoWarmup)
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, result.Total, nil
+}
+
 func (s *adminServiceImpl) ListAccountsForSchedulerScoreFilter(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error) {
 	if s == nil || s.accountRepo == nil {
 		return nil, nil
@@ -961,7 +974,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.AutoWarmupEnabled != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -973,6 +986,21 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if account != nil {
 			targetsByID[account.ID] = account
 		}
+	}
+	eligibleWarmupIDs := make([]int64, 0, len(input.AccountIDs))
+	if input.AutoWarmupEnabled != nil {
+		for _, accountID := range input.AccountIDs {
+			account, ok := targetsByID[accountID]
+			if !ok {
+				return nil, ErrAccountNotFound
+			}
+			if IsOpenAIAutoWarmupConfigurable(account) {
+				eligibleWarmupIDs = append(eligibleWarmupIDs, accountID)
+				continue
+			}
+			result.AutoWarmupSkippedIDs = append(result.AutoWarmupSkippedIDs, accountID)
+		}
+		result.AutoWarmupSkippedCount = len(result.AutoWarmupSkippedIDs)
 	}
 	if openAISettings.any() {
 		inheritedCount, err := validateBulkOpenAISettingsTargets(input, openAISettings, targetsByID)
@@ -1124,9 +1152,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
-	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	hasNormalRepoUpdate := repoUpdates.Name != nil || repoUpdates.ProxyID != nil || repoUpdates.Concurrency != nil ||
+		repoUpdates.Priority != nil || repoUpdates.RateMultiplier != nil || repoUpdates.LoadFactor != nil ||
+		repoUpdates.Status != nil || repoUpdates.Schedulable != nil || len(repoUpdates.Credentials) > 0 ||
+		len(repoUpdates.Extra) > 0 || repoUpdates.ProbeEnabled != nil || repoUpdates.EnsureCodexFingerprintSeed
+
+	// Run ordinary bulk fields for every target. Auto Warm-up is a separate
+	// typed merge applied only to configuration-eligible accounts.
+	if hasNormalRepoUpdate {
+		if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
+			return nil, err
+		}
+	}
+	if input.AutoWarmupEnabled != nil && len(eligibleWarmupIDs) > 0 {
+		if _, err := s.accountRepo.BulkUpdate(ctx, eligibleWarmupIDs, AccountBulkUpdate{Extra: map[string]any{
+			OpenAIAutoWarmupEnabledExtraKey: *input.AutoWarmupEnabled,
+		}}); err != nil {
+			return nil, err
+		}
+		result.AutoWarmupUpdatedCount = len(eligibleWarmupIDs)
 	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
@@ -1143,7 +1187,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Handle group bindings per account (requires individual operations).
-	for _, accountID := range input.AccountIDs {
+	resultIDs := input.AccountIDs
+	if input.AutoWarmupEnabled != nil && !hasNormalRepoUpdate && input.GroupIDs == nil {
+		resultIDs = eligibleWarmupIDs
+	}
+	for _, accountID := range resultIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
 
 		if input.GroupIDs != nil {
@@ -1214,19 +1262,14 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 	accountIDs := make([]int64, 0, pageSize)
 
 	for {
-		accounts, total, err := s.ListAccounts(
-			ctx,
-			page,
-			pageSize,
-			filters.Platform,
-			filters.Type,
-			filters.Status,
-			filters.Search,
-			groupID,
-			filters.PrivacyMode,
-			"",
-			"",
-		)
+		var accounts []Account
+		var total int64
+		var err error
+		if filters.AutoWarmup != "" {
+			accounts, total, err = s.ListAccountsWithAutoWarmupFilter(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, filters.AutoWarmup, "", "")
+		} else {
+			accounts, total, err = s.ListAccounts(ctx, page, pageSize, filters.Platform, filters.Type, filters.Status, filters.Search, groupID, filters.PrivacyMode, "", "")
+		}
 		if err != nil {
 			return nil, err
 		}

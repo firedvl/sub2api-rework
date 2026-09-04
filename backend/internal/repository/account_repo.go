@@ -1007,6 +1007,33 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)
+	return r.listAccountsQuery(ctx, params, q)
+}
+
+func (r *accountRepository) ListWithAutoWarmupFilter(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup string) ([]service.Account, *pagination.PaginationResult, error) {
+	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).Where(
+		dbaccount.PlatformEQ(service.PlatformOpenAI),
+		dbaccount.TypeEQ(service.AccountTypeOAuth),
+		dbaccount.ParentAccountIDIsNil(),
+	)
+	path := sqljson.Path(service.OpenAIAutoWarmupEnabledExtraKey)
+	switch autoWarmup {
+	case "enabled":
+		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(sqljson.ValueEQ(dbaccount.FieldExtra, true, path))
+		}))
+	case "disabled":
+		q = q.Where(dbpredicate.Account(func(s *entsql.Selector) {
+			s.Where(entsql.Or(
+				entsql.Not(sqljson.HasKey(dbaccount.FieldExtra, path)),
+				sqljson.ValueEQ(dbaccount.FieldExtra, false, path),
+			))
+		}))
+	}
+	return r.listAccountsQuery(ctx, params, q)
+}
+
+func (r *accountRepository) listAccountsQuery(ctx context.Context, params pagination.PaginationParams, q *dbent.AccountQuery) ([]service.Account, *pagination.PaginationResult, error) {
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo

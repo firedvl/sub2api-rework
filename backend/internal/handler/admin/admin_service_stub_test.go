@@ -52,6 +52,7 @@ type stubAdminService struct {
 		search      string
 		groupID     int64
 		privacyMode string
+		autoWarmup  string
 		sortBy      string
 		sortOrder   string
 		calls       int
@@ -427,6 +428,33 @@ func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int,
 		end = total
 	}
 	return accounts[start:end], int64(total), nil
+}
+
+func (s *stubAdminService) ListAccountsWithAutoWarmupFilter(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup, sortBy, sortOrder string) ([]service.Account, int64, error) {
+	s.lastListAccounts.autoWarmup = autoWarmup
+	accounts, _, err := s.ListAccounts(ctx, 1, len(s.accounts), platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	if err != nil {
+		return nil, 0, err
+	}
+	filtered := make([]service.Account, 0, len(accounts))
+	for i := range accounts {
+		account := &accounts[i]
+		if !service.IsOpenAIAutoWarmupConfigurable(account) {
+			continue
+		}
+		enabled := service.ResolveOpenAIAutoWarmupEnabled(account)
+		if autoWarmup == "enabled" && !enabled || autoWarmup == "disabled" && enabled {
+			continue
+		}
+		filtered = append(filtered, *account)
+	}
+	total := len(filtered)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []service.Account{}, int64(total), nil
+	}
+	end := min(start+pageSize, total)
+	return filtered[start:end], int64(total), nil
 }
 
 func (s *stubAdminService) ListAccountsForSchedulerScoreFilter(_ context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, error) {

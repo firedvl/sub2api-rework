@@ -55,6 +55,9 @@
       <button @click="$emit('edit-filtered')" class="btn btn-primary btn-sm">
         {{ t('admin.accounts.bulkEdit.submit') }}
       </button>
+      <button @click="$emit('edit-auto-warmup-eligible')" class="btn btn-secondary btn-sm" data-testid="edit-auto-warmup-eligible">
+        {{ t('admin.accounts.bulkEdit.editAllAutoWarmupEligible') }}
+      </button>
     </div>
   </div>
 </template>
@@ -73,6 +76,7 @@ defineEmits([
   'delete',
   'edit-selected',
   'edit-filtered',
+  'edit-auto-warmup-eligible',
   'clear',
   'select-page',
   'select-all-results',

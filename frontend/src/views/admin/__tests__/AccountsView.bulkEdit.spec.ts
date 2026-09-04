@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { routeLocationKey } from 'vue-router'
 
 import AccountsView from '../AccountsView.vue'
 
@@ -12,6 +13,7 @@ const {
   getUpstreamBillingProbeSettings,
   getAllProxies,
   getAllGroups,
+  getSettings,
   probeUpstreamBilling,
   probeUpstreamBillingBatch,
   showError,
@@ -25,6 +27,7 @@ const {
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
+  getSettings: vi.fn(),
   probeUpstreamBilling: vi.fn(),
   probeUpstreamBillingBatch: vi.fn(),
   showError: vi.fn(),
@@ -52,6 +55,9 @@ vi.mock('@/api/admin', () => ({
     },
     groups: {
       getAll: getAllGroups
+    },
+    settings: {
+      getSettings
     }
   }
 }))
@@ -88,6 +94,7 @@ const DataTableStub = {
       <div v-for="row in data" :key="row.id">
         <div data-test="select-row"><slot name="cell-select" :row="row" /></div>
         <slot name="cell-created_at" :value="row.created_at" :row="row" />
+        <slot name="cell-status" :row="row" />
         <div data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></div>
       </div>
     </div>
@@ -108,10 +115,11 @@ const ProbeDataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered', 'probe-upstream-billing'],
+  emits: ['edit-filtered', 'edit-auto-warmup-eligible', 'probe-upstream-billing'],
   template: `
     <div>
       <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
+      <button data-test="edit-auto-warmup-eligible" @click="$emit('edit-auto-warmup-eligible')">edit warm-up eligible</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
     </div>
   `
@@ -123,7 +131,7 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target'],
+  props: ['show', 'target', 'globalAutoWarmupEnabled'],
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
 }
 
@@ -139,6 +147,7 @@ describe('admin AccountsView bulk edit scope', () => {
     getUpstreamBillingProbeSettings.mockReset()
     getAllProxies.mockReset()
     getAllGroups.mockReset()
+    getSettings.mockReset()
     probeUpstreamBilling.mockReset()
     probeUpstreamBillingBatch.mockReset()
     showError.mockReset()
@@ -166,6 +175,7 @@ describe('admin AccountsView bulk edit scope', () => {
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
+    getSettings.mockResolvedValue({ openai_auto_warmup_enabled: true })
     probeUpstreamBilling.mockResolvedValue({})
     probeUpstreamBillingBatch.mockResolvedValue([])
   })
@@ -214,6 +224,131 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+  })
+
+  it('opens bulk edit for the full eligible Auto Warm-up fleet', async () => {
+    listAccounts.mockImplementation(async (page: number, pageSize: number, filters?: Record<string, string>) => ({
+      items: [],
+      total: pageSize === 1 && filters?.auto_warmup === 'eligible' ? 37 : 0,
+      page,
+      page_size: pageSize,
+      pages: pageSize === 1 ? 37 : 0
+    }))
+
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: { template: '<div></div>' },
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-test="edit-auto-warmup-eligible"]').trigger('click')
+    await flushPromises()
+
+    const modal = wrapper.getComponent(BulkEditAccountModalStub)
+    expect(modal.props('target')).toEqual(expect.objectContaining({
+      mode: 'filtered',
+      previewCount: 37,
+      filters: expect.objectContaining({ auto_warmup: 'eligible' }),
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    }))
+    expect(modal.props('globalAutoWarmupEnabled')).toBe(true)
+    expect(listAccounts).toHaveBeenCalledWith(1, 1, expect.objectContaining({ auto_warmup: 'eligible' }))
+  })
+
+  it('loads the technical disabled-filter view from the query and shows account warm-up status', async () => {
+    listAccounts.mockResolvedValue({
+      items: [{
+        id: 1,
+        name: 'openai-parent',
+        platform: 'openai',
+        type: 'oauth',
+        parent_account_id: null,
+        extra: { auto_warmup_enabled: false },
+        status: 'active',
+        schedulable: true,
+        created_at: '2026-09-04T00:00:00Z',
+        updated_at: '2026-09-04T00:00:00Z'
+      }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+
+    const wrapper = mount(AccountsView, {
+      global: {
+        provide: {
+          [routeLocationKey as symbol]: { query: { view: 'technical', auto_warmup: 'disabled' } }
+        },
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: { template: '<div></div>' },
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('#account-technical-tab').attributes('aria-selected')).toBe('true')
+    expect(listAccounts.mock.calls.some(([page, pageSize, filters]) =>
+      page === 1 && pageSize === 20 && filters.auto_warmup === 'disabled'
+    )).toBe(true)
+    expect(wrapper.get('[data-testid="account-auto-warmup-status"]').text()).toBe('admin.accounts.autoWarmup.off')
   })
 
   it('renders the created_at column by default', async () => {

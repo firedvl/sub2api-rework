@@ -126,6 +126,12 @@ type AccountRepository interface {
 	ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error)
 }
 
+// AccountAutoWarmupFilterRepository is the optional admin-only account list
+// capability for Auto Warm-up fleet management.
+type AccountAutoWarmupFilterRepository interface {
+	ListWithAutoWarmupFilter(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup string) ([]Account, *pagination.PaginationResult, error)
+}
+
 type AccountDuplicateRepository interface {
 	// CreateWithAccountGroups atomically persists an account, its exact group priorities,
 	// and the scheduler outbox event for the new routing snapshot.

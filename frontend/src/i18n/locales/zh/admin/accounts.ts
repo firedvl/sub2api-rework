@@ -618,6 +618,14 @@ export default {
         rateSyncConflict: '无法修改账号倍率：{count} 个目标账号已开启上游倍率同步。',
         longContextShadowHint: '长上下文计费归母账号所有。选中的影子账号仍跟随母账号，筛选全量目标时同样如此。',
         longContextParentRequired: '选中的账号全部是影子账号，请选择母账号修改长上下文计费。',
+        noChange: '不修改',
+        enable: '开启',
+        disable: '关闭',
+        autoWarmupHint: '仅修改符合条件的 OpenAI OAuth 母账号，不支持的账号会被跳过。',
+        autoWarmupGlobalOff: '这些账号将开启自动预热，但全局 OpenAI 自动预热开关当前处于关闭状态。',
+        openGatewaySettings: '打开网关设置',
+        autoWarmupResult: '已更新 {updated} 个账号的自动预热设置；跳过 {skipped} 个不支持的账号。',
+        editAllAutoWarmupEligible: '编辑全部符合条件的自动预热账号',
         mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。'
       },
       bulkDeleteTitle: '批量删除账号',
@@ -961,6 +969,11 @@ export default {
 	  autoWarmup: {
 	    title: '自动预热',
 	    hint: '配额窗口恢复后发送一个很小的 Codex 请求；还需要启用全局开关。',
+	    on: '预热：开',
+	    off: '预热：关',
+	    filterAll: '全部自动预热状态',
+	    filterEnabled: '已开启自动预热',
+	    filterDisabled: '未开启自动预热',
 	    lastAttempt: '最近一次尝试：{status}，{time}',
 	    unknownTime: '时间不可用',
 	    status: {

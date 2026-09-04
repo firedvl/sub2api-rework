@@ -263,3 +263,41 @@ func TestBulkUpdateAcceptsDedicatedUpstreamBillingProbeSetting(t *testing.T) {
 	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.ProbeEnabled)
 	require.False(t, *adminSvc.lastBulkUpdateAccountInput.ProbeEnabled)
 }
+
+func TestBulkUpdateForwardsAutoWarmupFieldAndFilter(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := setupAccountMixedChannelRouter(adminSvc)
+
+	body, _ := json.Marshal(map[string]any{
+		"filters":             map[string]any{"auto_warmup": "eligible"},
+		"auto_warmup_enabled": true,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoWarmupEnabled)
+	require.True(t, *adminSvc.lastBulkUpdateAccountInput.AutoWarmupEnabled)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.Filters)
+	require.Equal(t, "eligible", adminSvc.lastBulkUpdateAccountInput.Filters.AutoWarmup)
+}
+
+func TestBulkUpdateRejectsInvalidAutoWarmupFilter(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := setupAccountMixedChannelRouter(adminSvc)
+
+	body, _ := json.Marshal(map[string]any{
+		"filters":             map[string]any{"auto_warmup": "invalid"},
+		"auto_warmup_enabled": true,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Nil(t, adminSvc.lastBulkUpdateAccountInput)
+}

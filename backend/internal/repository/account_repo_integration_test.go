@@ -630,6 +630,53 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 	}
 }
 
+func (s *AccountRepoSuite) TestListWithAutoWarmupFilter() {
+	enabled := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-enabled", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
+	})
+	disabled := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-disabled", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: false},
+	})
+	missing := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-missing", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-apikey", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "warmup-shadow", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		ParentAccountID: &enabled.ID, QuotaDimension: service.QuotaDimensionSpark,
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
+	})
+
+	eligiblePage1, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 2}, "", "", "", "", 0, "", "eligible")
+	s.Require().NoError(err)
+	s.Require().Equal(int64(3), page.Total)
+	s.Require().Len(eligiblePage1, 2)
+	eligiblePage2, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 2, PageSize: 2}, "", "", "", "", 0, "", "eligible")
+	s.Require().NoError(err)
+	s.Require().Equal(int64(3), page.Total)
+	s.Require().Len(eligiblePage2, 1)
+	s.Require().ElementsMatch([]int64{enabled.ID, disabled.ID, missing.ID}, append(idsOfAccounts(eligiblePage1), idsOfAccounts(eligiblePage2)...))
+
+	enabledAccounts, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0, "", "enabled")
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Equal([]int64{enabled.ID}, idsOfAccounts(enabledAccounts))
+
+	disabledAccounts, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0, "", "disabled")
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().ElementsMatch([]int64{disabled.ID, missing.ID}, idsOfAccounts(disabledAccounts))
+}
+
 // --- ListByGroup / ListActive / ListByPlatform ---
 
 func (s *AccountRepoSuite) TestListByGroup() {
@@ -1846,6 +1893,28 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	got, _ := s.repo.GetByID(s.ctx, a1.ID)
 	s.Require().Equal("val", got.Extra["existing"])
 	s.Require().Equal("new_val", got.Extra["new_key"])
+}
+
+func (s *AccountRepoSuite) TestBulkUpdate_AutoWarmupPreservesRuntimeAndUnrelatedExtra() {
+	runtimeState := map[string]any{"status": "succeeded", "reset_at": "2026-09-04T00:00:00Z"}
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "bulk-warmup-extra",
+		Extra: map[string]any{
+			"existing":                            "value",
+			service.OpenAIAutoWarmupStateExtraKey: runtimeState,
+		},
+	})
+
+	_, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
+	})
+	s.Require().NoError(err)
+
+	got, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("value", got.Extra["existing"])
+	s.Require().Equal(true, got.Extra[service.OpenAIAutoWarmupEnabledExtraKey])
+	s.Require().Equal(runtimeState, got.Extra[service.OpenAIAutoWarmupStateExtraKey])
 }
 
 func (s *AccountRepoSuite) TestBulkUpdate_EmptyIDs() {
