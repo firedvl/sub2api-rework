@@ -66,6 +66,17 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "max_reasoning_effort", "character varying", 20, false)
+	requireColumn(t, tx, "groups", "max_reasoning_effort_over_limit", "character varying", 20, false)
+
+	for _, table := range []string{
+		"channel_model_pricing",
+		"channel_pricing_intervals",
+		"channel_account_stats_model_pricing",
+		"channel_account_stats_pricing_intervals",
+	} {
+		requireColumn(t, tx, table, "cache_write_1h_price", "numeric", 0, true)
+	}
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)
@@ -192,7 +203,7 @@ WHERE ns.nspname = 'public'
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
 }
 
-func TestMigrationsRunner_UpgradeFrom232PreservesRows(t *testing.T) {
+func TestMigrationsRunner_UpgradeFrom235PreservesRows(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -221,18 +232,18 @@ func TestMigrationsRunner_UpgradeFrom232PreservesRows(t *testing.T) {
 
 	files, err := fs.Glob(migrations.FS, "*.sql")
 	require.NoError(t, err)
-	migrations232 := fstest.MapFS{}
+	migrations235 := fstest.MapFS{}
 	for _, name := range files {
-		if name >= "233_" {
+		if name >= "236_" {
 			continue
 		}
 		data, readErr := migrations.FS.ReadFile(name)
 		require.NoError(t, readErr)
-		migrations232[name] = &fstest.MapFile{Data: data}
+		migrations235[name] = &fstest.MapFile{Data: data}
 	}
-	_, has232 := migrations232["232_openai_auto_warmup_attempts.sql"]
-	require.True(t, has232)
-	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, migrations232))
+	_, has235 := migrations235["235_user_restrict_public_groups.sql"]
+	require.True(t, has235)
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, migrations235))
 
 	columnExists := func(table, column string) bool {
 		var exists bool
@@ -243,23 +254,24 @@ SELECT EXISTS (
 )`, table, column).Scan(&exists))
 		return exists
 	}
-	require.False(t, columnExists("usage_logs", "native_compaction_v2"))
-	require.False(t, columnExists("usage_logs", "requested_reasoning_effort"))
-	require.False(t, columnExists("users", "restrict_public_groups"))
+	require.False(t, columnExists("groups", "force_openai_fast"))
+	require.False(t, columnExists("groups", "max_reasoning_effort_over_limit"))
+	require.False(t, columnExists("groups", "free_openai_fast"))
+	require.False(t, columnExists("channel_model_pricing", "cache_write_1h_price"))
 
 	var userID, accountID, apiKeyID int64
 	require.NoError(t, upgradeDB.QueryRowContext(ctx,
-		"INSERT INTO users (email, password_hash) VALUES ('upgrade-232@example.com', 'hash') RETURNING id",
+		"INSERT INTO users (email, password_hash) VALUES ('upgrade-235@example.com', 'hash') RETURNING id",
 	).Scan(&userID))
 	require.NoError(t, upgradeDB.QueryRowContext(ctx,
-		"INSERT INTO accounts (name, platform, type) VALUES ('upgrade-232', 'openai', 'oauth') RETURNING id",
+		"INSERT INTO accounts (name, platform, type) VALUES ('upgrade-235', 'openai', 'oauth') RETURNING id",
 	).Scan(&accountID))
 	require.NoError(t, upgradeDB.QueryRowContext(ctx,
-		"INSERT INTO api_keys (user_id, key, name) VALUES ($1, 'sk-upgrade-232', 'upgrade-232') RETURNING id", userID,
+		"INSERT INTO api_keys (user_id, key, name) VALUES ($1, 'sk-upgrade-235', 'upgrade-235') RETURNING id", userID,
 	).Scan(&apiKeyID))
 	_, err = upgradeDB.ExecContext(ctx, `
 INSERT INTO usage_logs (user_id, api_key_id, account_id, request_id, model)
-VALUES ($1, $2, $3, 'upgrade-232-log', 'gpt-5.6-sol')`, userID, apiKeyID, accountID)
+VALUES ($1, $2, $3, 'upgrade-235-log', 'gpt-5.6-sol')`, userID, apiKeyID, accountID)
 	require.NoError(t, err)
 
 	require.NoError(t, ApplyMigrations(ctx, upgradeDB))
@@ -269,7 +281,7 @@ VALUES ($1, $2, $3, 'upgrade-232-log', 'gpt-5.6-sol')`, userID, apiKeyID, accoun
 	var requestedEffort sql.NullString
 	require.NoError(t, upgradeDB.QueryRowContext(ctx, `
 SELECT native_compaction_v2, requested_reasoning_effort
-FROM usage_logs WHERE request_id = 'upgrade-232-log'`,
+FROM usage_logs WHERE request_id = 'upgrade-235-log'`,
 	).Scan(&nativeCompaction, &requestedEffort))
 	require.False(t, nativeCompaction)
 	require.False(t, requestedEffort.Valid)
@@ -282,11 +294,12 @@ FROM usage_logs WHERE request_id = 'upgrade-232-log'`,
 	require.NoError(t, upgradeDB.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM schema_migrations
 WHERE filename IN (
-	'233_add_usage_log_native_compaction_v2.sql',
-	'234_add_usage_log_requested_reasoning_effort.sql',
-	'235_user_restrict_public_groups.sql'
+	'236_channel_cache_write_1h_pricing.sql',
+	'237_group_force_openai_fast.sql',
+	'238_group_reasoning_effort_over_limit.sql',
+	'239_group_free_openai_fast.sql'
 )`).Scan(&applied))
-	require.Equal(t, 3, applied)
+	require.Equal(t, 4, applied)
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {
