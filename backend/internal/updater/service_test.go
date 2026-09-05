@@ -228,6 +228,22 @@ func validUpdaterManifest(t *testing.T) []byte {
 	return data
 }
 
+func TestApprovedManifestAcceptsCurrentMigrationAtTarget(t *testing.T) {
+	service, _ := newUpdaterTestService(t, &fakeRunner{})
+	var manifest updatecontract.Manifest
+	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
+	manifest.ReworkVersion = "0.2.0-rework.2"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.2.0-rework.2"
+	manifest.MigrationMin = 235
+	manifest.MigrationMax = 239
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	service.fetcher = &fakeManifestFetcher{data: data}
+
+	_, err = service.approvedManifest(context.Background(), manifest.ReworkVersion, 239)
+	require.NoError(t, err)
+}
+
 func newUpdaterTestService(t *testing.T, runner *fakeRunner) (*Service, Policy) {
 	return newUpdaterTestServiceWithPolicy(t, runner, nil)
 }
