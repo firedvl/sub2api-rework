@@ -686,6 +686,28 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestOpenAIAutoWarmupWindowEvidenceFirstObservationDoesNotClaimWindowStarted(t *testing.T) {
+	windowMinutes := 300
+	resetSeconds := 18_000
+	usedPercent := 12.0
+	observedAt := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
+
+	started, resetAt, used := openAIAutoWarmupWindowEvidence(
+		&Account{Extra: map[string]any{}},
+		&OpenAICodexUsageSnapshot{
+			PrimaryWindowMinutes:     &windowMinutes,
+			PrimaryResetAfterSeconds: &resetSeconds,
+			PrimaryUsedPercent:       &usedPercent,
+		},
+		observedAt,
+	)
+
+	require.False(t, started)
+	require.Equal(t, observedAt.Add(5*time.Hour).Format(time.RFC3339), resetAt)
+	require.NotNil(t, used)
+	require.Equal(t, usedPercent, *used)
+}
+
 func TestOpenAIGatewayServiceCapturesSanitizedAutoWarmupRejection(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	account := newAutoWarmupTestAccount(12, now)

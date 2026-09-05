@@ -209,7 +209,8 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 	clientVersion string,
 	ifNoneMatch string,
 ) (*CodexModelsManifest, bool, error) {
-	if s == nil || s.accountRepo == nil || group == nil || group.Platform != PlatformOpenAI {
+	if s == nil || s.accountRepo == nil || group == nil ||
+		(group.Platform != PlatformOpenAI && group.Platform != PlatformComposite) {
 		return nil, false, nil
 	}
 	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, group.ID)
@@ -217,7 +218,10 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 		return nil, true, err
 	}
 	manifests := make([]codexAccountManifest, 0, len(accounts))
-	configuredModels := openAIConfiguredCodexModelIDsForGroup(accounts, group)
+	configuredModels := []string(nil)
+	if group.Platform == PlatformOpenAI {
+		configuredModels = openAIConfiguredCodexModelIDsForGroup(accounts, group)
+	}
 	hasOAuth := false
 	for i := range accounts {
 		account := &accounts[i]
@@ -240,7 +244,13 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 	if len(manifests) == 0 && len(configuredModels) == 0 {
 		return nil, false, nil
 	}
-	body, err := mergeRoutableCodexManifests(manifests)
+	var allowPublicID func(*Account, string, string) bool
+	if group.Platform == PlatformComposite {
+		allowPublicID = func(account *Account, publicID, upstreamID string) bool {
+			return s.compositeCodexPublicIDRoutable(ctx, group.ID, account, publicID, upstreamID)
+		}
+	}
+	body, err := mergeRoutableCodexManifests(manifests, allowPublicID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -256,7 +266,30 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 	return manifest, true, nil
 }
 
-func mergeRoutableCodexManifests(sources []codexAccountManifest) ([]byte, error) {
+func (s *OpenAIGatewayService) compositeCodexPublicIDRoutable(
+	ctx context.Context,
+	groupID int64,
+	account *Account,
+	publicID string,
+	upstreamID string,
+) bool {
+	if s == nil || s.compositeResolver == nil || account == nil {
+		return false
+	}
+	decision, err := s.compositeResolver.Resolve(ctx, groupID, publicID, CompositeRouteEndpointResponses)
+	if err != nil || !decision.Matched || decision.TargetPlatform != PlatformOpenAI {
+		return false
+	}
+	if !account.IsModelSupported(decision.UpstreamModel) {
+		return false
+	}
+	return strings.TrimSpace(account.GetMappedModel(decision.UpstreamModel)) == strings.TrimSpace(upstreamID)
+}
+
+func mergeRoutableCodexManifests(
+	sources []codexAccountManifest,
+	allowPublicID func(*Account, string, string) bool,
+) ([]byte, error) {
 	envelope := map[string]json.RawMessage{}
 	models := make([]json.RawMessage, 0)
 	seen := make(map[string]struct{})
@@ -288,6 +321,9 @@ func mergeRoutableCodexManifests(sources []codexAccountManifest) ([]byte, error)
 				continue
 			}
 			for _, publicID := range routableCodexPublicIDs(item.account, descriptor.Slug) {
+				if allowPublicID != nil && !allowPublicID(item.account, publicID, descriptor.Slug) {
+					continue
+				}
 				if _, exists := seen[publicID]; exists {
 					continue
 				}
@@ -309,6 +345,51 @@ func mergeRoutableCodexManifests(sources []codexAccountManifest) ([]byte, error)
 	}
 	envelope["models"] = rawModels
 	return json.Marshal(envelope)
+}
+
+// MergeCodexModelsManifestBodies keeps preferred descriptors and appends only
+// missing fallback models. The preferred envelope is retained so live Codex
+// metadata survives when it is merged into a generated Composite catalog.
+func MergeCodexModelsManifestBodies(preferredBody, fallbackBody []byte) ([]byte, error) {
+	var preferred map[string]json.RawMessage
+	if err := json.Unmarshal(preferredBody, &preferred); err != nil {
+		return nil, err
+	}
+	var fallback map[string]json.RawMessage
+	if err := json.Unmarshal(fallbackBody, &fallback); err != nil {
+		return nil, err
+	}
+	var preferredModels, fallbackModels []json.RawMessage
+	if err := json.Unmarshal(preferred["models"], &preferredModels); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(fallback["models"], &fallbackModels); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(preferredModels)+len(fallbackModels))
+	merged := make([]json.RawMessage, 0, len(preferredModels)+len(fallbackModels))
+	for _, models := range [][]json.RawMessage{preferredModels, fallbackModels} {
+		for _, raw := range models {
+			var descriptor struct {
+				Slug string `json:"slug"`
+			}
+			if json.Unmarshal(raw, &descriptor) != nil || strings.TrimSpace(descriptor.Slug) == "" {
+				continue
+			}
+			descriptor.Slug = strings.TrimSpace(descriptor.Slug)
+			if _, exists := seen[descriptor.Slug]; exists {
+				continue
+			}
+			seen[descriptor.Slug] = struct{}{}
+			merged = append(merged, raw)
+		}
+	}
+	rawModels, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	preferred["models"] = rawModels
+	return json.Marshal(preferred)
 }
 
 func routableCodexPublicIDs(account *Account, upstreamID string) []string {

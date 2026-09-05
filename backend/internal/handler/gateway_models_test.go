@@ -20,6 +20,16 @@ type gatewayModelsAccountRepoStub struct {
 	byGroup map[int64][]service.Account
 }
 
+type countingGatewayModelsAccountRepoStub struct {
+	service.AccountRepository
+	calls int
+}
+
+func (s *countingGatewayModelsAccountRepoStub) ListSchedulableByGroupID(context.Context, int64) ([]service.Account, error) {
+	s.calls++
+	return nil, nil
+}
+
 type gatewayModelsResponseForTest struct {
 	Object string                    `json:"object"`
 	Data   []gatewayModelItemForTest `json:"data"`
@@ -226,6 +236,46 @@ func TestGatewayCodexModels_CompositeUsesCompleteEffectiveModelList(t *testing.T
 	var got codexModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, []string{"gpt-5.5", "grok-4.6"}, codexModelSlugsForTest(got.Models))
+}
+
+func TestGatewayCodexModels_CompositeForcedNonOpenAISkipsDynamicOpenAIManifest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 121
+	gatewayRepo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{
+		groupID: {{
+			ID: 1, Platform: service.PlatformGrok, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true,
+			Credentials: map[string]any{"model_mapping": map[string]any{"grok-only": "grok-4.5"}},
+		}},
+	}}
+	openAIRepo := &countingGatewayModelsAccountRepoStub{}
+	gateway := service.NewGatewayService(
+		gatewayRepo,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, service.NewCompositeRouteResolver(nil), nil, nil,
+	)
+	openAI := service.NewOpenAIGatewayService(
+		openAIRepo,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil,
+		nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := NewGatewayHandler(
+		gateway, openAI, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/models?client_version=0.199.0", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{ID: groupID, Platform: service.PlatformComposite},
+	})
+	c.Set(string(middleware2.ContextKeyForcePlatform), service.PlatformGrok)
+
+	h.CodexModels(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Zero(t, openAIRepo.calls)
 }
 
 func TestGatewayCodexModels_GeneratedManifestUsesFinalBodyETag(t *testing.T) {

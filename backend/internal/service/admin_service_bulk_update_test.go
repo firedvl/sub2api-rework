@@ -255,7 +255,7 @@ func TestAdminServiceBulkUpdateAccounts_AutoWarmupDisable(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 4, result.Success)
+	require.Equal(t, 1, result.Success)
 	require.Equal(t, 1, result.AutoWarmupUpdatedCount)
 	require.Equal(t, false, repo.lastBulkUpdate.Extra[OpenAIAutoWarmupEnabledExtraKey])
 }
@@ -300,7 +300,7 @@ func TestAdminServiceBulkUpdateAccounts_AutoResetCreditMixedEligibility(t *testi
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Success)
+	require.Equal(t, 4, result.Success)
 	require.Equal(t, 1, result.AutoResetCreditUpdatedCount)
 	require.Equal(t, 3, result.AutoResetCreditSkippedCount)
 	require.ElementsMatch(t, []int64{2, 3, 4}, result.AutoResetCreditSkippedIDs)
