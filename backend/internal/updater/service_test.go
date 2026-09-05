@@ -232,8 +232,8 @@ func TestApprovedManifestAcceptsCurrentMigrationAtTarget(t *testing.T) {
 	service, _ := newUpdaterTestService(t, &fakeRunner{})
 	var manifest updatecontract.Manifest
 	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
-	manifest.ReworkVersion = "0.2.0-rework.2"
-	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.2.0-rework.2"
+	manifest.ReworkVersion = "0.2.0-rework.3"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.2.0-rework.3"
 	manifest.MigrationMin = 235
 	manifest.MigrationMax = 239
 	data, err := json.Marshal(manifest)
