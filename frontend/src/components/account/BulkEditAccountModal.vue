@@ -21,6 +21,53 @@
         </p>
       </div>
 
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-auto-reset-credit">
+        <label id="bulk-edit-auto-reset-credit-label" class="input-label">
+          {{ t('admin.accounts.autoResetCredit.title') }}
+        </label>
+        <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.bulkEdit.autoResetCreditHint') }}
+        </p>
+        <Select
+          v-model="autoResetCreditMode"
+          :options="autoWarmupOptions"
+          data-testid="bulk-edit-auto-reset-credit-select"
+          aria-labelledby="bulk-edit-auto-reset-credit-label"
+        />
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label for="bulk-edit-auto-reset-credit-5h" class="input-label">
+              {{ t('admin.accounts.autoResetCredit.threshold5h') }}
+            </label>
+            <input
+              id="bulk-edit-auto-reset-credit-5h"
+              v-model="autoResetCredit5hThreshold"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+              class="input"
+              :placeholder="t('admin.accounts.bulkEdit.noChange')"
+            />
+          </div>
+          <div>
+            <label for="bulk-edit-auto-reset-credit-7d" class="input-label">
+              {{ t('admin.accounts.autoResetCredit.threshold7d') }}
+            </label>
+            <input
+              id="bulk-edit-auto-reset-credit-7d"
+              v-model="autoResetCredit7dThreshold"
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+              class="input"
+              :placeholder="t('admin.accounts.bulkEdit.noChange')"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-auto-warmup">
         <label id="bulk-edit-auto-warmup-label" class="input-label">
           {{ t('admin.accounts.autoWarmup.title') }}
@@ -1699,6 +1746,9 @@ const enableOpenAICompactModelMapping = ref(false)
 const enableRpmLimit = ref(false)
 type AutoWarmupMode = 'unchanged' | 'enabled' | 'disabled'
 const autoWarmupMode = ref<AutoWarmupMode>('unchanged')
+const autoResetCreditMode = ref<AutoWarmupMode>('unchanged')
+const autoResetCredit5hThreshold = ref('')
+const autoResetCredit7dThreshold = ref('')
 const autoWarmupOptions = computed(() => [
   { value: 'unchanged', label: t('admin.accounts.bulkEdit.noChange') },
   { value: 'enabled', label: t('admin.accounts.bulkEdit.enable') },
@@ -1977,6 +2027,16 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (autoWarmupMode.value !== 'unchanged') {
     updates.auto_warmup_enabled = autoWarmupMode.value === 'enabled'
+  }
+
+  if (autoResetCreditMode.value !== 'unchanged') {
+    updates.auto_reset_credit_enabled = autoResetCreditMode.value === 'enabled'
+  }
+  if (autoResetCredit5hThreshold.value !== '') {
+    updates.auto_reset_credit_5h_threshold = Number(autoResetCredit5hThreshold.value) / 100
+  }
+  if (autoResetCredit7dThreshold.value !== '') {
+    updates.auto_reset_credit_7d_threshold = Number(autoResetCredit7dThreshold.value) / 100
   }
 
   if (enableConcurrency.value) {
@@ -2265,11 +2325,21 @@ const handleSubmit = async () => {
     enableOpenAICompactModelMapping.value ||
     enableRpmLimit.value ||
     autoWarmupMode.value !== 'unchanged' ||
+    autoResetCreditMode.value !== 'unchanged' ||
+    autoResetCredit5hThreshold.value !== '' ||
+    autoResetCredit7dThreshold.value !== '' ||
     userMsgQueueMode.value !== null
 
   if (!hasAnyFieldEnabled) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
     return
+  }
+
+  for (const threshold of [autoResetCredit5hThreshold.value, autoResetCredit7dThreshold.value]) {
+    if (threshold !== '' && (!Number.isFinite(Number(threshold)) || Number(threshold) < 0.1 || Number(threshold) > 100)) {
+      appStore.showError(t('admin.accounts.autoResetCredit.thresholdInvalid'))
+      return
+    }
   }
 
   // base_url 现在也会作用于 Grok OAuth 订阅账号的转发端点；坏值会让请求期
@@ -2328,8 +2398,17 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
     const inherited = res.long_context_inherited_count || 0
     const warmupUpdated = res.auto_warmup_updated_count || 0
     const warmupSkipped = res.auto_warmup_skipped_count || 0
+    const resetCreditUpdated = res.auto_reset_credit_updated_count || 0
+    const resetCreditSkipped = res.auto_reset_credit_skipped_count || 0
 
-    if (autoWarmupMode.value !== 'unchanged' && failed === 0) {
+    if ((autoResetCreditMode.value !== 'unchanged' || autoResetCredit5hThreshold.value !== '' || autoResetCredit7dThreshold.value !== '') && failed === 0) {
+      const message = t('admin.accounts.bulkEdit.autoResetCreditResult', {
+        updated: resetCreditUpdated,
+        skipped: resetCreditSkipped
+      })
+      if (success > 0 || resetCreditUpdated > 0) appStore.showSuccess(message)
+      else appStore.showInfo(message)
+    } else if (autoWarmupMode.value !== 'unchanged' && failed === 0) {
       const message = t('admin.accounts.bulkEdit.autoWarmupResult', {
         success,
         updated: warmupUpdated,
@@ -2355,7 +2434,7 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
       appStore.showError(t('admin.accounts.bulkEdit.failed'))
     }
 
-    if (success > 0 || warmupSkipped > 0) {
+    if (success > 0 || warmupSkipped > 0 || resetCreditSkipped > 0) {
       pendingUpdatesForConfirm.value = null
       emit('updated')
       handleClose()
@@ -2428,6 +2507,9 @@ watch(
       enableOpenAICompactModelMapping.value = false
       enableRpmLimit.value = false
       autoWarmupMode.value = 'unchanged'
+      autoResetCreditMode.value = 'unchanged'
+      autoResetCredit5hThreshold.value = ''
+      autoResetCredit7dThreshold.value = ''
 
       // Reset all values
       baseUrl.value = ''

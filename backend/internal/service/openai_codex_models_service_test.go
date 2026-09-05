@@ -86,6 +86,22 @@ type splitCodexModelsAccountRepo struct {
 	all         map[int64][]Account
 }
 
+type scopedCodexModelsAccountRepo struct {
+	AccountRepository
+	groupAccounts  map[int64][]Account
+	globalAccounts []Account
+	globalCalls    atomic.Int32
+}
+
+func (r *scopedCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
+	return append([]Account(nil), r.groupAccounts[groupID]...), nil
+}
+
+func (r *scopedCodexModelsAccountRepo) ListSchedulable(_ context.Context) ([]Account, error) {
+	r.globalCalls.Add(1)
+	return append([]Account(nil), r.globalAccounts...), nil
+}
+
 func (r splitCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
 	return append([]Account(nil), r.schedulable[groupID]...), nil
 }
@@ -159,6 +175,228 @@ func newCodexCatalogMappedAccount(
 	}
 	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: models})
 	return account
+}
+
+func TestMergeRoutableCodexManifestsPropagatesOnlyEligibleLiveModels(t *testing.T) {
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"model_mapping": map[string]any{
+			"gpt-6-astra":  "gpt-6-astra",
+			"future-alias": "gpt-future",
+		}},
+	}
+	body, err := mergeRoutableCodexManifests([]codexAccountManifest{
+		{account: account, manifest: &CodexModelsManifest{Body: []byte(`{"models":[
+			{"slug":"gpt-6-astra","display_name":"Astra","priority":7},
+			{"slug":"gpt-future","description":"future metadata"},
+			{"slug":"hidden","supported_in_api":false}
+		]}`)}},
+		{account: account, manifest: &CodexModelsManifest{Body: []byte(`{"models":[{"slug":"gpt-6-astra"}]}`)}},
+	}, nil)
+	require.NoError(t, err)
+
+	var envelope struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.Len(t, envelope.Models, 2)
+	require.Equal(t, "gpt-6-astra", envelope.Models[0]["slug"])
+	require.Equal(t, float64(7), envelope.Models[0]["priority"])
+	require.Equal(t, "future-alias", envelope.Models[1]["slug"])
+	require.Equal(t, "future metadata", envelope.Models[1]["description"])
+}
+
+func TestMergeRoutableCodexManifestsDoesNotFabricateAstra(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body, err := mergeRoutableCodexManifests([]codexAccountManifest{{
+		account:  account,
+		manifest: &CodexModelsManifest{Body: []byte(`{"models":[{"slug":"gpt-5.4-mini"}]}`)},
+	}}, nil)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "gpt-6-astra")
+}
+
+func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testing.T) {
+	const groupID int64 = 810
+	accounts := []Account{
+		{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{
+				"access_token":       "token-1",
+				"chatgpt_account_id": "openai-1",
+				"model_mapping": map[string]any{
+					"future-alias": "gpt-future-internal",
+					"gpt-6-astra":  "gpt-6-astra",
+					"hidden-model": "hidden-model",
+					"shared-model": "gpt-shared-internal",
+				},
+			},
+		},
+		{
+			ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{
+				"access_token":       "token-2",
+				"chatgpt_account_id": "openai-2",
+				"model_mapping":      map[string]any{"gpt-6-astra": "gpt-6-astra"},
+			},
+		},
+		{
+			ID: 3, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{"model_mapping": map[string]any{
+				"shared-model": "grok-4.5",
+				"grok-only":    "grok-4.5",
+			}},
+		},
+	}
+	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: accounts}}
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		ID: 1, GroupID: groupID, PublicModel: "shared-model", MatchType: CompositeRouteMatchExact,
+		TargetPlatform: PlatformOpenAI, UpstreamModel: "shared-model", Endpoint: CompositeRouteEndpointResponses, Enabled: true,
+	}}})
+	gateway := &GatewayService{accountRepo: repo, compositeResolver: resolver}
+	resolver.SetModelOwnershipResolver(gateway.resolveCompositeModelOwnership)
+	openAI := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
+
+	var versionsMu sync.Mutex
+	versions := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		versionsMu.Lock()
+		versions = append(versions, r.URL.Query().Get("client_version"))
+		versionsMu.Unlock()
+		switch r.Header.Get("chatgpt-account-id") {
+		case "openai-1":
+			_, _ = io.WriteString(w, `{"models":[
+				{"slug":"gpt-future-internal","display_name":"Future","minimum_client_version":"0.200.0","priority":7},
+				{"slug":"gpt-6-astra","display_name":"Astra"},
+				{"slug":"hidden-model","supported_in_api":false},
+				{"slug":"gpt-shared-internal"}
+			]}`)
+		case "openai-2":
+			_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-6-astra","display_name":"Duplicate Astra"}]}`)
+		default:
+			http.Error(w, "unexpected account", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	group := &Group{ID: groupID, Platform: PlatformComposite}
+	dynamic, used, err := openAI.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.199.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"future-alias", "gpt-6-astra", "shared-model"}, codexManifestModelSlugs(t, dynamic.Body))
+	require.NotContains(t, string(dynamic.Body), "gpt-future-internal")
+	require.NotContains(t, string(dynamic.Body), "hidden-model")
+	require.Contains(t, string(dynamic.Body), `"minimum_client_version":"0.200.0"`)
+	versionsMu.Lock()
+	require.Equal(t, []string{"0.199.0", "0.199.0"}, versions)
+	versionsMu.Unlock()
+
+	generated, err := gateway.BuildCodexModelsManifestForGroup(
+		context.Background(),
+		group,
+		"",
+		[]string{"future-alias", "gpt-6-astra", "shared-model", "grok-only"},
+	)
+	require.NoError(t, err)
+	merged, err := MergeCodexModelsManifestBodies(dynamic.Body, generated)
+	require.NoError(t, err)
+	require.Equal(t, []string{"future-alias", "gpt-6-astra", "shared-model", "grok-only"}, codexManifestModelSlugs(t, merged))
+}
+
+func TestCompositeDynamicCodexModelsFailsClosedForAbsentOrOverriddenRoutes(t *testing.T) {
+	const groupID int64 = 811
+	account := Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{
+			"access_token":       "token",
+			"chatgpt_account_id": "openai",
+			"model_mapping": map[string]any{
+				"gpt-6-astra":  "gpt-6-astra",
+				"future-alias": "gpt-future-internal",
+			},
+		},
+	}
+	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: []Account{account}}}
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		ID: 1, GroupID: groupID, PublicModel: "future-alias", MatchType: CompositeRouteMatchExact,
+		TargetPlatform: PlatformGrok, UpstreamModel: "grok-4.5", Endpoint: CompositeRouteEndpointResponses, Enabled: true,
+	}}})
+	gateway := &GatewayService{accountRepo: repo, compositeResolver: resolver}
+	resolver.SetModelOwnershipResolver(gateway.resolveCompositeModelOwnership)
+	openAI := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-future-internal"}]}`)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	manifest, used, err := openAI.BuildGroupDynamicCodexModelsManifest(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"0.199.0",
+		"",
+	)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Empty(t, codexManifestModelSlugs(t, manifest.Body))
+	require.NotContains(t, string(manifest.Body), "gpt-6-astra")
+}
+
+func TestCompositeDynamicCodexModelsDoesNotInspectUnrelatedGlobalAccount(t *testing.T) {
+	const groupID int64 = 812
+	repo := &scopedCodexModelsAccountRepo{
+		groupAccounts: map[int64][]Account{groupID: nil},
+		globalAccounts: []Account{{
+			ID: 99, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{"access_token": "unrelated"},
+		}},
+	}
+	resolver := NewCompositeRouteResolver(nil)
+	gateway := &GatewayService{accountRepo: repo, compositeResolver: resolver}
+	resolver.SetModelOwnershipResolver(gateway.resolveCompositeModelOwnership)
+	openAI := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
+
+	manifest, used, err := openAI.BuildGroupDynamicCodexModelsManifest(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"0.199.0",
+		"",
+	)
+	require.NoError(t, err)
+	require.False(t, used)
+	require.Nil(t, manifest)
+	require.Zero(t, repo.globalCalls.Load())
+}
+
+func TestCompositeDynamicCodexModelsSkipsUnschedulableMember(t *testing.T) {
+	const groupID int64 = 813
+	repo := splitCodexModelsAccountRepo{
+		schedulable: map[int64][]Account{groupID: nil},
+		catalog: map[int64][]Account{groupID: {{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusDisabled, Schedulable: false,
+			Credentials: map[string]any{"access_token": "inactive"},
+		}}},
+	}
+	resolver := NewCompositeRouteResolver(nil)
+	gateway := &GatewayService{accountRepo: repo, compositeResolver: resolver}
+	resolver.SetModelOwnershipResolver(gateway.resolveCompositeModelOwnership)
+	openAI := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
+
+	manifest, used, err := openAI.BuildGroupDynamicCodexModelsManifest(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"0.199.0",
+		"",
+	)
+	require.NoError(t, err)
+	require.False(t, used)
+	require.Nil(t, manifest)
 }
 
 func TestFilterCodexModelIDsForGroupOmitsWildcardKeys(t *testing.T) {

@@ -77,6 +77,9 @@ func NewGatewayHandler(
 	cfg *config.Config,
 	settingService *service.SettingService,
 ) *GatewayHandler {
+	if openAIGatewayService != nil && gatewayService != nil {
+		openAIGatewayService.SetCompositeRouteResolver(gatewayService.CompositeRouteResolver())
+	}
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 10
 	maxAccountSwitchesGemini := 3
@@ -1168,6 +1171,23 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 	if err != nil {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
 		return
+	}
+	if apiKey.Group.Platform == service.PlatformComposite &&
+		(forcedPlatform == "" || forcedPlatform == service.PlatformOpenAI) &&
+		h.openAIGatewayService != nil {
+		dynamicManifest, dynamic, dynamicErr := h.openAIGatewayService.BuildGroupDynamicCodexModelsManifest(
+			c.Request.Context(),
+			apiKey.Group,
+			c.Query("client_version"),
+			"",
+		)
+		if dynamicErr == nil && dynamic && dynamicManifest != nil && len(dynamicManifest.Body) > 0 {
+			body, err = service.MergeCodexModelsManifestBodies(dynamicManifest.Body, body)
+			if err != nil {
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
+				return
+			}
+		}
 	}
 	etag := service.CodexModelsManifestETag(body)
 	c.Header("ETag", etag)

@@ -1421,12 +1421,24 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
 
   it('shows and saves Auto Warm-up only for OpenAI OAuth parent accounts', async () => {
     const parent = buildOpenAIOAuthParentAccount()
-    parent.extra = { codex_auto_warmup_state: { status: 'succeeded' } }
+    parent.extra = {
+      codex_auto_warmup_state: {
+        status: 'window_started_with_warning',
+        model: 'gpt-5.4-mini',
+        request_id: 'req-warning',
+        upstream_status: 200,
+        error_code: 'OPENAI_AUTO_WARMUP_WINDOW_STARTED_WARNING',
+        observed_5h_reset_at: '2026-09-05T12:00:00Z'
+      }
+    }
     updateAccountMock.mockResolvedValue(parent)
     const wrapper = mountModal(parent)
 
     expect(wrapper.find('[data-testid="auto-warmup-settings"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="auto-warmup-last-attempt"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="auto-warmup-last-attempt"]').text()).toContain('admin.accounts.autoWarmup.lastAttempt')
+    expect(wrapper.get('[data-testid="auto-warmup-last-attempt-details"]').text()).toContain('model=gpt-5.4-mini')
+    expect(wrapper.get('[data-testid="auto-warmup-last-attempt-details"]').text()).toContain('request_id=req-warning')
     expect(wrapper.get('[data-testid="auto-warmup-enabled"]').attributes('aria-label')).toBe(
       'admin.accounts.autoWarmup.title'
     )

@@ -146,6 +146,7 @@ func (r *autoWarmupAttemptMemoryRepo) attemptCount() int {
 
 type autoWarmupSenderStub struct {
 	err     error
+	result  *OpenAIAutoWarmupResult
 	release <-chan struct{}
 	started chan<- struct{}
 	calls   atomic.Int32
@@ -191,10 +192,41 @@ func (s *autoWarmupSenderStub) SendOpenAIAutoWarmup(context.Context, int64) (*Op
 	if s.release != nil {
 		<-s.release
 	}
+	if s.result != nil {
+		return s.result, s.err
+	}
 	return &OpenAIAutoWarmupResult{
 		Model: "gpt-test", RequestID: "req-test", ResponseID: "resp-test",
 		Usage: OpenAIUsage{InputTokens: 5, OutputTokens: 1}, Latency: 10 * time.Millisecond,
 	}, s.err
+}
+
+func TestOpenAIAutoWarmupPersistsWindowStartedWarningWithoutSchemaChange(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	used := 1.0
+	account := newAutoWarmupTestAccount(90, now)
+	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	attempts := &autoWarmupAttemptMemoryRepo{}
+	sender := &autoWarmupSenderStub{
+		err: infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_RESPONSE_UNEXPECTED", "missing terminal response"),
+		result: &OpenAIAutoWarmupResult{
+			Model: "gpt-5.4-mini", RequestID: "req-warning", UpstreamStatus: http.StatusOK,
+			WindowStarted: true, Observed5hResetAt: now.Add(5 * time.Hour).Format(time.RFC3339), Observed5hUsedPercent: &used,
+		},
+	}
+	newAutoWarmupTestService(t, repo, attempts, sender, true).
+		maybeWarmFreshOpenAIWindow(context.Background(), account, newAutoWarmupTestUsage(5*time.Hour, 0), false, now)
+
+	require.Equal(t, OpenAIAutoWarmupStatusFailed, attempts.completions[1].Status)
+	require.Equal(t, "OPENAI_AUTO_WARMUP_WINDOW_STARTED_WARNING", attempts.completions[1].ErrorCode)
+	stored, err := repo.GetByID(context.Background(), account.ID)
+	require.NoError(t, err)
+	state, ok := stored.Extra[OpenAIAutoWarmupStateExtraKey].(*OpenAIAutoWarmupState)
+	require.True(t, ok)
+	require.Equal(t, OpenAIAutoWarmupStatusWindowStartedWithWarning, state.Status)
+	require.True(t, state.WindowStarted)
+	require.Equal(t, http.StatusOK, state.UpstreamStatus)
+	require.Equal(t, "req-warning", state.RequestID)
 }
 
 func absDuration(value time.Duration) time.Duration {
@@ -623,6 +655,9 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 	require.Equal(t, "req-warm", result.RequestID)
 	require.Equal(t, "resp-warm", result.ResponseID)
 	require.Equal(t, 5, result.Usage.InputTokens)
+	require.True(t, result.WindowStarted)
+	require.NotEmpty(t, result.Observed5hResetAt)
+	require.NotNil(t, result.Observed5hUsedPercent)
 	require.NotNil(t, upstream.request)
 	require.Equal(t, account.Proxy.URL(), upstream.proxyURL)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.request.Context()))
@@ -649,6 +684,28 @@ func TestOpenAIGatewayServiceSendsMinimalAutoWarmupThroughAccountRoute(t *testin
 		used, ok := resolveAccountExtraNumber(stored.Extra, "codex_5h_used_percent")
 		return ok && used == 12
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestOpenAIAutoWarmupWindowEvidenceFirstObservationDoesNotClaimWindowStarted(t *testing.T) {
+	windowMinutes := 300
+	resetSeconds := 18_000
+	usedPercent := 12.0
+	observedAt := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.UTC)
+
+	started, resetAt, used := openAIAutoWarmupWindowEvidence(
+		&Account{Extra: map[string]any{}},
+		&OpenAICodexUsageSnapshot{
+			PrimaryWindowMinutes:     &windowMinutes,
+			PrimaryResetAfterSeconds: &resetSeconds,
+			PrimaryUsedPercent:       &usedPercent,
+		},
+		observedAt,
+	)
+
+	require.False(t, started)
+	require.Equal(t, observedAt.Add(5*time.Hour).Format(time.RFC3339), resetAt)
+	require.NotNil(t, used)
+	require.Equal(t, usedPercent, *used)
 }
 
 func TestOpenAIGatewayServiceCapturesSanitizedAutoWarmupRejection(t *testing.T) {
@@ -740,7 +797,7 @@ func TestResolveOpenAIAutoWarmupModelPrefersEligibleLightweightModelAcrossManife
 		{name: "preferred model second", manifest: `{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-5.4-mini"}]}`, want: "gpt-5.4-mini"},
 		{name: "preferred model first", manifest: `{"models":[{"slug":"gpt-5.4-mini"},{"slug":"gpt-5.6-sol"}]}`, want: "gpt-5.4-mini"},
 		{name: "unsupported preferred model skipped", manifest: `{"models":[{"slug":"gpt-5.4-mini","supported_in_api":false},{"slug":"gpt-5.6-terra"}]}`, want: "gpt-5.6-terra"},
-		{name: "manifest fallback", manifest: `{"models":[{"slug":"gpt-test"},{"slug":"gpt-other"}]}`, want: "gpt-test"},
+		{name: "deterministic fallback", manifest: `{"models":[{"slug":"gpt-test"},{"slug":"gpt-other"}]}`, want: "gpt-other"},
 	}
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -1184,6 +1184,11 @@ export interface Account {
       request_id?: string
       reset_at?: string
       window_type?: string
+      upstream_status?: number
+      upstream_error_code?: string
+      window_started?: boolean
+      observed_5h_reset_at?: string
+      observed_5h_used_percent?: number
     }
   } & Record<string, unknown>)
   proxy_id: number | null

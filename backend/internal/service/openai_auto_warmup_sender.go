@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -99,13 +101,15 @@ func (s *OpenAIGatewayService) SendOpenAIAutoWarmup(ctx context.Context, account
 	if len(responseBody) > openAIAutoWarmupRequestLimit {
 		return &OpenAIAutoWarmupResult{Model: model, RequestID: strings.TrimSpace(resp.Header.Get("x-request-id")), Latency: latency}, infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_RESPONSE_TOO_LARGE", "warm-up response exceeded the read limit")
 	}
-	if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
+	snapshot := ParseCodexRateLimitHeaders(resp.Header)
+	if snapshot != nil {
 		s.updateCodexUsageSnapshot(requestCtx, account.ID, snapshot)
 	}
 	result := &OpenAIAutoWarmupResult{
 		Model: model, RequestID: strings.TrimSpace(resp.Header.Get("x-request-id")), Latency: latency,
 		UpstreamStatus: resp.StatusCode,
 	}
+	result.WindowStarted, result.Observed5hResetAt, result.Observed5hUsedPercent = openAIAutoWarmupWindowEvidence(account, snapshot, time.Now())
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		result.UpstreamErrorCode = truncateString(strings.TrimSpace(extractUpstreamErrorCode(responseBody)), 120)
 		result.UpstreamErrorMessage = truncateString(logredact.RedactText(sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))), 512)
@@ -190,9 +194,27 @@ func (s *OpenAIGatewayService) resolveOpenAIAutoWarmupModel(ctx context.Context,
 		models = append(models, slug)
 	}
 	if len(models) > 0 {
+		sort.Strings(models)
 		return models[0], nil
 	}
 	return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE", "Codex models manifest has no usable model")
+}
+
+func openAIAutoWarmupWindowEvidence(account *Account, snapshot *OpenAICodexUsageSnapshot, observedAt time.Time) (bool, string, *float64) {
+	normalized := snapshot.Normalize()
+	if normalized == nil || normalized.Window5hMinutes == nil || *normalized.Window5hMinutes != int(openAIAutoWarmupWindowLength/time.Minute) ||
+		normalized.Reset5hSeconds == nil || *normalized.Reset5hSeconds < 0 {
+		return false, "", nil
+	}
+	resetAt := codexSnapshotBaseTime(snapshot, observedAt).Add(time.Duration(*normalized.Reset5hSeconds) * time.Second).UTC()
+	previousReset, err := parseTime(strings.TrimSpace(fmt.Sprint(account.Extra["codex_5h_reset_at"])))
+	if err != nil || previousReset.IsZero() {
+		return false, resetAt.Format(time.RFC3339), normalized.Used5hPercent
+	}
+	previousUsed, hasPreviousUsed := resolveAccountExtraNumber(account.Extra, "codex_5h_used_percent")
+	started := !observedAt.Before(previousReset) || resetAt.Sub(previousReset) >= openAIAutoWarmupResetAdvance ||
+		normalized.Used5hPercent != nil && hasPreviousUsed && *normalized.Used5hPercent > previousUsed
+	return started, resetAt.Format(time.RFC3339), normalized.Used5hPercent
 }
 
 func firstError(primary, fallback error) error {

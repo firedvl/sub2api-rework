@@ -519,6 +519,9 @@ export async function bulkUpdate(
   auto_warmup_updated_count?: number
   auto_warmup_skipped_count?: number
   auto_warmup_skipped_ids?: number[]
+  auto_reset_credit_updated_count?: number
+  auto_reset_credit_skipped_count?: number
+  auto_reset_credit_skipped_ids?: number[]
   results: Array<{ account_id: number; success: boolean; error?: string }>
   }> {
   const payload = Array.isArray(accountIdsOrPayload)
@@ -536,6 +539,9 @@ export async function bulkUpdate(
     auto_warmup_updated_count?: number
     auto_warmup_skipped_count?: number
     auto_warmup_skipped_ids?: number[]
+    auto_reset_credit_updated_count?: number
+    auto_reset_credit_skipped_count?: number
+    auto_reset_credit_skipped_ids?: number[]
     results: Array<{ account_id: number; success: boolean; error?: string }>
   }>('/admin/accounts/bulk-update', payload)
   return data

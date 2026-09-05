@@ -539,6 +539,8 @@ export default {
         autoWarmupGlobalOff: 'Automatic warm-up will be enabled for these accounts, but the global OpenAI setting is off.',
         openGatewaySettings: 'Open Gateway settings',
         autoWarmupResult: 'Auto Warm-up updated for {updated} account(s); {skipped} unsupported account(s) skipped.',
+        autoResetCreditHint: 'Only eligible OpenAI OAuth parent accounts are changed. Leave thresholds blank to keep their current values.',
+        autoResetCreditResult: 'Automatic reset credits updated for {updated} account(s); {skipped} unsupported account(s) skipped.',
         editAllAutoWarmupEligible: 'Edit all eligible Auto Warm-up accounts',
         mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.'
       },
@@ -909,6 +911,7 @@ export default {
 	      pending: 'Pending',
 	      succeeded: 'Succeeded',
 	      failed: 'Failed',
+	      window_started_with_warning: 'Window started · verification warning',
 	      unknown: 'Unknown'
 	    }
 	  },
