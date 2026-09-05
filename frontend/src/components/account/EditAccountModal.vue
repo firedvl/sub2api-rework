@@ -2378,6 +2378,9 @@
         <p v-if="autoWarmupLastAttempt" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt">
           {{ autoWarmupLastAttemptLabel }}
         </p>
+        <p v-if="autoWarmupLastAttemptDetails" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt-details">
+          {{ autoWarmupLastAttemptDetails }}
+        </p>
       </div>
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
@@ -3231,12 +3234,24 @@ const autoWarmupLastAttempt = computed(() => props.account?.extra?.codex_auto_wa
 const autoWarmupLastAttemptLabel = computed(() => {
   const attempt = autoWarmupLastAttempt.value
   if (!attempt) return ''
-  const knownStatuses = ['pending', 'succeeded', 'failed']
+  const knownStatuses = ['pending', 'succeeded', 'failed', 'window_started_with_warning']
   const rawStatus = attempt.status?.trim() || 'unknown'
   const status = t(`admin.accounts.autoWarmup.status.${knownStatuses.includes(rawStatus) ? rawStatus : 'unknown'}`)
   const timestamp = attempt.completed_at || attempt.attempted_at
   const time = timestamp ? formatRelativeTime(timestamp) : t('admin.accounts.autoWarmup.unknownTime')
   return t('admin.accounts.autoWarmup.lastAttempt', { status, time })
+})
+const autoWarmupLastAttemptDetails = computed(() => {
+  const attempt = autoWarmupLastAttempt.value
+  if (!attempt) return ''
+  const details = [
+    attempt.model && `model=${attempt.model}`,
+    attempt.request_id && `request_id=${attempt.request_id}`,
+    attempt.upstream_status && `upstream_status=${attempt.upstream_status}`,
+    attempt.error_code && `error_code=${attempt.error_code}`,
+    attempt.observed_5h_reset_at && `5h_reset_at=${attempt.observed_5h_reset_at}`
+  ].filter(Boolean)
+  return details.join(' · ')
 })
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)

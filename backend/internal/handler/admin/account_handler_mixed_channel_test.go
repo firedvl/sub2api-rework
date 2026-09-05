@@ -285,6 +285,31 @@ func TestBulkUpdateForwardsAutoWarmupFieldAndFilter(t *testing.T) {
 	require.Equal(t, "eligible", adminSvc.lastBulkUpdateAccountInput.Filters.AutoWarmup)
 }
 
+func TestBulkUpdateForwardsAutoResetCreditFields(t *testing.T) {
+	adminSvc := newStubAdminService()
+	router := setupAccountMixedChannelRouter(adminSvc)
+
+	body, _ := json.Marshal(map[string]any{
+		"account_ids":                    []int64{1, 2},
+		"auto_reset_credit_enabled":      true,
+		"auto_reset_credit_5h_threshold": 0.75,
+		"auto_reset_credit_7d_threshold": 0.9,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/bulk-update", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCreditEnabled)
+	require.True(t, *adminSvc.lastBulkUpdateAccountInput.AutoResetCreditEnabled)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hThreshold)
+	require.Equal(t, 0.75, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hThreshold)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dThreshold)
+	require.Equal(t, 0.9, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dThreshold)
+}
+
 func TestBulkUpdateRejectsInvalidAutoWarmupFilter(t *testing.T) {
 	adminSvc := newStubAdminService()
 	router := setupAccountMixedChannelRouter(adminSvc)

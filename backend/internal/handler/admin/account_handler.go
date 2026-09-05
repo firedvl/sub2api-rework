@@ -154,22 +154,25 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	AccountIDs              []int64                   `json:"account_ids"`
-	Filters                 *BulkUpdateAccountFilters `json:"filters"`
-	Name                    string                    `json:"name"`
-	ProxyID                 *int64                    `json:"proxy_id"`
-	Concurrency             *int                      `json:"concurrency"`
-	Priority                *int                      `json:"priority"`
-	RateMultiplier          *float64                  `json:"rate_multiplier"`
-	LoadFactor              *int                      `json:"load_factor"`
-	Status                  string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
-	Schedulable             *bool                     `json:"schedulable"`
-	GroupIDs                *[]int64                  `json:"group_ids"`
-	Credentials             map[string]any            `json:"credentials"`
-	Extra                   map[string]any            `json:"extra"`
-	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
-	AutoWarmupEnabled       *bool                     `json:"auto_warmup_enabled"`
-	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	AccountIDs                 []int64                   `json:"account_ids"`
+	Filters                    *BulkUpdateAccountFilters `json:"filters"`
+	Name                       string                    `json:"name"`
+	ProxyID                    *int64                    `json:"proxy_id"`
+	Concurrency                *int                      `json:"concurrency"`
+	Priority                   *int                      `json:"priority"`
+	RateMultiplier             *float64                  `json:"rate_multiplier"`
+	LoadFactor                 *int                      `json:"load_factor"`
+	Status                     string                    `json:"status" binding:"omitempty,oneof=active inactive error"`
+	Schedulable                *bool                     `json:"schedulable"`
+	GroupIDs                   *[]int64                  `json:"group_ids"`
+	Credentials                map[string]any            `json:"credentials"`
+	Extra                      map[string]any            `json:"extra"`
+	ProbeEnabled               *bool                     `json:"upstream_billing_probe_enabled"`
+	AutoWarmupEnabled          *bool                     `json:"auto_warmup_enabled"`
+	AutoResetCreditEnabled     *bool                     `json:"auto_reset_credit_enabled"`
+	AutoResetCredit5hThreshold *float64                  `json:"auto_reset_credit_5h_threshold"`
+	AutoResetCredit7dThreshold *float64                  `json:"auto_reset_credit_7d_threshold"`
+	ConfirmMixedChannelRisk    *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 type BulkUpdateAccountFilters struct {
@@ -2128,7 +2131,10 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		len(req.Credentials) > 0 ||
 		len(req.Extra) > 0 ||
 		req.ProbeEnabled != nil ||
-		req.AutoWarmupEnabled != nil
+		req.AutoWarmupEnabled != nil ||
+		req.AutoResetCreditEnabled != nil ||
+		req.AutoResetCredit5hThreshold != nil ||
+		req.AutoResetCredit7dThreshold != nil
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
@@ -2136,22 +2142,25 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
-		AccountIDs:            req.AccountIDs,
-		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
-		Name:                  req.Name,
-		ProxyID:               req.ProxyID,
-		Concurrency:           req.Concurrency,
-		Priority:              req.Priority,
-		RateMultiplier:        req.RateMultiplier,
-		LoadFactor:            req.LoadFactor,
-		Status:                req.Status,
-		Schedulable:           req.Schedulable,
-		GroupIDs:              req.GroupIDs,
-		Credentials:           req.Credentials,
-		Extra:                 req.Extra,
-		ProbeEnabled:          req.ProbeEnabled,
-		AutoWarmupEnabled:     req.AutoWarmupEnabled,
-		SkipMixedChannelCheck: skipCheck,
+		AccountIDs:                 req.AccountIDs,
+		Filters:                    toServiceBulkUpdateAccountFilters(req.Filters),
+		Name:                       req.Name,
+		ProxyID:                    req.ProxyID,
+		Concurrency:                req.Concurrency,
+		Priority:                   req.Priority,
+		RateMultiplier:             req.RateMultiplier,
+		LoadFactor:                 req.LoadFactor,
+		Status:                     req.Status,
+		Schedulable:                req.Schedulable,
+		GroupIDs:                   req.GroupIDs,
+		Credentials:                req.Credentials,
+		Extra:                      req.Extra,
+		ProbeEnabled:               req.ProbeEnabled,
+		AutoWarmupEnabled:          req.AutoWarmupEnabled,
+		AutoResetCreditEnabled:     req.AutoResetCreditEnabled,
+		AutoResetCredit5hThreshold: req.AutoResetCredit5hThreshold,
+		AutoResetCredit7dThreshold: req.AutoResetCredit7dThreshold,
+		SkipMixedChannelCheck:      skipCheck,
 	})
 	if err != nil {
 		var mixedErr *service.MixedChannelError

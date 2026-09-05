@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	OpenAIAutoWarmupStatusPending   = "pending"
-	OpenAIAutoWarmupStatusSucceeded = "succeeded"
-	OpenAIAutoWarmupStatusFailed    = "failed"
+	OpenAIAutoWarmupStatusPending                  = "pending"
+	OpenAIAutoWarmupStatusSucceeded                = "succeeded"
+	OpenAIAutoWarmupStatusFailed                   = "failed"
+	OpenAIAutoWarmupStatusWindowStartedWithWarning = "window_started_with_warning"
 
 	openAIAutoWarmupWindowType   = "5h"
 	openAIAutoWarmupResetAdvance = time.Minute
@@ -66,14 +67,17 @@ type OpenAIAutoWarmupAttemptRepository interface {
 }
 
 type OpenAIAutoWarmupResult struct {
-	Model                string
-	RequestID            string
-	ResponseID           string
-	Usage                OpenAIUsage
-	Latency              time.Duration
-	UpstreamStatus       int
-	UpstreamErrorCode    string
-	UpstreamErrorMessage string
+	Model                 string
+	RequestID             string
+	ResponseID            string
+	Usage                 OpenAIUsage
+	Latency               time.Duration
+	UpstreamStatus        int
+	UpstreamErrorCode     string
+	UpstreamErrorMessage  string
+	WindowStarted         bool
+	Observed5hResetAt     string
+	Observed5hUsedPercent *float64
 }
 
 type openAIAutoWarmupSender interface {
@@ -81,14 +85,19 @@ type openAIAutoWarmupSender interface {
 }
 
 type OpenAIAutoWarmupState struct {
-	Status      string `json:"status"`
-	WindowType  string `json:"window_type"`
-	ResetAt     string `json:"reset_at"`
-	AttemptedAt string `json:"attempted_at"`
-	CompletedAt string `json:"completed_at,omitempty"`
-	ErrorCode   string `json:"error_code,omitempty"`
-	Model       string `json:"model,omitempty"`
-	RequestID   string `json:"request_id,omitempty"`
+	Status                string   `json:"status"`
+	WindowType            string   `json:"window_type"`
+	ResetAt               string   `json:"reset_at"`
+	AttemptedAt           string   `json:"attempted_at"`
+	CompletedAt           string   `json:"completed_at,omitempty"`
+	ErrorCode             string   `json:"error_code,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	RequestID             string   `json:"request_id,omitempty"`
+	UpstreamStatus        int      `json:"upstream_status,omitempty"`
+	UpstreamErrorCode     string   `json:"upstream_error_code,omitempty"`
+	WindowStarted         bool     `json:"window_started,omitempty"`
+	Observed5hResetAt     string   `json:"observed_5h_reset_at,omitempty"`
+	Observed5hUsedPercent *float64 `json:"observed_5h_used_percent,omitempty"`
 }
 
 type openAIAutoWarmupWindow struct {
@@ -265,11 +274,20 @@ func (s *OpenAIQuotaAutoResetService) completeOpenAIAutoWarmup(ctx context.Conte
 		completion.CacheReadTokens = result.Usage.CacheReadInputTokens
 		state.Model = result.Model
 		state.RequestID = firstNonEmpty(result.RequestID, result.ResponseID)
+		state.UpstreamStatus = result.UpstreamStatus
+		state.UpstreamErrorCode = result.UpstreamErrorCode
+		state.WindowStarted = result.WindowStarted
+		state.Observed5hResetAt = result.Observed5hResetAt
+		state.Observed5hUsedPercent = result.Observed5hUsedPercent
 	}
 	if sendErr != nil {
 		completion.Status = OpenAIAutoWarmupStatusFailed
 		completion.ErrorCode = firstNonEmpty(infraerrors.Reason(sendErr), "OPENAI_AUTO_WARMUP_FAILED")
 		state.Status = OpenAIAutoWarmupStatusFailed
+		if result != nil && result.WindowStarted {
+			state.Status = OpenAIAutoWarmupStatusWindowStartedWithWarning
+			completion.ErrorCode = "OPENAI_AUTO_WARMUP_WINDOW_STARTED_WARNING"
+		}
 		state.ErrorCode = completion.ErrorCode
 	}
 	completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

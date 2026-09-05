@@ -102,6 +102,11 @@ type CodexModelsManifest struct {
 	NotModified                  bool
 }
 
+type codexAccountManifest struct {
+	account  *Account
+	manifest *CodexModelsManifest
+}
+
 // BuildGroupConfiguredCodexModelsManifest builds a Codex catalog exclusively
 // from the public model names configured on accounts in an OpenAI group. The
 // boolean result distinguishes "no explicit configuration" from a configured
@@ -193,6 +198,236 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		manifest.NotModified = true
 	}
 	return nil
+}
+
+// BuildGroupDynamicCodexModelsManifest unions the live manifests of routable
+// OpenAI accounts. Raw provider descriptors are retained; account mappings
+// only rename models that the same account can actually route.
+func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
+	ctx context.Context,
+	group *Group,
+	clientVersion string,
+	ifNoneMatch string,
+) (*CodexModelsManifest, bool, error) {
+	if s == nil || s.accountRepo == nil || group == nil ||
+		(group.Platform != PlatformOpenAI && group.Platform != PlatformComposite) {
+		return nil, false, nil
+	}
+	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, group.ID)
+	if err != nil {
+		return nil, true, err
+	}
+	manifests := make([]codexAccountManifest, 0, len(accounts))
+	configuredModels := []string(nil)
+	if group.Platform == PlatformOpenAI {
+		configuredModels = openAIConfiguredCodexModelIDsForGroup(accounts, group)
+	}
+	hasOAuth := false
+	for i := range accounts {
+		account := &accounts[i]
+		if account.Platform != PlatformOpenAI || !account.IsOpenAIOAuth() {
+			continue
+		}
+		hasOAuth = true
+		manifest, fetchErr := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		if fetchErr != nil {
+			continue
+		}
+		if completeErr := s.CompleteAPIKeyCodexModelsManifestForClient(manifest, account); completeErr != nil {
+			continue
+		}
+		manifests = append(manifests, codexAccountManifest{account: account, manifest: manifest})
+	}
+	if !hasOAuth {
+		return nil, false, nil
+	}
+	if len(manifests) == 0 && len(configuredModels) == 0 {
+		return nil, false, nil
+	}
+	var allowPublicID func(*Account, string, string) bool
+	if group.Platform == PlatformComposite {
+		allowPublicID = func(account *Account, publicID, upstreamID string) bool {
+			return s.compositeCodexPublicIDRoutable(ctx, group.ID, account, publicID, upstreamID)
+		}
+	}
+	body, err := mergeRoutableCodexManifests(manifests, allowPublicID)
+	if err != nil {
+		return nil, true, err
+	}
+	body, _, err = mergeConfiguredCodexModelsManifest(body, configuredModels, group.ModelsListConfig.Models, group.CustomModelsListEnabled())
+	if err != nil {
+		return nil, true, err
+	}
+	manifest := &CodexModelsManifest{Body: body, ETag: codexModelsManifestBodyETag(body)}
+	if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
+		manifest.Body = nil
+		manifest.NotModified = true
+	}
+	return manifest, true, nil
+}
+
+func (s *OpenAIGatewayService) compositeCodexPublicIDRoutable(
+	ctx context.Context,
+	groupID int64,
+	account *Account,
+	publicID string,
+	upstreamID string,
+) bool {
+	if s == nil || s.compositeResolver == nil || account == nil {
+		return false
+	}
+	decision, err := s.compositeResolver.Resolve(ctx, groupID, publicID, CompositeRouteEndpointResponses)
+	if err != nil || !decision.Matched || decision.TargetPlatform != PlatformOpenAI {
+		return false
+	}
+	if !account.IsModelSupported(decision.UpstreamModel) {
+		return false
+	}
+	return strings.TrimSpace(account.GetMappedModel(decision.UpstreamModel)) == strings.TrimSpace(upstreamID)
+}
+
+func mergeRoutableCodexManifests(
+	sources []codexAccountManifest,
+	allowPublicID func(*Account, string, string) bool,
+) ([]byte, error) {
+	envelope := map[string]json.RawMessage{}
+	models := make([]json.RawMessage, 0)
+	seen := make(map[string]struct{})
+	for _, item := range sources {
+		if item.manifest == nil || item.manifest.NotModified || len(item.manifest.Body) == 0 {
+			continue
+		}
+		var current map[string]json.RawMessage
+		if err := json.Unmarshal(item.manifest.Body, &current); err != nil {
+			return nil, err
+		}
+		if len(envelope) == 0 {
+			envelope = current
+		}
+		var entries []json.RawMessage
+		if err := json.Unmarshal(current["models"], &entries); err != nil {
+			return nil, err
+		}
+		for _, raw := range entries {
+			var descriptor struct {
+				Slug           string `json:"slug"`
+				SupportedInAPI *bool  `json:"supported_in_api"`
+			}
+			if json.Unmarshal(raw, &descriptor) != nil {
+				continue
+			}
+			descriptor.Slug = strings.TrimSpace(descriptor.Slug)
+			if descriptor.Slug == "" || descriptor.SupportedInAPI != nil && !*descriptor.SupportedInAPI || isCodexDedicatedMediaModel(descriptor.Slug) {
+				continue
+			}
+			for _, publicID := range routableCodexPublicIDs(item.account, descriptor.Slug) {
+				if allowPublicID != nil && !allowPublicID(item.account, publicID, descriptor.Slug) {
+					continue
+				}
+				if _, exists := seen[publicID]; exists {
+					continue
+				}
+				publicRaw, err := codexModelWithPublicID(raw, publicID, descriptor.Slug)
+				if err != nil {
+					return nil, err
+				}
+				seen[publicID] = struct{}{}
+				models = append(models, publicRaw)
+			}
+		}
+	}
+	if envelope == nil {
+		envelope = map[string]json.RawMessage{}
+	}
+	rawModels, err := json.Marshal(models)
+	if err != nil {
+		return nil, err
+	}
+	envelope["models"] = rawModels
+	return json.Marshal(envelope)
+}
+
+// MergeCodexModelsManifestBodies keeps preferred descriptors and appends only
+// missing fallback models. The preferred envelope is retained so live Codex
+// metadata survives when it is merged into a generated Composite catalog.
+func MergeCodexModelsManifestBodies(preferredBody, fallbackBody []byte) ([]byte, error) {
+	var preferred map[string]json.RawMessage
+	if err := json.Unmarshal(preferredBody, &preferred); err != nil {
+		return nil, err
+	}
+	var fallback map[string]json.RawMessage
+	if err := json.Unmarshal(fallbackBody, &fallback); err != nil {
+		return nil, err
+	}
+	var preferredModels, fallbackModels []json.RawMessage
+	if err := json.Unmarshal(preferred["models"], &preferredModels); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(fallback["models"], &fallbackModels); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(preferredModels)+len(fallbackModels))
+	merged := make([]json.RawMessage, 0, len(preferredModels)+len(fallbackModels))
+	for _, models := range [][]json.RawMessage{preferredModels, fallbackModels} {
+		for _, raw := range models {
+			var descriptor struct {
+				Slug string `json:"slug"`
+			}
+			if json.Unmarshal(raw, &descriptor) != nil || strings.TrimSpace(descriptor.Slug) == "" {
+				continue
+			}
+			descriptor.Slug = strings.TrimSpace(descriptor.Slug)
+			if _, exists := seen[descriptor.Slug]; exists {
+				continue
+			}
+			seen[descriptor.Slug] = struct{}{}
+			merged = append(merged, raw)
+		}
+	}
+	rawModels, err := json.Marshal(merged)
+	if err != nil {
+		return nil, err
+	}
+	preferred["models"] = rawModels
+	return json.Marshal(preferred)
+}
+
+func routableCodexPublicIDs(account *Account, upstreamID string) []string {
+	if account == nil {
+		return nil
+	}
+	mapping := account.GetModelMapping()
+	if len(mapping) == 0 {
+		if account.IsModelSupported(upstreamID) {
+			return []string{upstreamID}
+		}
+		return nil
+	}
+	publicIDs := make([]string, 0)
+	if mapped, matched := account.ResolveMappedModel(upstreamID); account.IsModelSupported(upstreamID) && (!matched || strings.TrimSpace(mapped) == upstreamID) {
+		publicIDs = append(publicIDs, upstreamID)
+	}
+	for publicID, target := range mapping {
+		publicID = strings.TrimSpace(publicID)
+		if publicID == "" || strings.Contains(publicID, "*") || strings.TrimSpace(target) != upstreamID {
+			continue
+		}
+		publicIDs = append(publicIDs, publicID)
+	}
+	return dedupeAndSortModelIDs(publicIDs)
+}
+
+func codexModelWithPublicID(raw json.RawMessage, publicID, upstreamID string) (json.RawMessage, error) {
+	if publicID == upstreamID {
+		return raw, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	fields["slug"], _ = json.Marshal(publicID)
+	fields["display_name"], _ = json.Marshal(publicID)
+	return json.Marshal(fields)
 }
 
 func (s *OpenAIGatewayService) groupConfiguredCodexModelIDs(ctx context.Context, group *Group) ([]string, error) {
@@ -1567,10 +1802,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 	}
-	if useAPIKeyUpstream {
-		return s.fetchCachedAPIKeyCodexModelsManifest(ctx, request, ifNoneMatch)
-	}
-	manifest, fetchErr := s.fetchCodexModelsManifestUpstream(ctx, request, ifNoneMatch)
+	manifest, fetchErr := s.fetchCachedCodexModelsManifest(ctx, request, ifNoneMatch)
 	if !credAccount.IsOpenAIAgentIdentity() || !isAgentIdentityTaskInvalidCodexModelsError(fetchErr) {
 		s.handleCodexModelsManifestAccountAuthError(ctx, account, credAccount, fetchErr)
 		return manifest, fetchErr
@@ -1631,7 +1863,7 @@ func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx con
 	s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.statusCode, headers, upstreamErr.body)
 }
 
-func (s *OpenAIGatewayService) fetchCachedAPIKeyCodexModelsManifest(ctx context.Context, request codexModelsManifestRequest, ifNoneMatch string) (*CodexModelsManifest, error) {
+func (s *OpenAIGatewayService) fetchCachedCodexModelsManifest(ctx context.Context, request codexModelsManifestRequest, ifNoneMatch string) (*CodexModelsManifest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1640,7 +1872,11 @@ func (s *OpenAIGatewayService) fetchCachedAPIKeyCodexModelsManifest(ctx context.
 	if state == codexModelsManifestCacheFresh {
 		return codexModelsManifestForClient(manifest, ifNoneMatch), nil
 	}
-	resultCh := s.refreshCachedAPIKeyCodexModelsManifest(cacheKey, request)
+	upstreamIfNoneMatch := ""
+	if state == codexModelsManifestCacheMiss && !request.useAPIKeyUpstream {
+		upstreamIfNoneMatch = ifNoneMatch
+	}
+	resultCh := s.refreshCachedAPIKeyCodexModelsManifest(cacheKey, request, upstreamIfNoneMatch)
 	if state == codexModelsManifestCacheStale {
 		return codexModelsManifestForClient(manifest, ifNoneMatch), nil
 	}
@@ -1659,10 +1895,10 @@ func (s *OpenAIGatewayService) fetchCachedAPIKeyCodexModelsManifest(ctx context.
 	}
 }
 
-func (s *OpenAIGatewayService) refreshCachedAPIKeyCodexModelsManifest(cacheKey string, request codexModelsManifestRequest) <-chan singleflight.Result {
+func (s *OpenAIGatewayService) refreshCachedAPIKeyCodexModelsManifest(cacheKey string, request codexModelsManifestRequest, upstreamIfNoneMatch string) <-chan singleflight.Result {
 	return s.codexModelsManifestCache.refresh.DoChan(cacheKey, func() (any, error) {
 		cached, _ := s.codexModelsManifestCache.get(cacheKey, time.Now())
-		ifNoneMatch := ""
+		ifNoneMatch := strings.TrimSpace(upstreamIfNoneMatch)
 		if cached != nil {
 			ifNoneMatch = cached.upstreamETag
 		}
@@ -1813,11 +2049,9 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		upstreamSourceBody:           append([]byte(nil), upstreamBody...),
 		convertedFromOpenAIModelList: convertedFromOpenAIModelList,
 	}
-	if request.useAPIKeyUpstream {
-		manifest.upstreamETag = etag
-		if !bytes.Equal(body, upstreamBody) {
-			manifest.ETag = codexModelsManifestBodyETag(body)
-		}
+	manifest.upstreamETag = etag
+	if request.useAPIKeyUpstream && !bytes.Equal(body, upstreamBody) {
+		manifest.ETag = codexModelsManifestBodyETag(body)
 	}
 	return manifest, nil
 }

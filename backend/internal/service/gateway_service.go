@@ -797,6 +797,13 @@ type GatewayService struct {
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 }
 
+func (s *GatewayService) CompositeRouteResolver() *CompositeRouteResolver {
+	if s == nil {
+		return nil
+	}
+	return s.compositeResolver
+}
+
 // NewGatewayService creates a new GatewayService
 func NewGatewayService(
 	accountRepo AccountRepository,

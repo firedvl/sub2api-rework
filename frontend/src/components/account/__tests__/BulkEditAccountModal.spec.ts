@@ -182,6 +182,65 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('自动重置卡支持独立三态和阈值更新', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue('enabled')
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('75')
+    await wrapper.get('#bulk-edit-auto-reset-credit-7d').setValue('90')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      auto_reset_credit_enabled: true,
+      auto_reset_credit_5h_threshold: 0.75,
+      auto_reset_credit_7d_threshold: 0.9
+    })
+  })
+
+  it('自动重置卡阈值可单独修改并校验范围', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('0.05')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.autoResetCredit.thresholdInvalid')
+
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('50')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      auto_reset_credit_5h_threshold: 0.5
+    })
+  })
+
+  it('自动重置卡结果显示更新和跳过数量', async () => {
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockResolvedValueOnce({
+      success: 1,
+      failed: 0,
+      auto_reset_credit_updated_count: 1,
+      auto_reset_credit_skipped_count: 1,
+      results: []
+    } as any)
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue('disabled')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.bulkEdit.autoResetCreditResult')
+    expect(translate).toHaveBeenCalledWith('admin.accounts.bulkEdit.autoResetCreditResult', {
+      updated: 1,
+      skipped: 1
+    })
+  })
+
   it('后端拒绝修改同步账号倍率时展示专用错误', async () => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockRejectedValueOnce({
       status: 409,
