@@ -271,8 +271,7 @@ func TestBuildAntigravityCompatGeminiBody_ConfiguresMixedToolInvocations(t *test
 			require.True(t, exists)
 			require.Equal(t, true, toolConfig["includeServerSideToolInvocations"])
 			require.Equal(t, "VALIDATED", gjson.GetBytes(body, "request.toolConfig.functionCallingConfig.mode").String())
-			require.True(t, gjson.GetBytes(body, "request.tool_config.include_server_side_tool_invocations").Bool())
-			require.Equal(t, "VALIDATED", gjson.GetBytes(body, "request.tool_config.function_calling_config.mode").String())
+			require.False(t, gjson.GetBytes(body, "request.tool_config").Exists())
 		})
 	}
 }
@@ -286,151 +285,83 @@ func TestEnableMixedGeminiToolInvocationsPreservesFunctionCallingConfig(t *testi
 	require.Equal(t, "AUTO", gjson.GetBytes(got, "toolConfig.functionCallingConfig.mode").String())
 	require.Equal(t, "get_weather", gjson.GetBytes(got, "toolConfig.functionCallingConfig.allowedFunctionNames.0").String())
 	require.True(t, gjson.GetBytes(got, "toolConfig.includeServerSideToolInvocations").Bool())
-	require.Equal(t, "AUTO", gjson.GetBytes(got, "tool_config.function_calling_config.mode").String())
-	require.Equal(t, "get_weather", gjson.GetBytes(got, "tool_config.function_calling_config.allowed_function_names.0").String())
-	require.True(t, gjson.GetBytes(got, "tool_config.include_server_side_tool_invocations").Bool())
+	require.False(t, gjson.GetBytes(got, "tool_config").Exists())
 }
 
-func TestAntigravityCompatResponsesAdaptsCodexNamespaceMixedTools(t *testing.T) {
+func TestAntigravityCompatResponsesRejectsMixedV1InternalTools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	upstreamBody := `data: {"response":{"responseId":"resp_3757","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_3757","name":"shell__exec","args":{"command":"pwd"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}}` + "\n\n"
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
-		}},
+	tests := []struct {
+		name  string
+		tools string
+	}{
+		{
+			name:  "function",
+			tools: `[{"type":"web_search"},{"type":"function","name":"get_weather","parameters":{"type":"object"}}]`,
+		},
+		{
+			name:  "preview search",
+			tools: `[{"type":"web_search_preview"},{"type":"function","name":"get_weather","parameters":{"type":"object"}}]`,
+		},
+		{
+			name:  "namespace",
+			tools: `[{"type":"web_search"},{"type":"namespace","name":"shell","tools":[{"type":"function","name":"exec","parameters":{"type":"object"}}]}]`,
+		},
 	}
-	svc := newAntigravityCompatService(
-		config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
-		upstream,
-	)
 
-	body := []byte(`{
-		"model":"gemini-3.1-pro-high",
-		"input":[{
-			"role":"user",
-			"content":[{
-				"type":"input_text",
-				"text":"hello"
-			}]
-		}],
-		"stream":true,
-		"tools":[
-			{"type":"web_search"},
-			{
-				"type":"namespace",
-				"name":"shell",
-				"tools":[{
-					"type":"function",
-					"name":"exec",
-					"description":"Run a shell command",
-					"parameters":{
-						"type":"object",
-						"properties":{
-							"command":{"type":"string"}
-						},
-						"required":["command"]
-					}
-				}]
-			}
-		]
-	}`)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &queuedHTTPUpstreamStub{}
+			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
+			body := []byte(`{"model":"gemini-3.1-pro-high","input":"hello","stream":true,"tools":` + tt.tools + `}`)
+			c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
 
-	c, recorder := newAntigravityCompatContext(
-		http.MethodPost,
-		"/v1/responses",
-		body,
-	)
+			result, err := svc.ForwardAsResponses(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
 
-	result, err := svc.ForwardAsResponses(
-		context.Background(),
-		c,
-		newAntigravityCompatAccount(AccountTypeOAuth),
-		body,
-		nil,
-	)
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.requestBodies, 1)
-
-	requestBody := upstream.requestBodies[0]
-
-	require.True(
-		t,
-		gjson.GetBytes(
-			requestBody,
-			"request.toolConfig.includeServerSideToolInvocations",
-		).Bool(),
-	)
-	require.Equal(
-		t,
-		"VALIDATED",
-		gjson.GetBytes(
-			requestBody,
-			"request.toolConfig.functionCallingConfig.mode",
-		).String(),
-	)
-	require.True(t, gjson.GetBytes(requestBody, "request.tool_config.include_server_side_tool_invocations").Bool())
-	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.tool_config.function_calling_config.mode").String())
-
-	require.Equal(
-		t,
-		"shell__exec",
-		gjson.GetBytes(
-			requestBody,
-			"request.tools.0.functionDeclarations.0.name",
-		).String(),
-	)
-
-	require.True(
-		t,
-		gjson.GetBytes(
-			requestBody,
-			"request.tools.1.googleSearch",
-		).Exists(),
-	)
-
-	require.Contains(t, recorder.Body.String(), `"namespace":"shell"`)
-	require.Contains(t, recorder.Body.String(), `"name":"exec"`)
-	require.NotContains(t, recorder.Body.String(), `"name":"shell__exec"`)
+			require.EqualError(t, err, AntigravityMixedToolsUnsupportedClientMessage)
+			require.Nil(t, result)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), AntigravityMixedToolsUnsupportedClientMessage)
+			require.Empty(t, upstream.requestBodies)
+		})
+	}
 }
 
-func TestAntigravityCompatResponsesSerializesLiveMixedToolAliases(t *testing.T) {
+func TestAntigravityCompatResponsesForwardsNonMixedTools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
-	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
-	body := []byte(`{
-		"model":"gemini-3.1-pro-high",
-		"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],
-		"stream":true,
-		"tools":[
-			{"type":"web_search"},
-			{"type":"function","name":"get_weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}
-		]
-	}`)
-	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
+	tests := []struct {
+		name          string
+		tools         string
+		wantSearch    bool
+		wantFunctions bool
+	}{
+		{name: "no tools"},
+		{name: "web only", tools: `,"tools":[{"type":"web_search"}]`, wantSearch: true},
+		{name: "function only", tools: `,"tools":[{"type":"function","name":"get_weather","parameters":{"type":"object"}}]`, wantFunctions: true},
+	}
 
-	result, err := svc.ForwardAsResponses(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+			svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
+			body := []byte(`{"model":"gemini-3.1-pro-high","input":"hello"` + tt.tools + `}`)
+			c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.requestBodies, 1)
-	requestBody := upstream.requestBodies[0]
-	require.Equal(t, "gemini-pro-agent", gjson.GetBytes(requestBody, "model").String())
-	require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
-	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.toolConfig.functionCallingConfig.mode").String())
-	require.True(t, gjson.GetBytes(requestBody, "request.tool_config.include_server_side_tool_invocations").Bool())
-	require.Equal(t, "VALIDATED", gjson.GetBytes(requestBody, "request.tool_config.function_calling_config.mode").String())
-	require.Equal(t, "get_weather", gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations.0.name").String())
-	require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
+			result, err := svc.ForwardAsResponses(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Len(t, upstream.requestBodies, 1)
+			requestBody := upstream.requestBodies[0]
+			require.Equal(t, "gemini-pro-agent", gjson.GetBytes(requestBody, "model").String())
+			require.Equal(t, tt.wantSearch, gjson.GetBytes(requestBody, "request.tools.#(googleSearch)").Exists())
+			require.Equal(t, tt.wantFunctions, gjson.GetBytes(requestBody, "request.tools.#(functionDeclarations)").Exists())
+		})
+	}
 }
 
-func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *testing.T) {
+func TestAntigravityCompatChatRejectsMixedV1InternalTools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+	upstream := &queuedHTTPUpstreamStub{}
 	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
 	body := []byte(`{
 		"model":"claude-opus-4-6-thinking",
@@ -443,19 +374,15 @@ func TestAntigravityCompatChatMixedBuiltInToolsEnableServerSideInvocations(t *te
 			{"type":"code_execution"}
 		]
 	}`)
-	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), body, nil)
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.requestBodies, 1)
-	requestBody := upstream.requestBodies[0]
-	require.True(t, gjson.GetBytes(requestBody, "request.toolConfig.includeServerSideToolInvocations").Bool())
-	require.False(t, gjson.GetBytes(requestBody, "request.tool_config").Exists())
-	require.Len(t, gjson.GetBytes(requestBody, "request.tools.0.functionDeclarations").Array(), 2)
-	require.True(t, gjson.GetBytes(requestBody, "request.tools.1.googleSearch").Exists())
-	require.True(t, gjson.GetBytes(requestBody, "request.tools.2.codeExecution").Exists())
+	require.EqualError(t, err, AntigravityMixedToolsUnsupportedClientMessage)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), AntigravityMixedToolsUnsupportedClientMessage)
+	require.Empty(t, upstream.requestBodies)
 }
 
 func TestAntigravityCompatResponsesAdaptsStandaloneWebRunWithShell(t *testing.T) {

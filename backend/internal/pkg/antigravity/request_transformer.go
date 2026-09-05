@@ -156,9 +156,8 @@ func TransformClaudeToGeminiWithOptions(claudeReq *ClaudeRequest, projectID, map
 				Mode: "VALIDATED",
 			},
 		}
-		// 内置工具（googleSearch）与函数调用混用时，上游要求显式开启
-		// includeServerSideToolInvocations，否则返回 400（issue #5709）。
-		// 与 raw 透传路的 enableMixedGeminiToolInvocations 注入保持同一语义。
+		// Preserve the canonical public Generate Content mixed-tool field.
+		// Antigravity v1internal callers reject this combination before sending it.
 		if hasMixedToolInvocations(tools) {
 			enabled := true
 			innerRequest.ToolConfig.IncludeServerSideToolInvocations = &enabled

@@ -93,18 +93,6 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	}
 	forwardedModel := mappedModel
 
-	// 获取 access_token
-	if s.tokenProvider == nil {
-		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Antigravity token provider not configured")
-	}
-	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
-	}
-
 	projectID, err := resolveAntigravityProjectID(account)
 	if err != nil {
 		_ = s.writeGoogleError(c, http.StatusBadRequest, err.Error())
@@ -135,6 +123,21 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
+	}
+	if antigravityV1InternalUsesMixedTools(wrappedBody) {
+		return nil, s.writeGoogleError(c, http.StatusBadRequest, AntigravityMixedToolsUnsupportedClientMessage)
+	}
+
+	// 获取 access_token
+	if s.tokenProvider == nil {
+		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Antigravity token provider not configured")
+	}
+	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, &UpstreamFailoverError{
+			StatusCode:   http.StatusBadGateway,
+			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
+		}
 	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent

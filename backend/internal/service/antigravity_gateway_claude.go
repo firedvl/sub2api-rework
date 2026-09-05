@@ -59,18 +59,6 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
 	billingModel := mappedModel
 
-	// 获取 access_token
-	if s.tokenProvider == nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
-	}
-	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
-	}
-
 	projectID, err := resolveAntigravityProjectID(account)
 	if err != nil {
 		_ = s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -92,6 +80,21 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	geminiBody, err := antigravity.TransformClaudeToGeminiWithOptions(&claudeReq, projectID, mappedModel, transformOpts)
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
+	}
+	if antigravityV1InternalUsesMixedTools(geminiBody) {
+		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", AntigravityMixedToolsUnsupportedClientMessage)
+	}
+
+	// 获取 access_token
+	if s.tokenProvider == nil {
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
+	}
+	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, &UpstreamFailoverError{
+			StatusCode:   http.StatusBadGateway,
+			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
+		}
 	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent

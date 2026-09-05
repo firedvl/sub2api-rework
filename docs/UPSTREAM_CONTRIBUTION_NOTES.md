@@ -51,10 +51,21 @@ route resolver, so it needs no schema migration or new provider abstraction.
 
 ## Mixed Native Search Wire Compatibility
 
-Live Antigravity `v1internal` transports require both tool-config naming forms
-for mixed `googleSearch` and custom function declarations. The compatibility
-path now emits the canonical camelCase object and its snake_case alias only for
-mixed requests. Standalone Codex search remains available as a separate route.
+Live Antigravity `v1internal` tests rejected mixed `googleSearch` and custom
+function declarations with camel-case, snake-case, and dual tool-config forms.
+This includes the canonical
+`toolConfig.includeServerSideToolInvocations=true` form added by upstream PRs
+[#5711](https://github.com/Wei-Shaw/sub2api/pull/5711) and
+[#5725](https://github.com/Wei-Shaw/sub2api/pull/5725); upstream issue
+[#6464](https://github.com/Wei-Shaw/sub2api/issues/6464) reports the same result.
+
+All Antigravity OAuth paths return a clear provider capability error before
+OAuth or upstream I/O. They do not remove either requested tool. Public Gemini
+API tool-combination support is a separate endpoint contract and does not prove
+support in Antigravity `v1internal`.
+[Antigravity-Manager](https://github.com/lbjlaq/Antigravity-Manager/blob/ba7b945f1a275a1a3642a0174b086bf9f42fc31a/src-tauri/src/proxy/mappers/common_utils.rs)
+makes the same endpoint distinction. Standalone Codex search remains available
+as an explicit, separate route.
 
 ## Suggested Verification
 

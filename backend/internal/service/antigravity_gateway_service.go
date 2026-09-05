@@ -629,6 +629,21 @@ func (s *AntigravityGatewayService) wrapV1InternalRequest(projectID, model strin
 	return json.Marshal(wrapped)
 }
 
+// antigravityV1InternalUsesMixedTools detects the v1internal shape rejected
+// even with includeServerSideToolInvocations=true; see Wei-Shaw/sub2api#6464.
+func antigravityV1InternalUsesMixedTools(body []byte) bool {
+	tools := gjson.GetBytes(body, "request.tools")
+	if !tools.Exists() {
+		tools = gjson.GetBytes(body, "tools")
+	}
+	var hasGoogleSearch, hasFunctions bool
+	for _, tool := range tools.Array() {
+		hasGoogleSearch = hasGoogleSearch || tool.Get("googleSearch").Exists()
+		hasFunctions = hasFunctions || len(tool.Get("functionDeclarations").Array()) > 0
+	}
+	return hasGoogleSearch && hasFunctions
+}
+
 // unwrapV1InternalResponse 解包 v1internal 响应
 // 使用 gjson 零拷贝提取 response 字段，避免 Unmarshal+Marshal 双重开销
 func (s *AntigravityGatewayService) unwrapV1InternalResponse(body []byte) ([]byte, error) {

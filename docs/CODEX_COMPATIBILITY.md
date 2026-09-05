@@ -30,11 +30,16 @@ streaming response restoration.
 
 ## Mixed Native Search
 
-Antigravity's `v1internal` transport requires both canonical camelCase and
-snake_case tool-config aliases for mixed native search and function calling.
-Mixed requests therefore retain `toolConfig.includeServerSideToolInvocations`
-and also emit `tool_config.include_server_side_tool_invocations`. Search-only,
-function-only, and no-tool requests remain unchanged.
+Antigravity's private `v1internal` transport rejects mixed native Google Search
+and function declarations even when the request includes the canonical
+`toolConfig.includeServerSideToolInvocations=true` setting. Camel-case,
+snake-case, and dual-alias requests all returned the same upstream HTTP 400;
+search-only and function-only requests succeeded.
+
+All Antigravity OAuth paths now reject that final v1internal shape before OAuth
+or upstream I/O with a provider capability error. They do not drop either tool
+or claim that search ran. Public Gemini tool-combination support does not
+establish support in the private Antigravity `v1internal` endpoint.
 
 The implemented alternative is Codex standalone search: advertise `web.run` as
 a client-side tool, keep it beside normal function tools in the inference
@@ -46,3 +51,11 @@ See [Codex standalone search](CODEX_STANDALONE_SEARCH.md) for the pinned
 protocol, configuration, routing, PAT fallback, and acceptance gate.
 
 Public upstream context: [Wei-Shaw/sub2api issue #5843](https://github.com/Wei-Shaw/sub2api/issues/5843).
+Mixed-tool evidence: [issue #5709](https://github.com/Wei-Shaw/sub2api/issues/5709),
+[PR #5711](https://github.com/Wei-Shaw/sub2api/pull/5711),
+[PR #5725](https://github.com/Wei-Shaw/sub2api/pull/5725), and
+[issue #6464](https://github.com/Wei-Shaw/sub2api/issues/6464).
+The endpoint distinction is also documented by
+[Antigravity-Manager's mapper](https://github.com/lbjlaq/Antigravity-Manager/blob/ba7b945f1a275a1a3642a0174b086bf9f42fc31a/src-tauri/src/proxy/mappers/common_utils.rs)
+and Google's separate
+[Gemini Generate Content tool-combination guide](https://ai.google.dev/gemini-api/docs/generate-content/tool-combination).
