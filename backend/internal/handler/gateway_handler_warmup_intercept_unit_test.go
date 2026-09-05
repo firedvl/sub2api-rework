@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -156,6 +158,20 @@ func (f *fakeConcurrencyCache) CleanupExpiredAccountSlots(context.Context, int64
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlotKeys(context.Context) error     { return nil }
 func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error  { return nil }
 
+type countingHTTPUpstream struct {
+	calls int
+}
+
+func (u *countingHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.calls++
+	return nil, context.Canceled
+}
+
+func (u *countingHTTPUpstream) DoWithTLS(*http.Request, string, int64, int, *tlsfingerprint.Profile) (*http.Response, error) {
+	u.calls++
+	return nil, context.Canceled
+}
+
 func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*service.Account) (*GatewayHandler, func()) {
 	t.Helper()
 
@@ -213,6 +229,81 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		billingCacheSvc.Stop()
 	}
 	return h, cleanup
+}
+
+func TestGatewayHandlerResponses_AntigravityMixedToolsRejectBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(2000)
+	accountID := int64(1000)
+	group := &service.Group{
+		ID:       groupID,
+		Hydrated: true,
+		Platform: service.PlatformComposite,
+		Status:   service.StatusActive,
+	}
+	account := &service.Account{
+		ID:          accountID,
+		Name:        "ag-responses",
+		Platform:    service.PlatformAntigravity,
+		Type:        service.AccountTypeOAuth,
+		Concurrency: 1,
+		Priority:    1,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"project_id": "project-test",
+			"model_mapping": map[string]any{
+				"gemini-3.1-pro-high": "gemini-pro-agent",
+			},
+		},
+		Extra:         map[string]any{"mixed_scheduling": true},
+		AccountGroups: []service.AccountGroup{{AccountID: accountID, GroupID: groupID}},
+	}
+
+	h, cleanup := newTestGatewayHandler(t, group, []*service.Account{account})
+	defer cleanup()
+	upstream := &countingHTTPUpstream{}
+	h.antigravityGatewayService = service.NewAntigravityGatewayService(nil, nil, nil, nil, nil, upstream, nil, nil)
+
+	body := []byte(`{
+		"model":"gemini-3.1-pro-high",
+		"input":"hello",
+		"stream":true,
+		"tools":[
+			{"type":"web_search"},
+			{"type":"function","name":"get_time_zone","parameters":{"type":"object"}}
+		]
+	}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), ctxkey.Group, group))
+	c.Request = request
+	apiKey := &service.APIKey{
+		ID:      3000,
+		UserID:  4000,
+		GroupID: &groupID,
+		Status:  service.StatusActive,
+		User: &service.User{
+			ID:          4000,
+			Concurrency: 10,
+			Balance:     100,
+		},
+		Group: group,
+	}
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
+
+	h.Responses(c)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), service.AntigravityMixedToolsUnsupportedClientMessage)
+	require.Equal(t, 0, upstream.calls)
+	selected, ok := c.Get(opsAccountIDKey)
+	require.True(t, ok)
+	require.Equal(t, accountID, selected)
 }
 
 func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_MixedSchedulingV1(t *testing.T) {

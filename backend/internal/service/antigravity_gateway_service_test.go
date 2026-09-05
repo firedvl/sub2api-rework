@@ -399,7 +399,7 @@ func TestAntigravityGatewayService_ForwardGemini_ImageUsesDefaultMappingAndOAuth
 	require.Equal(t, []any{"TEXT", "IMAGE"}, generationConfig["responseModalities"])
 }
 
-func TestAntigravityGatewayService_ForwardGemini_PreservesServerSideToolInvocationConfig(t *testing.T) {
+func TestAntigravityGatewayService_ForwardGemini_RejectsMixedToolsBeforeOAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"tools":[{"functionDeclarations":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false}}]},{"googleSearch":{}}],"toolConfig":{"includeServerSideToolInvocations":true}}`)
 	writer := httptest.NewRecorder()
@@ -407,14 +407,9 @@ func TestAntigravityGatewayService_ForwardGemini_PreservesServerSideToolInvocati
 	body = bytes.ReplaceAll(body, []byte{92}, nil)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
 
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{}}}\n\n")),
-	}}}
+	upstream := &queuedHTTPUpstreamStub{}
 	svc := &AntigravityGatewayService{
 		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
-		tokenProvider:  &AntigravityTokenProvider{},
 		httpUpstream:   upstream,
 	}
 	account := &Account{
@@ -423,18 +418,11 @@ func TestAntigravityGatewayService_ForwardGemini_PreservesServerSideToolInvocati
 	}
 
 	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.Len(t, upstream.requestBodies, 1)
-
-	var wrapped map[string]any
-	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
-	request, ok := wrapped["request"].(map[string]any)
-	require.True(t, ok)
-	toolConfig, ok := request["toolConfig"].(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, true, toolConfig["includeServerSideToolInvocations"])
-	require.NotContains(t, toolConfig, "include_server_side_tool_invocations")
+	require.EqualError(t, err, AntigravityMixedToolsUnsupportedClientMessage)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, writer.Code)
+	require.Contains(t, writer.Body.String(), AntigravityMixedToolsUnsupportedClientMessage)
+	require.Empty(t, upstream.requestBodies)
 }
 
 func TestAntigravityGatewayService_ForwardGemini_MissingProjectReturnsLocalError(t *testing.T) {
@@ -542,6 +530,38 @@ func TestAntigravityGatewayService_Forward_PromptTooLong(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, events, 1)
 	require.Equal(t, "prompt_too_long", events[0].Kind)
+}
+
+func TestAntigravityGatewayService_Forward_RejectsMixedToolsBeforeOAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{
+		"model":"claude-opus-4-6",
+		"messages":[{"role":"user","content":"hello"}],
+		"max_tokens":16,
+		"tools":[
+			{"type":"web_search_20250305","name":"web_search"},
+			{"name":"get_weather","input_schema":{"type":"object"}}
+		]
+	}`)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	upstream := &queuedHTTPUpstreamStub{}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+	account := &Account{
+		ID: 104, Name: "native-claude", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"project_id": "project-104", "model_mapping": map[string]any{"claude-opus-4-6": "claude-opus-4-6-thinking"}},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+	require.EqualError(t, err, AntigravityMixedToolsUnsupportedClientMessage)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, writer.Code)
+	require.Contains(t, writer.Body.String(), AntigravityMixedToolsUnsupportedClientMessage)
+	require.Empty(t, upstream.requestBodies)
 }
 
 // TestAntigravityGatewayService_Forward_ModelRateLimitTriggersFailover

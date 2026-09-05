@@ -25,6 +25,8 @@ const (
 const (
 	// AntigravityCredentialRejectedClientMessage 是可安全返回给客户端的认证修复提示。
 	AntigravityCredentialRejectedClientMessage = "Antigravity rejected the OAuth credential after refresh; reauthorize the account and verify project_id"
+	// AntigravityMixedToolsUnsupportedClientMessage explains the observed v1internal capability limit.
+	AntigravityMixedToolsUnsupportedClientMessage = "Antigravity v1internal does not support combining server-side web search with custom function tools"
 	// AntigravityCredentialRejectedReason 标识上游拒绝已刷新 OAuth 凭据。
 	AntigravityCredentialRejectedReason GatewayFailureReason = "antigravity_oauth_credential_rejected"
 )
@@ -236,6 +238,24 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		(claudeRequest.Thinking.Type == "enabled" || claudeRequest.Thinking.Type == "adaptive")
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
 
+	projectID, err := resolveAntigravityProjectID(account)
+	if err != nil {
+		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
+	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
+	if err != nil {
+		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
+	}
+	if antigravityV1InternalUsesMixedTools(geminiBody) {
+		return nil, s.writeAntigravityCompatError(
+			c,
+			http.StatusBadRequest,
+			"invalid_request_error",
+			AntigravityMixedToolsUnsupportedClientMessage,
+		)
+	}
+
 	if s.tokenProvider == nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
 	}
@@ -245,16 +265,6 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 			StatusCode:   http.StatusBadGateway,
 			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
 		}
-	}
-
-	projectID, err := resolveAntigravityProjectID(account)
-	if err != nil {
-		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return nil, err
-	}
-	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
-	if err != nil {
-		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
 
 	request.reasoningEffort = ApplyThinkingEnabledFallback(request.reasoningEffort, request.originalBody, mappedModel)
@@ -337,14 +347,6 @@ func enableMixedGeminiToolInvocations(body []byte) ([]byte, error) {
 		functionConfig["mode"] = "VALIDATED"
 	}
 	toolConfig["includeServerSideToolInvocations"] = true
-	snakeFunctionConfig := map[string]any{"mode": functionConfig["mode"]}
-	if allowedNames, ok := functionConfig["allowedFunctionNames"]; ok {
-		snakeFunctionConfig["allowed_function_names"] = allowedNames
-	}
-	request["tool_config"] = map[string]any{
-		"function_calling_config":              snakeFunctionConfig,
-		"include_server_side_tool_invocations": true,
-	}
 	return json.Marshal(request)
 }
 
