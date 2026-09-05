@@ -433,21 +433,24 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
-	AccountIDs        []int64
-	Filters           *BulkUpdateAccountFilters
-	Name              string
-	ProxyID           *int64
-	Concurrency       *int
-	Priority          *int
-	RateMultiplier    *float64 // 账号计费倍率（>=0，允许 0）
-	LoadFactor        *int
-	Status            string
-	Schedulable       *bool
-	GroupIDs          *[]int64
-	Credentials       map[string]any
-	Extra             map[string]any
-	ProbeEnabled      *bool
-	AutoWarmupEnabled *bool
+	AccountIDs                 []int64
+	Filters                    *BulkUpdateAccountFilters
+	Name                       string
+	ProxyID                    *int64
+	Concurrency                *int
+	Priority                   *int
+	RateMultiplier             *float64 // 账号计费倍率（>=0，允许 0）
+	LoadFactor                 *int
+	Status                     string
+	Schedulable                *bool
+	GroupIDs                   *[]int64
+	Credentials                map[string]any
+	Extra                      map[string]any
+	ProbeEnabled               *bool
+	AutoWarmupEnabled          *bool
+	AutoResetCreditEnabled     *bool
+	AutoResetCredit5hThreshold *float64
+	AutoResetCredit7dThreshold *float64
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool
@@ -501,15 +504,18 @@ type UserGroupRPMStatus struct {
 
 // BulkUpdateAccountsResult is the aggregated response for bulk updates.
 type BulkUpdateAccountsResult struct {
-	Success                   int                       `json:"success"`
-	Failed                    int                       `json:"failed"`
-	SuccessIDs                []int64                   `json:"success_ids"`
-	FailedIDs                 []int64                   `json:"failed_ids"`
-	Results                   []BulkUpdateAccountResult `json:"results"`
-	LongContextInheritedCount int                       `json:"long_context_inherited_count,omitempty"`
-	AutoWarmupUpdatedCount    int                       `json:"auto_warmup_updated_count,omitempty"`
-	AutoWarmupSkippedCount    int                       `json:"auto_warmup_skipped_count,omitempty"`
-	AutoWarmupSkippedIDs      []int64                   `json:"auto_warmup_skipped_ids,omitempty"`
+	Success                     int                       `json:"success"`
+	Failed                      int                       `json:"failed"`
+	SuccessIDs                  []int64                   `json:"success_ids"`
+	FailedIDs                   []int64                   `json:"failed_ids"`
+	Results                     []BulkUpdateAccountResult `json:"results"`
+	LongContextInheritedCount   int                       `json:"long_context_inherited_count,omitempty"`
+	AutoWarmupUpdatedCount      int                       `json:"auto_warmup_updated_count,omitempty"`
+	AutoWarmupSkippedCount      int                       `json:"auto_warmup_skipped_count,omitempty"`
+	AutoWarmupSkippedIDs        []int64                   `json:"auto_warmup_skipped_ids,omitempty"`
+	AutoResetCreditUpdatedCount int                       `json:"auto_reset_credit_updated_count,omitempty"`
+	AutoResetCreditSkippedCount int                       `json:"auto_reset_credit_skipped_count,omitempty"`
+	AutoResetCreditSkippedIDs   []int64                   `json:"auto_reset_credit_skipped_ids,omitempty"`
 }
 
 type CreateProxyInput struct {

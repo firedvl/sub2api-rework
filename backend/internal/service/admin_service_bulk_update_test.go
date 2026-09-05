@@ -255,7 +255,7 @@ func TestAdminServiceBulkUpdateAccounts_AutoWarmupDisable(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Success)
+	require.Equal(t, 4, result.Success)
 	require.Equal(t, 1, result.AutoWarmupUpdatedCount)
 	require.Equal(t, false, repo.lastBulkUpdate.Extra[OpenAIAutoWarmupEnabledExtraKey])
 }
@@ -277,6 +277,59 @@ func TestAdminServiceBulkUpdateAccounts_AutoWarmupUnsupportedOnlySkips(t *testin
 	require.Zero(t, result.Failed)
 	require.Equal(t, 1, result.AutoWarmupSkippedCount)
 	require.Equal(t, []int64{2}, result.AutoWarmupSkippedIDs)
+	require.Zero(t, repo.bulkUpdateCalls)
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoResetCreditMixedEligibility(t *testing.T) {
+	parentID := int64(1)
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		{ID: 3, Platform: PlatformAnthropic, Type: AccountTypeOAuth},
+		{ID: 4, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	enabled := true
+	fiveHour := 0.75
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs:                 []int64{1, 2, 3, 4},
+		AutoResetCreditEnabled:     &enabled,
+		AutoResetCredit5hThreshold: &fiveHour,
+		Extra:                      map[string]any{"operator_note": "preserve", OpenAIAutoResetCreditStateExtraKey: map[string]any{"status": "success"}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, 1, result.AutoResetCreditUpdatedCount)
+	require.Equal(t, 3, result.AutoResetCreditSkippedCount)
+	require.ElementsMatch(t, []int64{2, 3, 4}, result.AutoResetCreditSkippedIDs)
+	require.Equal(t, 2, repo.bulkUpdateCalls)
+	require.Equal(t, "preserve", repo.bulkUpdates[0].Extra["operator_note"])
+	require.NotContains(t, repo.bulkUpdates[0].Extra, OpenAIAutoResetCreditStateExtraKey)
+	require.Equal(t, map[string]any{
+		OpenAIAutoResetCreditEnabledExtraKey:     true,
+		OpenAIAutoResetCredit5hThresholdExtraKey: 0.75,
+	}, repo.bulkUpdates[1].Extra)
+}
+
+func TestAdminServiceBulkUpdateAccounts_AutoResetCreditThresholdOnlyAndValidation(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+	weekly := 0.9
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1}, AutoResetCredit7dThreshold: &weekly,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, map[string]any{OpenAIAutoResetCredit7dThresholdExtraKey: 0.9}, repo.lastBulkUpdate.Extra)
+
+	invalid := 0.0009
+	repo.bulkUpdateCalls = 0
+	_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1}, AutoResetCredit5hThreshold: &invalid,
+	})
+	requireApplicationErrorReason(t, err, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID")
 	require.Zero(t, repo.bulkUpdateCalls)
 }
 

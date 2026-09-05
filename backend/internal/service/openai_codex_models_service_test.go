@@ -161,6 +161,45 @@ func newCodexCatalogMappedAccount(
 	return account
 }
 
+func TestMergeRoutableCodexManifestsPropagatesOnlyEligibleLiveModels(t *testing.T) {
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"model_mapping": map[string]any{
+			"gpt-6-astra":  "gpt-6-astra",
+			"future-alias": "gpt-future",
+		}},
+	}
+	body, err := mergeRoutableCodexManifests([]codexAccountManifest{
+		{account: account, manifest: &CodexModelsManifest{Body: []byte(`{"models":[
+			{"slug":"gpt-6-astra","display_name":"Astra","priority":7},
+			{"slug":"gpt-future","description":"future metadata"},
+			{"slug":"hidden","supported_in_api":false}
+		]}`)}},
+		{account: account, manifest: &CodexModelsManifest{Body: []byte(`{"models":[{"slug":"gpt-6-astra"}]}`)}},
+	})
+	require.NoError(t, err)
+
+	var envelope struct {
+		Models []map[string]any `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	require.Len(t, envelope.Models, 2)
+	require.Equal(t, "gpt-6-astra", envelope.Models[0]["slug"])
+	require.Equal(t, float64(7), envelope.Models[0]["priority"])
+	require.Equal(t, "future-alias", envelope.Models[1]["slug"])
+	require.Equal(t, "future metadata", envelope.Models[1]["description"])
+}
+
+func TestMergeRoutableCodexManifestsDoesNotFabricateAstra(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body, err := mergeRoutableCodexManifests([]codexAccountManifest{{
+		account:  account,
+		manifest: &CodexModelsManifest{Body: []byte(`{"models":[{"slug":"gpt-5.4-mini"}]}`)},
+	}})
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "gpt-6-astra")
+}
+
 func TestFilterCodexModelIDsForGroupOmitsWildcardKeys(t *testing.T) {
 	t.Parallel()
 

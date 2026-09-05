@@ -974,7 +974,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.AutoWarmupEnabled != nil {
+	resetCreditUpdates, err := bulkOpenAIAutoResetCreditUpdates(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.AutoWarmupEnabled != nil || len(resetCreditUpdates) > 0 {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -988,19 +992,27 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 	eligibleWarmupIDs := make([]int64, 0, len(input.AccountIDs))
-	if input.AutoWarmupEnabled != nil {
+	eligibleManagedOpenAIIDs := make([]int64, 0, len(input.AccountIDs))
+	if input.AutoWarmupEnabled != nil || len(resetCreditUpdates) > 0 {
 		for _, accountID := range input.AccountIDs {
 			account, ok := targetsByID[accountID]
 			if !ok {
 				return nil, ErrAccountNotFound
 			}
 			if IsOpenAIAutoWarmupConfigurable(account) {
-				eligibleWarmupIDs = append(eligibleWarmupIDs, accountID)
+				eligibleManagedOpenAIIDs = append(eligibleManagedOpenAIIDs, accountID)
 				continue
 			}
-			result.AutoWarmupSkippedIDs = append(result.AutoWarmupSkippedIDs, accountID)
+			if input.AutoWarmupEnabled != nil {
+				result.AutoWarmupSkippedIDs = append(result.AutoWarmupSkippedIDs, accountID)
+			}
+			if len(resetCreditUpdates) > 0 {
+				result.AutoResetCreditSkippedIDs = append(result.AutoResetCreditSkippedIDs, accountID)
+			}
 		}
+		eligibleWarmupIDs = eligibleManagedOpenAIIDs
 		result.AutoWarmupSkippedCount = len(result.AutoWarmupSkippedIDs)
+		result.AutoResetCreditSkippedCount = len(result.AutoResetCreditSkippedIDs)
 	}
 	if openAISettings.any() {
 		inheritedCount, err := validateBulkOpenAISettingsTargets(input, openAISettings, targetsByID)
@@ -1172,6 +1184,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		result.AutoWarmupUpdatedCount = len(eligibleWarmupIDs)
 	}
+	if len(resetCreditUpdates) > 0 && len(eligibleManagedOpenAIIDs) > 0 {
+		if _, err := s.accountRepo.BulkUpdate(ctx, eligibleManagedOpenAIIDs, AccountBulkUpdate{Extra: resetCreditUpdates}); err != nil {
+			return nil, err
+		}
+		result.AutoResetCreditUpdatedCount = len(eligibleManagedOpenAIIDs)
+	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
 	if repoUpdates.ProxyID != nil {
@@ -1188,8 +1206,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Handle group bindings per account (requires individual operations).
 	resultIDs := input.AccountIDs
-	if input.AutoWarmupEnabled != nil && !hasNormalRepoUpdate && input.GroupIDs == nil {
-		resultIDs = eligibleWarmupIDs
+	if (input.AutoWarmupEnabled != nil || len(resetCreditUpdates) > 0) && !hasNormalRepoUpdate && input.GroupIDs == nil {
+		resultIDs = eligibleManagedOpenAIIDs
 	}
 	for _, accountID := range resultIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
@@ -1212,6 +1230,29 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	return result, nil
+}
+
+func bulkOpenAIAutoResetCreditUpdates(input *BulkUpdateAccountsInput) (map[string]any, error) {
+	if input == nil {
+		return nil, nil
+	}
+	updates := make(map[string]any, 3)
+	if input.AutoResetCreditEnabled != nil {
+		updates[OpenAIAutoResetCreditEnabledExtraKey] = *input.AutoResetCreditEnabled
+	}
+	for key, value := range map[string]*float64{
+		OpenAIAutoResetCredit5hThresholdExtraKey: input.AutoResetCredit5hThreshold,
+		OpenAIAutoResetCredit7dThresholdExtraKey: input.AutoResetCredit7dThreshold,
+	} {
+		if value == nil {
+			continue
+		}
+		if !isValidOpenAIAutoResetThreshold(*value) {
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID", "%s must be between 0.001 and 1.0", key)
+		}
+		updates[key] = *value
+	}
+	return updates, nil
 }
 
 func updatesUpstreamBillingProbeIdentity(credentials map[string]any) bool {

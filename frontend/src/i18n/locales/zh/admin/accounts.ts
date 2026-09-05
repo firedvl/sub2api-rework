@@ -625,6 +625,8 @@ export default {
         autoWarmupGlobalOff: '这些账号将开启自动预热，但全局 OpenAI 自动预热开关当前处于关闭状态。',
         openGatewaySettings: '打开网关设置',
         autoWarmupResult: '已更新 {updated} 个账号的自动预热设置；跳过 {skipped} 个不支持的账号。',
+        autoResetCreditHint: '仅修改符合条件的 OpenAI OAuth 母账号；阈值留空时保持现有值。',
+        autoResetCreditResult: '已更新 {updated} 个账号的自动用重置卡设置；跳过 {skipped} 个不支持的账号。',
         editAllAutoWarmupEligible: '编辑全部符合条件的自动预热账号',
         mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。'
       },
@@ -980,6 +982,7 @@ export default {
 	      pending: '等待中',
 	      succeeded: '成功',
 	      failed: '失败',
+	      window_started_with_warning: '窗口已启动 · 验证警告',
 	      unknown: '未知'
 	    }
 	  },
