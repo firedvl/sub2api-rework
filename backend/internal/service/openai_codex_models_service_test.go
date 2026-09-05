@@ -306,6 +306,53 @@ func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testi
 	require.Equal(t, []string{"future-alias", "gpt-6-astra", "shared-model", "grok-only"}, codexManifestModelSlugs(t, merged))
 }
 
+func TestOpenAIDynamicCodexModelsPropagatesUnknownLiveModelsByClientVersion(t *testing.T) {
+	const groupID int64 = 814
+	account := Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{
+			"access_token":       "token",
+			"chatgpt_account_id": "openai",
+		},
+	}
+	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: {account}}}
+	openAI := &OpenAIGatewayService{accountRepo: repo}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		models := `
+			{"slug":"gpt-future-codex-model","display_name":"Future","future_metadata":{"mode":"new"}},
+			{"slug":"unsupported-model","supported_in_api":false},
+			{"slug":"internal-model","visibility":"hide"}`
+		if r.URL.Query().Get("client_version") == "0.153.0" {
+			models = `{"slug":"gpt-6-astra","display_name":"Astra","minimal_client_version":"0.153.0"},` + models
+		}
+		_, _ = fmt.Fprintf(w, `{"models":[%s]}`, models)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	group := &Group{ID: groupID, Platform: PlatformOpenAI}
+	oldManifest, used, err := openAI.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.152.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-future-codex-model", "internal-model"}, codexManifestModelSlugs(t, oldManifest.Body))
+	require.NotContains(t, string(oldManifest.Body), "gpt-6-astra")
+	require.NotContains(t, string(oldManifest.Body), "unsupported-model")
+
+	newManifest, used, err := openAI.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-6-astra", "gpt-future-codex-model", "internal-model"}, codexManifestModelSlugs(t, newManifest.Body))
+	require.NotEqual(t, oldManifest.ETag, newManifest.ETag)
+
+	models := decodeCodexManifestModels(t, newManifest.Body)
+	require.Equal(t, "0.153.0", models[0]["minimal_client_version"])
+	require.Equal(t, map[string]any{"mode": "new"}, models[1]["future_metadata"])
+	require.Equal(t, "hide", models[2]["visibility"])
+}
+
 func TestCompositeDynamicCodexModelsFailsClosedForAbsentOrOverriddenRoutes(t *testing.T) {
 	const groupID int64 = 811
 	account := Account{
@@ -1953,24 +2000,42 @@ func TestFetchCodexModelsManifestAgentIdentityRedactsUpstreamErrors(t *testing.T
 	require.Contains(t, err.Error(), "[redacted]")
 }
 
-func TestFetchCodexModelsManifestDefaultClientVersion(t *testing.T) {
-	var gotClientVersion string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotClientVersion = r.URL.Query().Get("client_version")
-		_, _ = w.Write([]byte(`{"models":[]}`))
-	}))
-	defer server.Close()
-
-	original := chatgptCodexModelsURL
-	chatgptCodexModelsURL = server.URL
-	defer func() { chatgptCodexModelsURL = original }()
-
-	s := &OpenAIGatewayService{}
-	if _, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "", ""); err != nil {
-		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
+func TestFetchCodexModelsManifestClientVersionForwarding(t *testing.T) {
+	tests := []struct {
+		name              string
+		clientVersion     string
+		wantQueryPresent  bool
+		wantQueryVersion  string
+		wantHeaderVersion string
+	}{
+		{name: "present", clientVersion: "0.153.1", wantQueryPresent: true, wantQueryVersion: "0.153.1", wantHeaderVersion: "0.153.1"},
+		{name: "absent", wantHeaderVersion: CodexCanonicalClientVersion()},
+		{name: "future", clientVersion: "9.9.9", wantQueryPresent: true, wantQueryVersion: "9.9.9", wantHeaderVersion: "9.9.9"},
 	}
-	if gotClientVersion != CodexCanonicalClientVersion() {
-		t.Errorf("default client_version: got %q, want %q", gotClientVersion, CodexCanonicalClientVersion())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotQuery url.Values
+			var gotHeaderVersion string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query()
+				gotHeaderVersion = r.Header.Get("Version")
+				_, _ = w.Write([]byte(`{"models":[]}`))
+			}))
+			defer server.Close()
+
+			original := chatgptCodexModelsURL
+			chatgptCodexModelsURL = server.URL
+			defer func() { chatgptCodexModelsURL = original }()
+
+			s := &OpenAIGatewayService{}
+			_, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), tt.clientVersion, "")
+			require.NoError(t, err)
+			_, queryPresent := gotQuery["client_version"]
+			require.Equal(t, tt.wantQueryPresent, queryPresent)
+			require.Equal(t, tt.wantQueryVersion, gotQuery.Get("client_version"))
+			require.Equal(t, tt.wantHeaderVersion, gotHeaderVersion)
+		})
 	}
 }
 
