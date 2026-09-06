@@ -445,6 +445,8 @@ func (r *usageLogRepository) GetModelStatsWithUsageFiltersBySource(ctx context.C
 }
 
 func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Context, startTime, endTime time.Time, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8, source string, billingMode string, upstreamModelMismatch *bool, nativeCompactionV2 *bool) (results []ModelStat, err error) {
+	const minimumTimingSamples = 5
+
 	actualCostExpr := "COALESCE(SUM(actual_cost), 0) as actual_cost"
 	// 当仅按 account_id 聚合时，实际费用使用账号倍率（total_cost * account_rate_multiplier）。
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
@@ -452,6 +454,9 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	}
 	accountCostExpr := "COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost"
 	modelExpr := resolveModelDimensionExpression(source)
+	validDuration := "duration_ms > 0"
+	validTTFT := "first_token_ms > 0"
+	validThroughput := "duration_ms > 0 AND first_token_ms > 0 AND duration_ms > first_token_ms AND output_tokens > 0"
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -464,10 +469,26 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			%s,
-			%s
+			%s,
+			CASE WHEN COUNT(*) FILTER (WHERE %s) >= %d THEN ROUND(percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE %s))::BIGINT END as latency_p50_ms,
+			CASE WHEN COUNT(*) FILTER (WHERE %s) >= %d THEN ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE %s))::BIGINT END as latency_p95_ms,
+			CASE WHEN COUNT(*) FILTER (WHERE %s) >= %d THEN ROUND(percentile_cont(0.50) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE %s))::BIGINT END as ttft_p50_ms,
+			CASE WHEN COUNT(*) FILTER (WHERE %s) >= %d THEN ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE %s))::BIGINT END as ttft_p95_ms,
+			CASE WHEN COUNT(*) FILTER (WHERE %s) >= %d THEN
+				1000.0 * (SUM(output_tokens) FILTER (WHERE %s))::DOUBLE PRECISION /
+				NULLIF((SUM(duration_ms - first_token_ms) FILTER (WHERE %s))::DOUBLE PRECISION, 0)
+			END as output_tokens_per_second,
+			COUNT(*) FILTER (WHERE %s) as timing_sample_count
 		FROM usage_logs
 		WHERE created_at >= $1 AND created_at < $2
-	`, modelExpr, actualCostExpr, accountCostExpr)
+	`, modelExpr, actualCostExpr, accountCostExpr,
+		validDuration, minimumTimingSamples, validDuration,
+		validDuration, minimumTimingSamples, validDuration,
+		validTTFT, minimumTimingSamples, validTTFT,
+		validTTFT, minimumTimingSamples, validTTFT,
+		validThroughput, minimumTimingSamples, validThroughput, validThroughput,
+		validDuration,
+	)
 
 	args := []any{startTime, endTime}
 	if userID > 0 {
@@ -778,6 +799,8 @@ func scanModelStatsRows(rows *sql.Rows) ([]ModelStat, error) {
 	results := make([]ModelStat, 0)
 	for rows.Next() {
 		var row ModelStat
+		var latencyP50, latencyP95, ttftP50, ttftP95 sql.NullInt64
+		var outputTokensPerSecond sql.NullFloat64
 		if err := rows.Scan(
 			&row.Model,
 			&row.Requests,
@@ -789,8 +812,29 @@ func scanModelStatsRows(rows *sql.Rows) ([]ModelStat, error) {
 			&row.Cost,
 			&row.ActualCost,
 			&row.AccountCost,
+			&latencyP50,
+			&latencyP95,
+			&ttftP50,
+			&ttftP95,
+			&outputTokensPerSecond,
+			&row.TimingSampleCount,
 		); err != nil {
 			return nil, err
+		}
+		if latencyP50.Valid {
+			row.LatencyP50Ms = &latencyP50.Int64
+		}
+		if latencyP95.Valid {
+			row.LatencyP95Ms = &latencyP95.Int64
+		}
+		if ttftP50.Valid {
+			row.TTFTP50Ms = &ttftP50.Int64
+		}
+		if ttftP95.Valid {
+			row.TTFTP95Ms = &ttftP95.Int64
+		}
+		if outputTokensPerSecond.Valid {
+			row.OutputTokensPerSecond = &outputTokensPerSecond.Float64
 		}
 		results = append(results, row)
 	}

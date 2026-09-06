@@ -34,7 +34,7 @@
       </div>
 
       <div class="overflow-x-auto border-y border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800">
-        <table class="min-w-[1180px] w-full table-fixed text-left text-sm">
+        <table class="min-w-[1460px] w-full table-fixed text-left text-sm">
           <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">
             <tr>
               <th class="w-64 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.model') }}</th>
@@ -44,12 +44,13 @@
               <th class="w-44 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.visibility') }}</th>
               <th class="w-36 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.routes') }}</th>
               <th class="w-48 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.usage') }}</th>
+              <th class="w-72 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.performance') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-            <tr v-if="loading && !snapshot"><td colspan="7" class="px-3 py-10 text-center text-gray-500" role="status">{{ t('common.loading') }}</td></tr>
-            <tr v-else-if="!selectedGroupID"><td colspan="7" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.selectGroup') }}</td></tr>
-            <tr v-else-if="filteredModels.length === 0"><td colspan="7" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.empty') }}</td></tr>
+            <tr v-if="loading && !snapshot"><td colspan="8" class="px-3 py-10 text-center text-gray-500" role="status">{{ t('common.loading') }}</td></tr>
+            <tr v-else-if="!selectedGroupID"><td colspan="8" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.selectGroup') }}</td></tr>
+            <tr v-else-if="filteredModels.length === 0"><td colspan="8" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.empty') }}</td></tr>
             <tr v-for="model in filteredModels" :key="model.public_id" class="align-top hover:bg-gray-50 dark:hover:bg-dark-700/60">
               <td class="px-3 py-3">
                 <div class="break-words font-mono text-xs font-semibold text-gray-900 dark:text-white">{{ model.public_id }}</div>
@@ -70,6 +71,12 @@
                 <div>{{ t('admin.modelOperations.labels.requests') }} <strong>{{ formatNumber(model.recent_request_count) }}</strong></div>
                 <div class="mt-1">{{ t('admin.modelOperations.labels.tokens') }} <strong>{{ formatNumber(model.recent_total_tokens) }}</strong></div>
                 <div class="mt-1">{{ t('admin.modelOperations.labels.samples') }} <strong>{{ formatNumber(model.sample_count) }}</strong></div>
+              </td>
+              <td class="px-3 py-3 text-xs text-gray-600 dark:text-gray-300">
+                <div>{{ t('admin.modelOperations.labels.latency') }} <strong>P50 {{ formatMilliseconds(model.latency_p50_ms) }}</strong> · <strong>P95 {{ formatMilliseconds(model.latency_p95_ms) }}</strong></div>
+                <div class="mt-1">{{ t('admin.modelOperations.labels.ttft') }} <strong>P50 {{ formatMilliseconds(model.ttft_p50_ms) }}</strong> · <strong>P95 {{ formatMilliseconds(model.ttft_p95_ms) }}</strong></div>
+                <div class="mt-1">{{ t('admin.modelOperations.labels.outputSpeed') }} <strong>{{ formatThroughput(model.output_tokens_per_second) }}</strong></div>
+                <div class="mt-1">{{ t('admin.modelOperations.labels.timingSamples') }} <strong>{{ formatNumber(model.timing_sample_count) }}</strong></div>
               </td>
             </tr>
           </tbody>
@@ -147,6 +154,18 @@ function sourceLabel(value: string): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function formatMilliseconds(value: number | null): string {
+  return value != null && Number.isFinite(value) && value > 0
+    ? `${formatNumber(Math.round(value))} ms`
+    : t('admin.modelOperations.notAvailable')
+}
+
+function formatThroughput(value: number | null): string {
+  return value != null && Number.isFinite(value) && value > 0
+    ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} tok/s`
+    : t('admin.modelOperations.notAvailable')
 }
 
 function formatDate(value: string): string {

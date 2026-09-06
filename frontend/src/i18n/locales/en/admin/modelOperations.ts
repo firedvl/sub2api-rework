@@ -15,6 +15,7 @@ export default {
     yes: 'Yes',
     no: 'No',
     unknown: 'Unknown',
+    notAvailable: 'N/A',
     empty: 'No provider-backed models are published for this group.',
     loadFailed: 'Model operations could not be loaded.',
     columns: {
@@ -25,6 +26,7 @@ export default {
       visibility: 'Visibility',
       routes: 'Routes',
       usage: '7-day passive usage',
+      performance: '7-day passive performance',
     },
     labels: {
       configured: 'Configured',
@@ -38,6 +40,10 @@ export default {
       requests: 'Requests',
       tokens: 'Tokens',
       samples: 'Samples',
+      latency: 'Latency',
+      ttft: 'TTFT',
+      outputSpeed: 'Output speed',
+      timingSamples: 'Timing samples',
     },
   },
 }

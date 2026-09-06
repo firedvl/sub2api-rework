@@ -1496,6 +1496,76 @@ func (s *UsageLogRepoSuite) TestGetModelStatsWithFilters() {
 	s.Require().Len(stats, 2)
 }
 
+func (s *UsageLogRepoSuite) TestGetModelStatsWithFiltersAggregatesPositiveTimingSamples() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "modelspeed@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-modelspeed", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-modelspeed"})
+	group := mustCreateGroup(s.T(), s.client, &service.Group{Name: "group-modelspeed"})
+	base := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	for i := 1; i <= 5; i++ {
+		duration := i * 1000
+		firstToken := i * 100
+		_, err := s.repo.Create(s.ctx, &service.UsageLog{
+			UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+			RequestID: uuid.NewString(), Model: "gpt-speed", GroupID: &group.ID,
+			OutputTokens: i * 90, DurationMs: &duration, FirstTokenMs: &firstToken,
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		})
+		s.Require().NoError(err)
+	}
+
+	for i := 1; i <= 4; i++ {
+		duration := i * 1000
+		firstToken := i * 100
+		_, err := s.repo.Create(s.ctx, &service.UsageLog{
+			UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+			RequestID: uuid.NewString(), Model: "gpt-sparse", GroupID: &group.ID,
+			OutputTokens: i * 90, DurationMs: &duration, FirstTokenMs: &firstToken,
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		})
+		s.Require().NoError(err)
+	}
+
+	invalidDuration, invalidFirstToken := -1, 0
+	_, err := s.repo.Create(s.ctx, &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: uuid.NewString(), Model: "gpt-speed", GroupID: &group.ID,
+		OutputTokens: 9999, DurationMs: &invalidDuration, FirstTokenMs: &invalidFirstToken,
+		CreatedAt: base.Add(10 * time.Minute),
+	})
+	s.Require().NoError(err)
+
+	stats, err := s.repo.GetModelStatsWithFilters(s.ctx, base, base.Add(time.Hour), 0, 0, 0, group.ID, nil, nil, nil)
+	s.Require().NoError(err)
+	s.Require().Len(stats, 2)
+
+	byModel := make(map[string]usagestats.ModelStat, len(stats))
+	for _, stat := range stats {
+		byModel[stat.Model] = stat
+	}
+	speed := byModel["gpt-speed"]
+	s.Require().NotNil(speed.LatencyP50Ms)
+	s.Require().NotNil(speed.LatencyP95Ms)
+	s.Require().NotNil(speed.TTFTP50Ms)
+	s.Require().NotNil(speed.TTFTP95Ms)
+	s.Require().NotNil(speed.OutputTokensPerSecond)
+	s.Equal(int64(3000), *speed.LatencyP50Ms)
+	s.Equal(int64(4800), *speed.LatencyP95Ms)
+	s.Equal(int64(300), *speed.TTFTP50Ms)
+	s.Equal(int64(480), *speed.TTFTP95Ms)
+	s.InDelta(100.0, *speed.OutputTokensPerSecond, 0.001)
+	s.Equal(int64(5), speed.TimingSampleCount)
+
+	sparse := byModel["gpt-sparse"]
+	s.Nil(sparse.LatencyP50Ms)
+	s.Nil(sparse.LatencyP95Ms)
+	s.Nil(sparse.TTFTP50Ms)
+	s.Nil(sparse.TTFTP95Ms)
+	s.Nil(sparse.OutputTokensPerSecond)
+	s.Equal(int64(4), sparse.TimingSampleCount)
+}
+
 // --- GetAccountUsageStats ---
 
 func (s *UsageLogRepoSuite) TestGetAccountUsageStats() {

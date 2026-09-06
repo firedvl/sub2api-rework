@@ -15,6 +15,7 @@ export default {
     yes: '是',
     no: '否',
     unknown: '未知',
+    notAvailable: 'N/A',
     empty: '此分组没有发布由真实提供方支持的模型。',
     loadFailed: '无法加载模型运维数据。',
     columns: {
@@ -25,6 +26,7 @@ export default {
       visibility: '可见性',
       routes: '路由',
       usage: '7 天被动用量',
+      performance: '7 天被动性能',
     },
     labels: {
       configured: '已配置',
@@ -38,6 +40,10 @@ export default {
       requests: '请求',
       tokens: '令牌',
       samples: '样本',
+      latency: '总延迟',
+      ttft: '首 Token 时间',
+      outputSpeed: '输出速度',
+      timingSamples: '计时样本',
     },
   },
 }

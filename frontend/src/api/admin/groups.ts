@@ -42,6 +42,12 @@ export interface ModelOperationsModel {
   recent_output_tokens: number
   recent_total_tokens: number
   sample_count: number
+  latency_p50_ms: number | null
+  latency_p95_ms: number | null
+  ttft_p50_ms: number | null
+  ttft_p95_ms: number | null
+  output_tokens_per_second: number | null
+  timing_sample_count: number
 }
 
 export interface ModelOperationsSnapshot {

@@ -1072,6 +1072,8 @@ export function getOperatorFixtureData(
         codex_picker_visible: true, route_type: 'direct', available_route_count: 0,
         recent_request_count: 14, recent_input_tokens: 2400, recent_output_tokens: 320,
         recent_total_tokens: 2720, sample_count: 14,
+        latency_p50_ms: 1280, latency_p95_ms: 3420, ttft_p50_ms: 310, ttft_p95_ms: 880,
+        output_tokens_per_second: 46.7, timing_sample_count: 12,
       }],
     }
   }

@@ -33,26 +33,32 @@ type modelOperationsGroup struct {
 }
 
 type modelOperationsModel struct {
-	ModelID               string `json:"model_id"`
-	PublicID              string `json:"public_id"`
-	ActualPlatform        string `json:"actual_platform"`
-	DiscoverySource       string `json:"discovery_source"`
-	Configured            bool   `json:"configured"`
-	Discovered            bool   `json:"discovered"`
-	CatalogMember         bool   `json:"catalog_member"`
-	Routable              *bool  `json:"routable,omitempty"`
-	CurrentAvailability   string `json:"current_availability"`
-	RateLimitedOrCooldown *bool  `json:"rate_limited_or_cooldown,omitempty"`
-	Healthy               *bool  `json:"healthy,omitempty"`
-	V1ModelsVisible       bool   `json:"v1_models_visible"`
-	CodexPickerVisible    bool   `json:"codex_picker_visible"`
-	RouteType             string `json:"route_type"`
-	AvailableRouteCount   *int   `json:"available_route_count,omitempty"`
-	RecentRequestCount    int64  `json:"recent_request_count"`
-	RecentInputTokens     int64  `json:"recent_input_tokens"`
-	RecentOutputTokens    int64  `json:"recent_output_tokens"`
-	RecentTotalTokens     int64  `json:"recent_total_tokens"`
-	SampleCount           int64  `json:"sample_count"`
+	ModelID               string   `json:"model_id"`
+	PublicID              string   `json:"public_id"`
+	ActualPlatform        string   `json:"actual_platform"`
+	DiscoverySource       string   `json:"discovery_source"`
+	Configured            bool     `json:"configured"`
+	Discovered            bool     `json:"discovered"`
+	CatalogMember         bool     `json:"catalog_member"`
+	Routable              *bool    `json:"routable,omitempty"`
+	CurrentAvailability   string   `json:"current_availability"`
+	RateLimitedOrCooldown *bool    `json:"rate_limited_or_cooldown,omitempty"`
+	Healthy               *bool    `json:"healthy,omitempty"`
+	V1ModelsVisible       bool     `json:"v1_models_visible"`
+	CodexPickerVisible    bool     `json:"codex_picker_visible"`
+	RouteType             string   `json:"route_type"`
+	AvailableRouteCount   *int     `json:"available_route_count,omitempty"`
+	RecentRequestCount    int64    `json:"recent_request_count"`
+	RecentInputTokens     int64    `json:"recent_input_tokens"`
+	RecentOutputTokens    int64    `json:"recent_output_tokens"`
+	RecentTotalTokens     int64    `json:"recent_total_tokens"`
+	SampleCount           int64    `json:"sample_count"`
+	LatencyP50Ms          *int64   `json:"latency_p50_ms"`
+	LatencyP95Ms          *int64   `json:"latency_p95_ms"`
+	TTFTP50Ms             *int64   `json:"ttft_p50_ms"`
+	TTFTP95Ms             *int64   `json:"ttft_p95_ms"`
+	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
+	TimingSampleCount     int64    `json:"timing_sample_count"`
 }
 
 // GetModelOperations returns an admin-only, passive model snapshot for one
@@ -187,4 +193,10 @@ func applyModelOperationsUsage(model *modelOperationsModel, stat usagestats.Mode
 	model.RecentOutputTokens = stat.OutputTokens
 	model.RecentTotalTokens = stat.TotalTokens
 	model.SampleCount = stat.Requests
+	model.LatencyP50Ms = stat.LatencyP50Ms
+	model.LatencyP95Ms = stat.LatencyP95Ms
+	model.TTFTP50Ms = stat.TTFTP50Ms
+	model.TTFTP95Ms = stat.TTFTP95Ms
+	model.OutputTokensPerSecond = stat.OutputTokensPerSecond
+	model.TimingSampleCount = stat.TimingSampleCount
 }

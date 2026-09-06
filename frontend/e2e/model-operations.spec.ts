@@ -9,6 +9,9 @@ test('shows catalog membership separately from current availability', async ({ p
   await expect(page.getByRole('main').getByRole('heading', { name: 'Model Operations' })).toBeVisible()
   await expect(page.getByText('gpt-6-astra', { exact: true })).toBeVisible()
   await expect(page.getByText('unavailable', { exact: true })).toBeVisible()
+  await expect(page.getByText('P50 1,280 ms', { exact: false })).toBeVisible()
+  await expect(page.getByText('46.7 tok/s', { exact: true })).toBeVisible()
+  await expect(page.getByText('Timing samples 12', { exact: false })).toBeVisible()
   await expect(page.getByText('Grok', { exact: true })).toHaveCount(0)
 
   await page.getByRole('searchbox', { name: 'Filter models' }).fill('missing-model')
