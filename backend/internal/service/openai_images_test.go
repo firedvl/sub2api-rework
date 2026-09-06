@@ -726,6 +726,29 @@ func TestAccountSupportsOpenAIEndpointCapability(t *testing.T) {
 
 		require.False(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses))
 	})
+
+	t.Run("vision input requires explicit capability and Responses support", func(t *testing.T) {
+		unconfigured := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+		require.False(t, unconfigured.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityVisionInput))
+
+		configured := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"chat_completions", "vision_input"},
+			},
+		}
+		require.True(t, configured.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityVisionInput))
+
+		withoutChat := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"vision_input"},
+			},
+		}
+		require.False(t, withoutChat.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityVisionInput))
+	})
 }
 
 func TestBuildOpenAIImagesURL_HandlesVersionedBaseURL(t *testing.T) {

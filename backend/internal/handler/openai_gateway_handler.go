@@ -260,6 +260,13 @@ func openAIResponsesRequiredCapability(imageIntent bool, platform string) servic
 // required by an image or Responses request. needsResponses includes both the
 // legacy /responses/compact endpoint and native remote compaction v2.
 func openAIResponsesRequiredCapabilityForRequest(imageIntent bool, needsResponses bool, platform string) service.OpenAIEndpointCapability {
+	return openAIResponsesRequiredCapabilityForRequestWithVision(imageIntent, false, needsResponses, platform)
+}
+
+func openAIResponsesRequiredCapabilityForRequestWithVision(imageIntent bool, visionInput bool, needsResponses bool, platform string) service.OpenAIEndpointCapability {
+	if visionInput && platform == service.PlatformOpenAI {
+		return service.OpenAIEndpointCapabilityVisionInput
+	}
 	if needsResponses && platform == service.PlatformOpenAI {
 		return service.OpenAIEndpointCapabilityResponses
 	}
@@ -430,6 +437,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	service.LogOpenAIVisionInputDiagnostics(c.Request.Context(), "inbound", nil, reqModel, body)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -606,7 +614,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 复用前置权限与并发阶段在未修改 body 上确认的显式生图意图，避免大 tools 请求重复扫描。
 	// 该判断已排除 Codex 被动 image_gen namespace，避免 CC-only 账号被误过滤（#4476）。
 	needsResponses := nativeV2 || legacyCompact
-	requiredCapability := openAIResponsesRequiredCapabilityForRequest(imageIntent, needsResponses, requestPlatform)
+	visionInput := service.OpenAIRequestBodyMayContainImageInput(forwardBody)
+	requiredCapability := openAIResponsesRequiredCapabilityForRequestWithVision(imageIntent, visionInput, needsResponses, requestPlatform)
 
 	// 分组利润控制：请求级装配定价上下文——pricingAt 固定本请求的
 	// D 与计费高峰因子，选号、槽位终检与全部 failover 重入共用同一门与阈值。
@@ -648,6 +657,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
+				if requiredCapability == service.OpenAIEndpointCapabilityVisionInput {
+					h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
+					return
+				}
 				if legacyCompact && errors.Is(err, service.ErrNoAvailableCompactAccounts) {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
@@ -669,6 +682,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 		if selection == nil || selection.Account == nil {
+			if requiredCapability == service.OpenAIEndpointCapabilityVisionInput {
+				h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
+				return
+			}
 			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)

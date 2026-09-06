@@ -372,15 +372,31 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		translatedBody := body
+		if upstreamReq.GetBody != nil {
+			if replay, replayErr := upstreamReq.GetBody(); replayErr == nil {
+				if replayBody, readErr := io.ReadAll(replay); readErr == nil {
+					translatedBody = replayBody
+				}
+				_ = replay.Close()
+			}
+		}
+		LogOpenAIVisionInputDiagnostics(ctx, "outbound", account, requestedModel, translatedBody)
 
 		upstreamStart := time.Now()
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
+			logOpenAIVisionResponseDiagnostics(ctx, account, body, 0, "", "transport_failure")
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account.
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
+		responseOutcome := "upstream_http_accepted"
+		if resp.StatusCode >= 400 {
+			responseOutcome = "upstream_http_rejected"
+		}
+		logOpenAIVisionResponseDiagnostics(ctx, account, body, resp.StatusCode, resp.Header.Get("x-request-id"), responseOutcome)
 		if resp.StatusCode >= 400 {
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.

@@ -3,18 +3,23 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 func (s *OpenAIGatewayService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -1893,8 +1898,168 @@ func openAIRequestBodyMayContainImageInput(body []byte) bool {
 		return false
 	}
 	input := gjson.GetBytes(body, "input")
-	messages := gjson.GetBytes(body, "messages.#-1")
+	messages := gjson.GetBytes(body, "messages")
 	return openAIJSONValueMayContainImageInput(input) || openAIJSONValueMayContainImageInput(messages)
+}
+
+// OpenAIRequestBodyMayContainImageInput exposes the shared image-input detector
+// to the HTTP routing boundary without duplicating request-shape logic there.
+func OpenAIRequestBodyMayContainImageInput(body []byte) bool {
+	return openAIRequestBodyMayContainImageInput(body)
+}
+
+type openAIVisionInputFingerprint struct {
+	representation string
+	mimeType       string
+	byteLength     int64
+	sha256         string
+}
+
+// LogOpenAIVisionInputDiagnostics records image integrity without retaining
+// URLs, base64 payloads, image bytes, credentials, or authentication headers.
+func LogOpenAIVisionInputDiagnostics(ctx context.Context, stage string, account *Account, requestedModel string, body []byte) {
+	fingerprints := openAIVisionInputFingerprints(body)
+	if len(fingerprints) == 0 {
+		return
+	}
+	representations := make([]string, 0, len(fingerprints))
+	mimeTypes := make([]string, 0, len(fingerprints))
+	byteLengths := make([]int64, 0, len(fingerprints))
+	hashes := make([]string, 0, len(fingerprints))
+	for _, fingerprint := range fingerprints {
+		representations = append(representations, fingerprint.representation)
+		mimeTypes = append(mimeTypes, fingerprint.mimeType)
+		byteLengths = append(byteLengths, fingerprint.byteLength)
+		hashes = append(hashes, fingerprint.sha256)
+	}
+
+	accountID := int64(0)
+	platform := ""
+	accountType := ""
+	if account != nil {
+		accountID = account.ID
+		platform = account.Platform
+		accountType = account.Type
+	}
+	actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
+	clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
+	logger.FromContext(ctx).Info("openai vision input diagnostics",
+		zap.String("component", "service.openai_vision_input"),
+		zap.String("stage", strings.TrimSpace(stage)),
+		zap.Int("image_count", len(fingerprints)),
+		zap.Strings("image_representations", representations),
+		zap.Strings("image_mime_types", mimeTypes),
+		zap.Int64s("image_byte_lengths", byteLengths),
+		zap.Strings("image_sha256", hashes),
+		zap.Int("payload_bytes", len(body)),
+		zap.Int64("account_id", accountID),
+		zap.String("platform", platform),
+		zap.String("account_type", accountType),
+		zap.String("requested_model", strings.TrimSpace(requestedModel)),
+		zap.String("upstream_model", actualModel),
+		zap.String("request_id", strings.TrimSpace(requestID)),
+		zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
+	)
+}
+
+func logOpenAIVisionResponseDiagnostics(ctx context.Context, account *Account, body []byte, statusCode int, upstreamRequestID string, outcome string) {
+	if !openAIRequestBodyMayContainImageInput(body) {
+		return
+	}
+	accountID := int64(0)
+	platform := ""
+	accountType := ""
+	if account != nil {
+		accountID = account.ID
+		platform = account.Platform
+		accountType = account.Type
+	}
+	requestID, _ := ctx.Value(ctxkey.RequestID).(string)
+	clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string)
+	logger.FromContext(ctx).Info("openai vision response diagnostics",
+		zap.String("component", "service.openai_vision_input"),
+		zap.String("stage", "response"),
+		zap.Int64("account_id", accountID),
+		zap.String("platform", platform),
+		zap.String("account_type", accountType),
+		zap.String("upstream_model", strings.TrimSpace(gjson.GetBytes(body, "model").String())),
+		zap.Int("upstream_status", statusCode),
+		zap.String("upstream_request_id", strings.TrimSpace(upstreamRequestID)),
+		zap.String("capability_outcome", strings.TrimSpace(outcome)),
+		zap.String("request_id", strings.TrimSpace(requestID)),
+		zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
+	)
+}
+
+func openAIVisionInputFingerprints(body []byte) []openAIVisionInputFingerprint {
+	if len(body) == 0 {
+		return nil
+	}
+	fingerprints := make([]openAIVisionInputFingerprint, 0, 1)
+	for _, path := range []string{"input", "messages"} {
+		collectOpenAIVisionInputFingerprints(gjson.GetBytes(body, path), &fingerprints)
+	}
+	return fingerprints
+}
+
+func collectOpenAIVisionInputFingerprints(value gjson.Result, fingerprints *[]openAIVisionInputFingerprint) {
+	if !value.Exists() {
+		return
+	}
+	if value.IsArray() {
+		value.ForEach(func(_, item gjson.Result) bool {
+			collectOpenAIVisionInputFingerprints(item, fingerprints)
+			return true
+		})
+		return
+	}
+	if !value.IsObject() {
+		return
+	}
+
+	typeName := strings.TrimSpace(value.Get("type").String())
+	imageURL := value.Get("image_url")
+	if imageURL.IsObject() {
+		imageURL = imageURL.Get("url")
+	}
+	if typeName == "input_image" || typeName == "image_url" || imageURL.Exists() {
+		*fingerprints = append(*fingerprints, fingerprintOpenAIVisionInput(imageURL.String(), value.Get("file_id").Exists()))
+		return
+	}
+	collectOpenAIVisionInputFingerprints(value.Get("content"), fingerprints)
+}
+
+func fingerprintOpenAIVisionInput(raw string, hasFileID bool) openAIVisionInputFingerprint {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if hasFileID {
+			return openAIVisionInputFingerprint{representation: "file_id"}
+		}
+		return openAIVisionInputFingerprint{representation: "missing"}
+	}
+	if !strings.HasPrefix(raw, "data:") {
+		return openAIVisionInputFingerprint{representation: "remote_url"}
+	}
+
+	metadata, encoded, found := strings.Cut(strings.TrimPrefix(raw, "data:"), ",")
+	parts := strings.Split(metadata, ";")
+	fingerprint := openAIVisionInputFingerprint{
+		representation: "invalid_data_url",
+		mimeType:       strings.ToLower(strings.TrimSpace(parts[0])),
+	}
+	if !found || len(parts) < 2 || !strings.EqualFold(strings.TrimSpace(parts[len(parts)-1]), "base64") {
+		return fingerprint
+	}
+	hasher := sha256.New()
+	decodedLength, err := io.Copy(hasher, base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded)))
+	if err != nil {
+		return fingerprint
+	}
+	fingerprint.representation = "data_url"
+	fingerprint.byteLength = decodedLength
+	fingerprint.sha256 = fmt.Sprintf("%x", hasher.Sum(nil))
+	return fingerprint
 }
 
 func openAIJSONValueMayContainImageInput(value gjson.Result) bool {
