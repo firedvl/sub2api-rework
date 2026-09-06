@@ -76,3 +76,39 @@ test('qualifies OpenAI vision in two explicit gates before separate promotion', 
     }
   }
 })
+
+test('offers capability reconciliation for a retained promoted report', async ({ page }) => {
+  await seedSession(page)
+  await installOperatorApiMock(page)
+
+  let promotionCalls = 0
+  const retainedReport = {
+    account_id: 101,
+    state: 'QUALIFIED',
+    model: 'gpt-5.6-sol',
+    endpoint: 'responses',
+    preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+    reliability: { required: 10, completed: 10, passed: true, attempts: [] },
+    promoted_at: '2026-09-06T12:00:00Z'
+  }
+  await page.route('**/api/v1/admin/accounts/101/vision-qualification**', async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/promote')) {
+      promotionCalls++
+      return fulfill(route, { ...retainedReport, promotion_eligible: false })
+    }
+    return fulfill(route, { ...retainedReport, promotion_eligible: true })
+  })
+
+  await page.goto('/admin/accounts')
+  await page.getByRole('button', { name: 'More Codex Team West' }).click()
+  await page.getByRole('button', { name: 'Test Connection' }).click()
+
+  const qualification = page.getByTestId('vision-qualification')
+  const promoteButton = qualification.getByRole('button', { name: 'Add vision input' })
+  await expect(page.getByTestId('vision-qualification-status')).toHaveText('Qualified 10/10')
+  await expect(promoteButton).toBeVisible()
+  await promoteButton.click()
+  await expect(promoteButton).toHaveCount(0)
+  await expect(page.getByTestId('vision-qualification-status')).toHaveText('Qualified 10/10')
+  expect(promotionCalls).toBe(1)
+})

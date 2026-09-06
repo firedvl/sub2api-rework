@@ -205,7 +205,15 @@ func openAIVisionQualificationReportFromAccount(account *Account) (*OpenAIVision
 		return report, false
 	}
 	report.RequalificationRequired = false
+	report.PromotionEligible = openAIVisionQualificationPromotionEligible(account, report)
 	return report, true
+}
+
+func openAIVisionQualificationPromotionEligible(account *Account, report *OpenAIVisionQualificationReport) bool {
+	return account != nil && report != nil && report.State == VisionQualificationStateQualified &&
+		report.Reliability != nil && report.Reliability.Passed && report.Reliability.Completed == 10 && report.QualifiedAt != nil &&
+		report.UpstreamIdentityFingerprint != "" && report.UpstreamIdentityFingerprint == openAIVisionQualificationIdentityFingerprint(account) &&
+		!hasConfiguredVisionCapability(account.Credentials)
 }
 
 func (s *AccountTestService) GetOpenAIVisionQualification(ctx context.Context, accountID int64) (*OpenAIVisionQualificationReport, error) {
@@ -291,7 +299,7 @@ func (s *AccountTestService) RunOpenAIVisionQualification(ctx context.Context, a
 	} else {
 		report.Reliability = stageReport
 	}
-	report.PromotionEligible = report.State == VisionQualificationStateQualified && report.Reliability != nil && report.Reliability.Passed && report.Reliability.Completed == 10 && report.PromotedAt == nil
+	report.PromotionEligible = openAIVisionQualificationPromotionEligible(account, report)
 	if err := s.saveOpenAIVisionQualificationReport(ctx, accountID, report); err != nil {
 		return nil, err
 	}

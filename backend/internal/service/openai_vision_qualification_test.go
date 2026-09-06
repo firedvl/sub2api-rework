@@ -117,6 +117,67 @@ func promotedVisionQualificationAccount() *Account {
 	return account
 }
 
+func TestGetOpenAIVisionQualificationPromotionEligibilityFollowsCurrentCapability(t *testing.T) {
+	tests := []struct {
+		name                     string
+		configure                func(*Account)
+		promotionEligible        bool
+		requalificationRequired  bool
+		shouldPreservePromotedAt bool
+	}{
+		{
+			name: "NEVER_PROMOTED_GET",
+			configure: func(account *Account) {
+				account.Extra[OpenAIVisionQualificationExtraKey].(*OpenAIVisionQualificationReport).PromotedAt = nil
+				account.Credentials[openAIEndpointCapabilitiesCredentialKey] = []any{"chat_completions", "alpha_search"}
+			},
+			promotionEligible: true,
+		},
+		{
+			name:                     "PROMOTED_CAPABILITY_PRESENT_GET",
+			promotionEligible:        false,
+			shouldPreservePromotedAt: true,
+		},
+		{
+			name: "PROMOTED_CAPABILITY_REMOVED_GET",
+			configure: func(account *Account) {
+				account.Credentials[openAIEndpointCapabilitiesCredentialKey] = []any{"chat_completions", "alpha_search"}
+			},
+			promotionEligible:        true,
+			shouldPreservePromotedAt: true,
+		},
+		{
+			name: "DIFFERENT_IDENTITY_GET",
+			configure: func(account *Account) {
+				account.Credentials["chatgpt_account_id"] = "acct-other"
+			},
+			promotionEligible:        false,
+			requalificationRequired:  true,
+			shouldPreservePromotedAt: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := promotedVisionQualificationAccount()
+			promotedAt := account.Extra[OpenAIVisionQualificationExtraKey].(*OpenAIVisionQualificationReport).PromotedAt
+			if test.configure != nil {
+				test.configure(account)
+			}
+			svc := &AccountTestService{accountRepo: &visionQualificationRepo{account: account}}
+
+			report, err := svc.GetOpenAIVisionQualification(context.Background(), account.ID)
+
+			require.NoError(t, err)
+			require.Equal(t, test.promotionEligible, report.PromotionEligible)
+			require.Equal(t, test.requalificationRequired, report.RequalificationRequired)
+			if test.shouldPreservePromotedAt {
+				require.Equal(t, promotedAt, report.PromotedAt)
+			}
+		})
+	}
+}
+
 func visionAnswer(status int, answer string) *http.Response {
 	body := fmt.Sprintf("data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\ndata: {\"type\":\"response.completed\"}\n\n", answer)
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}

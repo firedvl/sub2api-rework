@@ -309,6 +309,48 @@ describe('AccountTestModal', () => {
     expect(promoteVisionQualification).toHaveBeenCalledWith(42)
   })
 
+  it('offers promotion again when retained evidence needs capability reconciliation', async () => {
+    const retainedReport = {
+      account_id: 42,
+      state: 'QUALIFIED',
+      model: 'gpt-5.6-sol',
+      endpoint: 'responses',
+      preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+      reliability: { required: 10, completed: 10, passed: true, attempts: [] },
+      promotion_eligible: true,
+      promoted_at: '2026-09-06T12:00:00Z'
+    }
+    getVisionQualification.mockResolvedValue(retainedReport)
+    promoteVisionQualification.mockResolvedValue({
+      ...retainedReport,
+      promotion_eligible: false
+    })
+
+    const wrapper = mountModal({
+      id: 42,
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active',
+      parent_account_id: null
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const promoteButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('promote'))
+    expect(promoteButton).toBeTruthy()
+
+    await promoteButton!.trigger('click')
+    await flushPromises()
+
+    expect(promoteVisionQualification).toHaveBeenCalledWith(42)
+    expect(wrapper.get('[data-testid="vision-qualification-status"]').text()).toContain('QUALIFIED')
+    expect((wrapper.vm as any).visionQualification.promoted_at).toBe('2026-09-06T12:00:00Z')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('promote'))).toBe(false)
+  })
+
   it('restarts preliminary qualification when retained evidence is stale', async () => {
     getVisionQualification.mockResolvedValue({
       account_id: 42,
