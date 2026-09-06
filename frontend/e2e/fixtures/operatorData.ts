@@ -51,6 +51,7 @@ export const operatorFixtureUpdateStatus = {
   upstream_baseline_sha: 'e8cb019fabf8b55199436229044cbf9aa7a82564',
   latest_upstream: 'v0.1.184',
   latest_upstream_url: 'https://github.com/Wei-Shaw/sub2api/releases/tag/v0.1.184',
+  latest_rework_version: '0.1.183-rework.4',
   state: 'compatibility_pending',
   installable: false,
   release_notes: {
@@ -1058,6 +1059,22 @@ export function getOperatorFixtureData(
 
   if (pathname === '/api/v1/admin/groups') return paginated(operatorFixtureGroups)
   if (pathname === '/api/v1/admin/groups/all') return operatorFixtureGroups
+  if (/^\/api\/v1\/admin\/groups\/\d+\/model-operations$/.test(pathname)) {
+    return {
+      generated_at: OPERATOR_FIXTURE_NOW,
+      window: { start: '2026-08-23T02:00:00Z', end: OPERATOR_FIXTURE_NOW },
+      group: { id: 11, name: 'OpenAI Production', platform: 'openai' },
+      models: [{
+        model_id: 'gpt-6-astra', public_id: 'gpt-6-astra', actual_platform: 'openai',
+        discovery_source: 'provider_discovery', configured: true, discovered: true,
+        catalog_member: true, routable: false, current_availability: 'unavailable',
+        rate_limited_or_cooldown: true, healthy: false, v1_models_visible: true,
+        codex_picker_visible: true, route_type: 'direct', available_route_count: 0,
+        recent_request_count: 14, recent_input_tokens: 2400, recent_output_tokens: 320,
+        recent_total_tokens: 2720, sample_count: 14,
+      }],
+    }
+  }
   if (pathname === '/api/v1/admin/groups/usage-summary') {
     return [
       { group_id: 11, today_cost: 9.84, yesterday_cost: 8.91, total_cost: 1_842.62 },

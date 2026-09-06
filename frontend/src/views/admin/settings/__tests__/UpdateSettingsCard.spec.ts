@@ -26,7 +26,7 @@ const ConfirmDialogStub = { name: 'ConfirmDialog', props: ['show', 'title'], tem
 
 function updateStatus(state: string, updaterState = 'idle', prepared = '') {
   return {
-    current_version: '1.2.3-rework.1', upstream_baseline: 'v1.2.2', latest_upstream: 'v1.2.3', update_channel: 'stable', checked_at: '2026-08-28T00:00:00Z',
+    current_version: '1.2.3-rework.1', current_git_commit: 'running-sha', upstream_baseline: 'v1.2.2', upstream_baseline_sha: 'baseline-sha', latest_rework_version: '1.2.3-rework.4', latest_upstream: 'v1.2.3', update_channel: 'stable', checked_at: '2026-08-28T00:00:00Z',
     latest_compatible_rework: '1.2.3-rework.4', state, installable: state === 'update_ready', release_notes: { upstream: '<b>safe text</b>', rework: '', compatibility: 'Review pending.', migrations: '', rollback: '' },
     updater: { healthy: updaterState !== 'unavailable', state: updaterState, busy: false, prepared_version: prepared, rollback_version: '1.2.3-rework.0' }
   }
@@ -48,8 +48,15 @@ describe('UpdateSettingsCard', () => {
     const wrapper = mountCard()
     await flushPromises()
     expect(wrapper.text()).toContain('admin.settings.updates.states.compatibility_pending')
-    expect(wrapper.text()).toContain('admin.settings.updates.upstreamBaseline')
+    expect(wrapper.text()).toContain('admin.settings.updates.embeddedUpstream')
     expect(wrapper.text()).toContain('v1.2.2')
+    expect(wrapper.text()).toContain('admin.settings.updates.runningRevision')
+    expect(wrapper.text()).toContain('running-sha')
+    expect(wrapper.text()).toContain('admin.settings.updates.embeddedUpstreamRevision')
+    expect(wrapper.text()).toContain('baseline-sha')
+    expect(wrapper.text()).toContain('admin.settings.updates.latestRework')
+    expect(wrapper.text()).toContain('1.2.3-rework.4')
+    expect(wrapper.text()).toContain('admin.settings.updates.upstreamSyncStatus')
     expect(wrapper.text()).toContain('admin.settings.updates.latestUpstream')
     expect(wrapper.text()).toContain('v1.2.3')
     expect(wrapper.text()).toContain('admin.settings.updates.noteLabels.upstream')

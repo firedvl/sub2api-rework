@@ -152,6 +152,30 @@ func gatewayCapabilitySchedulerSnapshot(groupID int64, platform string, accounts
 }
 
 func TestBuildGatewayCapabilityModelsStatesRoutesAndQueries(t *testing.T) {
+	t.Run("configured mapping is distinct from provider discovery", func(t *testing.T) {
+		account := gatewayCapabilityTestAccount(10, PlatformOpenAI, map[string]string{"public-model": "upstream-model"})
+		repo := &gatewayCapabilityAccountRepoStub{configured: []Account{account}}
+		gateway := &GatewayService{accountRepo: repo}
+
+		model := gatewayCapabilityModelByID(t, gateway.BuildGatewayCapabilityModels(
+			context.Background(), &Group{ID: 42, Platform: PlatformOpenAI}, nil,
+		), "public-model")
+		require.True(t, model.Configured)
+		require.False(t, model.Discovered)
+		require.Equal(t, "account_mapping", model.DiscoverySource)
+
+		account.SetUpstreamModelInventorySnapshot(UpstreamModelInventorySnapshot{
+			Source: "upstream", SyncedAt: time.Now().UTC().Format(time.RFC3339), Models: []string{"upstream-model"},
+		})
+		repo.configured = []Account{account}
+		model = gatewayCapabilityModelByID(t, gateway.BuildGatewayCapabilityModels(
+			context.Background(), &Group{ID: 42, Platform: PlatformOpenAI}, nil,
+		), "public-model")
+		require.True(t, model.Configured)
+		require.True(t, model.Discovered)
+		require.Equal(t, "provider_discovery", model.DiscoverySource)
+	})
+
 	t.Run("available degraded alias and deterministic scope", func(t *testing.T) {
 		current := gatewayCapabilityTestAccount(1, PlatformOpenAI, map[string]string{
 			"model-z":      "model-z",

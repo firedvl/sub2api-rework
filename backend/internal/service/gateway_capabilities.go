@@ -9,6 +9,10 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -48,6 +52,12 @@ type GatewayCapabilityModel struct {
 	Capabilities *GatewayModelCapabilities `json:"capabilities,omitempty"`
 	Routing      GatewayCapabilityRouting  `json:"routing"`
 	Capacity     GatewayCapabilityCapacity `json:"capacity"`
+
+	ActualPlatform        string `json:"-"`
+	DiscoverySource       string `json:"-"`
+	Configured            bool   `json:"-"`
+	Discovered            bool   `json:"-"`
+	RateLimitedOrCooldown bool   `json:"-"`
 }
 
 type GatewayModelCapabilities struct {
@@ -171,16 +181,108 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 		if route.known && modelCurrentKnown && len(currentPaths) > 0 {
 			capacity = gatewayCapabilityCapacity(currentPaths, route.upstreamModel, time.Now())
 		}
+		actualPlatform := route.targetPlatform
+		if len(configuredPaths) > 0 {
+			actualPlatform = configuredPaths[0].Platform
+		} else if len(currentPaths) > 0 {
+			actualPlatform = currentPaths[0].Platform
+		}
+		configuredModel := len(configuredPaths) > 0 || route.decision.Source == CompositeRouteSourceExplicit
 		models = append(models, GatewayCapabilityModel{
-			ID:           modelID,
-			DisplayName:  modelID,
-			Availability: availability,
-			Routing:      routing,
-			Capacity:     capacity,
+			ID:                    modelID,
+			DisplayName:           modelID,
+			Availability:          availability,
+			Routing:               routing,
+			Capacity:              capacity,
+			ActualPlatform:        actualPlatform,
+			DiscoverySource:       gatewayCapabilityDiscoverySource(modelID, route, configuredPaths),
+			Configured:            configuredModel,
+			Discovered:            gatewayCapabilityDiscoveredByAccounts(modelID, route, configuredPaths),
+			RateLimitedOrCooldown: gatewayCapabilityHasTransientBlock(configuredPaths),
 		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models
+}
+
+func DefaultGatewayCapabilityFallbacks() map[string][]string {
+	geminiModels := make([]string, 0, len(geminicli.DefaultModels))
+	for _, model := range geminicli.DefaultModels {
+		geminiModels = append(geminiModels, model.ID)
+	}
+	antigravityDefaults := antigravity.DefaultModels()
+	antigravityModels := make([]string, 0, len(antigravityDefaults))
+	for _, model := range antigravityDefaults {
+		antigravityModels = append(antigravityModels, model.ID)
+	}
+	return map[string][]string{
+		PlatformAnthropic:   claude.DefaultModelIDs(),
+		PlatformGemini:      geminiModels,
+		PlatformOpenAI:      openai.DefaultModelIDs(),
+		PlatformAntigravity: antigravityModels,
+		PlatformGrok:        xai.DefaultModelIDs(),
+	}
+}
+
+func gatewayCapabilityDiscoverySource(model string, route gatewayCapabilityRoute, accounts []Account) string {
+	if route.decision.Source == CompositeRouteSourceExplicit {
+		return "explicit_route"
+	}
+	for i := range accounts {
+		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel) {
+			return "provider_discovery"
+		}
+	}
+	for i := range accounts {
+		if explicitModelMappingClaims(accounts[i], model) {
+			return "account_mapping"
+		}
+	}
+	return "provider_default"
+}
+
+func gatewayCapabilityDiscoveredByAccounts(model string, route gatewayCapabilityRoute, accounts []Account) bool {
+	for i := range accounts {
+		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel) {
+			return true
+		}
+	}
+	return false
+}
+
+func gatewayCapabilityAccountDiscoveredModel(account *Account, publicModel, upstreamModel string) bool {
+	if account == nil {
+		return false
+	}
+	inventory := account.GetUpstreamModelInventorySnapshot()
+	if inventory == nil {
+		return false
+	}
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	if mapped, _ := account.ResolveMappedModel(upstreamModel); strings.TrimSpace(mapped) != "" {
+		upstreamModel = mapped
+	}
+	upstreamModel = strings.TrimPrefix(strings.TrimSpace(upstreamModel), "models/")
+	for _, discovered := range inventory.Models {
+		discovered = strings.TrimPrefix(strings.TrimSpace(discovered), "models/")
+		if discovered == upstreamModel || publicCatalogModelID(account, discovered) == publicModel {
+			return true
+		}
+	}
+	return false
+}
+
+func gatewayCapabilityHasTransientBlock(accounts []Account) bool {
+	now := time.Now()
+	for i := range accounts {
+		account := &accounts[i]
+		if account.RateLimitResetAt != nil && now.Before(*account.RateLimitResetAt) ||
+			account.OverloadUntil != nil && now.Before(*account.OverloadUntil) ||
+			account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GatewayService) filterGatewayCapabilityCurrentAccounts(ctx context.Context, accounts []Account) []Account {
@@ -245,14 +347,20 @@ func gatewayCapabilityVisibleModelIDs(
 
 	if platform != PlatformComposite {
 		available := make([]string, 0)
+		hasPlatform := false
 		if configuredKnown {
 			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(configured, platform))
+			hasPlatform = gatewayCapabilityHasPlatform(configured, platform)
 		}
 		if currentKnown {
 			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(current, platform))
+			hasPlatform = hasPlatform || gatewayCapabilityHasPlatform(current, platform)
 		}
 		fallback := cloneStringSlice(fallbacks[platform])
 		if group != nil && group.CustomModelsListEnabled() {
+			if !hasPlatform {
+				return nil
+			}
 			if platform == PlatformAnthropic && len(available) > 0 {
 				available = mergeGatewayCapabilityModelIDs(available, fallback)
 			}
@@ -260,6 +368,9 @@ func gatewayCapabilityVisibleModelIDs(
 		}
 		if len(available) > 0 {
 			return available
+		}
+		if !hasPlatform {
+			return nil
 		}
 		return fallback
 	}

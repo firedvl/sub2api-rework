@@ -479,6 +479,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-operations',
+    name: 'AdminModelOperations',
+    component: () => import('@/views/admin/ModelOperationsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Operations',
+      titleKey: 'admin.modelOperations.title',
+      descriptionKey: 'admin.modelOperations.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

@@ -17,6 +17,10 @@ func (r *compositeOwnershipAccountRepo) ListSchedulableByGroupID(context.Context
 	return r.accounts, nil
 }
 
+func (r *compositeOwnershipAccountRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	return r.accounts, nil
+}
+
 // Scenario: 唯一平台的精确别名可路由
 func TestResolveCompositeModelOwnershipKeepsProviderAccountsIsolated(t *testing.T) {
 	groupID := int64(7)

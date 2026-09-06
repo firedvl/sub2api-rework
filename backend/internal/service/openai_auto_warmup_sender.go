@@ -19,7 +19,6 @@ import (
 const (
 	openAIAutoWarmupPrompt         = "Reply with OK only."
 	openAIAutoWarmupInput          = "OK"
-	openAIAutoWarmupPreferredModel = "gpt-5.4-mini"
 	openAIAutoWarmupRequestLimit   = 1 << 20
 	openAIAutoWarmupRequestTimeout = 15 * time.Second
 )
@@ -173,31 +172,105 @@ func (s *OpenAIGatewayService) resolveOpenAIAutoWarmupModel(ctx context.Context,
 	if err != nil {
 		return "", infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "fetch Codex models: %v", err)
 	}
-	var envelope struct {
-		Models []struct {
-			Slug           string `json:"slug"`
-			SupportedInAPI *bool  `json:"supported_in_api"`
-		} `json:"models"`
-	}
-	if manifest == nil || json.Unmarshal(manifest.Body, &envelope) != nil {
+	if manifest == nil {
 		return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "Codex models manifest is invalid")
 	}
-	models := make([]string, 0, len(envelope.Models))
-	for _, model := range envelope.Models {
+	model, err := selectOpenAIAutoWarmupModel(manifest.Body)
+	if err != nil {
+		return "", infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "parse Codex models: %v", err)
+	}
+	if model == "" {
+		return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE", "Codex models manifest has no usable text model")
+	}
+	return model, nil
+}
+
+type openAIAutoWarmupModelCandidate struct {
+	slug            string
+	contextWindow   int64
+	maxOutputTokens int64
+	priority        int
+	manifestOrder   int
+}
+
+// selectOpenAIAutoWarmupModel uses capability size as a conservative quota
+// proxy because ChatGPT/Codex OAuth does not publish per-model quota weights.
+// Known smaller context/output limits win, then upstream priority/order, then
+// slug for deterministic behavior. It never hardcodes a model entitlement.
+func selectOpenAIAutoWarmupModel(body []byte) (string, error) {
+	var envelope struct {
+		Models []struct {
+			Slug             string   `json:"slug"`
+			SupportedInAPI   *bool    `json:"supported_in_api"`
+			InputModalities  []string `json:"input_modalities"`
+			OutputModalities []string `json:"output_modalities"`
+			ContextWindow    int64    `json:"context_window"`
+			MaxOutputTokens  int64    `json:"max_output_tokens"`
+			Priority         int      `json:"priority"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return "", err
+	}
+	candidates := make([]openAIAutoWarmupModelCandidate, 0, len(envelope.Models))
+	for index, model := range envelope.Models {
 		slug := strings.TrimSpace(model.Slug)
-		if slug == "" || model.SupportedInAPI != nil && !*model.SupportedInAPI {
+		if slug == "" || model.SupportedInAPI != nil && !*model.SupportedInAPI || isCodexDedicatedMediaModel(slug) ||
+			!openAIAutoWarmupSupportsText(model.InputModalities) || !openAIAutoWarmupSupportsText(model.OutputModalities) {
 			continue
 		}
-		if slug == openAIAutoWarmupPreferredModel {
-			return slug, nil
+		candidates = append(candidates, openAIAutoWarmupModelCandidate{
+			slug: slug, contextWindow: model.ContextWindow, maxOutputTokens: model.MaxOutputTokens,
+			priority: model.Priority, manifestOrder: index,
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if cmp := compareKnownPositive(a.contextWindow, b.contextWindow); cmp != 0 {
+			return cmp < 0
 		}
-		models = append(models, slug)
+		if cmp := compareKnownPositive(a.maxOutputTokens, b.maxOutputTokens); cmp != 0 {
+			return cmp < 0
+		}
+		if cmp := compareKnownPositive(int64(a.priority), int64(b.priority)); cmp != 0 {
+			return cmp < 0
+		}
+		if a.manifestOrder != b.manifestOrder {
+			return a.manifestOrder < b.manifestOrder
+		}
+		return a.slug < b.slug
+	})
+	if len(candidates) == 0 {
+		return "", nil
 	}
-	if len(models) > 0 {
-		sort.Strings(models)
-		return models[0], nil
+	return candidates[0].slug, nil
+}
+
+func openAIAutoWarmupSupportsText(modalities []string) bool {
+	if len(modalities) == 0 {
+		return true
 	}
-	return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE", "Codex models manifest has no usable model")
+	for _, modality := range modalities {
+		if strings.EqualFold(strings.TrimSpace(modality), "text") {
+			return true
+		}
+	}
+	return false
+}
+
+func compareKnownPositive(a, b int64) int {
+	switch {
+	case a > 0 && b <= 0:
+		return -1
+	case a <= 0 && b > 0:
+		return 1
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func openAIAutoWarmupWindowEvidence(account *Account, snapshot *OpenAICodexUsageSnapshot, observedAt time.Time) (bool, string, *float64) {

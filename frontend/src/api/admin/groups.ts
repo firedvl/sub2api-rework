@@ -21,6 +21,37 @@ export interface LiveCapability {
   reason?: string
 }
 
+export interface ModelOperationsModel {
+  model_id: string
+  public_id: string
+  actual_platform: string
+  discovery_source: string
+  configured: boolean
+  discovered: boolean
+  catalog_member: boolean
+  routable?: boolean
+  current_availability: 'available' | 'degraded' | 'unavailable' | 'unknown'
+  rate_limited_or_cooldown?: boolean
+  healthy?: boolean
+  v1_models_visible: boolean
+  codex_picker_visible: boolean
+  route_type: string
+  available_route_count?: number
+  recent_request_count: number
+  recent_input_tokens: number
+  recent_output_tokens: number
+  recent_total_tokens: number
+  sample_count: number
+}
+
+export interface ModelOperationsSnapshot {
+  generated_at: string
+  window: { start: string; end: string }
+  group: { id: number; name: string; platform: string }
+  models: ModelOperationsModel[]
+  warning?: string
+}
+
 /**
  * List all groups with pagination
  * @param page - Page number (default: 1)
@@ -99,6 +130,17 @@ export async function getLiveCapability(): Promise<LiveCapability> {
  */
 export async function getById(id: number): Promise<AdminGroup> {
   const { data } = await apiClient.get<AdminGroup>(`/admin/groups/${id}`)
+  return data
+}
+
+export async function getModelOperations(
+  id: number,
+  clientVersion?: string
+): Promise<ModelOperationsSnapshot> {
+  const { data } = await apiClient.get<ModelOperationsSnapshot>(
+    `/admin/groups/${id}/model-operations`,
+    { params: clientVersion ? { client_version: clientVersion } : undefined }
+  )
   return data
 }
 

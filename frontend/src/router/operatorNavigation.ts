@@ -45,6 +45,7 @@ export const operatorAreas: OperatorArea[] = [
     hideInSimpleMode: true,
     sections: [
       { path: '/admin/groups', labelKey: 'nav.groups' },
+      { path: '/admin/model-operations', labelKey: 'nav.modelOperations' },
       { path: '/admin/channels/pricing', labelKey: 'nav.channelPricing' },
       {
         path: '/admin/channels/monitor',

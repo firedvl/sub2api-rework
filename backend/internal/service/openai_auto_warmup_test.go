@@ -794,10 +794,12 @@ func TestResolveOpenAIAutoWarmupModelPrefersEligibleLightweightModelAcrossManife
 		manifest string
 		want     string
 	}{
-		{name: "preferred model second", manifest: `{"models":[{"slug":"gpt-5.6-sol"},{"slug":"gpt-5.4-mini"}]}`, want: "gpt-5.4-mini"},
-		{name: "preferred model first", manifest: `{"models":[{"slug":"gpt-5.4-mini"},{"slug":"gpt-5.6-sol"}]}`, want: "gpt-5.4-mini"},
-		{name: "unsupported preferred model skipped", manifest: `{"models":[{"slug":"gpt-5.4-mini","supported_in_api":false},{"slug":"gpt-5.6-terra"}]}`, want: "gpt-5.6-terra"},
-		{name: "deterministic fallback", manifest: `{"models":[{"slug":"gpt-test"},{"slug":"gpt-other"}]}`, want: "gpt-other"},
+		{name: "smaller capability second", manifest: `{"models":[{"slug":"large-model","context_window":1000000,"max_output_tokens":100000},{"slug":"small-model","context_window":128000,"max_output_tokens":16000}]}`, want: "small-model"},
+		{name: "smaller capability first", manifest: `{"models":[{"slug":"small-model","context_window":128000,"max_output_tokens":16000},{"slug":"large-model","context_window":1000000,"max_output_tokens":100000}]}`, want: "small-model"},
+		{name: "unsupported smaller model skipped", manifest: `{"models":[{"slug":"small-model","supported_in_api":false,"context_window":128000},{"slug":"large-model","context_window":1000000}]}`, want: "large-model"},
+		{name: "media models skipped", manifest: `{"models":[{"slug":"gpt-image-2","input_modalities":["image"]},{"slug":"text-model","input_modalities":["text"]}]}`, want: "text-model"},
+		{name: "future unknown model remains usable", manifest: `{"models":[{"slug":"gpt-future-codex-model"}]}`, want: "gpt-future-codex-model"},
+		{name: "manifest order breaks metadata ties", manifest: `{"models":[{"slug":"gpt-test"},{"slug":"gpt-other"}]}`, want: "gpt-test"},
 	}
 	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
