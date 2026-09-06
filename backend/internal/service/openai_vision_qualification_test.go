@@ -19,18 +19,28 @@ import (
 
 type visionQualificationRepo struct {
 	AccountRepository
-	account     *Account
-	saved       *OpenAIVisionQualificationReport
-	updateCalls int
+	account           *Account
+	saved             *OpenAIVisionQualificationReport
+	saveErr           error
+	getAfterUpdateErr error
+	saveCalls         int
+	updateCalls       int
 }
 
 func (r *visionQualificationRepo) GetByID(context.Context, int64) (*Account, error) {
+	if r.updateCalls > 0 && r.getAfterUpdateErr != nil {
+		return nil, r.getAfterUpdateErr
+	}
 	return r.account, nil
 }
 
 func (r *visionQualificationRepo) SaveOpenAIVisionQualificationReport(_ context.Context, accountID int64, report *OpenAIVisionQualificationReport) error {
+	r.saveCalls++
 	if accountID != r.account.ID {
 		return fmt.Errorf("wrong account: %d", accountID)
+	}
+	if r.saveErr != nil {
+		return r.saveErr
 	}
 	r.saved = report
 	if r.account.Extra == nil {
@@ -79,6 +89,7 @@ func visionQualificationAccount() *Account {
 		Status: StatusActive, Schedulable: true, Concurrency: 1,
 		Credentials: map[string]any{
 			"access_token": "access-secret", "refresh_token": "refresh-secret",
+			"chatgpt_account_id": "acct-stable", "chatgpt_user_id": "user-stable",
 			openAIEndpointCapabilitiesCredentialKey: []any{"chat_completions", "alpha_search"},
 		},
 		Extra: map[string]any{},
@@ -87,6 +98,10 @@ func visionQualificationAccount() *Account {
 
 func visionAnswer(status int, answer string) *http.Response {
 	body := fmt.Sprintf("data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\ndata: {\"type\":\"response.completed\"}\n\n", answer)
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func visionError(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
 
@@ -131,7 +146,7 @@ func TestOpenAIVisionQualificationGatesAndStopsOnFailure(t *testing.T) {
 		svc, _, upstream := newVisionQualificationService(visionAnswer(200, "9"), visionAnswer(200, "2"))
 		report, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
 		require.NoError(t, err)
-		require.Equal(t, VisionQualificationStateFailed, report.State)
+		require.Equal(t, VisionQualificationStateIncorrectAnswer, report.State)
 		require.Len(t, report.Preliminary.Attempts, 1)
 		require.Len(t, upstream.bodies, 1)
 	})
@@ -169,7 +184,7 @@ func TestOpenAIVisionQualificationGatesAndStopsOnFailure(t *testing.T) {
 		require.NoError(t, err)
 		report, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStageReliability)
 		require.NoError(t, err)
-		require.Equal(t, VisionQualificationStateFailed, report.State)
+		require.Equal(t, VisionQualificationStateIncorrectAnswer, report.State)
 		require.Len(t, report.Reliability.Attempts, 2)
 		require.Len(t, upstream.bodies, 4)
 	})
@@ -209,6 +224,10 @@ func TestOpenAIVisionQualificationRejectsIneligibleAccounts(t *testing.T) {
 		{name: "unschedulable", mutate: func(a *Account) { a.Schedulable = false }},
 		{name: "wrong mapping", mutate: func(a *Account) {
 			a.Credentials["model_mapping"] = map[string]any{OpenAIVisionQualificationModel: "other-model"}
+		}},
+		{name: "missing stable identity", mutate: func(a *Account) {
+			delete(a.Credentials, "chatgpt_account_id")
+			delete(a.Credentials, "chatgpt_user_id")
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -269,7 +288,7 @@ func TestAccountUpdateCannotAddVisionWithoutRetainedGatePromotion(t *testing.T) 
 
 func TestAccountUpdateCannotForgeOrEraseVisionQualificationReport(t *testing.T) {
 	repo := &visionQualificationRepo{account: visionQualificationAccount()}
-	original := defaultOpenAIVisionQualificationReport(repo.account.ID)
+	original := defaultOpenAIVisionQualificationReport(repo.account)
 	original.State = VisionQualificationStatePreliminary
 	repo.account.Extra[OpenAIVisionQualificationExtraKey] = original
 	svc := &adminServiceImpl{accountRepo: repo}
@@ -282,4 +301,201 @@ func TestAccountUpdateCannotForgeOrEraseVisionQualificationReport(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, original, updated.Extra[OpenAIVisionQualificationExtraKey])
 	require.Equal(t, "kept", updated.Extra["operator_note"])
+}
+
+func TestOpenAIVisionQualificationBindsRetainedEvidenceToUpstreamIdentity(t *testing.T) {
+	responses := []*http.Response{visionAnswer(200, "1"), visionAnswer(200, "2")}
+	for i := 0; i < 10; i++ {
+		responses = append(responses, visionAnswer(200, fmt.Sprintf("%d", i%4+1)))
+	}
+	svc, repo, upstream := newVisionQualificationService(responses...)
+	delete(repo.account.Credentials, "chatgpt_user_id")
+	_, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+	require.NoError(t, err)
+	qualified, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStageReliability)
+	require.NoError(t, err)
+	fingerprint := qualified.UpstreamIdentityFingerprint
+	require.NotEmpty(t, fingerprint)
+
+	admin := &adminServiceImpl{accountRepo: repo}
+	_, err = admin.UpdateAccount(context.Background(), 31, &UpdateAccountInput{Credentials: map[string]any{
+		"access_token": "rotated-access", "refresh_token": "rotated-refresh",
+		"chatgpt_account_id": "acct-stable", "chatgpt_user_id": "user-stable",
+	}})
+	require.NoError(t, err)
+	retained, err := svc.GetOpenAIVisionQualification(context.Background(), 31)
+	require.NoError(t, err)
+	require.Equal(t, VisionQualificationStateQualified, retained.State)
+	require.Equal(t, fingerprint, retained.UpstreamIdentityFingerprint)
+	require.True(t, retained.PromotionEligible)
+	require.False(t, retained.RequalificationRequired)
+
+	_, err = admin.UpdateAccount(context.Background(), 31, &UpdateAccountInput{Credentials: map[string]any{
+		"access_token": "other-access", "refresh_token": "other-refresh",
+		"chatgpt_account_id": "acct-other", "chatgpt_user_id": "user-other",
+	}})
+	require.NoError(t, err)
+	stale, err := svc.GetOpenAIVisionQualification(context.Background(), 31)
+	require.NoError(t, err)
+	require.Equal(t, VisionQualificationStateUnqualified, stale.State)
+	require.False(t, stale.PromotionEligible)
+	require.True(t, stale.RequalificationRequired)
+	_, err = svc.PromoteOpenAIVisionQualification(context.Background(), 31, admin)
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
+
+	upstream.responses = []*http.Response{visionAnswer(200, "1"), visionAnswer(200, "2")}
+	replaced, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+	require.NoError(t, err)
+	require.NotEqual(t, fingerprint, replaced.UpstreamIdentityFingerprint)
+	require.False(t, replaced.RequalificationRequired)
+	require.Nil(t, replaced.Reliability)
+
+	payload, err := json.Marshal(replaced)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "acct-other")
+	require.NotContains(t, string(payload), "user-other")
+	require.NotContains(t, string(payload), "other-access")
+	require.NotContains(t, string(payload), "other-refresh")
+}
+
+func TestOpenAIVisionQualificationClassifiesFailuresPrecisely(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		response       *http.Response
+		classification string
+		state          string
+	}{
+		{name: "unauthorized", response: visionError(401, `{"error":{"code":"invalid_token"}}`), classification: visionFailureAuthFailed, state: VisionQualificationStateAuthFailed},
+		{name: "revoked token", response: visionError(401, `{"error":{"code":"token_revoked","message":"credential revoked"}}`), classification: visionFailureAuthFailed, state: VisionQualificationStateAuthFailed},
+		{name: "forbidden", response: visionError(403, `{"error":{"code":"policy_denied"}}`), classification: visionFailureAuthOrPolicyDenied, state: VisionQualificationStateAuthOrPolicyDenied},
+		{name: "rate limited", response: visionError(429, `{}`), classification: visionFailureDeferred, state: VisionQualificationStateCurrentlyUnavailable},
+		{name: "service unavailable", response: visionError(503, `{}`), classification: visionFailureDeferred, state: VisionQualificationStateCurrentlyUnavailable},
+		{name: "explicit image unsupported", response: visionError(400, `{"error":{"code":"image_input_unsupported","message":"image input is not supported"}}`), classification: visionFailureUnsupported, state: VisionQualificationStateUnsupported},
+		{name: "other bad request", response: visionError(400, `{"error":{"code":"invalid_request"}}`), classification: visionFailureInvalidResponse, state: VisionQualificationStateInvalidResponse},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := newVisionQualificationService(tc.response)
+			report, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+			require.NoError(t, err)
+			require.Equal(t, tc.state, report.State)
+			require.Equal(t, tc.classification, report.Preliminary.Attempts[0].FailureClassification)
+		})
+	}
+
+	t.Run("transport", func(t *testing.T) {
+		svc, _, upstream := newVisionQualificationService()
+		upstream.responses = nil
+		report, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+		require.NoError(t, err)
+		require.Equal(t, VisionQualificationStateCurrentlyUnavailable, report.State)
+		require.Equal(t, visionFailureTransportUnavailable, report.Preliminary.Attempts[0].FailureClassification)
+	})
+
+	t.Run("malformed success", func(t *testing.T) {
+		svc, _, _ := newVisionQualificationService(visionError(200, `{"unexpected":true}`))
+		report, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+		require.NoError(t, err)
+		require.Equal(t, VisionQualificationStateInvalidResponse, report.State)
+		require.Equal(t, visionFailureInvalidResponse, report.Preliminary.Attempts[0].FailureClassification)
+	})
+}
+
+func TestAccountCreateAndBulkUpdateCannotAddVision(t *testing.T) {
+	credentials := map[string]any{openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions", "vision_input"}}
+	_, err := (&adminServiceImpl{}).CreateAccount(context.Background(), &CreateAccountInput{
+		Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: credentials, SkipDefaultGroupBind: true,
+	})
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
+
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID: 31, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions"}},
+	}, {
+		ID: 32, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"chatgpt_account_id": "acct-32", openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions"}},
+	}}}
+	_, err = (&adminServiceImpl{accountRepo: repo}).BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{31, 32}, Credentials: credentials,
+	})
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
+	require.Zero(t, repo.bulkUpdateCalls)
+}
+
+func TestAccountCredentialPersistenceCannotAddVision(t *testing.T) {
+	repo := &visionQualificationRepo{account: visionQualificationAccount()}
+	credentials := shallowCopyMap(repo.account.Credentials)
+	credentials[openAIEndpointCapabilitiesCredentialKey] = []string{"chat_completions", "vision_input"}
+
+	err := persistAccountCredentials(context.Background(), repo, repo.account, credentials)
+
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
+	require.Zero(t, repo.updateCalls)
+	require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+}
+
+func TestDuplicateAccountCannotCopyVisionIntoNewAccount(t *testing.T) {
+	repo := newDuplicateAccountRepoStub()
+	source := visionQualificationAccount()
+	source.Type = AccountTypeAPIKey
+	source.Credentials = map[string]any{"api_key": "secret"}
+	source.Credentials[openAIEndpointCapabilitiesCredentialKey] = []string{"chat_completions", "vision_input"}
+	repo.accounts[source.ID] = source
+	repo.mockAccountRepoForGemini.accountsByID[source.ID] = source
+
+	_, err := (&adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}).DuplicateAccount(
+		context.Background(), source.ID, "admin:1", "",
+	)
+
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
+	require.Len(t, repo.accounts, 1)
+}
+
+func TestAccountUpdatePreservesOrRemovesExistingVision(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		capabilities []string
+		hasVision    bool
+	}{
+		{name: "preserve", capabilities: []string{"chat_completions", "vision_input"}, hasVision: true},
+		{name: "remove", capabilities: []string{"chat_completions"}, hasVision: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &visionQualificationRepo{account: visionQualificationAccount()}
+			repo.account.Credentials[openAIEndpointCapabilitiesCredentialKey] = []string{"chat_completions", "vision_input"}
+			updated, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{
+				Credentials: map[string]any{openAIEndpointCapabilitiesCredentialKey: tc.capabilities},
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.hasVision, hasConfiguredVisionCapability(updated.Credentials))
+		})
+	}
+}
+
+func TestOpenAIVisionQualificationPromotionPersistsCapabilityAndEvidenceTogether(t *testing.T) {
+	responses := []*http.Response{visionAnswer(200, "1"), visionAnswer(200, "2")}
+	for i := 0; i < 10; i++ {
+		responses = append(responses, visionAnswer(200, fmt.Sprintf("%d", i%4+1)))
+	}
+	svc, repo, _ := newVisionQualificationService(responses...)
+	_, err := svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStagePreliminary)
+	require.NoError(t, err)
+	_, err = svc.RunOpenAIVisionQualification(context.Background(), 31, VisionQualificationStageReliability)
+	require.NoError(t, err)
+	savesBeforePromotion := repo.saveCalls
+	repo.saveErr = errorsNewUnexpectedDo()
+	repo.getAfterUpdateErr = errorsNewUnexpectedDo()
+
+	report, err := svc.PromoteOpenAIVisionQualification(context.Background(), 31, &adminServiceImpl{accountRepo: repo})
+	require.NoError(t, err)
+	require.True(t, hasConfiguredVisionCapability(repo.account.Credentials))
+	require.NotNil(t, report.PromotedAt)
+	require.Equal(t, report, repo.account.Extra[OpenAIVisionQualificationExtraKey])
+	require.Equal(t, savesBeforePromotion, repo.saveCalls, "promotion must not persist evidence after the capability transaction")
+
+	repo.getAfterUpdateErr = nil
+	updateCalls := repo.updateCalls
+	retried, err := svc.PromoteOpenAIVisionQualification(context.Background(), 31, &adminServiceImpl{accountRepo: repo})
+	require.NoError(t, err)
+	require.Equal(t, report.PromotedAt, retried.PromotedAt)
+	require.Equal(t, updateCalls, repo.updateCalls, "completed promotion must be idempotent")
 }

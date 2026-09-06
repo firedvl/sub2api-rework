@@ -1572,7 +1572,11 @@ export default {
           PRELIMINARY: '初步验证 2/2',
           QUALIFIED: '已验证 10/10',
           DEFERRED_CURRENTLY_UNAVAILABLE: '当前不可用',
-          VISION_UNSUPPORTED: '失败 / 不支持'
+          AUTH_FAILED: '身份验证失败',
+          AUTH_OR_POLICY_DENIED: '授权或策略拒绝',
+          VISION_UNSUPPORTED: '不支持视觉输入',
+          INCORRECT_VISUAL_ANSWER: '视觉答案错误',
+          INVALID_UPSTREAM_RESPONSE: '上游响应无效'
         }
       },
       selectTestModel: '选择测试模型',

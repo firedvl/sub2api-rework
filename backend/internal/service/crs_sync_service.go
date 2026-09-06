@@ -681,6 +681,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			if err := validateVisionCapabilityAddition(nil, account.Platform, account.Type, account.Credentials, false); err != nil {
+				item.Action = "failed"
+				item.Error = err.Error()
+				result.Failed++
+				result.Items = append(result.Items, item)
+				continue
+			}
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -698,6 +705,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
+		if err := validateVisionCapabilityAddition(existing, PlatformOpenAI, AccountTypeOAuth, credentials, false); err != nil {
+			item.Action = "failed"
+			item.Error = err.Error()
+			result.Failed++
+			result.Items = append(result.Items, item)
+			continue
+		}
 		existing.Extra = extra
 		existing.Name = defaultName(src.Name, src.ID)
 		existing.Platform = PlatformOpenAI
@@ -809,6 +823,13 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		}
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
+		}
+		if err := validateVisionCapabilityAddition(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, false); err != nil {
+			item.Action = "failed"
+			item.Error = err.Error()
+			result.Failed++
+			result.Items = append(result.Items, item)
+			continue
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, extra)
 

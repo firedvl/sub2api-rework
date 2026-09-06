@@ -1144,7 +1144,11 @@ export type OpenAIVisionQualificationState =
   | 'PRELIMINARY'
   | 'QUALIFIED'
   | 'DEFERRED_CURRENTLY_UNAVAILABLE'
+  | 'AUTH_FAILED'
+  | 'AUTH_OR_POLICY_DENIED'
   | 'VISION_UNSUPPORTED'
+  | 'INCORRECT_VISUAL_ANSWER'
+  | 'INVALID_UPSTREAM_RESPONSE'
 
 export interface OpenAIVisionQualificationAttempt {
   account_id: number
@@ -1169,6 +1173,7 @@ export interface OpenAIVisionQualificationStageReport {
 
 export interface OpenAIVisionQualificationReport {
   account_id: number
+  upstream_identity_fingerprint?: string
   state: OpenAIVisionQualificationState
   model: 'gpt-5.6-sol'
   endpoint: 'responses'
@@ -1177,6 +1182,7 @@ export interface OpenAIVisionQualificationReport {
   qualification_timestamp?: string
   promotion_eligible: boolean
   promoted_at?: string
+  requalification_required: boolean
   current_unavailable_until?: string
 }
 

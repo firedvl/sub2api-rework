@@ -22,6 +22,9 @@ func persistAccountCredentials(ctx context.Context, repo AccountRepository, acco
 			"account_id", account.ID, "parent_id", *account.ParentAccountID)
 		return nil
 	}
+	if err := validateVisionCapabilityAddition(account, account.Platform, account.Type, credentials, false); err != nil {
+		return err
+	}
 
 	account.Credentials = shallowCopyMap(credentials)
 	if updater, ok := any(repo).(accountCredentialsUpdater); ok {

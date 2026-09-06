@@ -1515,7 +1515,11 @@ export default {
           PRELIMINARY: 'Preliminary 2/2',
           QUALIFIED: 'Qualified 10/10',
           DEFERRED_CURRENTLY_UNAVAILABLE: 'Currently unavailable',
-          VISION_UNSUPPORTED: 'Failed / unsupported'
+          AUTH_FAILED: 'Authentication failed',
+          AUTH_OR_POLICY_DENIED: 'Authorization or policy denied',
+          VISION_UNSUPPORTED: 'Vision unsupported',
+          INCORRECT_VISUAL_ANSWER: 'Incorrect visual answer',
+          INVALID_UPSTREAM_RESPONSE: 'Invalid upstream response'
         }
       },
       selectTestModel: 'Select Test Model',

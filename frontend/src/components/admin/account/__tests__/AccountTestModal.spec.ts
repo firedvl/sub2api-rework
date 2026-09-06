@@ -308,4 +308,45 @@ describe('AccountTestModal', () => {
     await flushPromises()
     expect(promoteVisionQualification).toHaveBeenCalledWith(42)
   })
+
+  it('restarts preliminary qualification when retained evidence is stale', async () => {
+    getVisionQualification.mockResolvedValue({
+      account_id: 42,
+      state: 'UNQUALIFIED',
+      model: 'gpt-5.6-sol',
+      endpoint: 'responses',
+      preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+      reliability: { required: 10, completed: 10, passed: true, attempts: [] },
+      promotion_eligible: false,
+      requalification_required: true
+    })
+    runVisionQualification.mockResolvedValue({
+      account_id: 42,
+      state: 'PRELIMINARY',
+      model: 'gpt-5.6-sol',
+      endpoint: 'responses',
+      preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+      promotion_eligible: false,
+      requalification_required: false
+    })
+
+    const wrapper = mountModal({
+      id: 42,
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active',
+      parent_account_id: null
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('runPreliminary'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(runVisionQualification).toHaveBeenCalledWith(42, 'preliminary')
+  })
 })

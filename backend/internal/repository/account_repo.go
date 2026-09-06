@@ -627,6 +627,10 @@ func lockAndMergeAccountProbeExtra(
 			AND type = $3
 			AND credentials = $4::jsonb
 			AND proxy_id IS NOT DISTINCT FROM $5,
+			platform = $2
+			AND type = $3
+			AND NULLIF(BTRIM(credentials ->> 'chatgpt_account_id'), '') IS NOT DISTINCT FROM NULLIF(BTRIM($4::jsonb ->> 'chatgpt_account_id'), '')
+			AND NULLIF(BTRIM(credentials ->> 'chatgpt_user_id'), '') IS NOT DISTINCT FROM NULLIF(BTRIM($4::jsonb ->> 'chatgpt_user_id'), ''),
 			COALESCE(
 				platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 				AND $2 IN (`+ollamaCloudUsagePlatformsSQL+`)
@@ -661,6 +665,7 @@ func lockAndMergeAccountProbeExtra(
 
 	var (
 		identityUnchanged            bool
+		promotionIdentityUnchanged   bool
 		ollamaGroupIdentityUnchanged bool
 		ollamaProxyIdentityUnchanged bool
 		currentEnabled               []byte
@@ -672,6 +677,7 @@ func lockAndMergeAccountProbeExtra(
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
+		&promotionIdentityUnchanged,
 		&ollamaGroupIdentityUnchanged,
 		&ollamaProxyIdentityUnchanged,
 		&currentEnabled,
@@ -685,6 +691,9 @@ func lockAndMergeAccountProbeExtra(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if service.IsOpenAIVisionQualificationPromotion(ctx) && !promotionIdentityUnchanged {
+		return nil, service.ErrVisionQualificationPromotion
 	}
 
 	extra := copyJSONMap(normalizeJSONMap(account.Extra))

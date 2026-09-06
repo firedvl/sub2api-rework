@@ -512,7 +512,8 @@ const visionQualificationStatus = computed(() => {
 })
 const visionQualificationActionLabel = computed(() => {
   if (visionQualificationBusy.value) return t('admin.accounts.visionQualification.running')
-  return visionQualification.value?.preliminary?.passed
+  return visionQualification.value?.preliminary?.passed &&
+    !visionQualification.value.requalification_required
     ? t('admin.accounts.visionQualification.runReliability')
     : t('admin.accounts.visionQualification.runPreliminary')
 })
@@ -862,7 +863,11 @@ const runVisionQualification = async () => {
   visionQualificationBusy.value = true
   visionQualificationError.value = ''
   try {
-    const stage = visionQualification.value.preliminary?.passed ? 'reliability' : 'preliminary'
+    const stage =
+      visionQualification.value.preliminary?.passed &&
+      !visionQualification.value.requalification_required
+        ? 'reliability'
+        : 'preliminary'
     visionQualification.value = await adminAPI.accounts.runVisionQualification(props.account.id, stage)
   } catch (error: any) {
     visionQualificationError.value = error?.message || t('common.unknownError')
