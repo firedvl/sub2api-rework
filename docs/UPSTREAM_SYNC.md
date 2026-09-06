@@ -55,6 +55,57 @@ before adopting a new baseline.
 Do not mix an upstream sync with unrelated rework features. Do not force-push a
 shared branch to make the history look linear.
 
+## Feature-Parity Qualification
+
+Custom UI divergence must never silently cause loss of applicable upstream
+Sub2API functionality. Every upstream-version sync must inventory backend and
+API features, provider additions, authentication changes, account-management
+functionality, scheduler and routing behavior, configuration, migrations,
+user-facing behavior, and upstream frontend/UI capabilities.
+
+Classify every capability as one of:
+
+- `PRESERVED_DIRECTLY`
+- `ADAPTED_TO_REWORK_UI`
+- `NOT_APPLICABLE`
+- `INTENTIONALLY_EXCLUDED`, with an explicit rationale
+- `UNRESOLVED`, which blocks feature-parity qualification
+
+Functional parity is required; exact visual parity is not. When upstream ships
+backend and UI behavior, preserve the applicable backend behavior and expose it
+through the rework UI. Adapt useful UI-only capabilities to the existing design
+system rather than replacing the operator interface wholesale.
+
+Record the qualification in the tracking issue or pull request using this
+template:
+
+```text
+upstream_baseline=
+upstream_target=
+
+backend_features_total=
+backend_features_preserved=
+
+api_features_total=
+api_features_preserved=
+
+provider_features_total=
+provider_features_preserved=
+
+ui_capabilities_total=
+ui_capabilities_adapted=
+
+intentionally_excluded=
+unresolved=
+
+feature_parity=PASS|FAIL
+```
+
+The reviewer must compare the full upstream range and verify the classifications
+against the changed backend, API, provider, authentication, account, routing,
+configuration, migration, and frontend surfaces. Keep this a reviewed inventory;
+a diff parser cannot reliably infer feature semantics or applicability.
+
 ## v0.2.0 Change Audit
 
 The accepted range is `v0.1.184..v0.2.0` (86 commits, 182 changed files).
