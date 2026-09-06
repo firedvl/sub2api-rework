@@ -616,6 +616,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	needsResponses := nativeV2 || legacyCompact
 	visionInput := service.OpenAIRequestBodyMayContainImageInput(forwardBody)
 	requiredCapability := openAIResponsesRequiredCapabilityForRequestWithVision(imageIntent, visionInput, needsResponses, requestPlatform)
+	probeAccountID, visionProbe, probeHeaderErr := service.ParseOpenAIVisionProbeHeaders(c)
+	if probeHeaderErr != nil || (visionProbe && (requestPlatform != service.PlatformOpenAI || !visionInput)) {
+		reqLog.Warn("openai.vision_probe_rejected", zap.Error(probeHeaderErr))
+		h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
+		return
+	}
 
 	// 分组利润控制：请求级装配定价上下文——pricingAt 固定本请求的
 	// D 与计费高峰因子，选号、槽位终检与全部 failover 重入共用同一门与阈值。
@@ -623,6 +629,19 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(pricingCtx)
+	var visionProbeSelection *service.AccountSelectionResult
+	var visionProbeDecision service.OpenAIAccountScheduleDecision
+	if visionProbe {
+		var err error
+		visionProbeSelection, visionProbeDecision, err = h.gatewayService.ClaimOpenAIVisionProbeSelection(
+			c.Request.Context(), apiKey.GroupID, probeAccountID, reqModel, forwardBody,
+		)
+		if err != nil {
+			reqLog.Warn("openai.vision_probe_candidate_unavailable", zap.Int64("account_id", probeAccountID), zap.Error(err))
+			h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
+			return
+		}
+	}
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -633,20 +652,28 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
-			apiKey.GroupID,
-			previousResponseID,
-			sessionHash,
-			reqModel,
-			failedAccountIDs,
-			service.OpenAIUpstreamTransportAny,
-			requiredCapability,
-			requireCompact,
-			false,
-			!imageIntent,
-			requestPlatform,
-		)
+		var selection *service.AccountSelectionResult
+		var scheduleDecision service.OpenAIAccountScheduleDecision
+		var err error
+		if visionProbe {
+			selection, scheduleDecision = visionProbeSelection, visionProbeDecision
+			visionProbeSelection = nil
+		} else {
+			selection, scheduleDecision, err = h.gatewayService.SelectAccountWithSchedulerForCapability(
+				c.Request.Context(),
+				apiKey.GroupID,
+				previousResponseID,
+				sessionHash,
+				reqModel,
+				failedAccountIDs,
+				service.OpenAIUpstreamTransportAny,
+				requiredCapability,
+				requireCompact,
+				false,
+				!imageIntent,
+				requestPlatform,
+			)
+		}
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai.account_select_aborted_client_disconnected", zap.Error(err))
@@ -733,7 +760,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountSessionHash := sessionHash
+		if visionProbe {
+			accountSessionHash = ""
+		}
+		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, accountSessionHash, selection, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
 			// 否决次数达上限则直接终止，避免排队抢槽后才终检的延迟放大。
@@ -827,6 +858,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if visionProbe {
+				reqLog.Warn("openai.vision_probe_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),

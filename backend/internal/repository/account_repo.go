@@ -863,6 +863,57 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	return nil
 }
 
+// ConsumeOpenAIVisionProbeCandidate removes one probe-only claim before the
+// request is forwarded. Normal schedulers never read this credential field.
+func (r *accountRepository) ConsumeOpenAIVisionProbeCandidate(ctx context.Context, accountID int64, groupID *int64) (bool, error) {
+	if r == nil || r.sql == nil || accountID <= 0 {
+		return false, nil
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		UPDATE accounts
+		SET credentials = CASE
+				WHEN (credentials ->> $3)::int = 1
+					THEN COALESCE(credentials, '{}'::jsonb) - $3
+				ELSE jsonb_set(
+					COALESCE(credentials, '{}'::jsonb),
+					ARRAY[$3],
+					to_jsonb((credentials ->> $3)::int - 1),
+					TRUE
+				)
+			END,
+			updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND platform = 'openai'
+			AND type = 'oauth'
+			AND status = 'active'
+			AND schedulable = TRUE
+			AND jsonb_typeof(credentials -> $3) = 'number'
+			AND (credentials ->> $3)::int BETWEEN 1 AND 10
+			AND (
+				($2::bigint IS NULL AND NOT EXISTS (
+					SELECT 1 FROM account_groups ag WHERE ag.account_id = accounts.id
+				))
+				OR ($2::bigint IS NOT NULL AND EXISTS (
+					SELECT 1 FROM account_groups ag WHERE ag.account_id = accounts.id AND ag.group_id = $2
+				))
+			)
+		RETURNING id
+	`, accountID, groupID, service.OpenAIVisionProbeCandidateCredentialKey)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return false, rows.Err()
+	}
+	var claimedID int64
+	if err := rows.Scan(&claimedID); err != nil {
+		return false, err
+	}
+	return claimedID == accountID, rows.Err()
+}
+
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	groupIDs, err := r.loadAccountGroupIDs(ctx, id)
 	if err != nil {

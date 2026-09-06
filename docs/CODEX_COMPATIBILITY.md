@@ -16,6 +16,22 @@ selected provider transport.
 | Native hosted web search plus custom functions through Antigravity | Known limitation | The observed `v1internal` transport rejects `googleSearch` with `functionDeclarations` in one request |
 | Standalone `web.run` search | Experimental | Matches the Codex `rust-v0.149.0` alpha-search contract; provider qualification remains transport-specific |
 
+## Hosted Vision Qualification
+
+Production Responses requests containing image input require the selected
+OpenAI OAuth account to declare `vision_input`. The gateway fails closed with
+`HOSTED_VISION_UNAVAILABLE` when no such account is available; it does not fall
+back to a text-only account.
+
+An operator may temporarily set `vision_probe_candidate` to `2` or `10` on one
+healthy OpenAI OAuth account. That counter is usable only when the request pins
+the same account with the `deterministic-pixel-canary-v1` probe contract and
+contains exactly one allowlisted deterministic PNG canary for `gpt-5.6-sol`.
+Each accepted call atomically consumes one count. Probe candidates never enter
+normal scheduling and are not production-capable. Only a retained 10/10 gate
+may justify separately adding `vision_input`; historical successes are not a
+promotion signal.
+
 ## Responses Client-Tool Bug
 
 The generic Responses-to-Anthropic path lowers Codex client tools before

@@ -9,7 +9,7 @@ protocol translation, and usage accounting.
 This repository is not a claim of compatibility with every model or provider.
 Provider behavior can differ by account type and upstream transport. See
 [Codex compatibility](docs/CODEX_COMPATIBILITY.md) for tested boundaries and
-known limitations.
+known limitations, including the fail-closed hosted-vision qualification path.
 
 ## Status
 

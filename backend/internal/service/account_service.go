@@ -47,6 +47,12 @@ type OAuthRefreshCandidatePager interface {
 	ListOAuthRefreshCandidatePage(ctx context.Context, options OAuthRefreshPageOptions) (*OAuthRefreshCandidatePage, error)
 }
 
+// OpenAIVisionProbeRepository atomically consumes one probe-only account claim.
+// The marker never participates in normal account scheduling.
+type OpenAIVisionProbeRepository interface {
+	ConsumeOpenAIVisionProbeCandidate(ctx context.Context, accountID int64, groupID *int64) (bool, error)
+}
+
 type AccountRepository interface {
 	Create(ctx context.Context, account *Account) error
 	GetByID(ctx context.Context, id int64) (*Account, error)
