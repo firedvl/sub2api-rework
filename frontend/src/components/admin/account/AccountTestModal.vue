@@ -41,6 +41,77 @@
         </span>
       </div>
 
+      <div
+        v-if="visionQualificationEligible"
+        class="space-y-3 border-y border-gray-200 py-3 dark:border-dark-500"
+        data-testid="vision-qualification"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+              {{ t('admin.accounts.visionQualification.title') }}
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">gpt-5.6-sol · Responses</div>
+          </div>
+          <span
+            class="text-xs font-semibold text-gray-700 dark:text-gray-200"
+            data-testid="vision-qualification-status"
+          >
+            {{ visionQualificationStatus }}
+          </span>
+        </div>
+        <div
+          v-if="visionQualification"
+          class="flex gap-4 text-xs text-gray-500 dark:text-gray-400"
+        >
+          <span>{{
+            t('admin.accounts.visionQualification.preliminaryProgress', {
+              completed: visionQualification.preliminary?.completed || 0
+            })
+          }}</span>
+          <span>{{
+            t('admin.accounts.visionQualification.reliabilityProgress', {
+              completed: visionQualification.reliability?.completed || 0
+            })
+          }}</span>
+        </div>
+        <p
+          v-if="visionQualificationError"
+          class="text-xs text-red-600 dark:text-red-400"
+          role="alert"
+        >
+          {{ visionQualificationError }}
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="visionQualificationBusy || !visionQualification"
+            @click="runVisionQualification"
+          >
+            <Icon
+              v-if="visionQualificationBusy"
+              name="refresh"
+              size="sm"
+              class="animate-spin"
+              :stroke-width="2"
+            />
+            <Icon v-else name="eye" size="sm" :stroke-width="2" />
+            {{ visionQualificationActionLabel }}
+          </button>
+          <button
+            v-if="visionQualification?.promotion_eligible"
+            type="button"
+            class="btn btn-primary btn-sm"
+            :disabled="visionQualificationBusy"
+            @click="promoteVisionQualification"
+          >
+            <Icon name="check" size="sm" :stroke-width="2" />
+            {{ t('admin.accounts.visionQualification.promote') }}
+          </button>
+        </div>
+      </div>
+
       <!-- Grok: mode first, then optional model / mode params -->
       <div v-if="isGrokAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -375,7 +446,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { buildApiUrl } from '@/api/client'
 import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
-import type { Account, ClaudeModel } from '@/types'
+import type { Account, ClaudeModel, OpenAIVisionQualificationReport } from '@/types'
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
@@ -408,6 +479,9 @@ const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const testPrompt = ref('')
 const loadingModels = ref(false)
+const visionQualification = ref<OpenAIVisionQualificationReport | null>(null)
+const visionQualificationBusy = ref(false)
+const visionQualificationError = ref('')
 let abortController: AbortController | null = null
 const generatedImages = ref<PreviewMedia[]>([])
 const generatedAudios = ref<PreviewMedia[]>([])
@@ -423,7 +497,25 @@ const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+const visionQualificationEligible = computed(
+  () =>
+    props.account?.platform === 'openai' &&
+    props.account.type === 'oauth' &&
+    props.account.status === 'active' &&
+    props.account.schedulable !== false &&
+    !props.account.parent_account_id
+)
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
+const visionQualificationStatus = computed(() => {
+  const state = visionQualification.value?.state || 'UNQUALIFIED'
+  return t(`admin.accounts.visionQualification.states.${state}`)
+})
+const visionQualificationActionLabel = computed(() => {
+  if (visionQualificationBusy.value) return t('admin.accounts.visionQualification.running')
+  return visionQualification.value?.preliminary?.passed
+    ? t('admin.accounts.visionQualification.runReliability')
+    : t('admin.accounts.visionQualification.runPreliminary')
+})
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
@@ -741,16 +833,56 @@ watch(
       testMode.value = 'default'
       grokTestMode.value = 'text'
       resetState()
-      await loadAvailableModels()
+      await Promise.all([loadAvailableModels(), loadVisionQualification()])
       if (isGrokAccount.value) {
         pickDefaultModelForMode()
         applyDefaultPromptForMode()
       }
     } else {
       abortStream()
+      visionQualification.value = null
+      visionQualificationError.value = ''
     }
   }
 )
+
+const loadVisionQualification = async () => {
+  visionQualification.value = null
+  visionQualificationError.value = ''
+  if (!props.account || !visionQualificationEligible.value) return
+  try {
+    visionQualification.value = await adminAPI.accounts.getVisionQualification(props.account.id)
+  } catch (error: any) {
+    visionQualificationError.value = error?.message || t('common.unknownError')
+  }
+}
+
+const runVisionQualification = async () => {
+  if (!props.account || !visionQualification.value || visionQualificationBusy.value) return
+  visionQualificationBusy.value = true
+  visionQualificationError.value = ''
+  try {
+    const stage = visionQualification.value.preliminary?.passed ? 'reliability' : 'preliminary'
+    visionQualification.value = await adminAPI.accounts.runVisionQualification(props.account.id, stage)
+  } catch (error: any) {
+    visionQualificationError.value = error?.message || t('common.unknownError')
+  } finally {
+    visionQualificationBusy.value = false
+  }
+}
+
+const promoteVisionQualification = async () => {
+  if (!props.account || !visionQualification.value?.promotion_eligible || visionQualificationBusy.value) return
+  visionQualificationBusy.value = true
+  visionQualificationError.value = ''
+  try {
+    visionQualification.value = await adminAPI.accounts.promoteVisionQualification(props.account.id)
+  } catch (error: any) {
+    visionQualificationError.value = error?.message || t('common.unknownError')
+  } finally {
+    visionQualificationBusy.value = false
+  }
+}
 
 watch(grokTestMode, () => {
   if (!isGrokAccount.value) return

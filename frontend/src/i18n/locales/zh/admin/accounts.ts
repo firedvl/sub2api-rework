@@ -1559,6 +1559,22 @@ export default {
       outputCopied: '输出已复制',
       startingTestForAccount: '开始测试账号：{name}',
       testAccountTypeLabel: '账号类型：{type}',
+      visionQualification: {
+        title: '视觉输入资格验证',
+        preliminaryProgress: '初步验证 {completed}/2',
+        reliabilityProgress: '可靠性验证 {completed}/10',
+        runPreliminary: '运行初步验证',
+        runReliability: '运行可靠性验证',
+        running: '运行中...',
+        promote: '添加视觉输入能力',
+        states: {
+          UNQUALIFIED: '未验证',
+          PRELIMINARY: '初步验证 2/2',
+          QUALIFIED: '已验证 10/10',
+          DEFERRED_CURRENTLY_UNAVAILABLE: '当前不可用',
+          VISION_UNSUPPORTED: '失败 / 不支持'
+        }
+      },
       selectTestModel: '选择测试模型',
       testModel: '测试模型',
       testPrompt: '提示词："hi"',

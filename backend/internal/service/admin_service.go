@@ -429,6 +429,8 @@ type UpdateAccountInput struct {
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+	// VisionQualificationPromotion is set only by the retained-gate promotion path.
+	VisionQualificationPromotion bool
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

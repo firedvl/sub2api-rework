@@ -1139,6 +1139,47 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export type OpenAIVisionQualificationState =
+  | 'UNQUALIFIED'
+  | 'PRELIMINARY'
+  | 'QUALIFIED'
+  | 'DEFERRED_CURRENTLY_UNAVAILABLE'
+  | 'VISION_UNSUPPORTED'
+
+export interface OpenAIVisionQualificationAttempt {
+  account_id: number
+  attempt_id: string
+  timestamp: string
+  model: string
+  endpoint: 'responses'
+  upstream_status: number
+  visual_answer?: string
+  expected_answer: string
+  correct: boolean
+  latency_ms: number
+  failure_classification?: string
+}
+
+export interface OpenAIVisionQualificationStageReport {
+  required: number
+  completed: number
+  passed: boolean
+  attempts: OpenAIVisionQualificationAttempt[]
+}
+
+export interface OpenAIVisionQualificationReport {
+  account_id: number
+  state: OpenAIVisionQualificationState
+  model: 'gpt-5.6-sol'
+  endpoint: 'responses'
+  preliminary?: OpenAIVisionQualificationStageReport
+  reliability?: OpenAIVisionQualificationStageReport
+  qualification_timestamp?: string
+  promotion_eligible: boolean
+  promoted_at?: string
+  current_unavailable_until?: string
+}
+
 export interface Account {
   id: number
   name: string

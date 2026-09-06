@@ -1502,6 +1502,22 @@ export default {
       outputCopied: 'Output copied',
       startingTestForAccount: 'Starting test for account: {name}',
       testAccountTypeLabel: 'Account type: {type}',
+      visionQualification: {
+        title: 'Vision input qualification',
+        preliminaryProgress: 'Preliminary {completed}/2',
+        reliabilityProgress: 'Reliability {completed}/10',
+        runPreliminary: 'Run preliminary',
+        runReliability: 'Run reliability',
+        running: 'Running...',
+        promote: 'Add vision input',
+        states: {
+          UNQUALIFIED: 'Unqualified',
+          PRELIMINARY: 'Preliminary 2/2',
+          QUALIFIED: 'Qualified 10/10',
+          DEFERRED_CURRENTLY_UNAVAILABLE: 'Currently unavailable',
+          VISION_UNSUPPORTED: 'Failed / unsupported'
+        }
+      },
       selectTestModel: 'Select Test Model',
       testModel: 'Test model',
       testPrompt: 'Prompt: "hi"',

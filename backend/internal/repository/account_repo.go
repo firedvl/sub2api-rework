@@ -66,6 +66,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":                    {},
 	service.OpenAICodexManifestSnapshotExtraKey: {},
+	service.OpenAIVisionQualificationExtraKey:   {},
 	"grok_billing_snapshot":                     {},
 	"session_window_utilization":                {},
 }
@@ -2859,6 +2860,43 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		if dbent.TxFromContext(ctx) == nil {
 			r.syncSchedulerAccountSnapshot(ctx, id)
 		}
+	}
+	return nil
+}
+
+// SaveOpenAIVisionQualificationReport stores operator evidence without
+// publishing a scheduler event; qualification reports never affect routing.
+func (r *accountRepository) SaveOpenAIVisionQualificationReport(
+	ctx context.Context,
+	id int64,
+	report *service.OpenAIVisionQualificationReport,
+) error {
+	if report == nil {
+		return service.ErrAccountNilInput
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = jsonb_set(
+			COALESCE(extra, '{}'::jsonb),
+			ARRAY[$2],
+			$3::jsonb,
+			TRUE
+		), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id, service.OpenAIVisionQualificationExtraKey, string(payload))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
 	}
 	return nil
 }

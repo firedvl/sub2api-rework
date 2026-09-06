@@ -2,15 +2,27 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountTestModal from '../AccountTestModal.vue'
 
-const { getAvailableModels, copyToClipboard } = vi.hoisted(() => ({
+const {
+  getAvailableModels,
+  getVisionQualification,
+  runVisionQualification,
+  promoteVisionQualification,
+  copyToClipboard
+} = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
+  getVisionQualification: vi.fn(),
+  runVisionQualification: vi.fn(),
+  promoteVisionQualification: vi.fn(),
   copyToClipboard: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      getAvailableModels
+      getAvailableModels,
+      getVisionQualification,
+      runVisionQualification,
+      promoteVisionQualification
     }
   }
 }))
@@ -97,6 +109,16 @@ describe('AccountTestModal', () => {
       { id: 'gemini-3.1-flash-image', display_name: 'Gemini 3.1 Flash Image' }
     ])
     copyToClipboard.mockReset()
+    getVisionQualification.mockReset()
+    runVisionQualification.mockReset()
+    promoteVisionQualification.mockReset()
+    getVisionQualification.mockResolvedValue({
+      account_id: 42,
+      state: 'UNQUALIFIED',
+      model: 'gpt-5.6-sol',
+      endpoint: 'responses',
+      promotion_eligible: false
+    })
     Object.defineProperty(globalThis, 'localStorage', {
       value: {
         getItem: vi.fn((key: string) => (key === 'auth_token' ? 'test-token' : null)),
@@ -219,5 +241,71 @@ describe('AccountTestModal', () => {
       prompt: '',
       mode: 'compact'
     })
+  })
+
+  it('requires separate preliminary, reliability, and promotion actions', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol' }])
+    runVisionQualification
+      .mockResolvedValueOnce({
+        account_id: 42,
+        state: 'PRELIMINARY',
+        model: 'gpt-5.6-sol',
+        endpoint: 'responses',
+        preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+        promotion_eligible: false
+      })
+      .mockResolvedValueOnce({
+        account_id: 42,
+        state: 'QUALIFIED',
+        model: 'gpt-5.6-sol',
+        endpoint: 'responses',
+        preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+        reliability: { required: 10, completed: 10, passed: true, attempts: [] },
+        promotion_eligible: true
+      })
+    promoteVisionQualification.mockResolvedValue({
+      account_id: 42,
+      state: 'QUALIFIED',
+      model: 'gpt-5.6-sol',
+      endpoint: 'responses',
+      preliminary: { required: 2, completed: 2, passed: true, attempts: [] },
+      reliability: { required: 10, completed: 10, passed: true, attempts: [] },
+      promotion_eligible: false,
+      promoted_at: '2026-09-06T12:00:00Z'
+    })
+
+    const wrapper = mountModal({
+      id: 42,
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active',
+      parent_account_id: null
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="vision-qualification-status"]').text()).toContain('UNQUALIFIED')
+    const qualificationButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('runPreliminary'))!
+    await qualificationButton.trigger('click')
+    await flushPromises()
+    expect(runVisionQualification).toHaveBeenNthCalledWith(1, 42, 'preliminary')
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('runReliability'))!
+      .trigger('click')
+    await flushPromises()
+    expect(runVisionQualification).toHaveBeenNthCalledWith(2, 42, 'reliability')
+    expect(promoteVisionQualification).not.toHaveBeenCalled()
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('promote'))!
+      .trigger('click')
+    await flushPromises()
+    expect(promoteVisionQualification).toHaveBeenCalledWith(42)
   })
 })
