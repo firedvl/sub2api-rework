@@ -12,5 +12,6 @@ describe('operator navigation', () => {
       'settings',
     ])
     expect(getOperatorArea('/admin/stats')?.primaryPath).toBe('/admin/stats')
+    expect(getOperatorArea('/admin/model-operations')?.id).toBe('models-routing')
   })
 })

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -17,7 +18,8 @@ import (
 type gatewayModelsAccountRepoStub struct {
 	service.AccountRepository
 
-	byGroup map[int64][]service.Account
+	byGroup        map[int64][]service.Account
+	catalogByGroup map[int64][]service.Account
 }
 
 type countingGatewayModelsAccountRepoStub struct {
@@ -85,6 +87,9 @@ func (s *gatewayModelsAccountRepoStub) ListByGroup(ctx context.Context, groupID 
 func (s *gatewayModelsAccountRepoStub) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, _ []string, _ bool) ([]service.Account, error) {
 	if groupID == nil {
 		return nil, nil
+	}
+	if s.catalogByGroup != nil {
+		return append([]service.Account(nil), s.catalogByGroup[*groupID]...), nil
 	}
 	return s.ListSchedulableByGroupID(ctx, *groupID)
 }
@@ -236,6 +241,62 @@ func TestGatewayCodexModels_CompositeUsesCompleteEffectiveModelList(t *testing.T
 	var got codexModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, []string{"gpt-5.5", "grok-4.6"}, codexModelSlugsForTest(got.Models))
+}
+
+func TestGatewayCodexModels_CompositeCatalogIgnoresTransientSchedulingAndUnbackedProviders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 123
+	repo := &gatewayModelsAccountRepoStub{
+		byGroup: map[int64][]service.Account{groupID: nil},
+		catalogByGroup: map[int64][]service.Account{groupID: {{
+			ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true,
+			Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra"}},
+		}}},
+	}
+	h := newGatewayModelsHandlerForTest(repo)
+	group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
+
+	require.Equal(t, []string{"gpt-6-astra"}, h.codexModelIDsForGroup(context.Background(), group, ""))
+	require.NotContains(t, h.codexModelIDsForGroup(context.Background(), group, ""), "grok-4.6")
+	require.NotContains(t, h.codexModelIDsForGroup(context.Background(), group, ""), "claude-opus-4-6")
+}
+
+func TestGatewayCodexModels_CompositeWithoutProviderRoutesIsEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 124
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{
+		byGroup:        map[int64][]service.Account{groupID: nil},
+		catalogByGroup: map[int64][]service.Account{groupID: nil},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: groupID, Platform: service.PlatformComposite}})
+	h.CodexModels(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got codexModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Empty(t, got.Models)
+}
+
+func TestGatewayCodexModels_CompositePreservesAntigravityDiscovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 125
+	account := service.Account{ID: 1, Platform: service.PlatformAntigravity, Status: service.StatusActive, Schedulable: true}
+	account.SetUpstreamModelInventorySnapshot(service.UpstreamModelInventorySnapshot{
+		Source: "upstream", SyncedAt: time.Now().UTC().Format(time.RFC3339), Models: []string{"gemini-3.1-pro-high", "claude-sonnet-4-6"},
+	})
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{
+		catalogByGroup: map[int64][]service.Account{groupID: {account}},
+	})
+
+	models := h.codexModelIDsForGroup(context.Background(), &service.Group{ID: groupID, Platform: service.PlatformComposite}, "")
+	require.Contains(t, models, "gemini-3.1-pro-high")
+	require.Contains(t, models, "claude-sonnet-4-6")
+	require.NotContains(t, models, "grok-4.6")
 }
 
 func TestGatewayCodexModels_CompositeForcedNonOpenAISkipsDynamicOpenAIManifest(t *testing.T) {

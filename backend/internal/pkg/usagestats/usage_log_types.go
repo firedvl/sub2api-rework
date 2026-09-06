@@ -94,16 +94,22 @@ type TrendDataPoint struct {
 
 // ModelStat represents usage statistics for a single model
 type ModelStat struct {
-	Model               string  `json:"model"`
-	Requests            int64   `json:"requests"`
-	InputTokens         int64   `json:"input_tokens"`
-	OutputTokens        int64   `json:"output_tokens"`
-	CacheCreationTokens int64   `json:"cache_creation_tokens"`
-	CacheReadTokens     int64   `json:"cache_read_tokens"`
-	TotalTokens         int64   `json:"total_tokens"`
-	Cost                float64 `json:"cost"`         // 标准计费
-	ActualCost          float64 `json:"actual_cost"`  // 实际扣除
-	AccountCost         float64 `json:"account_cost"` // 账号成本
+	Model                 string   `json:"model"`
+	Requests              int64    `json:"requests"`
+	InputTokens           int64    `json:"input_tokens"`
+	OutputTokens          int64    `json:"output_tokens"`
+	CacheCreationTokens   int64    `json:"cache_creation_tokens"`
+	CacheReadTokens       int64    `json:"cache_read_tokens"`
+	TotalTokens           int64    `json:"total_tokens"`
+	Cost                  float64  `json:"cost"`         // 标准计费
+	ActualCost            float64  `json:"actual_cost"`  // 实际扣除
+	AccountCost           float64  `json:"account_cost"` // 账号成本
+	LatencyP50Ms          *int64   `json:"latency_p50_ms"`
+	LatencyP95Ms          *int64   `json:"latency_p95_ms"`
+	TTFTP50Ms             *int64   `json:"ttft_p50_ms"`
+	TTFTP95Ms             *int64   `json:"ttft_p95_ms"`
+	OutputTokensPerSecond *float64 `json:"output_tokens_per_second"`
+	TimingSampleCount     int64    `json:"timing_sample_count"`
 }
 
 // EndpointStat represents usage statistics for a single request endpoint.

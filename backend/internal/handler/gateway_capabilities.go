@@ -49,9 +49,9 @@ func (h *GatewayHandler) Capabilities(c *gin.Context) {
 
 	var models []service.GatewayCapabilityModel
 	if h != nil && h.gatewayService != nil {
-		models = h.gatewayService.BuildGatewayCapabilityModels(c.Request.Context(), apiKey.Group, gatewayCapabilityFallbacks())
+		models = h.gatewayService.BuildGatewayCapabilityModels(c.Request.Context(), apiKey.Group, service.DefaultGatewayCapabilityFallbacks())
 	} else {
-		models = (&service.GatewayService{}).BuildGatewayCapabilityModels(c.Request.Context(), apiKey.Group, gatewayCapabilityFallbacks())
+		models = (&service.GatewayService{}).BuildGatewayCapabilityModels(c.Request.Context(), apiKey.Group, service.DefaultGatewayCapabilityFallbacks())
 	}
 	for i := range models {
 		models[i].DisplayName = gatewayCapabilityDisplayName(models[i].ID)
@@ -77,17 +77,6 @@ func (h *GatewayHandler) Capabilities(c *gin.Context) {
 		},
 		Models: models,
 	})
-}
-
-func gatewayCapabilityFallbacks() map[string][]string {
-	return map[string][]string{
-		service.PlatformAnthropic:   defaultModelIDsForPlatform(service.PlatformAnthropic),
-		service.PlatformGemini:      defaultModelIDsForPlatform(service.PlatformGemini),
-		service.PlatformOpenAI:      defaultModelIDsForPlatform(service.PlatformOpenAI),
-		service.PlatformAntigravity: defaultModelIDsForPlatform(service.PlatformAntigravity),
-		service.PlatformGrok:        defaultModelIDsForPlatform(service.PlatformGrok),
-		service.PlatformComposite:   defaultModelIDsForPlatform(service.PlatformComposite),
-	}
 }
 
 func gatewayCapabilityDisplayName(modelID string) string {
@@ -140,3 +129,7 @@ func gatewayCapabilityMetadata(modelID string) *service.GatewayModelCapabilities
 }
 
 func gatewayCapabilityBool(value bool) *bool { return &value }
+
+func gatewayCapabilityFallbacks() map[string][]string {
+	return service.DefaultGatewayCapabilityFallbacks()
+}

@@ -1421,6 +1421,31 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	return cloneStringSlice(models)
 }
 
+// GetCatalogModels returns model IDs and provider presence from persistently
+// enabled accounts. Transient rate limits and cooldowns affect availability,
+// not catalog membership.
+func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, platform string) ([]string, bool) {
+	if s == nil || s.accountRepo == nil {
+		return nil, false
+	}
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return nil, false
+	}
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{platform}, false)
+	if err != nil {
+		return nil, false
+	}
+	backed := false
+	for i := range accounts {
+		if accounts[i].Platform == platform {
+			backed = true
+			break
+		}
+	}
+	return availableModelIDsFromAccounts(accounts, platform), backed
+}
+
 func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
 	modelSet := make(map[string]struct{})
 	hasAnyMapping := false
@@ -1485,7 +1510,12 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		}
 	}
 
-	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, groupID)
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(
+		ctx,
+		&groupID,
+		[]string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek},
+		false,
+	)
 	if err != nil {
 		return CompositeModelOwnership{}, err
 	}

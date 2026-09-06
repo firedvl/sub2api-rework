@@ -16,6 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var modelStatColumns = []string{
+	"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens",
+	"cache_read_tokens", "total_tokens", "cost", "actual_cost", "account_cost",
+	"latency_p50_ms", "latency_p95_ms", "ttft_p50_ms", "ttft_p95_ms",
+	"output_tokens_per_second", "timing_sample_count",
+}
+
 func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
@@ -542,10 +549,7 @@ func TestUsageLogRepositoryUsageAggregatesFilterNativeCompactionV2(t *testing.T)
 		repo := &usageLogRepository{sql: db}
 		mock.ExpectQuery("(?s)FROM usage_logs.*AND native_compaction_v2 = \\$3").
 			WithArgs(start, end, true).
-			WillReturnRows(sqlmock.NewRows([]string{
-				"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens",
-				"cache_read_tokens", "total_tokens", "cost", "actual_cost", "account_cost",
-			}))
+			WillReturnRows(sqlmock.NewRows(modelStatColumns))
 
 		_, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceRequested)
 		require.NoError(t, err)
@@ -582,7 +586,7 @@ func TestUsageLogRepositoryGetModelStatsWithFiltersRequestTypePriority(t *testin
 
 	mock.ExpectQuery("AND \\(request_type = \\$3 OR \\(request_type = 0 AND openai_ws_mode = TRUE\\)\\)").
 		WithArgs(start, end, requestType).
-		WillReturnRows(sqlmock.NewRows([]string{"model", "requests", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "total_tokens", "cost", "actual_cost", "account_cost"}))
+		WillReturnRows(sqlmock.NewRows(modelStatColumns))
 
 	stats, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, &requestType, &stream, nil)
 	require.NoError(t, err)
@@ -599,11 +603,8 @@ func TestUsageLogRepositoryGetUserModelStatsUsesRequestedModel(t *testing.T) {
 
 	mock.ExpectQuery("(?s)SELECT\\s+COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) as model,.*WHERE created_at >= \\$1 AND created_at < \\$2\\s+AND user_id = \\$3.*GROUP BY COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) ORDER BY total_tokens DESC").
 		WithArgs(start, end, int64(7)).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"model", "requests", "input_tokens", "output_tokens",
-			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
-			"cost", "actual_cost", "account_cost",
-		}).AddRow("gpt-5.5", int64(2), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07))
+		WillReturnRows(sqlmock.NewRows(modelStatColumns).
+			AddRow("gpt-5.5", int64(2), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07, nil, nil, nil, nil, nil, int64(0)))
 
 	stats, err := repo.GetUserModelStats(context.Background(), 7, start, end)
 	require.NoError(t, err)
@@ -696,15 +697,11 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 
-	mock.ExpectQuery("FROM usage_logs").
+	mock.ExpectQuery("(?s)percentile_cont\\(0\\.50\\).*duration_ms > first_token_ms.*COUNT\\(\\*\\) FILTER \\(WHERE duration_ms > 0\\) as timing_sample_count.*FROM usage_logs").
 		WithArgs(start, end).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"model", "requests", "input_tokens", "output_tokens",
-			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
-			"cost", "actual_cost", "account_cost",
-		}).
-			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(308), 2.5, 2.0, 1.8).
-			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(150), 1.0, 0.8, 0.7))
+		WillReturnRows(sqlmock.NewRows(modelStatColumns).
+			AddRow("claude-opus-4-6", int64(10), int64(100), int64(200), int64(5), int64(3), int64(308), 2.5, 2.0, 1.8, int64(120), int64(300), int64(40), int64(100), 50.0, int64(10)).
+			AddRow("claude-sonnet-4-6", int64(5), int64(50), int64(100), int64(0), int64(0), int64(150), 1.0, 0.8, 0.7, nil, nil, nil, nil, nil, int64(2)))
 
 	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
 	require.NoError(t, err)
@@ -713,8 +710,17 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 	require.Equal(t, 2.5, results[0].Cost)
 	require.Equal(t, 2.0, results[0].ActualCost)
 	require.Equal(t, 1.8, results[0].AccountCost)
+	require.Equal(t, int64(120), *results[0].LatencyP50Ms)
+	require.Equal(t, int64(300), *results[0].LatencyP95Ms)
+	require.Equal(t, int64(40), *results[0].TTFTP50Ms)
+	require.Equal(t, int64(100), *results[0].TTFTP95Ms)
+	require.Equal(t, 50.0, *results[0].OutputTokensPerSecond)
+	require.Equal(t, int64(10), results[0].TimingSampleCount)
 	require.Equal(t, "claude-sonnet-4-6", results[1].Model)
 	require.Equal(t, 0.7, results[1].AccountCost)
+	require.Nil(t, results[1].LatencyP50Ms)
+	require.Nil(t, results[1].OutputTokensPerSecond)
+	require.Equal(t, int64(2), results[1].TimingSampleCount)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -728,11 +734,8 @@ func TestUsageLogRepositoryGetModelStatsWithUsageFiltersAppliesRequestedModelFil
 
 	mock.ExpectQuery("AND COALESCE\\(NULLIF\\(TRIM\\(requested_model\\), ''\\), model\\) = \\$3").
 		WithArgs(start, end, "gpt-5").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"model", "requests", "input_tokens", "output_tokens",
-			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
-			"cost", "actual_cost", "account_cost",
-		}).AddRow("gpt-5", int64(1), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07))
+		WillReturnRows(sqlmock.NewRows(modelStatColumns).
+			AddRow("gpt-5", int64(1), int64(10), int64(20), int64(0), int64(0), int64(30), 0.1, 0.08, 0.07, nil, nil, nil, nil, nil, int64(0)))
 
 	results, err := repo.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceRequested)
 	require.NoError(t, err)

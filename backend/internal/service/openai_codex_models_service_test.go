@@ -97,6 +97,13 @@ func (r *scopedCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Contex
 	return append([]Account(nil), r.groupAccounts[groupID]...), nil
 }
 
+func (r *scopedCodexModelsAccountRepo) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, _ []string, _ bool) ([]Account, error) {
+	if groupID == nil {
+		return nil, nil
+	}
+	return append([]Account(nil), r.groupAccounts[*groupID]...), nil
+}
+
 func (r *scopedCodexModelsAccountRepo) ListSchedulable(_ context.Context) ([]Account, error) {
 	r.globalCalls.Add(1)
 	return append([]Account(nil), r.globalAccounts...), nil
@@ -444,6 +451,32 @@ func TestCompositeDynamicCodexModelsSkipsUnschedulableMember(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, used)
 	require.Nil(t, manifest)
+}
+
+func TestOpenAIDynamicCodexModelsKeepsTransientlyRateLimitedAccountCatalog(t *testing.T) {
+	const groupID int64 = 815
+	account := Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "openai"},
+	}
+	repo := splitCodexModelsAccountRepo{
+		schedulable: map[int64][]Account{groupID: nil},
+		catalog:     map[int64][]Account{groupID: {account}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-future-codex-model"}]}`)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	manifest, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(
+		context.Background(), &Group{ID: groupID, Platform: PlatformOpenAI}, "0.153.0", "",
+	)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-6-astra", "gpt-future-codex-model"}, codexManifestModelSlugs(t, manifest.Body))
 }
 
 func TestFilterCodexModelIDsForGroupOmitsWildcardKeys(t *testing.T) {

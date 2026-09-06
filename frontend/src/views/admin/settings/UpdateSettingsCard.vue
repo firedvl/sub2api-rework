@@ -29,7 +29,7 @@
           <div>
             <p class="text-sm font-medium text-gray-900 dark:text-white">{{ stateLabel }}</p>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.updates.currentVersion', { version: status.current_version }) }}
+              {{ t('admin.settings.updates.runningGatewayValue', { version: status.current_version }) }}
             </p>
           </div>
           <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.updater', { state: updaterLabel }) }}</span>
@@ -40,8 +40,13 @@
         </p>
 
         <dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.upstreamBaseline') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.upstream_baseline }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.runningGateway') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.current_version }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.runningRevision') }}</dt><dd class="break-all font-mono text-xs font-medium text-gray-900 dark:text-white">{{ status.current_git_commit || t('common.unknown') }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.embeddedUpstream') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.upstream_baseline }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.embeddedUpstreamRevision') }}</dt><dd class="break-all font-mono text-xs font-medium text-gray-900 dark:text-white">{{ status.upstream_baseline_sha || t('common.unknown') }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.latestRework') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.latest_rework_version || status.current_version }}</dd></div>
           <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.latestUpstream') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.latest_upstream }}</dd></div>
+          <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.upstreamSyncStatus') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ upstreamSyncLabel }}</dd></div>
           <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.channel') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.update_channel }}</dd></div>
           <div><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.checkedAt') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ formatDate(status.checked_at) }}</dd></div>
           <div v-if="status.latest_compatible_rework"><dt class="text-gray-500 dark:text-gray-400">{{ t('admin.settings.updates.availableVersion') }}</dt><dd class="font-medium text-gray-900 dark:text-white">{{ status.latest_compatible_rework }}</dd></div>
@@ -114,6 +119,12 @@ let mounted = true
 
 const stateLabel = computed(() => status.value ? t(`admin.settings.updates.states.${status.value.state}`) : '')
 const updaterLabel = computed(() => status.value ? t(`admin.settings.updates.updaterStates.${status.value.updater.state}`) : '')
+const upstreamSyncLabel = computed(() => {
+  if (!status.value?.latest_upstream || !status.value.upstream_baseline) return t('common.unknown')
+  return t(status.value.latest_upstream === status.value.upstream_baseline
+    ? 'admin.settings.updates.upstreamSyncCurrent'
+    : 'admin.settings.updates.upstreamSyncAvailable')
+})
 const targetVersion = computed(() => status.value?.latest_compatible_rework || '')
 const rollbackVersion = computed(() => status.value?.updater.rollback_version || '')
 const canPrepare = computed(() => !!status.value?.installable && !!targetVersion.value && status.value.updater.healthy && !status.value.updater.busy)

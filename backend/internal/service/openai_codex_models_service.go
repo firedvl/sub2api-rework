@@ -213,7 +213,7 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 		(group.Platform != PlatformOpenAI && group.Platform != PlatformComposite) {
 		return nil, false, nil
 	}
-	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, group.ID)
+	_, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 	if err != nil {
 		return nil, true, err
 	}
@@ -434,7 +434,7 @@ func (s *OpenAIGatewayService) groupConfiguredCodexModelIDs(ctx context.Context,
 	if group == nil {
 		return nil, nil
 	}
-	accounts, err := s.accountRepo.ListSchedulableByGroupID(ctx, group.ID)
+	_, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -2062,6 +2062,34 @@ func codexModelsManifestBodyETag(body []byte) string {
 // catalog. It is based on the final JSON body after local filtering.
 func CodexModelsManifestETag(body []byte) string {
 	return codexModelsManifestBodyETag(body)
+}
+
+// CodexModelsManifestModelIDs returns the ordered public slugs from a Codex
+// manifest without exposing provider metadata to callers that only need the
+// effective picker inventory.
+func CodexModelsManifestModelIDs(body []byte) ([]string, error) {
+	var envelope struct {
+		Models []struct {
+			Slug string `json:"slug"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(envelope.Models))
+	seen := make(map[string]struct{}, len(envelope.Models))
+	for _, entry := range envelope.Models {
+		slug := strings.TrimSpace(entry.Slug)
+		if slug == "" {
+			continue
+		}
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		models = append(models, slug)
+	}
+	return models, nil
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{

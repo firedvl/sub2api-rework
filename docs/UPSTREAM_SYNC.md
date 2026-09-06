@@ -122,6 +122,17 @@ The accepted range is `v0.1.184..v0.2.0` (86 commits, 182 changed files).
 | Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and WebSocket-disabled production policy. |
 | Verification | Release qualification covers backend unit and integration suites, frontend Vitest/build/lint/Playwright, PostgreSQL fresh and `235 -> 239` migration rehearsals, static analysis, dependency audit, and secret scan. |
 
+## v0.2.1 Qualification Notes (Not Synced)
+
+The latest stable upstream release is `v0.2.1`, published September 5, 2026.
+This PR does not sync it. A later dedicated qualification should review:
+
+- OpenAI GPT-6 Astra support, capability persistence, and capability retention when live model listing is unavailable;
+- pinned-account Codex manifests and their interaction with Rework's provider-backed Composite publication rules;
+- scheduler fixes for mapped-model account selection and per-account channel model restrictions;
+- the new Codex Ultrafast tier and related request metadata;
+- the absence of upstream Auto Warm-up changes in `v0.2.0..v0.2.1`, leaving Rework's account-pinned warm-up repair independently owned.
+
 ## v0.1.184 Change Audit
 
 The accepted range is `v0.1.183..v0.1.184` (170 commits, 342 changed files).
