@@ -614,7 +614,7 @@ func assertStagingApplicationAccess(t *testing.T, docker string, compose []strin
 		t.Fatalf("application cannot reach updater status: %v: %s", err, output)
 	}
 	deniedArgs := append(append([]string(nil), compose...),
-		"exec", "-T", "-u", "65534:65534", "sub2api",
+		"exec", "-T", "-u", "root", "sub2api", "su-exec", "65534:65534",
 		"curl", "--silent", "--show-error", "--fail", "--unix-socket", policy.SocketPath,
 		"http://updater/v1/status",
 	)
