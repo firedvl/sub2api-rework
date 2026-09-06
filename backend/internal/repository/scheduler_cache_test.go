@@ -10,14 +10,22 @@ import (
 
 func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	filtered := filterSchedulerCredentials(map[string]any{
-		"plan_type":     "plus",
-		"access_token":  "secret-access-token",
-		"refresh_token": "secret-refresh-token",
+		"plan_type":           "plus",
+		"openai_capabilities": []any{"chat_completions", "vision_input"},
+		"access_token":        "secret-access-token",
+		"refresh_token":       "secret-refresh-token",
+		"session_token":       "secret-session-token",
+		"api_secret":          "secret-api-secret",
+		"authorization":       "Bearer secret-authorization",
 	})
 
 	require.Equal(t, "plus", filtered["plan_type"])
+	require.Equal(t, []any{"chat_completions", "vision_input"}, filtered["openai_capabilities"])
 	require.NotContains(t, filtered, "access_token")
 	require.NotContains(t, filtered, "refresh_token")
+	require.NotContains(t, filtered, "session_token")
+	require.NotContains(t, filtered, "api_secret")
+	require.NotContains(t, filtered, "authorization")
 }
 
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {

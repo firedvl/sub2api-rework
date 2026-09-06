@@ -54,6 +54,42 @@ func TestSchedulerCacheWriteAccountIDsSkipsUnencodableTimes(t *testing.T) {
 	require.Nil(t, invalid)
 }
 
+func TestSchedulerCacheRoundTripKeepsOnlyExplicitOpenAIVisionCapability(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 7, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	accounts := []service.Account{
+		{
+			ID: 12, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{bucket.GroupID},
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"chat_completions", "vision_input"},
+				"access_token":        "secret-access-token",
+				"refresh_token":       "secret-refresh-token",
+			},
+		},
+		{
+			ID: 13, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{bucket.GroupID},
+			Credentials: map[string]any{"openai_capabilities": []any{"chat_completions"}},
+		},
+	}
+
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, accounts))
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 2)
+	require.True(t, snapshot[0].SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVisionInput))
+	require.False(t, snapshot[1].SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVisionInput))
+	require.Empty(t, snapshot[0].GetCredential("access_token"))
+	require.Empty(t, snapshot[0].GetCredential("refresh_token"))
+	require.Equal(t, []int64{bucket.GroupID}, snapshot[0].GroupIDs)
+}
+
 func TestSchedulerCacheSetAccountClearsUnencodablePayload(t *testing.T) {
 	ctx := context.Background()
 	cache := newSchedulerCacheUnit(t)
