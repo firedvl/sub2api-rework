@@ -827,6 +827,48 @@ func TestResolveOpenAIAutoWarmupModelPrefersEligibleLightweightModelAcrossManife
 	}
 }
 
+func TestResolveOpenAIAutoWarmupModelUsesFreshCachedDiscoveryAfterTemporaryFailure(t *testing.T) {
+	account := newAutoWarmupTestAccount(199, time.Now())
+	setCodexManifestSnapshotForTest(account, "", `{"models":[
+			{"slug":"large-model","context_window":1000000,"max_output_tokens":100000},
+			{"slug":"small-model","context_window":128000,"max_output_tokens":16000},
+			{"slug":"gpt-image-2","input_modalities":["image"]}
+	]}`, time.Now())
+	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	originalModelsURL := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = originalModelsURL }()
+	service := &OpenAIGatewayService{accountRepo: repo, cfg: &config.Config{}}
+
+	got, err := service.resolveOpenAIAutoWarmupModel(context.Background(), account, "synthetic-token")
+
+	require.NoError(t, err)
+	require.Equal(t, "small-model", got)
+}
+
+func TestResolveOpenAIAutoWarmupModelRejectsCachedDiscoveryAfterOAuth401(t *testing.T) {
+	account := newAutoWarmupTestAccount(200, time.Now())
+	setCodexManifestSnapshotForTest(account, "", `{"models":[{"slug":"cached-model"}]}`, time.Now())
+	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"detail":"invalid token"}`, http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	originalModelsURL := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = originalModelsURL }()
+	service := &OpenAIGatewayService{accountRepo: repo, cfg: &config.Config{}}
+
+	model, err := service.resolveOpenAIAutoWarmupModel(context.Background(), account, "synthetic-token")
+
+	require.Error(t, err)
+	require.Empty(t, model)
+}
+
 func TestOpenAIGatewayServiceRejectsUnsafeAutoWarmupBeforeNetwork(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	settingService, _ := newAutoWarmupTestSettingService(t, true)

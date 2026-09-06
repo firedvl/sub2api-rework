@@ -635,6 +635,8 @@ func TestBaseSystemdUnitUsesPrivateStateAndRuntimeStorage(t *testing.T) {
 	require.NotContains(t, unit, "DOCKER_CONFIG")
 	require.Contains(t, unit, "RuntimeDirectory=sub2api-rework-updater")
 	require.Contains(t, unit, "RuntimeDirectoryMode=0750")
+	require.Contains(t, unit, "\nUser=root\n")
+	require.Contains(t, unit, "\nGroup=sub2api-updater\n")
 	require.Equal(t, 1, strings.Count(unit, "RuntimeDirectoryPreserve="))
 	require.Contains(t, unit, "\nRuntimeDirectoryPreserve=restart\n")
 	require.NotContains(t, unit, "RuntimeDirectoryPreserve=yes")

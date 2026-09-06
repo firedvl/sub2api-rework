@@ -18,6 +18,9 @@ func main() {
 	showVersion := flag.Bool("version", false, "Show updater version")
 	printSystemdDropIn := flag.Bool("print-systemd-drop-in", false, "Print the deployment-specific systemd sandbox drop-in")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		log.Fatalf("unexpected positional arguments: %v", flag.Args())
+	}
 	if *showVersion {
 		fmt.Println(updater.Version)
 		return

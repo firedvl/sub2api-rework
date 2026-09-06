@@ -47,6 +47,24 @@ func (r codexModelsVisibilityAccountRepo) ListModelAvailabilityCandidates(_ cont
 	return append([]Account(nil), accounts...), nil
 }
 
+func (r codexModelsVisibilityAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	for groupID, accounts := range r.byGroup {
+		for i := range accounts {
+			if accounts[i].ID != id {
+				continue
+			}
+			if accounts[i].Extra == nil {
+				accounts[i].Extra = make(map[string]any)
+			}
+			for key, value := range updates {
+				accounts[i].Extra[key] = value
+			}
+			r.byGroup[groupID] = accounts
+		}
+	}
+	return nil
+}
+
 type countingCodexModelsAccountRepo struct {
 	AccountRepository
 	accounts        []Account
@@ -79,6 +97,10 @@ func (r *countingCodexModelsAccountRepo) ListModelAvailabilityCandidates(_ conte
 	return append([]Account(nil), r.accounts...), nil
 }
 
+func (r *countingCodexModelsAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
 type splitCodexModelsAccountRepo struct {
 	AccountRepository
 	schedulable map[int64][]Account
@@ -91,6 +113,10 @@ type scopedCodexModelsAccountRepo struct {
 	groupAccounts  map[int64][]Account
 	globalAccounts []Account
 	globalCalls    atomic.Int32
+}
+
+func (r *scopedCodexModelsAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
 }
 
 func (r *scopedCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
@@ -126,6 +152,69 @@ func (r splitCodexModelsAccountRepo) ListModelAvailabilityCandidates(_ context.C
 		return nil, nil
 	}
 	return append([]Account(nil), r.catalog[*groupID]...), nil
+}
+
+func (r splitCodexModelsAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+type durableCodexModelsAccountRepo struct {
+	AccountRepository
+	accounts map[int64]*Account
+	members  map[int64][]int64
+}
+
+func (r *durableCodexModelsAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
+	return r.groupAccounts(groupID), nil
+}
+
+func (r *durableCodexModelsAccountRepo) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, _ []string, _ bool) ([]Account, error) {
+	if groupID == nil {
+		return nil, nil
+	}
+	return r.groupAccounts(*groupID), nil
+}
+
+func (r *durableCodexModelsAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	account := r.accounts[id]
+	if account == nil {
+		return ErrAccountNotFound
+	}
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	for key, value := range updates {
+		account.Extra[key] = value
+	}
+	return nil
+}
+
+func (r *durableCodexModelsAccountRepo) groupAccounts(groupID int64) []Account {
+	accounts := make([]Account, 0, len(r.members[groupID]))
+	for _, id := range r.members[groupID] {
+		account := r.accounts[id]
+		if account == nil || account.Status != StatusActive || !account.Schedulable {
+			continue
+		}
+		clone := *account
+		accounts = append(accounts, clone)
+	}
+	return accounts
+}
+
+func setCodexManifestSnapshotForTest(account *Account, clientVersion, body string, syncedAt time.Time) {
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	account.Extra[OpenAICodexManifestSnapshotExtraKey] = openAICodexManifestSnapshots{
+		Identity: openAICodexManifestIdentity(account),
+		Versions: map[string]openAICodexManifestSnapshot{
+			strings.TrimSpace(clientVersion): {
+				SyncedAt: syncedAt.UTC().Format(time.RFC3339Nano),
+				Body:     json.RawMessage(body),
+			},
+		},
+	}
 }
 
 func newCodexCatalogMappedAccount(
@@ -266,7 +355,12 @@ func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testi
 
 	var versionsMu sync.Mutex
 	versions := make([]string, 0, 2)
+	var manifestFailure atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if manifestFailure.Load() {
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
 		versionsMu.Lock()
 		versions = append(versions, r.URL.Query().Get("client_version"))
 		versionsMu.Unlock()
@@ -300,6 +394,14 @@ func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testi
 	versionsMu.Lock()
 	require.Equal(t, []string{"0.199.0", "0.199.0"}, versions)
 	versionsMu.Unlock()
+	manifestFailure.Store(true)
+	cached, used, err := (&OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}).BuildGroupDynamicCodexModelsManifest(
+		context.Background(), group, "0.199.0", "",
+	)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, string(dynamic.Body), string(cached.Body))
+	require.Equal(t, dynamic.ETag, cached.ETag)
 
 	generated, err := gateway.BuildCodexModelsManifestForGroup(
 		context.Background(),
@@ -360,7 +462,7 @@ func TestOpenAIDynamicCodexModelsPropagatesUnknownLiveModelsByClientVersion(t *t
 	require.Equal(t, "hide", models[2]["visibility"])
 }
 
-func TestCompositeDynamicCodexModelsFailsClosedForAbsentOrOverriddenRoutes(t *testing.T) {
+func TestCompositeDynamicCodexModelsCachedDiscoveryFailsClosedForAbsentOrOverriddenRoutes(t *testing.T) {
 	const groupID int64 = 811
 	account := Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
@@ -373,6 +475,7 @@ func TestCompositeDynamicCodexModelsFailsClosedForAbsentOrOverriddenRoutes(t *te
 			},
 		},
 	}
+	setCodexManifestSnapshotForTest(&account, "0.199.0", `{"models":[{"slug":"gpt-future-internal"}]}`, time.Now())
 	repo := codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{groupID: []Account{account}}}
 	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
 		ID: 1, GroupID: groupID, PublicModel: "future-alias", MatchType: CompositeRouteMatchExact,
@@ -383,7 +486,7 @@ func TestCompositeDynamicCodexModelsFailsClosedForAbsentOrOverriddenRoutes(t *te
 	openAI := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"models":[{"slug":"gpt-future-internal"}]}`)
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
 	original := chatgptCodexModelsURL
@@ -477,6 +580,282 @@ func TestOpenAIDynamicCodexModelsKeepsTransientlyRateLimitedAccountCatalog(t *te
 	require.NoError(t, err)
 	require.True(t, used)
 	require.Equal(t, []string{"gpt-6-astra", "gpt-future-codex-model"}, codexManifestModelSlugs(t, manifest.Body))
+}
+
+func TestOpenAIDynamicCodexModelsUsesFreshAccountScopedDiscoveryAfterTemporaryFailure(t *testing.T) {
+	const groupID int64 = 816
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "openai-1"},
+	}
+	repo := &durableCodexModelsAccountRepo{
+		accounts: map[int64]*Account{account.ID: account},
+		members:  map[int64][]int64{groupID: {account.ID}},
+	}
+	var response atomic.Value
+	response.Store(`{"models":[{"slug":"gpt-6-astra","display_name":"Live Astra","future_metadata":{"kept":true}},{"slug":"gpt-future-codex-model"}]}`)
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		body, ok := response.Load().(string)
+		require.True(t, ok)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+	group := &Group{ID: groupID, Platform: PlatformOpenAI}
+
+	live, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-6-astra", "gpt-future-codex-model"}, codexManifestModelSlugs(t, live.Body))
+	require.Contains(t, string(live.Body), `"future_metadata":{"kept":true}`)
+	require.NotNil(t, account.Extra[OpenAICodexManifestSnapshotExtraKey])
+	encodedSnapshot, err := json.Marshal(account.Extra[OpenAICodexManifestSnapshotExtraKey])
+	require.NoError(t, err)
+	var databaseShape any
+	require.NoError(t, json.Unmarshal(encodedSnapshot, &databaseShape))
+	account.Extra[OpenAICodexManifestSnapshotExtraKey] = databaseShape
+
+	fail.Store(true)
+	cached, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, live.ETag, cached.ETag)
+	require.Equal(t, string(live.Body), string(cached.Body))
+
+	notModified, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", live.ETag)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.True(t, notModified.NotModified)
+	require.Empty(t, notModified.Body)
+
+	fail.Store(false)
+	response.Store(`{"models":[{"slug":"gpt-future-codex-model","display_name":"Refreshed"}]}`)
+	refreshed, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-future-codex-model"}, codexManifestModelSlugs(t, refreshed.Body))
+	require.NotEqual(t, live.ETag, refreshed.ETag)
+}
+
+func TestOpenAIDurableCodexModelsManifestSnapshotsAreClientVersionScoped(t *testing.T) {
+	const groupID int64 = 819
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "openai-1"},
+	}
+	repo := &durableCodexModelsAccountRepo{
+		accounts: map[int64]*Account{account.ID: account},
+		members:  map[int64][]int64{groupID: {account.ID}},
+	}
+	responses := map[string]string{
+		"":        `{"models":[{"slug":"empty-version"}]}`,
+		"0.153.0": `{"models":[{"slug":"version-x-old"}]}`,
+	}
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, responses[r.URL.Query().Get("client_version")])
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+	group := &Group{ID: groupID, Platform: PlatformOpenAI}
+	fetch := func(version string) (*CodexModelsManifest, bool) {
+		manifest, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, version, "")
+		require.NoError(t, err)
+		return manifest, used
+	}
+
+	manifestX, used := fetch("0.153.0")
+	require.True(t, used)
+	require.Equal(t, []string{"version-x-old"}, codexManifestModelSlugs(t, manifestX.Body))
+	emptyManifest, used := fetch("")
+	require.True(t, used)
+	require.Equal(t, []string{"empty-version"}, codexManifestModelSlugs(t, emptyManifest.Body))
+
+	responses["0.153.0"] = `{"models":[{"slug":"version-x-refreshed"}]}`
+	manifestX, used = fetch("0.153.0")
+	require.True(t, used)
+	require.Equal(t, []string{"version-x-refreshed"}, codexManifestModelSlugs(t, manifestX.Body))
+
+	fail.Store(true)
+	manifestX, used = fetch("0.153.0")
+	require.True(t, used)
+	require.Equal(t, []string{"version-x-refreshed"}, codexManifestModelSlugs(t, manifestX.Body))
+	emptyManifest, used = fetch("")
+	require.True(t, used)
+	require.Equal(t, []string{"empty-version"}, codexManifestModelSlugs(t, emptyManifest.Body))
+	missing, used := fetch("0.154.0")
+	require.False(t, used)
+	require.Nil(t, missing)
+}
+
+func TestOpenAIDurableCodexModelsManifestSnapshotsAreBounded(t *testing.T) {
+	account := newCodexModelsTestAccount()
+	repo := &durableCodexModelsAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	service := &OpenAIGatewayService{accountRepo: repo}
+	base := time.Now().UTC()
+
+	for i := 0; i < openAICodexManifestSnapshotMaxEntries+2; i++ {
+		version := fmt.Sprintf("0.%d.0", i)
+		body := []byte(fmt.Sprintf(`{"models":[{"slug":"model-%d"}]}`, i))
+		service.persistOpenAICodexManifestSnapshot(context.Background(), account, version, body, base.Add(time.Duration(i)*time.Second))
+	}
+
+	snapshots, ok := decodeOpenAICodexManifestSnapshots(account.Extra[OpenAICodexManifestSnapshotExtraKey])
+	require.True(t, ok)
+	require.Len(t, snapshots.Versions, openAICodexManifestSnapshotMaxEntries)
+	require.NotContains(t, snapshots.Versions, "0.0.0")
+	require.NotContains(t, snapshots.Versions, "0.1.0")
+	require.Contains(t, snapshots.Versions, fmt.Sprintf("0.%d.0", openAICodexManifestSnapshotMaxEntries+1))
+
+	oversized := []byte(`{"models":[]}` + strings.Repeat(" ", codexModelsManifestCacheBodyLimit))
+	service.persistOpenAICodexManifestSnapshot(context.Background(), account, "oversized", oversized, base.Add(time.Hour))
+	snapshots, ok = decodeOpenAICodexManifestSnapshots(account.Extra[OpenAICodexManifestSnapshotExtraKey])
+	require.True(t, ok)
+	require.NotContains(t, snapshots.Versions, "oversized")
+}
+
+func TestOpenAIDurableCodexModelsManifestSnapshotFallbackPolicy(t *testing.T) {
+	tests := []struct {
+		name         string
+		serve        func(http.ResponseWriter)
+		wantFallback bool
+	}{
+		{name: "OAuth 401", serve: func(w http.ResponseWriter) { http.Error(w, `{"detail":"invalid token"}`, http.StatusUnauthorized) }},
+		{name: "token revoked 401", serve: func(w http.ResponseWriter) {
+			http.Error(w, `{"error":{"code":"token_revoked"}}`, http.StatusUnauthorized)
+		}},
+		{name: "HTTP 429", serve: func(w http.ResponseWriter) { http.Error(w, "rate limited", http.StatusTooManyRequests) }, wantFallback: true},
+		{name: "HTTP 503", serve: func(w http.ResponseWriter) { http.Error(w, "temporary", http.StatusServiceUnavailable) }, wantFallback: true},
+		{name: "temporary transport failure", serve: func(w http.ResponseWriter) {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("test response writer cannot hijack connections")
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Errorf("hijack test connection: %v", err)
+				return
+			}
+			require.NoError(t, conn.Close())
+		}, wantFallback: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := newCodexModelsTestAccount()
+			setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"cached-model"}]}`, time.Now())
+			repo := &codexModelsAccountStateRepo{}
+			service := newCodexModels401TestService(repo)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { test.serve(w) }))
+			defer server.Close()
+			original := chatgptCodexModelsURL
+			chatgptCodexModelsURL = server.URL
+			defer func() { chatgptCodexModelsURL = original }()
+
+			manifest, err := service.fetchCodexModelsManifestWithLastKnownGood(context.Background(), account, "0.153.0")
+			if test.wantFallback {
+				require.NoError(t, err)
+				require.Equal(t, []string{"cached-model"}, codexManifestModelSlugs(t, manifest.Body))
+				return
+			}
+			require.Error(t, err)
+			require.Nil(t, manifest)
+		})
+	}
+}
+
+func TestOpenAIDynamicCodexModelsRejectsUntrustworthyDiscovery(t *testing.T) {
+	const groupID int64 = 817
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	newAccount := func() *Account {
+		return &Account{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "openai-1"},
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Account, *durableCodexModelsAccountRepo)
+	}{
+		{name: "no prior discovery", mutate: func(*Account, *durableCodexModelsAccountRepo) {}},
+		{name: "expired", mutate: func(account *Account, _ *durableCodexModelsAccountRepo) {
+			setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"gpt-future-codex-model"}]}`, time.Now().Add(-openAICodexManifestSnapshotTTL-time.Minute))
+		}},
+		{name: "identity changed", mutate: func(account *Account, _ *durableCodexModelsAccountRepo) {
+			setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"gpt-future-codex-model"}]}`, time.Now())
+			account.Credentials["chatgpt_account_id"] = "openai-2"
+		}},
+		{name: "account disabled", mutate: func(account *Account, _ *durableCodexModelsAccountRepo) {
+			setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"gpt-future-codex-model"}]}`, time.Now())
+			account.Status = StatusDisabled
+		}},
+		{name: "account removed from group", mutate: func(account *Account, repo *durableCodexModelsAccountRepo) {
+			setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"gpt-future-codex-model"}]}`, time.Now())
+			repo.members[groupID] = nil
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			account := newAccount()
+			repo := &durableCodexModelsAccountRepo{
+				accounts: map[int64]*Account{account.ID: account},
+				members:  map[int64][]int64{groupID: {account.ID}},
+			}
+			test.mutate(account, repo)
+			manifest, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(
+				context.Background(), &Group{ID: groupID, Platform: PlatformOpenAI}, "0.153.0", "",
+			)
+			require.NoError(t, err)
+			require.False(t, used)
+			require.Nil(t, manifest)
+		})
+	}
+}
+
+func TestOpenAIDynamicCodexModelsCachedDiscoveryStillUsesGroupAllowlist(t *testing.T) {
+	const groupID int64 = 818
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "openai-1"},
+	}
+	setCodexManifestSnapshotForTest(account, "0.153.0", `{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-future-codex-model"},{"slug":"gpt-image-2"},{"slug":"unsupported","supported_in_api":false}]}`, time.Now())
+	repo := &durableCodexModelsAccountRepo{
+		accounts: map[int64]*Account{account.ID: account},
+		members:  map[int64][]int64{groupID: {account.ID}},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "temporary", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+	group := &Group{ID: groupID, Platform: PlatformOpenAI, ModelsListConfig: GroupModelsListConfig{Enabled: true, Models: []string{"gpt-future-codex-model"}}}
+
+	manifest, used, err := (&OpenAIGatewayService{accountRepo: repo}).BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.153.0", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-future-codex-model"}, codexManifestModelSlugs(t, manifest.Body))
 }
 
 func TestFilterCodexModelIDsForGroupOmitsWildcardKeys(t *testing.T) {

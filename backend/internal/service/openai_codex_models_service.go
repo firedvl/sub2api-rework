@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -34,8 +35,12 @@ const (
 	codexModelsManifestCacheMaxEntries = 64
 	codexModelsManifestCacheTTL        = 30 * time.Second
 	codexModelsManifestCacheStaleTTL   = 5 * time.Minute
-	codexModelsManifestRequestTimeout  = 15 * time.Second
-	codexAutoModelPrefix               = "codex-auto-"
+	// Durable discovery is a bounded catalog fallback, not proof of current availability.
+	openAICodexManifestSnapshotTTL        = 24 * time.Hour
+	openAICodexManifestSnapshotMaxEntries = 4
+	codexModelsManifestRequestTimeout     = 15 * time.Second
+	codexAutoModelPrefix                  = "codex-auto-"
+	OpenAICodexManifestSnapshotExtraKey   = "openai_codex_models_manifest_snapshot"
 )
 
 // FilterCodexModelIDsForGroup removes dedicated media-generation models,
@@ -100,11 +105,22 @@ type CodexModelsManifest struct {
 	upstreamSourceBody           []byte
 	convertedFromOpenAIModelList bool
 	NotModified                  bool
+	fetchedAt                    time.Time
 }
 
 type codexAccountManifest struct {
 	account  *Account
 	manifest *CodexModelsManifest
+}
+
+type openAICodexManifestSnapshot struct {
+	SyncedAt string          `json:"synced_at"`
+	Body     json.RawMessage `json:"body"`
+}
+
+type openAICodexManifestSnapshots struct {
+	Identity string                                 `json:"identity"`
+	Versions map[string]openAICodexManifestSnapshot `json:"versions"`
 }
 
 // BuildGroupConfiguredCodexModelsManifest builds a Codex catalog exclusively
@@ -229,7 +245,7 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 			continue
 		}
 		hasOAuth = true
-		manifest, fetchErr := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		manifest, fetchErr := s.fetchCodexModelsManifestWithLastKnownGood(ctx, account, clientVersion)
 		if fetchErr != nil {
 			continue
 		}
@@ -264,6 +280,140 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 		manifest.NotModified = true
 	}
 	return manifest, true, nil
+}
+
+func (s *OpenAIGatewayService) fetchCodexModelsManifestWithLastKnownGood(
+	ctx context.Context,
+	account *Account,
+	clientVersion string,
+) (*CodexModelsManifest, error) {
+	manifest, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+	if err == nil {
+		if manifest != nil && !manifest.NotModified && len(manifest.Body) <= codexModelsManifestCacheBodyLimit {
+			body, normalizeErr := canonicalCodexManifestBody(manifest.Body)
+			if normalizeErr == nil {
+				manifest.Body = body
+				manifest.ETag = codexModelsManifestBodyETag(body)
+				s.persistOpenAICodexManifestSnapshot(ctx, account, clientVersion, body, manifest.fetchedAt)
+			}
+		}
+		return manifest, nil
+	}
+	if !canUseSameAccountCodexManifestSnapshot(err) {
+		return nil, err
+	}
+	body, ok := openAICodexManifestSnapshotBody(account, clientVersion, time.Now())
+	if !ok {
+		return nil, err
+	}
+	return &CodexModelsManifest{Body: body, ETag: codexModelsManifestBodyETag(body)}, nil
+}
+
+func (s *OpenAIGatewayService) persistOpenAICodexManifestSnapshot(ctx context.Context, account *Account, clientVersion string, body []byte, syncedAt time.Time) {
+	if s == nil || s.accountRepo == nil || account == nil || len(body) > codexModelsManifestCacheBodyLimit || validateCodexModelsManifestEnvelope(body) != nil {
+		return
+	}
+	clientVersion = strings.TrimSpace(clientVersion)
+	identity := openAICodexManifestIdentity(account)
+	if identity == "" {
+		return
+	}
+	if syncedAt.IsZero() {
+		syncedAt = time.Now()
+	}
+	snapshots := openAICodexManifestSnapshots{
+		Identity: identity,
+		Versions: make(map[string]openAICodexManifestSnapshot),
+	}
+	if current, ok := decodeOpenAICodexManifestSnapshots(account.Extra[OpenAICodexManifestSnapshotExtraKey]); ok && current.Identity == identity {
+		snapshots = current
+	}
+	for version, snapshot := range snapshots.Versions {
+		if _, ok := openAICodexManifestSnapshotFreshBody(snapshot, syncedAt); !ok {
+			delete(snapshots.Versions, version)
+		}
+	}
+	snapshots.Versions[clientVersion] = openAICodexManifestSnapshot{
+		SyncedAt: syncedAt.UTC().Format(time.RFC3339Nano),
+		Body:     append(json.RawMessage(nil), body...),
+	}
+	for len(snapshots.Versions) > openAICodexManifestSnapshotMaxEntries {
+		oldestVersion := ""
+		oldestSyncedAt := time.Time{}
+		for version, snapshot := range snapshots.Versions {
+			candidate, _ := time.Parse(time.RFC3339Nano, snapshot.SyncedAt)
+			if oldestVersion == "" || candidate.Before(oldestSyncedAt) || candidate.Equal(oldestSyncedAt) && version < oldestVersion {
+				oldestVersion = version
+				oldestSyncedAt = candidate
+			}
+		}
+		delete(snapshots.Versions, oldestVersion)
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{OpenAICodexManifestSnapshotExtraKey: snapshots}); err != nil {
+		slog.Warn("persist OpenAI Codex manifest snapshot failed", "account_id", account.ID, "error", err)
+		return
+	}
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	account.Extra[OpenAICodexManifestSnapshotExtraKey] = snapshots
+}
+
+func openAICodexManifestSnapshotBody(account *Account, clientVersion string, now time.Time) ([]byte, bool) {
+	if account == nil || account.Extra == nil {
+		return nil, false
+	}
+	raw, ok := account.Extra[OpenAICodexManifestSnapshotExtraKey]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	snapshots, ok := decodeOpenAICodexManifestSnapshots(raw)
+	if !ok || snapshots.Identity == "" || snapshots.Identity != openAICodexManifestIdentity(account) {
+		return nil, false
+	}
+	snapshot, ok := snapshots.Versions[strings.TrimSpace(clientVersion)]
+	if !ok {
+		return nil, false
+	}
+	return openAICodexManifestSnapshotFreshBody(snapshot, now)
+}
+
+func openAICodexManifestSnapshotFreshBody(snapshot openAICodexManifestSnapshot, now time.Time) ([]byte, bool) {
+	syncedAt, err := time.Parse(time.RFC3339Nano, snapshot.SyncedAt)
+	if err != nil || syncedAt.After(now.Add(time.Minute)) || now.Sub(syncedAt) > openAICodexManifestSnapshotTTL ||
+		len(snapshot.Body) == 0 || len(snapshot.Body) > codexModelsManifestCacheBodyLimit || validateCodexModelsManifestEnvelope(snapshot.Body) != nil {
+		return nil, false
+	}
+	body, err := canonicalCodexManifestBody(snapshot.Body)
+	return body, err == nil
+}
+
+func decodeOpenAICodexManifestSnapshots(raw any) (openAICodexManifestSnapshots, bool) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return openAICodexManifestSnapshots{}, false
+	}
+	var snapshots openAICodexManifestSnapshots
+	return snapshots, json.Unmarshal(encoded, &snapshots) == nil && snapshots.Versions != nil
+}
+
+func canonicalCodexManifestBody(body []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return json.Marshal(value)
+}
+
+func openAICodexManifestIdentity(account *Account) string {
+	namespace := codexAccountIdentityNamespace(account)
+	if namespace == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(namespace))
+	return fmt.Sprintf("%x", sum[:16])
 }
 
 func (s *OpenAIGatewayService) compositeCodexPublicIDRoutable(
@@ -1504,11 +1654,12 @@ func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json
 }
 
 type codexModelsManifestUpstreamError struct {
-	err        error
-	retryable  bool
-	statusCode int
-	headers    http.Header
-	body       []byte
+	err                 error
+	retryable           bool
+	sameAccountFallback bool
+	statusCode          int
+	headers             http.Header
+	body                []byte
 }
 
 func (e *codexModelsManifestUpstreamError) Error() string { return e.err.Error() }
@@ -1528,6 +1679,16 @@ func (e *codexModelsManifestUpstreamError) Unwrap() error { return e.err }
 func IsRetryableCodexModelsManifestError(err error) bool {
 	var upstreamErr *codexModelsManifestUpstreamError
 	return errors.As(err, &upstreamErr) && upstreamErr.retryable
+}
+
+func canUseSameAccountCodexManifestSnapshot(err error) bool {
+	var upstreamErr *codexModelsManifestUpstreamError
+	return errors.As(err, &upstreamErr) && upstreamErr.sameAccountFallback
+}
+
+func isSafeSameAccountCodexManifestStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests ||
+		(statusCode >= http.StatusInternalServerError && statusCode < 600)
 }
 
 func isRetryableCodexModelsManifestStatus(statusCode int, useAPIKeyUpstream bool) bool {
@@ -1904,6 +2065,8 @@ func (s *OpenAIGatewayService) refreshCachedAPIKeyCodexModelsManifest(cacheKey s
 			return nil, err
 		}
 		if manifest.NotModified && cached != nil {
+			cached = cloneCodexModelsManifest(cached)
+			cached.fetchedAt = time.Now().UTC()
 			s.codexModelsManifestCache.set(cacheKey, cached, time.Now())
 			return cached, nil
 		}
@@ -1951,9 +2114,11 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		}
 	}
 	if err != nil {
+		retryable := isRetryableCodexModelsManifestTransportError(err)
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest request failed: %v", err),
-			retryable: isRetryableCodexModelsManifestTransportError(err),
+			err:                 infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest request failed: %v", err),
+			retryable:           retryable,
+			sameAccountFallback: retryable,
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1969,20 +2134,23 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			message = resp.Status
 		}
 		return nil, &codexModelsManifestUpstreamError{
-			err:        infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest upstream error %d: %s", resp.StatusCode, message),
-			statusCode: resp.StatusCode,
-			headers:    resp.Header.Clone(),
-			body:       body,
-			retryable:  isRetryableCodexModelsManifestStatus(resp.StatusCode, request.useAPIKeyUpstream),
+			err:                 infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest upstream error %d: %s", resp.StatusCode, message),
+			statusCode:          resp.StatusCode,
+			headers:             resp.Header.Clone(),
+			body:                body,
+			retryable:           isRetryableCodexModelsManifestStatus(resp.StatusCode, request.useAPIKeyUpstream),
+			sameAccountFallback: isSafeSameAccountCodexManifestStatus(resp.StatusCode),
 		}
 	}
 
 	bodyLimit := resolveModelsListReadLimit(s.cfg)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
 	if err != nil {
+		retryable := isRetryableCodexModelsManifestTransportError(err)
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read codex models manifest response: %v", err),
-			retryable: isRetryableCodexModelsManifestTransportError(err),
+			err:                 infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read codex models manifest response: %v", err),
+			retryable:           retryable,
+			sameAccountFallback: retryable,
 		}
 	}
 	if int64(len(body)) > bodyLimit {
@@ -2045,6 +2213,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		ETag:                         etag,
 		upstreamSourceBody:           append([]byte(nil), upstreamBody...),
 		convertedFromOpenAIModelList: convertedFromOpenAIModelList,
+		fetchedAt:                    time.Now().UTC(),
 	}
 	manifest.upstreamETag = etag
 	if request.useAPIKeyUpstream && !bytes.Equal(body, upstreamBody) {

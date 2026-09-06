@@ -243,6 +243,17 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 			result <- ServeUnix(serverContext, policy, handler)
 		}(service.Handler(), serverError)
 		waitForStagingSocket(t, policy.SocketPath)
+		info, err := os.Lstat(policy.SocketPath)
+		if err != nil || info.Mode().Perm() != 0660 {
+			t.Fatalf("unexpected updater socket mode: %v: %v", info, err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatal("updater socket has no Unix ownership metadata")
+		}
+		if int(stat.Uid) != os.Getuid() || int(stat.Gid) != os.Getgid() {
+			t.Fatalf("unexpected updater socket ownership: uid=%d gid=%d", stat.Uid, stat.Gid)
+		}
 	}
 	stopUpdater := func() {
 		if stopServer == nil {
@@ -601,6 +612,14 @@ func assertStagingApplicationAccess(t *testing.T, docker string, compose []strin
 	output, err := runStagingCommand(docker, statusArgs...)
 	if err != nil || !strings.Contains(output, `"updater_version":"`+Version+`"`) {
 		t.Fatalf("application cannot reach updater status: %v: %s", err, output)
+	}
+	deniedArgs := append(append([]string(nil), compose...),
+		"exec", "-T", "-u", "root", "sub2api", "su-exec", "65534:65534",
+		"curl", "--silent", "--show-error", "--fail", "--unix-socket", policy.SocketPath,
+		"http://updater/v1/status",
+	)
+	if output, err := runStagingCommand(docker, deniedArgs...); err == nil {
+		t.Fatalf("unrelated runtime principal reached updater status: %s", output)
 	}
 	containerArgs := append(append([]string(nil), compose...), "ps", "-q", "sub2api")
 	containerID, err := runStagingCommand(docker, containerArgs...)

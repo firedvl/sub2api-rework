@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -88,6 +89,97 @@ func TestSchedulerCacheRoundTripKeepsOnlyExplicitOpenAIVisionCapability(t *testi
 	require.Empty(t, snapshot[0].GetCredential("access_token"))
 	require.Empty(t, snapshot[0].GetCredential("refresh_token"))
 	require.Equal(t, []int64{bucket.GroupID}, snapshot[0].GroupIDs)
+}
+
+type schedulerCacheSelectionAccountRepo struct {
+	service.AccountRepository
+	accounts map[int64]*service.Account
+}
+
+func (r schedulerCacheSelectionAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
+	account := r.accounts[id]
+	if account == nil {
+		return nil, service.ErrAccountNotFound
+	}
+	clone := *account
+	return &clone, nil
+}
+
+func TestSchedulerCacheRoundTripFeedsNormalVisionSelection(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9)
+	requestedModel := "gpt-5.6-sol"
+	bucket := service.SchedulerBucket{GroupID: groupID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	newAccount := func(id int64) service.Account {
+		return service.Account{
+			ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+			GroupIDs: []int64{groupID},
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"chat_completions", "vision_input"},
+			},
+		}
+	}
+	selectAccount := func(t *testing.T, account service.Account) (*service.AccountSelectionResult, error) {
+		t.Helper()
+		cache := newSchedulerCacheUnit(t)
+		token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+		require.NoError(t, err)
+		require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+		repo := schedulerCacheSelectionAccountRepo{accounts: map[int64]*service.Account{account.ID: &account}}
+		cfg := &config.Config{RunMode: config.RunModeStandard}
+		cfg.Gateway.Scheduling.LoadBatchEnabled = false
+		snapshot := service.NewSchedulerSnapshotService(cache, nil, repo, nil, cfg)
+		gateway := service.NewOpenAIGatewayService(
+			repo, nil, nil, nil, nil, nil, nil, cfg, snapshot, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		)
+		selection, _, err := gateway.SelectAccountWithSchedulerForCapability(
+			ctx, &groupID, "", "", requestedModel, nil,
+			service.OpenAIUpstreamTransportAny, service.OpenAIEndpointCapabilityVisionInput,
+			false, false, true,
+		)
+		return selection, err
+	}
+
+	vision := newAccount(12)
+	selection, err := selectAccount(t, vision)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, vision.ID, selection.Account.ID)
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*service.Account)
+	}{
+		{name: "vision capability absent", mutate: func(account *service.Account) {
+			account.Credentials["openai_capabilities"] = []any{"chat_completions"}
+		}},
+		{name: "wrong group", mutate: func(account *service.Account) { account.GroupIDs = []int64{groupID + 1} }},
+		{name: "wrong provider", mutate: func(account *service.Account) { account.Platform = service.PlatformGrok }},
+		{name: "model not routable", mutate: func(account *service.Account) {
+			account.Credentials["model_mapping"] = map[string]any{"different-model": "different-upstream"}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			account := newAccount(20)
+			test.mutate(&account)
+			selection, err := selectAccount(t, account)
+			require.Error(t, err)
+			require.Nil(t, selection)
+		})
+	}
+
+	t.Run("cooldown stays distinct from capability", func(t *testing.T) {
+		account := newAccount(30)
+		now := time.Now()
+		resetAt := now.Add(time.Hour)
+		account.RateLimitedAt = &now
+		account.RateLimitResetAt = &resetAt
+		selection, err := selectAccount(t, account)
+		require.Error(t, err)
+		require.Nil(t, selection)
+		require.True(t, account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVisionInput))
+	})
 }
 
 func TestSchedulerCacheSetAccountClearsUnencodablePayload(t *testing.T) {
