@@ -209,6 +209,7 @@ func TestOpenAIVisionQualificationPreliminaryUsesExactAccountAndFixedCanary(t *t
 	require.Equal(t, OpenAIVisionQualificationModel, payload["model"])
 	require.Equal(t, false, payload["store"])
 	require.Equal(t, true, payload["stream"])
+	require.NotContains(t, payload, "max_output_tokens")
 	require.NotContains(t, payload, "tools")
 	input := payload["input"].([]any)
 	require.Len(t, input, 1)

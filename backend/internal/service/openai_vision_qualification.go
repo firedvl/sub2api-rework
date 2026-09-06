@@ -376,7 +376,6 @@ func (s *AccountTestService) runOpenAIVisionQualificationAttempt(ctx context.Con
 			},
 		}},
 		"instructions":      "Return only the requested digit. Do not use tools.",
-		"max_output_tokens": 16,
 		"store":             false,
 		"stream":            true,
 	}
