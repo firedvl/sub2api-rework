@@ -618,7 +618,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	requiredCapability := openAIResponsesRequiredCapabilityForRequestWithVision(imageIntent, visionInput, needsResponses, requestPlatform)
 	probeAccountID, visionProbe, probeHeaderErr := service.ParseOpenAIVisionProbeHeaders(c)
 	if probeHeaderErr != nil || (visionProbe && (requestPlatform != service.PlatformOpenAI || !visionInput)) {
-		reqLog.Warn("openai.vision_probe_rejected", zap.Error(probeHeaderErr))
+		reqLog.Warn("openai.vision_probe_rejected",
+			zap.Error(probeHeaderErr),
+			zap.Bool("probe_requested", visionProbe),
+			zap.Int64("probe_account_id", probeAccountID),
+			zap.String("request_platform", requestPlatform),
+			zap.Bool("vision_input_detected", visionInput),
+			zap.Int("payload_bytes", len(forwardBody)),
+		)
 		h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", "HOSTED_VISION_UNAVAILABLE", "HOSTED_VISION_UNAVAILABLE", streamStarted, false)
 		return
 	}
