@@ -229,6 +229,9 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if err := validateVisionCapabilityAddition(nil, req.Platform, req.Type, req.Credentials, false); err != nil {
+		return nil, err
+	}
 	// 验证分组是否存在（如果指定了分组）
 	if len(req.GroupIDs) > 0 {
 		if err := s.validateGroupIDsExist(ctx, req.GroupIDs); err != nil {
@@ -335,7 +338,12 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
-		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		credentials := SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		credentials, err = normalizeVisionCapabilityMutation(account, account.Platform, account.Type, credentials, false)
+		if err != nil {
+			return nil, err
+		}
+		account.Credentials = credentials
 	}
 
 	if req.Extra != nil {

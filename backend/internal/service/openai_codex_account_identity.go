@@ -56,11 +56,8 @@ func codexAccountIdentityNamespace(account *Account) string {
 	if account == nil || !account.IsOpenAIOAuthLike() {
 		return ""
 	}
-	if upstreamAccountID := strings.TrimSpace(account.GetChatGPTAccountID()); upstreamAccountID != "" {
-		if upstreamUserID := strings.TrimSpace(account.GetCredential("chatgpt_user_id")); upstreamUserID != "" {
-			return "chatgpt:" + upstreamAccountID + ":user:" + upstreamUserID
-		}
-		return "chatgpt:" + upstreamAccountID
+	if namespace := codexUpstreamAccountIdentityNamespace(account); namespace != "" {
+		return namespace
 	}
 	if seed, ok := codexFingerprintSeed(account.Extra); ok {
 		return "seed:" + seed
@@ -72,6 +69,22 @@ func codexAccountIdentityNamespace(account *Account) string {
 		}
 	}
 	return ""
+}
+
+// codexUpstreamAccountIdentityNamespace excludes local fallback seeds and token
+// material so evidence bound to it survives rotation but not reauthentication.
+func codexUpstreamAccountIdentityNamespace(account *Account) string {
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return ""
+	}
+	upstreamAccountID := strings.TrimSpace(account.GetChatGPTAccountID())
+	if upstreamAccountID == "" {
+		return ""
+	}
+	if upstreamUserID := strings.TrimSpace(account.GetCredential("chatgpt_user_id")); upstreamUserID != "" {
+		return "chatgpt:" + upstreamAccountID + ":user:" + upstreamUserID
+	}
+	return "chatgpt:" + upstreamAccountID
 }
 
 // isolateOpenAIUpstreamSessionID preserves the existing API-key isolation while

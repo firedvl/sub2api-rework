@@ -1879,6 +1879,47 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeCredentials() {
 	s.Require().Equal("new_value", got.Credentials["new_key"])
 }
 
+func (s *AccountRepoSuite) TestBulkUpdate_RevokesVisionOnlyForChangedOpenAIIdentity() {
+	makeAccount := func(name, upstreamID string) *service.Account {
+		return mustCreateAccount(s.T(), s.client, &service.Account{
+			Name: name, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+			Status: service.StatusActive, Schedulable: true,
+			Credentials: map[string]any{
+				"access_token": "old", "chatgpt_account_id": upstreamID,
+				"openai_capabilities": []any{"chat_completions", "vision_input"},
+			},
+		})
+	}
+	same := makeAccount("bulk-vision-same", "acct-a")
+	changed := makeAccount("bulk-vision-changed", "acct-b")
+	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	s.Require().NoError(err)
+
+	_, err = s.repo.BulkUpdate(s.ctx, []int64{same.ID, changed.ID}, service.AccountBulkUpdate{
+		Credentials: map[string]any{"access_token": "new", "chatgpt_account_id": "acct-a"},
+	})
+	s.Require().NoError(err)
+
+	gotSame, err := s.repo.GetByID(s.ctx, same.ID)
+	s.Require().NoError(err)
+	gotChanged, err := s.repo.GetByID(s.ctx, changed.ID)
+	s.Require().NoError(err)
+	s.Require().True(gotSame.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVisionInput))
+	s.Require().False(gotChanged.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVisionInput))
+	s.Require().Equal("acct-a", gotChanged.GetChatGPTAccountID())
+
+	var outboxCount int
+	err = scanSingleRow(
+		s.ctx,
+		s.repo.sql,
+		"SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = $1",
+		[]any{service.SchedulerOutboxEventAccountBulkChanged},
+		&outboxCount,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(1, outboxCount)
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	a1 := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:  "bulk-extra",

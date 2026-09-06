@@ -429,6 +429,9 @@ type UpdateAccountInput struct {
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
+	// visionQualificationPromotion is package-private so external handlers cannot
+	// authorize capability promotion by constructing an UpdateAccountInput.
+	visionQualificationPromotion *OpenAIVisionQualificationReport
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

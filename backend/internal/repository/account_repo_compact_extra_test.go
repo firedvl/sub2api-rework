@@ -1,6 +1,10 @@
 package repository
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+)
 
 func TestShouldEnqueueSchedulerOutboxForExtraUpdates_CompactCapabilityKeysAreRelevant(t *testing.T) {
 	updates := map[string]any{
@@ -21,5 +25,13 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_OpenAIResponsesCapabilityKe
 
 	if !shouldEnqueueSchedulerOutboxForExtraUpdates(updates) {
 		t.Fatalf("expected responses capability updates to enqueue scheduler outbox")
+	}
+}
+
+func TestShouldEnqueueSchedulerOutboxForExtraUpdates_VisionQualificationEvidenceIsNeutral(t *testing.T) {
+	if shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{
+		service.OpenAIVisionQualificationExtraKey: map[string]any{"state": "QUALIFIED"},
+	}) {
+		t.Fatal("qualification evidence must not enqueue scheduler work")
 	}
 }

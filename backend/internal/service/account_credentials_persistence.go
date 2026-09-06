@@ -22,8 +22,12 @@ func persistAccountCredentials(ctx context.Context, repo AccountRepository, acco
 			"account_id", account.ID, "parent_id", *account.ParentAccountID)
 		return nil
 	}
+	normalized, err := normalizeVisionCapabilityMutation(account, account.Platform, account.Type, credentials, false)
+	if err != nil {
+		return err
+	}
 
-	account.Credentials = shallowCopyMap(credentials)
+	account.Credentials = shallowCopyMap(normalized)
 	if updater, ok := any(repo).(accountCredentialsUpdater); ok {
 		return updater.UpdateCredentials(ctx, account.ID, account.Credentials)
 	}

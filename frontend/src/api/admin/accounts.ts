@@ -27,7 +27,8 @@ import type {
   UpstreamBillingProbeSettings,
   UpstreamBillingRatesResponse,
   OllamaCloudUsageSettings,
-  OllamaCloudUsageState
+  OllamaCloudUsageState,
+  OpenAIVisionQualificationReport
 } from '@/types'
 
 /**
@@ -287,6 +288,24 @@ export async function testAccount(id: number): Promise<{
     message: string
     latency_ms?: number
   }>(`/admin/accounts/${id}/test`)
+  return data
+}
+
+export async function getVisionQualification(id: number): Promise<OpenAIVisionQualificationReport> {
+  const { data } = await apiClient.get<OpenAIVisionQualificationReport>(`/admin/accounts/${id}/vision-qualification`)
+  return data
+}
+
+export async function runVisionQualification(
+  id: number,
+  stage: 'preliminary' | 'reliability'
+): Promise<OpenAIVisionQualificationReport> {
+  const { data } = await apiClient.post<OpenAIVisionQualificationReport>(`/admin/accounts/${id}/vision-qualification`, { stage })
+  return data
+}
+
+export async function promoteVisionQualification(id: number): Promise<OpenAIVisionQualificationReport> {
+  const { data } = await apiClient.post<OpenAIVisionQualificationReport>(`/admin/accounts/${id}/vision-qualification/promote`)
   return data
 }
 
@@ -1085,6 +1104,9 @@ export const accountsAPI = {
   delete: deleteAccount,
   toggleStatus,
   testAccount,
+  getVisionQualification,
+  runVisionQualification,
+  promoteVisionQualification,
   refreshCredentials,
   applyOAuthCredentials,
   getStats,

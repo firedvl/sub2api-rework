@@ -66,6 +66,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":                    {},
 	service.OpenAICodexManifestSnapshotExtraKey: {},
+	service.OpenAIVisionQualificationExtraKey:   {},
 	"grok_billing_snapshot":                     {},
 	"session_window_utilization":                {},
 }
@@ -626,6 +627,10 @@ func lockAndMergeAccountProbeExtra(
 			AND type = $3
 			AND credentials = $4::jsonb
 			AND proxy_id IS NOT DISTINCT FROM $5,
+			platform = $2
+			AND type = $3
+			AND NULLIF(BTRIM(credentials ->> 'chatgpt_account_id'), '') IS NOT DISTINCT FROM NULLIF(BTRIM($4::jsonb ->> 'chatgpt_account_id'), '')
+			AND NULLIF(BTRIM(credentials ->> 'chatgpt_user_id'), '') IS NOT DISTINCT FROM NULLIF(BTRIM($4::jsonb ->> 'chatgpt_user_id'), ''),
 			COALESCE(
 				platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 				AND $2 IN (`+ollamaCloudUsagePlatformsSQL+`)
@@ -660,6 +665,7 @@ func lockAndMergeAccountProbeExtra(
 
 	var (
 		identityUnchanged            bool
+		promotionIdentityUnchanged   bool
 		ollamaGroupIdentityUnchanged bool
 		ollamaProxyIdentityUnchanged bool
 		currentEnabled               []byte
@@ -671,6 +677,7 @@ func lockAndMergeAccountProbeExtra(
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
+		&promotionIdentityUnchanged,
 		&ollamaGroupIdentityUnchanged,
 		&ollamaProxyIdentityUnchanged,
 		&currentEnabled,
@@ -684,6 +691,9 @@ func lockAndMergeAccountProbeExtra(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if service.IsOpenAIVisionQualificationPromotion(ctx) && !promotionIdentityUnchanged {
+		return nil, service.ErrVisionQualificationPromotion
 	}
 
 	extra := copyJSONMap(normalizeJSONMap(account.Extra))
@@ -2863,6 +2873,43 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	return nil
 }
 
+// SaveOpenAIVisionQualificationReport stores operator evidence without
+// publishing a scheduler event; qualification reports never affect routing.
+func (r *accountRepository) SaveOpenAIVisionQualificationReport(
+	ctx context.Context,
+	id int64,
+	report *service.OpenAIVisionQualificationReport,
+) error {
+	if report == nil {
+		return service.ErrAccountNilInput
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = jsonb_set(
+			COALESCE(extra, '{}'::jsonb),
+			ARRAY[$2],
+			$3::jsonb,
+			TRUE
+		), updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id, service.OpenAIVisionQualificationExtraKey, string(payload))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAccountNotFound
+	}
+	return nil
+}
+
 // UpdateUpstreamBillingProbeSnapshot stores a probe result only while the
 // network identity used by that probe is still current.
 func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(
@@ -3137,7 +3184,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
+		mergedCredentials := "COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb"
+		credentialExpression := mergedCredentials
+		if _, updatesStableIdentity := updates.Credentials["chatgpt_account_id"]; updatesStableIdentity {
+			credentialExpression = "CASE WHEN platform = 'openai'" +
+				" AND type IN ('oauth', 'setup-token')" +
+				" AND NULLIF(BTRIM(credentials ->> 'chatgpt_account_id'), '')" +
+				" IS DISTINCT FROM NULLIF(BTRIM(" + credentialPlaceholder + "::jsonb ->> 'chatgpt_account_id'), '')" +
+				" AND jsonb_typeof((" + mergedCredentials + ") -> 'openai_capabilities') IN ('array', 'object')" +
+				" THEN jsonb_set(" + mergedCredentials + ", '{openai_capabilities}'," +
+				" ((" + mergedCredentials + ") -> 'openai_capabilities') - 'vision_input')" +
+				" ELSE " + mergedCredentials + " END"
+		}
+		setClauses = append(setClauses, "credentials = "+credentialExpression)
 		args = append(args, payload)
 		idx++
 	}
