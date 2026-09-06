@@ -811,6 +811,60 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ResponsesCapabilityExcl
 	})
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_VisionCapabilityIsolation(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID, otherGroupID := int64(10121), int64(10122)
+	vision := Account{
+		ID: 37101, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{"openai_capabilities": []any{"chat_completions", "vision_input"}},
+	}
+	nonVision := Account{
+		ID: 37102, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: -10,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{"openai_capabilities": []any{"chat_completions"}},
+	}
+	otherGroupVision := vision
+	otherGroupVision.ID = 37103
+	otherGroupVision.Priority = -20
+	otherGroupVision.GroupIDs = []int64{otherGroupID}
+	otherProvider := vision
+	otherProvider.ID = 37104
+	otherProvider.Priority = -30
+	otherProvider.Platform = PlatformGrok
+
+	newService := func(accounts []Account) *OpenAIGatewayService {
+		cfg := &config.Config{RunMode: config.RunModeStandard}
+		cfg.Gateway.Scheduling.LoadBatchEnabled = false
+		return &OpenAIGatewayService{
+			accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
+			cache:              &schedulerTestGatewayCache{},
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		}
+	}
+
+	selection, _, err := newService([]Account{nonVision, otherGroupVision, otherProvider, vision}).SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "", "", "gpt-5.6-sol", nil,
+		OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityVisionInput,
+		false, false, true,
+	)
+	require.NoError(t, err)
+	require.Equal(t, vision.ID, selection.Account.ID)
+
+	selection, _, err = newService([]Account{nonVision}).SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "", "", "gpt-5.6-sol", nil,
+		OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions,
+		false, false, true,
+	)
+	require.NoError(t, err)
+	require.Equal(t, nonVision.ID, selection.Account.ID)
+}
+
 // alpha/search 调度必须同时放行 OAuth 与 APIKey 账号：v0.1.157 曾因 OAuth-only
 // 门控把 APIKey 账号从候选池剔除，纯 APIKey 分组的独立搜索请求在选号阶段就
 // 报无可用账号，Codex 网页搜索整体失效（转发层其实一直支持 APIKey 路径）。

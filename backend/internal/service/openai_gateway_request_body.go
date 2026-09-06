@@ -1897,6 +1897,10 @@ func openAIRequestBodyMayContainImageInput(body []byte) bool {
 	return openAIJSONValueMayContainImageInput(input) || openAIJSONValueMayContainImageInput(messages)
 }
 
+func OpenAIRequestBodyMayContainImageInput(body []byte) bool {
+	return openAIRequestBodyMayContainImageInput(body)
+}
+
 func openAIJSONValueMayContainImageInput(value gjson.Result) bool {
 	if !value.Exists() {
 		return false

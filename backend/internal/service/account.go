@@ -91,6 +91,7 @@ const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
+	OpenAIEndpointCapabilityVisionInput     OpenAIEndpointCapability = "vision_input"
 	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
 	OpenAIEndpointCapabilityLive            OpenAIEndpointCapability = "live"
 	// OpenAIEndpointCapabilityGrokMediaGeneration keeps image/video generation
@@ -1850,6 +1851,11 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		default:
 			return false
 		}
+	}
+	if capability == OpenAIEndpointCapabilityVisionInput {
+		configured, found := a.openAIEndpointCapabilitySet()
+		return found && configured[string(capability)] &&
+			a.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityResponses)
 	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
