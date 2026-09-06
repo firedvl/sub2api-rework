@@ -375,9 +375,9 @@ func (s *AccountTestService) runOpenAIVisionQualificationAttempt(ctx context.Con
 				{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(canary.png), "detail": "low"},
 			},
 		}},
-		"instructions":      "Return only the requested digit. Do not use tools.",
-		"store":             false,
-		"stream":            true,
+		"instructions": "Return only the requested digit. Do not use tools.",
+		"store":        false,
+		"stream":       true,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
