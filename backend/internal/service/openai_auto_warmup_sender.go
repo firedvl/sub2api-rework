@@ -168,7 +168,7 @@ func (s *OpenAIGatewayService) resolveOpenAIAutoWarmupModel(ctx context.Context,
 	if strings.TrimSpace(accessToken) != "" {
 		refreshed.Credentials["access_token"] = accessToken
 	}
-	manifest, err := s.FetchCodexModelsManifest(ctx, &refreshed, "", "")
+	manifest, err := s.fetchCodexModelsManifestWithLastKnownGood(ctx, &refreshed, "")
 	if err != nil {
 		return "", infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "fetch Codex models: %v", err)
 	}
