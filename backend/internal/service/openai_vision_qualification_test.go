@@ -56,6 +56,10 @@ func (r *visionQualificationRepo) Update(_ context.Context, account *Account) er
 	return nil
 }
 
+func (r *visionQualificationRepo) ListShadowsByParent(context.Context, int64) ([]*Account, error) {
+	return nil, nil
+}
+
 type visionQualificationUpstream struct {
 	responses  []*http.Response
 	bodies     [][]byte
@@ -94,6 +98,23 @@ func visionQualificationAccount() *Account {
 		},
 		Extra: map[string]any{},
 	}
+}
+
+func promotedVisionQualificationAccount() *Account {
+	account := visionQualificationAccount()
+	account.Credentials[openAIEndpointCapabilitiesCredentialKey] = []any{"chat_completions", "alpha_search", "vision_input"}
+	now := time.Now().UTC()
+	account.Extra[OpenAIVisionQualificationExtraKey] = &OpenAIVisionQualificationReport{
+		AccountID:                   account.ID,
+		UpstreamIdentityFingerprint: openAIVisionQualificationIdentityFingerprint(account),
+		State:                       VisionQualificationStateQualified,
+		Model:                       OpenAIVisionQualificationModel,
+		Endpoint:                    OpenAIVisionQualificationEndpoint,
+		Reliability:                 &OpenAIVisionQualificationStageReport{Required: 10, Completed: 10, Passed: true},
+		QualifiedAt:                 &now,
+		PromotedAt:                  &now,
+	}
+	return account
 }
 
 func visionAnswer(status int, answer string) *http.Response {
@@ -433,6 +454,96 @@ func TestAccountCredentialPersistenceCannotAddVision(t *testing.T) {
 	require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
 }
 
+func TestPromotedVisionCapabilityFollowsStableIdentity(t *testing.T) {
+	fullCredentials := func(accountID string) map[string]any {
+		return map[string]any{
+			"access_token": "rotated", "refresh_token": "rotated-refresh",
+			"chatgpt_account_id":                    accountID,
+			openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions", "vision_input"},
+		}
+	}
+
+	t.Run("same account token rotation", func(t *testing.T) {
+		repo := &visionQualificationRepo{account: promotedVisionQualificationAccount()}
+		_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{
+			Credentials: fullCredentials("acct-stable"),
+		})
+		require.NoError(t, err)
+		require.True(t, hasConfiguredVisionCapability(repo.account.Credentials))
+		_, matches := openAIVisionQualificationReportFromAccount(repo.account)
+		require.True(t, matches)
+	})
+
+	t.Run("optional user id enrichment", func(t *testing.T) {
+		account := promotedVisionQualificationAccount()
+		delete(account.Credentials, "chatgpt_user_id")
+		report, _ := openAIVisionQualificationReportFromAccount(account)
+		account.Extra[OpenAIVisionQualificationExtraKey] = report
+		credentials := fullCredentials("acct-stable")
+		credentials["chatgpt_user_id"] = "user-added"
+		repo := &visionQualificationRepo{account: account}
+
+		_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{Credentials: credentials})
+
+		require.NoError(t, err)
+		require.True(t, hasConfiguredVisionCapability(repo.account.Credentials))
+	})
+
+	t.Run("different account revokes capability and stales report", func(t *testing.T) {
+		repo := &visionQualificationRepo{account: promotedVisionQualificationAccount()}
+		svc := &AccountTestService{accountRepo: repo}
+
+		_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{
+			Credentials: fullCredentials("acct-other"),
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, repo.updateCalls, "revocation must use the normal scheduler-refreshing update")
+		require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+		stale, err := svc.GetOpenAIVisionQualification(context.Background(), 31)
+		require.NoError(t, err)
+		require.True(t, stale.RequalificationRequired)
+		require.False(t, stale.PromotionEligible)
+	})
+
+	t.Run("type change away from oauth revokes capability", func(t *testing.T) {
+		repo := &visionQualificationRepo{account: promotedVisionQualificationAccount()}
+
+		_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{Type: AccountTypeAPIKey})
+
+		require.NoError(t, err)
+		require.Equal(t, AccountTypeAPIKey, repo.account.Type)
+		require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+		report, matches := openAIVisionQualificationReportFromAccount(repo.account)
+		require.False(t, matches)
+		require.True(t, report.RequalificationRequired)
+	})
+}
+
+func TestCredentialPersistenceAndLegacyUpdateRevokeVisionForDifferentIdentity(t *testing.T) {
+	credentials := map[string]any{
+		"access_token": "other", "refresh_token": "other-refresh", "chatgpt_account_id": "acct-other",
+		openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions", "vision_input"},
+	}
+
+	t.Run("credential persistence", func(t *testing.T) {
+		repo := &visionQualificationRepo{account: promotedVisionQualificationAccount()}
+		err := persistAccountCredentials(context.Background(), repo, repo.account, credentials)
+		require.NoError(t, err)
+		require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+		report, matches := openAIVisionQualificationReportFromAccount(repo.account)
+		require.False(t, matches)
+		require.True(t, report.RequalificationRequired)
+	})
+
+	t.Run("legacy account update", func(t *testing.T) {
+		repo := &visionQualificationRepo{account: promotedVisionQualificationAccount()}
+		updated, err := NewAccountService(repo, nil).Update(context.Background(), 31, UpdateAccountRequest{Credentials: &credentials})
+		require.NoError(t, err)
+		require.False(t, hasConfiguredVisionCapability(updated.Credentials))
+	})
+}
+
 func TestDuplicateAccountCannotCopyVisionIntoNewAccount(t *testing.T) {
 	repo := newDuplicateAccountRepoStub()
 	source := visionQualificationAccount()
@@ -462,8 +573,12 @@ func TestAccountUpdatePreservesOrRemovesExistingVision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &visionQualificationRepo{account: visionQualificationAccount()}
 			repo.account.Credentials[openAIEndpointCapabilitiesCredentialKey] = []string{"chat_completions", "vision_input"}
+			credentials := map[string]any{
+				"access_token": "access-secret", "refresh_token": "refresh-secret", "chatgpt_account_id": "acct-stable",
+				openAIEndpointCapabilitiesCredentialKey: tc.capabilities,
+			}
 			updated, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{
-				Credentials: map[string]any{openAIEndpointCapabilitiesCredentialKey: tc.capabilities},
+				Credentials: credentials,
 			})
 			require.NoError(t, err)
 			require.Equal(t, tc.hasVision, hasConfiguredVisionCapability(updated.Credentials))
@@ -498,4 +613,25 @@ func TestOpenAIVisionQualificationPromotionPersistsCapabilityAndEvidenceTogether
 	require.NoError(t, err)
 	require.Equal(t, report.PromotedAt, retried.PromotedAt)
 	require.Equal(t, updateCalls, repo.updateCalls, "completed promotion must be idempotent")
+
+	_, err = (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{Credentials: map[string]any{
+		"access_token": "access-secret", "refresh_token": "refresh-secret", "chatgpt_account_id": "acct-stable",
+		openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions", "alpha_search"},
+	}})
+	require.NoError(t, err)
+	require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+
+	repromoted, err := svc.PromoteOpenAIVisionQualification(context.Background(), 31, &adminServiceImpl{accountRepo: repo})
+	require.NoError(t, err)
+	require.True(t, hasConfiguredVisionCapability(repo.account.Credentials))
+	require.Equal(t, report.PromotedAt, repromoted.PromotedAt)
+
+	_, err = (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 31, &UpdateAccountInput{Credentials: map[string]any{
+		"access_token": "other", "refresh_token": "other-refresh", "chatgpt_account_id": "acct-other",
+		openAIEndpointCapabilitiesCredentialKey: []string{"chat_completions", "vision_input"},
+	}})
+	require.NoError(t, err)
+	require.False(t, hasConfiguredVisionCapability(repo.account.Credentials))
+	_, err = svc.PromoteOpenAIVisionQualification(context.Background(), 31, &adminServiceImpl{accountRepo: repo})
+	require.ErrorIs(t, err, ErrVisionQualificationPromotion)
 }

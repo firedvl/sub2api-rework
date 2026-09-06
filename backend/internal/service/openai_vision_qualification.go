@@ -548,27 +548,47 @@ func openAIVisionPromotionCapabilities(account *Account) (any, error) {
 }
 
 func validateVisionCapabilityAddition(account *Account, platform, accountType string, credentials map[string]any, authorized bool) error {
-	if credentials == nil || platform != PlatformOpenAI || account != nil && account.Platform == PlatformOpenAI && hasConfiguredVisionCapability(account.Credentials) {
-		return nil
-	}
-	raw, provided := credentials[openAIEndpointCapabilitiesCredentialKey]
-	if !provided {
-		return nil
-	}
-	requested := &Account{Platform: platform, Type: accountType, Credentials: map[string]any{openAIEndpointCapabilitiesCredentialKey: raw}}
-	configured, found := requested.openAIEndpointCapabilitySet()
-	if !found || !configured[string(OpenAIEndpointCapabilityVisionInput)] {
-		return nil
-	}
-	if !authorized {
-		return ErrVisionQualificationPromotion
-	}
-	return nil
+	_, err := normalizeVisionCapabilityMutation(account, platform, accountType, credentials, authorized)
+	return err
 }
 
 func hasConfiguredVisionCapability(credentials map[string]any) bool {
 	configured, found := (&Account{Credentials: credentials}).openAIEndpointCapabilitySet()
 	return found && configured[string(OpenAIEndpointCapabilityVisionInput)]
+}
+
+func normalizeVisionCapabilityMutation(account *Account, platform, accountType string, credentials map[string]any, authorized bool) (map[string]any, error) {
+	if credentials == nil || !hasConfiguredVisionCapability(credentials) {
+		return credentials, nil
+	}
+	if account == nil || account.Platform != PlatformOpenAI || !hasConfiguredVisionCapability(account.Credentials) {
+		if platform != PlatformOpenAI {
+			return credentials, nil
+		}
+		if !authorized {
+			return nil, ErrVisionQualificationPromotion
+		}
+		return credentials, nil
+	}
+
+	target := &Account{Platform: platform, Type: accountType, Credentials: credentials}
+	currentIdentity := openAIVisionQualificationIdentityFingerprint(account)
+	if currentIdentity != "" && currentIdentity == openAIVisionQualificationIdentityFingerprint(target) {
+		return credentials, nil
+	}
+
+	configured, _ := target.openAIEndpointCapabilitySet()
+	delete(configured, string(OpenAIEndpointCapabilityVisionInput))
+	capabilities := make([]string, 0, len(configured))
+	for capability, enabled := range configured {
+		if enabled {
+			capabilities = append(capabilities, capability)
+		}
+	}
+	sort.Strings(capabilities)
+	normalized := shallowCopyMap(credentials)
+	normalized[openAIEndpointCapabilitiesCredentialKey] = capabilities
+	return normalized, nil
 }
 
 func validateVisionCapabilityUpdate(account *Account, input *UpdateAccountInput) error {
@@ -578,11 +598,7 @@ func validateVisionCapabilityUpdate(account *Account, input *UpdateAccountInput)
 	if input.visionQualificationPromotion != nil && !validVisionQualificationPromotionReport(account, input.visionQualificationPromotion) {
 		return ErrVisionQualificationPromotion
 	}
-	accountType := account.Type
-	if input.Type != "" {
-		accountType = input.Type
-	}
-	return validateVisionCapabilityAddition(account, account.Platform, accountType, input.Credentials, input.visionQualificationPromotion != nil)
+	return nil
 }
 
 func validVisionQualificationPromotionReport(account *Account, report *OpenAIVisionQualificationReport) bool {
@@ -605,15 +621,17 @@ func (s *AccountTestService) PromoteOpenAIVisionQualification(ctx context.Contex
 	if !identityMatches || report.Reliability == nil || !report.Reliability.Passed || report.Reliability.Completed != 10 || report.QualifiedAt == nil {
 		return nil, ErrVisionQualificationPromotion
 	}
-	if report.PromotedAt != nil {
+	if report.PromotedAt != nil && hasConfiguredVisionCapability(account.Credentials) {
 		return report, nil
 	}
 	capabilities, err := openAIVisionPromotionCapabilities(account)
 	if err != nil {
 		return nil, err
 	}
-	promotedAt := time.Now().UTC()
-	report.PromotedAt = &promotedAt
+	if report.PromotedAt == nil {
+		promotedAt := time.Now().UTC()
+		report.PromotedAt = &promotedAt
+	}
 	report.PromotionEligible = false
 	if _, err := admin.UpdateAccount(ctx, accountID, &UpdateAccountInput{
 		Credentials:                  map[string]any{openAIEndpointCapabilitiesCredentialKey: capabilities},

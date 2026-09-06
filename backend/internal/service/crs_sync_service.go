@@ -705,7 +705,8 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
-		if err := validateVisionCapabilityAddition(existing, PlatformOpenAI, AccountTypeOAuth, credentials, false); err != nil {
+		credentials, err = normalizeVisionCapabilityMutation(existing, PlatformOpenAI, AccountTypeOAuth, credentials, false)
+		if err != nil {
 			item.Action = "failed"
 			item.Error = err.Error()
 			result.Failed++
@@ -824,7 +825,8 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
-		if err := validateVisionCapabilityAddition(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, false); err != nil {
+		credentials, err = normalizeVisionCapabilityMutation(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, false)
+		if err != nil {
 			item.Action = "failed"
 			item.Error = err.Error()
 			result.Failed++

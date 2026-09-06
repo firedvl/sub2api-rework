@@ -162,6 +162,44 @@ func TestCRSSyncOpenAIResponsesCannotAddVision(t *testing.T) {
 	}
 }
 
+func TestCRSSyncRevokesPromotedVisionWhenIdentityOrTypeChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		collection  string
+		credentials map[string]any
+	}{
+		{
+			name:       "different oauth identity",
+			collection: "openaiOAuthAccounts",
+			credentials: map[string]any{
+				"access_token": "other", "refresh_token": "other-refresh", "chatgpt_account_id": "acct-other",
+			},
+		},
+		{
+			name:        "type changes to api key",
+			collection:  "openaiResponsesAccounts",
+			credentials: map[string]any{"api_key": "sk-other"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := promotedVisionQualificationAccount()
+			account.Extra["crs_account_id"] = "crs-openai-1"
+			repo := newCRSLongContextAccountRepo(account)
+
+			result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+				collection: tc.collection, credentials: tc.credentials,
+			})
+
+			require.Equal(t, 1, result.Updated)
+			updated := repo.accounts["crs-openai-1"]
+			require.False(t, hasConfiguredVisionCapability(updated.Credentials))
+			report, matches := openAIVisionQualificationReportFromAccount(updated)
+			require.False(t, matches)
+			require.True(t, report.RequalificationRequired)
+		})
+	}
+}
+
 func runCRSOpenAILongContextSync(t *testing.T, repo AccountRepository, source crsOpenAILongContextSource) *SyncFromCRSResult {
 	t.Helper()
 	account := map[string]any{

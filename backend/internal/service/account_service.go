@@ -338,10 +338,12 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
-		if err := validateVisionCapabilityAddition(account, account.Platform, account.Type, *req.Credentials, false); err != nil {
+		credentials := SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		credentials, err = normalizeVisionCapabilityMutation(account, account.Platform, account.Type, credentials, false)
+		if err != nil {
 			return nil, err
 		}
-		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		account.Credentials = credentials
 	}
 
 	if req.Extra != nil {

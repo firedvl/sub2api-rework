@@ -3184,7 +3184,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
+		mergedCredentials := "COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb"
+		credentialExpression := mergedCredentials
+		if _, updatesStableIdentity := updates.Credentials["chatgpt_account_id"]; updatesStableIdentity {
+			credentialExpression = "CASE WHEN platform = 'openai'" +
+				" AND type IN ('oauth', 'setup-token')" +
+				" AND NULLIF(BTRIM(credentials ->> 'chatgpt_account_id'), '')" +
+				" IS DISTINCT FROM NULLIF(BTRIM(" + credentialPlaceholder + "::jsonb ->> 'chatgpt_account_id'), '')" +
+				" AND jsonb_typeof((" + mergedCredentials + ") -> 'openai_capabilities') IN ('array', 'object')" +
+				" THEN jsonb_set(" + mergedCredentials + ", '{openai_capabilities}'," +
+				" ((" + mergedCredentials + ") -> 'openai_capabilities') - 'vision_input')" +
+				" ELSE " + mergedCredentials + " END"
+		}
+		setClauses = append(setClauses, "credentials = "+credentialExpression)
 		args = append(args, payload)
 		idx++
 	}
