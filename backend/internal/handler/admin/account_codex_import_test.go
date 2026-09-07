@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -645,6 +646,62 @@ func TestImportCodexSessionsAccessTokenOnlySameWorkspaceDifferentUsersCreatesTwo
 	}
 	if svc.createdAccounts[0].Credentials["chatgpt_user_id"] == svc.createdAccounts[1].Credentials["chatgpt_user_id"] {
 		t.Fatalf("created accounts share user id: %v", svc.createdAccounts)
+	}
+}
+
+func TestImportCodexSessionsMappingIsExplicitAndPreservedOnReimport(t *testing.T) {
+	for _, extras := range []map[string]any{nil, {"model_mapping": nil}, {"model_mapping": map[string]any{}}} {
+		if got := sanitizeCodexImportCredentialExtras(extras); len(got) != 0 {
+			t.Fatalf("empty mapping extras must be omitted, got %v", got)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		mapping map[string]any
+	}{
+		{name: "manifest driven default"},
+		{name: "custom alias", mapping: map[string]any{"public-model": "gpt-upstream"}},
+		{name: "intentional identity allowlist", mapping: map[string]any{"gpt-allowed": "gpt-allowed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newCodexImportMemoryAdminService(nil)
+			handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
+			if tc.mapping != nil {
+				req.CredentialExtras = map[string]any{"model_mapping": tc.mapping}
+			}
+			entries := []codexImportEntry{{Index: 1, Value: buildCodexAccessOnlyImportValue(t, "workspace", "user")}}
+			result, err := handler.importCodexSessions(context.Background(), req, entries)
+			if err != nil || result.Created != 1 || result.Failed != 0 {
+				t.Fatalf("create: result=%+v, err=%v", result, err)
+			}
+			checkMapping := func(credentials map[string]any) {
+				t.Helper()
+				got, present := credentials["model_mapping"]
+				if tc.mapping == nil {
+					if present {
+						t.Fatal("default import must omit model_mapping")
+					}
+				} else if !reflect.DeepEqual(got, tc.mapping) {
+					t.Fatalf("mapping = %v, want %v", got, tc.mapping)
+				}
+			}
+			checkMapping(svc.createdAccounts[0].Credentials)
+			req.CredentialExtras = nil
+			result, err = handler.importCodexSessions(context.Background(), req, entries)
+			if err != nil || result.Updated != 1 || result.Created != 0 || result.Failed != 0 {
+				t.Fatalf("reimport: result=%+v, err=%v", result, err)
+			}
+			checkMapping(svc.updatedAccounts[0].input.Credentials)
+			for _, emptyMapping := range []any{nil, map[string]any{}} {
+				req.CredentialExtras = map[string]any{"model_mapping": emptyMapping}
+				result, err = handler.importCodexSessions(context.Background(), req, entries)
+				if err != nil || result.Updated != 1 || result.Failed != 0 {
+					t.Fatalf("empty mapping reimport: result=%+v, err=%v", result, err)
+				}
+				checkMapping(svc.updatedAccounts[len(svc.updatedAccounts)-1].input.Credentials)
+			}
+		})
 	}
 }
 

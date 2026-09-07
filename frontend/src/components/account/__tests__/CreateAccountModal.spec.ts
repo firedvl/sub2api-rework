@@ -9,6 +9,7 @@ const {
   showWarningMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
+  validateOpenAIRefreshTokenMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   showWarningMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
+  validateOpenAIRefreshTokenMock: vi.fn(),
   authIsSimpleMode: { value: true },
 }))
 
@@ -60,6 +62,25 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock('@/composables/useOpenAIOAuth', async () => {
+  const { ref } = await import('vue')
+  return {
+    useOpenAIOAuth: () => ({
+      authUrl: ref(''),
+      sessionId: ref(''),
+      loading: ref(false),
+      error: ref(''),
+      oauthState: ref(''),
+      resetState: vi.fn(),
+      generateAuthUrl: vi.fn(),
+      exchangeAuthCode: vi.fn(),
+      validateRefreshToken: validateOpenAIRefreshTokenMock,
+      buildCredentials: () => ({ access_token: 'test-access-token' }),
+      buildExtraInfo: () => ({}),
+    }),
+  }
+})
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -86,11 +107,12 @@ const OAuthAuthorizationFlowStub = defineComponent({
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: ['import-codex-session', 'import-codex-pat', 'validate-refresh-token'],
   template: `
     <div>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
       <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
+      <button data-testid="validate-openai-refresh-token" @click="$emit('validate-refresh-token', 'refresh-token')">refresh</button>
     </div>
   `,
 })
@@ -210,6 +232,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       warnings: [],
     })
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    validateOpenAIRefreshTokenMock.mockReset().mockResolvedValue({ email: 'oauth@example.test' })
   })
 
   it('hides only the redundant account toggle when every selected group enables tier pricing', async () => {
@@ -501,7 +524,55 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.credential_extras).toBeUndefined()
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
+  })
+
+  it('creates an unrestricted OpenAI refresh-token account by default', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="validate-openai-refresh-token"]').trigger('click')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'openai',
+      type: 'oauth',
+      credentials: { access_token: 'test-access-token' },
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
+  })
+
+  it('retains an explicit mapping for OpenAI refresh-token creation', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
+    await selectButtonByText(wrapper, 'admin.accounts.addMapping')
+    await wrapper.get('input[placeholder="admin.accounts.requestModel"]').setValue('gpt-public')
+    await wrapper.get('input[placeholder="admin.accounts.actualModel"]').setValue('gpt-private')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI refresh token')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="validate-openai-refresh-token"]').trigger('click')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping).toEqual({
+      'gpt-public': 'gpt-private',
+    })
+  })
+
+  it('passes an explicit Codex session model mapping through unchanged', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
+    await selectButtonByText(wrapper, 'admin.accounts.addMapping')
+    await wrapper.get('input[placeholder="admin.accounts.requestModel"]').setValue('gpt-public')
+    await wrapper.get('input[placeholder="admin.accounts.actualModel"]').setValue('gpt-private')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.credential_extras).toEqual({
+      model_mapping: { 'gpt-public': 'gpt-private' }
+    })
   })
 
   it('leaves Codex PAT import billing ownership to the backend', async () => {
@@ -510,6 +581,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await flushPromises()
 
     expect(createOpenAICodexPATMock).toHaveBeenCalledTimes(1)
+    expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.credential_extras).toBeUndefined()
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
   })
 
