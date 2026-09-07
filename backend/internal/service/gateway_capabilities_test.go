@@ -126,6 +126,15 @@ func TestCompositeCatalogModelsUsesDurableSimpleScopeAndBackedExactRoutes(t *tes
 	require.NotContains(t, models, "search-only")
 	require.True(t, repo.configuredGroupIDNil)
 	require.True(t, repo.configuredIncludeGrouped)
+	route := gatewayCapabilityRouteForModel(
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"upstream-model",
+		routeRepo.routes,
+		true,
+		[]Account{backed},
+	)
+	require.Equal(t, PlatformAntigravity, route.targetPlatform)
+	require.Equal(t, CompositeRouteSourceAccount, route.decision.Source)
 }
 
 func TestCatalogModelsUsesDurableSimpleScope(t *testing.T) {
@@ -143,6 +152,12 @@ func TestCatalogModelsUsesDurableSimpleScope(t *testing.T) {
 	require.Equal(t, []string{"public-model"}, models)
 	require.True(t, repo.configuredGroupIDNil)
 	require.True(t, repo.configuredIncludeGrouped)
+	ownership, err := (&GatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}).resolveCompositeModelOwnership(context.Background(), groupID, "public-model")
+	require.NoError(t, err)
+	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformOpenAI, Matched: true}, ownership)
 }
 
 type gatewayCapabilityUsageRepoStub struct {
