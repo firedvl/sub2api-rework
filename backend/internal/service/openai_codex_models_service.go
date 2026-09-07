@@ -388,6 +388,64 @@ func openAICodexManifestSnapshotFreshBody(snapshot openAICodexManifestSnapshot, 
 	return body, err == nil
 }
 
+func openAIPublicModelIDsFromCodexManifestSnapshots(account *Account, now time.Time) []string {
+	if account == nil || account.Extra == nil {
+		return nil
+	}
+	snapshots, ok := decodeOpenAICodexManifestSnapshots(account.Extra[OpenAICodexManifestSnapshotExtraKey])
+	if !ok || snapshots.Identity == "" || snapshots.Identity != openAICodexManifestIdentity(account) {
+		return nil
+	}
+
+	var latestBody []byte
+	latestSyncedAt := time.Time{}
+	for _, snapshot := range snapshots.Versions {
+		body, fresh := openAICodexManifestSnapshotFreshBody(snapshot, now)
+		if !fresh {
+			continue
+		}
+		syncedAt, _ := time.Parse(time.RFC3339Nano, snapshot.SyncedAt)
+		if latestBody != nil && !syncedAt.After(latestSyncedAt) {
+			continue
+		}
+		latestBody = body
+		latestSyncedAt = syncedAt
+	}
+	if latestBody == nil {
+		return nil
+	}
+
+	var envelope struct {
+		Models []struct {
+			Slug           string `json:"slug"`
+			Visibility     string `json:"visibility"`
+			SupportedInAPI *bool  `json:"supported_in_api"`
+		} `json:"models"`
+	}
+	if json.Unmarshal(latestBody, &envelope) != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, model := range envelope.Models {
+		slug := strings.TrimSpace(model.Slug)
+		visibility := strings.TrimSpace(model.Visibility)
+		if slug == "" || visibility != "" && visibility != "list" ||
+			model.SupportedInAPI != nil && !*model.SupportedInAPI ||
+			strings.Contains(slug, "*") || strings.HasPrefix(slug, codexAutoModelPrefix) ||
+			isCodexDedicatedMediaModel(slug) {
+			continue
+		}
+		seen[slug] = struct{}{}
+	}
+
+	models := make([]string, 0, len(seen))
+	for model := range seen {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models
+}
+
 func decodeOpenAICodexManifestSnapshots(raw any) (openAICodexManifestSnapshots, bool) {
 	encoded, err := json.Marshal(raw)
 	if err != nil {
