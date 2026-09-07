@@ -1485,7 +1485,7 @@ func (s *GatewayService) GetCompositeCatalogModels(ctx context.Context, groupID 
 	}
 	backed := make([]string, 0, len(models))
 	for _, publicModel := range models {
-		route := gatewayCapabilityRouteForModel(group, publicModel, routes, routesKnown, accounts)
+		route := gatewayCapabilityRouteForModel(group, publicModel, routes, routesKnown, accounts, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
 		routeCtx := WithCompositeRouteDecision(ctx, route.decision)
 		if len(s.gatewayCapabilitySupportingAccounts(routeCtx, accounts, route, false)) > 0 {
 			backed = append(backed, publicModel)
@@ -1598,7 +1598,7 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		return CompositeModelOwnership{}, err
 	}
 
-	ownership := compositeModelOwnershipFromAccounts(accounts, model)
+	ownership := compositeModelOwnershipFromAccounts(accounts, model, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
 
 	if s.modelsListCache != nil {
 		s.modelsListCache.Set(cacheKey, ownership, s.modelsListCacheTTL)
@@ -1606,7 +1606,7 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	return ownership, nil
 }
 
-func compositeModelOwnershipFromAccounts(accounts []Account, model string) CompositeModelOwnership {
+func compositeModelOwnershipFromAccounts(accounts []Account, model string, preferDetected bool) CompositeModelOwnership {
 	platforms := make(map[string]struct{})
 	for i := range accounts {
 		account := &accounts[i]
@@ -1623,6 +1623,15 @@ func compositeModelOwnershipFromAccounts(accounts []Account, model string) Compo
 			ownership.TargetPlatform = platform
 		}
 		ownership.Matched = true
+	} else if len(platforms) > 1 && preferDetected {
+		if platform, ok := DetectModelPlatform(model); ok {
+			if _, claimed := platforms[platform]; claimed {
+				ownership.TargetPlatform = platform
+				ownership.Matched = true
+				return ownership
+			}
+		}
+		ownership.Ambiguous = true
 	} else if len(platforms) > 1 {
 		ownership.Ambiguous = true
 	}

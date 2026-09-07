@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
@@ -139,7 +140,7 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 
 	models := make([]GatewayCapabilityModel, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		route := gatewayCapabilityRouteForModel(group, modelID, routes, routesKnown, configured)
+		route := gatewayCapabilityRouteForModel(group, modelID, routes, routesKnown, configured, s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
 		modelCurrent, modelCurrentKnown := current, currentKnown
 		if currentByPlatform != nil {
 			pool := currentByPlatform[route.targetPlatform]
@@ -446,7 +447,7 @@ func mergeGatewayCapabilityModelIDs(first, second []string) []string {
 	return result
 }
 
-func gatewayCapabilityRouteForModel(group *Group, model string, routes []CompositeModelRoute, routesKnown bool, accounts []Account) gatewayCapabilityRoute {
+func gatewayCapabilityRouteForModel(group *Group, model string, routes []CompositeModelRoute, routesKnown bool, accounts []Account, preferDetected bool) gatewayCapabilityRoute {
 	platform := PlatformAnthropic
 	if group != nil && strings.TrimSpace(group.Platform) != "" {
 		platform = group.Platform
@@ -473,7 +474,7 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 		}
 		return gatewayCapabilityRoute{targetPlatform: explicit.TargetPlatform, upstreamModel: upstreamModel, routeType: GatewayRouteComposite, known: isConcreteRequestPlatform(explicit.TargetPlatform), decision: decision}
 	}
-	ownership := compositeModelOwnershipFromAccounts(accounts, model)
+	ownership := compositeModelOwnershipFromAccounts(accounts, model, preferDetected)
 	if ownership.Ambiguous {
 		return gatewayCapabilityRoute{upstreamModel: model, routeType: GatewayRouteUnknown}
 	}

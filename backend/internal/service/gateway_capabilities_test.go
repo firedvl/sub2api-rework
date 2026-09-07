@@ -132,6 +132,7 @@ func TestCompositeCatalogModelsUsesDurableSimpleScopeAndBackedExactRoutes(t *tes
 		routeRepo.routes,
 		true,
 		[]Account{backed},
+		true,
 	)
 	require.Equal(t, PlatformAntigravity, route.targetPlatform)
 	require.Equal(t, CompositeRouteSourceAccount, route.decision.Source)
