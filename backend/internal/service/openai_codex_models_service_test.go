@@ -234,7 +234,8 @@ func TestAvailableModelIDsUsesOpenAIDiscoveryOnlyWithoutExplicitRestriction(t *t
 		{"slug":"codex-auto-review","visibility":"list"},
 		{"slug":"gpt-image-2","visibility":"list"}
 	]}`, now)
-	snapshots := unrestricted.Extra[OpenAICodexManifestSnapshotExtraKey].(openAICodexManifestSnapshots)
+	snapshots, ok := unrestricted.Extra[OpenAICodexManifestSnapshotExtraKey].(openAICodexManifestSnapshots)
+	require.True(t, ok)
 	snapshots.Versions["0.152.0"] = openAICodexManifestSnapshot{
 		SyncedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
 		Body:     json.RawMessage(`{"models":[{"slug":"removed-model","visibility":"list"}]}`),
