@@ -1448,22 +1448,37 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 
 func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
 	modelSet := make(map[string]struct{})
-	hasAnyMapping := false
+	now := time.Now()
+	if platform == PlatformOpenAI {
+		hasPassthrough := false
+		for i := range accounts {
+			account := &accounts[i]
+			if account.Platform != platform || !account.IsOpenAIPassthroughEnabled() {
+				continue
+			}
+			hasPassthrough = true
+			for _, model := range openAIPublicModelIDsFromCodexManifestSnapshots(account, now) {
+				modelSet[model] = struct{}{}
+			}
+		}
+		if hasPassthrough {
+			return sortedModelIDSet(modelSet)
+		}
+	}
 	for i := range accounts {
 		account := &accounts[i]
 		if platform != "" && account.Platform != platform {
 			continue
 		}
-		// Passthrough routing accepts models independently of model_mapping. A
-		// leftover mapping must not become a public whitelist.
-		if platform == PlatformOpenAI && account.IsOpenAIPassthroughEnabled() {
-			return nil
+		if platform == PlatformOpenAI && len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0 {
+			for _, model := range openAIPublicModelIDsFromCodexManifestSnapshots(account, now) {
+				modelSet[model] = struct{}{}
+			}
 		}
 		mapping := account.GetModelMapping()
 		if len(mapping) == 0 {
 			continue
 		}
-		hasAnyMapping = true
 		for model := range mapping {
 			model = publicCatalogModelID(account, model)
 			if model != "" {
@@ -1471,7 +1486,14 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 			}
 		}
 	}
-	if !hasAnyMapping {
+	if len(modelSet) == 0 {
+		return nil
+	}
+	return sortedModelIDSet(modelSet)
+}
+
+func sortedModelIDSet(modelSet map[string]struct{}) []string {
+	if len(modelSet) == 0 {
 		return nil
 	}
 	models := make([]string, 0, len(modelSet))

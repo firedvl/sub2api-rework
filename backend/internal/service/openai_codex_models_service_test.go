@@ -217,6 +217,85 @@ func setCodexManifestSnapshotForTest(account *Account, clientVersion, body strin
 	}
 }
 
+func TestAvailableModelIDsUsesOpenAIDiscoveryOnlyWithoutExplicitRestriction(t *testing.T) {
+	now := time.Now().UTC()
+	unrestricted := Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "unrestricted"},
+	}
+	setCodexManifestSnapshotForTest(&unrestricted, "0.153.4", `{"models":[
+		{"slug":"gpt-5.6-sol","visibility":"list"},
+		{"slug":"gpt-6-astra","visibility":"list"},
+		{"slug":"gpt-future-codex","visibility":"list"},
+		{"slug":"gpt-legacy-visible"},
+		{"slug":"gpt-future-codex","visibility":"list"},
+		{"slug":"unsupported-model","visibility":"list","supported_in_api":false},
+		{"slug":"hidden-model","visibility":"hide"},
+		{"slug":"codex-auto-review","visibility":"list"},
+		{"slug":"gpt-image-2","visibility":"list"}
+	]}`, now)
+	snapshots, ok := unrestricted.Extra[OpenAICodexManifestSnapshotExtraKey].(openAICodexManifestSnapshots)
+	require.True(t, ok)
+	snapshots.Versions["0.152.0"] = openAICodexManifestSnapshot{
+		SyncedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		Body:     json.RawMessage(`{"models":[{"slug":"removed-model","visibility":"list"}]}`),
+	}
+	unrestricted.Extra[OpenAICodexManifestSnapshotExtraKey] = snapshots
+
+	strict := unrestricted
+	strict.ID = 2
+	strict.Extra = nil
+	strict.Credentials = map[string]any{
+		"chatgpt_account_id": "strict",
+		"model_mapping": map[string]any{
+			"public-alias": "gpt-5.6-sol",
+			"gpt-5.5":      "gpt-5.5",
+		},
+	}
+	setCodexManifestSnapshotForTest(&strict, "0.153.4", `{"models":[
+		{"slug":"gpt-5.6-sol","visibility":"list"},
+		{"slug":"gpt-6-astra","visibility":"list"},
+		{"slug":"gpt-future-codex","visibility":"list"}
+	]}`, now)
+	passthrough := strict
+	passthrough.ID = 3
+	passthrough.Extra = nil
+	passthrough.Credentials = map[string]any{
+		"chatgpt_account_id": "passthrough",
+		"model_mapping":      map[string]any{"stale-alias": "stale-upstream"},
+	}
+	setCodexManifestSnapshotForTest(&passthrough, "0.153.4", `{"models":[
+		{"slug":"gpt-6-astra","visibility":"list"}
+	]}`, now)
+	passthrough.Extra["openai_passthrough"] = true
+
+	require.Equal(t,
+		[]string{"gpt-5.6-sol", "gpt-6-astra", "gpt-future-codex", "gpt-legacy-visible"},
+		availableModelIDsFromAccounts([]Account{unrestricted}, PlatformOpenAI),
+	)
+	require.Equal(t,
+		[]string{"gpt-5.5", "public-alias"},
+		availableModelIDsFromAccounts([]Account{strict}, PlatformOpenAI),
+	)
+	require.Equal(t,
+		[]string{"gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "gpt-future-codex", "gpt-legacy-visible", "public-alias"},
+		availableModelIDsFromAccounts([]Account{unrestricted, strict}, PlatformOpenAI),
+	)
+	require.Equal(t,
+		[]string{"gpt-6-astra"},
+		availableModelIDsFromAccounts([]Account{strict, passthrough}, PlatformOpenAI),
+	)
+
+	groupID := int64(9)
+	repo := &countingCodexModelsAccountRepo{accounts: []Account{unrestricted}}
+	models, backed := (&GatewayService{accountRepo: repo}).GetCatalogModels(
+		context.Background(), &groupID, PlatformOpenAI,
+	)
+	require.True(t, backed)
+	require.Equal(t, groupID, *repo.groupID)
+	require.Equal(t, []string{"gpt-5.6-sol", "gpt-6-astra", "gpt-future-codex", "gpt-legacy-visible"}, models)
+}
+
 func newCodexCatalogMappedAccount(
 	id int64,
 	target string,
