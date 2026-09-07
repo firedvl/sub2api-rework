@@ -1432,7 +1432,13 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 	if platform == "" {
 		return nil, false
 	}
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{platform}, false)
+	queryGroupID := groupID
+	includeGrouped := false
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		queryGroupID = nil
+		includeGrouped = true
+	}
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, []string{platform}, includeGrouped)
 	if err != nil {
 		return nil, false
 	}
@@ -1444,6 +1450,52 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 		}
 	}
 	return availableModelIDsFromAccounts(accounts, platform), backed
+}
+
+// GetCompositeCatalogModels returns durable, provider-backed models for a
+// Composite group. Simple mode uses the same all-account scope as scheduling;
+// Standard mode remains group-scoped.
+func (s *GatewayService) GetCompositeCatalogModels(ctx context.Context, groupID *int64) []string {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	queryGroupID := groupID
+	includeGrouped := false
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		queryGroupID = nil
+		includeGrouped = true
+	}
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, gatewayCapabilityPlatforms, includeGrouped)
+	if err != nil {
+		return nil
+	}
+
+	models := make([]string, 0)
+	fallbacks := DefaultGatewayCapabilityFallbacks()
+	for _, platform := range gatewayCapabilityPlatforms {
+		platformModels := availableModelIDsFromAccounts(accounts, platform)
+		if len(platformModels) == 0 && gatewayCapabilityHasPlatform(accounts, platform) && !IsCNProvider(platform) {
+			platformModels = fallbacks[platform]
+		}
+		models = mergeGatewayCapabilityModelIDs(models, platformModels)
+	}
+
+	if groupID == nil || *groupID <= 0 || s.compositeResolver == nil || s.compositeResolver.repo == nil {
+		return models
+	}
+	routes, err := s.compositeResolver.repo.ListByGroup(ctx, *groupID, false)
+	if err != nil {
+		return models
+	}
+	group := &Group{ID: *groupID, Platform: PlatformComposite}
+	for _, publicModel := range gatewayCapabilityExactRouteModelIDs(routes) {
+		route := gatewayCapabilityRouteForModel(group, publicModel, routes, true)
+		routeCtx := WithCompositeRouteDecision(ctx, route.decision)
+		if len(s.gatewayCapabilitySupportingAccounts(routeCtx, accounts, route, false)) > 0 {
+			models = mergeGatewayCapabilityModelIDs(models, []string{publicModel})
+		}
+	}
+	return models
 }
 
 func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
