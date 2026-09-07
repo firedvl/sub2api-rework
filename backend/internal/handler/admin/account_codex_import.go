@@ -875,6 +875,10 @@ func sanitizeCodexImportCredentialExtras(input map[string]any) map[string]any {
 		if _, ok := protected[strings.ToLower(normalizedKey)]; ok {
 			continue
 		}
+		// An empty import editor is unspecified; account edits can explicitly clear a mapping.
+		if mapping, ok := value.(map[string]any); normalizedKey == "model_mapping" && (value == nil || (ok && len(mapping) == 0)) {
+			continue
+		}
 		out[normalizedKey] = value
 	}
 	if len(out) == 0 {
