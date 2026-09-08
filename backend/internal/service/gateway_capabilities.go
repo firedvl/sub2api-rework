@@ -140,7 +140,7 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 
 	models := make([]GatewayCapabilityModel, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
-		route := gatewayCapabilityRouteForModel(group, modelID, routes, routesKnown)
+		route := gatewayCapabilityRouteForModel(group, modelID, routes, routesKnown, configured, s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
 		modelCurrent, modelCurrentKnown := current, currentKnown
 		if currentByPlatform != nil {
 			pool := currentByPlatform[route.targetPlatform]
@@ -309,12 +309,11 @@ func (s *GatewayService) gatewayCapabilityConfiguredAccounts(ctx context.Context
 		return nil, false
 	}
 	var groupID *int64
-	includeGrouped := s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
 	if group != nil && group.ID > 0 {
 		id := group.ID
 		groupID = &id
-		includeGrouped = false
 	}
+	groupID, includeGrouped := s.modelCatalogAccountScope(groupID)
 	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, gatewayCapabilityPlatforms, includeGrouped)
 	return accounts, err == nil
 }
@@ -448,7 +447,7 @@ func mergeGatewayCapabilityModelIDs(first, second []string) []string {
 	return result
 }
 
-func gatewayCapabilityRouteForModel(group *Group, model string, routes []CompositeModelRoute, routesKnown bool) gatewayCapabilityRoute {
+func gatewayCapabilityRouteForModel(group *Group, model string, routes []CompositeModelRoute, routesKnown bool, accounts []Account, preferDetected bool) gatewayCapabilityRoute {
 	platform := PlatformAnthropic
 	if group != nil && strings.TrimSpace(group.Platform) != "" {
 		platform = group.Platform
@@ -474,6 +473,22 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 			Endpoint:       CompositeRouteEndpointResponses,
 		}
 		return gatewayCapabilityRoute{targetPlatform: explicit.TargetPlatform, upstreamModel: upstreamModel, routeType: GatewayRouteComposite, known: isConcreteRequestPlatform(explicit.TargetPlatform), decision: decision}
+	}
+	ownership := compositeModelOwnershipFromAccounts(accounts, model, preferDetected)
+	if ownership.Ambiguous {
+		return gatewayCapabilityRoute{upstreamModel: model, routeType: GatewayRouteUnknown}
+	}
+	if ownership.Matched {
+		decision := CompositeRouteDecision{
+			Matched:        true,
+			Source:         CompositeRouteSourceAccount,
+			GroupID:        group.ID,
+			PublicModel:    model,
+			TargetPlatform: ownership.TargetPlatform,
+			UpstreamModel:  model,
+			Endpoint:       CompositeRouteEndpointResponses,
+		}
+		return gatewayCapabilityRoute{targetPlatform: ownership.TargetPlatform, upstreamModel: model, routeType: GatewayRouteComposite, known: isConcreteRequestPlatform(ownership.TargetPlatform), decision: decision}
 	}
 	if detected, ok := DetectModelPlatform(model); ok {
 		decision := CompositeRouteDecision{

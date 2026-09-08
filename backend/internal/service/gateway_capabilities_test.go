@@ -16,12 +16,14 @@ import (
 
 type gatewayCapabilityAccountRepoStub struct {
 	AccountRepository
-	current         []Account
-	configured      []Account
-	currentErr      error
-	configuredErr   error
-	currentCalls    int
-	configuredCalls int
+	current                  []Account
+	configured               []Account
+	currentErr               error
+	configuredErr            error
+	currentCalls             int
+	configuredCalls          int
+	configuredGroupIDNil     bool
+	configuredIncludeGrouped bool
 }
 
 func (r *gatewayCapabilityAccountRepoStub) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]Account, error) {
@@ -80,8 +82,10 @@ func (r *gatewayCapabilityAccountRepoStub) ListSchedulableByGroupID(context.Cont
 	return r.current, r.currentErr
 }
 
-func (r *gatewayCapabilityAccountRepoStub) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+func (r *gatewayCapabilityAccountRepoStub) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, _ []string, includeGrouped bool) ([]Account, error) {
 	r.configuredCalls++
+	r.configuredGroupIDNil = groupID == nil
+	r.configuredIncludeGrouped = includeGrouped
 	return r.configured, r.configuredErr
 }
 
@@ -95,6 +99,66 @@ type gatewayCapabilityRouteRepoStub struct {
 	routes []CompositeModelRoute
 	err    error
 	calls  int
+}
+
+func TestCompositeCatalogModelsUsesDurableSimpleScopeAndBackedExactRoutes(t *testing.T) {
+	backed := gatewayCapabilityTestAccount(1, PlatformAntigravity, map[string]string{
+		"upstream-model": "upstream-model",
+	})
+	repo := &gatewayCapabilityAccountRepoStub{configured: []Account{backed}}
+	routeRepo := &gatewayCapabilityRouteRepoStub{routes: []CompositeModelRoute{
+		{ID: 1, PublicModel: "public-backed", MatchType: CompositeRouteMatchExact, TargetPlatform: PlatformAntigravity, UpstreamModel: "upstream-model", Endpoint: CompositeRouteEndpointAny, Enabled: true},
+		{ID: 2, PublicModel: "public-unbacked", MatchType: CompositeRouteMatchExact, TargetPlatform: PlatformAntigravity, UpstreamModel: "missing-model", Endpoint: CompositeRouteEndpointResponses, Enabled: true},
+		{ID: 3, PublicModel: "prefix-", MatchType: CompositeRouteMatchPrefix, TargetPlatform: PlatformAntigravity, Endpoint: CompositeRouteEndpointAny, Enabled: true},
+		{ID: 4, PublicModel: "search-only", MatchType: CompositeRouteMatchExact, TargetPlatform: PlatformAntigravity, UpstreamModel: "upstream-model", Endpoint: CompositeRouteEndpointAlphaSearch, Enabled: true},
+	}}
+	groupID := int64(9)
+	models := (&GatewayService{
+		accountRepo:       repo,
+		cfg:               &config.Config{RunMode: config.RunModeSimple},
+		compositeResolver: NewCompositeRouteResolver(routeRepo),
+	}).GetCompositeCatalogModels(context.Background(), &groupID)
+
+	require.Contains(t, models, "upstream-model")
+	require.Contains(t, models, "public-backed")
+	require.NotContains(t, models, "public-unbacked")
+	require.NotContains(t, models, "prefix-")
+	require.NotContains(t, models, "search-only")
+	require.True(t, repo.configuredGroupIDNil)
+	require.True(t, repo.configuredIncludeGrouped)
+	route := gatewayCapabilityRouteForModel(
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"upstream-model",
+		routeRepo.routes,
+		true,
+		[]Account{backed},
+		true,
+	)
+	require.Equal(t, PlatformAntigravity, route.targetPlatform)
+	require.Equal(t, CompositeRouteSourceAccount, route.decision.Source)
+}
+
+func TestCatalogModelsUsesDurableSimpleScope(t *testing.T) {
+	account := gatewayCapabilityTestAccount(1, PlatformOpenAI, map[string]string{
+		"public-model": "upstream-model",
+	})
+	repo := &gatewayCapabilityAccountRepoStub{configured: []Account{account}}
+	groupID := int64(9)
+	models, backed := (&GatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}).GetCatalogModels(context.Background(), &groupID, PlatformOpenAI)
+
+	require.True(t, backed)
+	require.Equal(t, []string{"public-model"}, models)
+	require.True(t, repo.configuredGroupIDNil)
+	require.True(t, repo.configuredIncludeGrouped)
+	ownership, err := (&GatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}).resolveCompositeModelOwnership(context.Background(), groupID, "public-model")
+	require.NoError(t, err)
+	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformOpenAI, Matched: true}, ownership)
 }
 
 type gatewayCapabilityUsageRepoStub struct {

@@ -1432,7 +1432,8 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 	if platform == "" {
 		return nil, false
 	}
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{platform}, false)
+	queryGroupID, includeGrouped := s.modelCatalogAccountScope(groupID)
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, []string{platform}, includeGrouped)
 	if err != nil {
 		return nil, false
 	}
@@ -1444,6 +1445,60 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 		}
 	}
 	return availableModelIDsFromAccounts(accounts, platform), backed
+}
+
+// GetCompositeCatalogModels returns durable, provider-backed models for a
+// Composite group. Simple mode uses the same all-account scope as scheduling;
+// Standard mode remains group-scoped.
+func (s *GatewayService) GetCompositeCatalogModels(ctx context.Context, groupID *int64) []string {
+	if s == nil || s.accountRepo == nil {
+		return nil
+	}
+	queryGroupID, includeGrouped := s.modelCatalogAccountScope(groupID)
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, gatewayCapabilityPlatforms, includeGrouped)
+	if err != nil {
+		return nil
+	}
+
+	models := make([]string, 0)
+	fallbacks := DefaultGatewayCapabilityFallbacks()
+	for _, platform := range gatewayCapabilityPlatforms {
+		platformModels := availableModelIDsFromAccounts(accounts, platform)
+		if len(platformModels) == 0 && gatewayCapabilityHasPlatform(accounts, platform) && !IsCNProvider(platform) {
+			platformModels = fallbacks[platform]
+		}
+		models = mergeGatewayCapabilityModelIDs(models, platformModels)
+	}
+
+	routes := []CompositeModelRoute(nil)
+	routesKnown := true
+	if groupID != nil && *groupID > 0 && s.compositeResolver != nil && s.compositeResolver.repo != nil {
+		routes, err = s.compositeResolver.repo.ListByGroup(ctx, *groupID, false)
+		routesKnown = err == nil
+		if routesKnown {
+			models = mergeGatewayCapabilityModelIDs(models, gatewayCapabilityExactRouteModelIDs(routes))
+		}
+	}
+	group := &Group{Platform: PlatformComposite}
+	if groupID != nil {
+		group.ID = *groupID
+	}
+	backed := make([]string, 0, len(models))
+	for _, publicModel := range models {
+		route := gatewayCapabilityRouteForModel(group, publicModel, routes, routesKnown, accounts, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
+		routeCtx := WithCompositeRouteDecision(ctx, route.decision)
+		if len(s.gatewayCapabilitySupportingAccounts(routeCtx, accounts, route, false)) > 0 {
+			backed = append(backed, publicModel)
+		}
+	}
+	return backed
+}
+
+func (s *GatewayService) modelCatalogAccountScope(groupID *int64) (*int64, bool) {
+	if s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		return nil, true
+	}
+	return groupID, false
 }
 
 func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
@@ -1532,20 +1587,31 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		}
 	}
 
+	queryGroupID, includeGrouped := s.modelCatalogAccountScope(&groupID)
 	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(
 		ctx,
-		&groupID,
+		queryGroupID,
 		[]string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek},
-		false,
+		includeGrouped,
 	)
 	if err != nil {
 		return CompositeModelOwnership{}, err
 	}
 
+	ownership := compositeModelOwnershipFromAccounts(accounts, model, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
+
+	if s.modelsListCache != nil {
+		s.modelsListCache.Set(cacheKey, ownership, s.modelsListCacheTTL)
+	}
+	return ownership, nil
+}
+
+func compositeModelOwnershipFromAccounts(accounts []Account, model string, preferDetected bool) CompositeModelOwnership {
 	platforms := make(map[string]struct{})
-	for _, account := range accounts {
+	for i := range accounts {
+		account := &accounts[i]
 		platform := strings.TrimSpace(account.Platform)
-		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) {
+		if !isConcreteRequestPlatform(platform) || !modelMappingClaims(account, model) {
 			continue
 		}
 		platforms[platform] = struct{}{}
@@ -1557,14 +1623,28 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 			ownership.TargetPlatform = platform
 		}
 		ownership.Matched = true
+	} else if len(platforms) > 1 && preferDetected {
+		if platform, ok := DetectModelPlatform(model); ok {
+			if _, claimed := platforms[platform]; claimed {
+				ownership.TargetPlatform = platform
+				ownership.Matched = true
+				return ownership
+			}
+		}
+		ownership.Ambiguous = true
 	} else if len(platforms) > 1 {
 		ownership.Ambiguous = true
 	}
 
-	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, ownership, s.modelsListCacheTTL)
+	return ownership
+}
+
+func modelMappingClaims(account *Account, model string) bool {
+	if account == nil || model == "" {
+		return false
 	}
-	return ownership, nil
+	mapped, ok := account.GetModelMapping()[model]
+	return ok && strings.TrimSpace(mapped) != ""
 }
 
 func explicitModelMappingClaims(account Account, model string) bool {

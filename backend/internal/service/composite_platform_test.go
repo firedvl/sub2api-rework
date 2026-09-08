@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
@@ -105,6 +106,21 @@ func TestResolveCompositeModelOwnershipAllowsSamePlatformAndRejectsCrossPlatform
 	ambiguous, err := svc.resolveCompositeModelOwnership(context.Background(), groupID, "ambiguous")
 	require.NoError(t, err)
 	require.Equal(t, CompositeModelOwnership{Ambiguous: true}, ambiguous)
+}
+
+func TestResolveCompositeModelOwnershipPrefersDetectedPlatformInSimpleMode(t *testing.T) {
+	groupID := int64(7)
+	repo := &compositeOwnershipAccountRepo{accounts: []Account{
+		{ID: 1, Platform: PlatformGemini, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-shared": "gemini-shared"}}},
+		{ID: 2, Platform: PlatformAntigravity, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-shared": "gemini-shared"}}},
+	}}
+	ownership, err := (&GatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}).resolveCompositeModelOwnership(context.Background(), groupID, "gemini-shared")
+
+	require.NoError(t, err)
+	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformGemini, Matched: true}, ownership)
 }
 
 func TestNewGatewayServiceWiresCompositeModelOwnershipResolver(t *testing.T) {

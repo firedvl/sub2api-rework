@@ -1250,30 +1250,7 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 	if h == nil || h.gatewayService == nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	models := make([]string, 0)
-	for _, platform := range []string{service.PlatformAnthropic, service.PlatformGemini, service.PlatformOpenAI, service.PlatformAntigravity, service.PlatformGrok, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek} {
-		platformModels, providerBacked := h.gatewayService.GetCatalogModels(ctx, groupID, platform)
-		if len(platformModels) == 0 {
-			// CN 供应商没有静态默认模型列表（defaultModelIDsForPlatform 的
-			// default 分支是 Claude 列表），composite 下只暴露账号映射键。
-			if providerBacked && !service.IsCNProvider(platform) {
-				platformModels = defaultModelIDsForPlatform(platform)
-			}
-		}
-		for _, model := range platformModels {
-			model = strings.TrimSpace(model)
-			if model == "" {
-				continue
-			}
-			if _, ok := seen[model]; ok {
-				continue
-			}
-			seen[model] = struct{}{}
-			models = append(models, model)
-		}
-	}
-	return models
+	return h.gatewayService.GetCompositeCatalogModels(ctx, groupID)
 }
 
 func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
