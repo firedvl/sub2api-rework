@@ -245,6 +245,104 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  describe('Reset Credit review for any risky target', () => {
+    const account = (id: number, enabled = true, threshold = 0.9) => ({
+      id, platform: 'openai', type: 'oauth', parent_account_id: null,
+      extra: {
+        auto_reset_credit_enabled: enabled,
+        auto_reset_credit_5h_threshold: threshold,
+        auto_reset_credit_7d_threshold: threshold
+      }
+    })
+    const cases = [
+      { name: 'one newly enabled in a batch', targets: [account(1, false), account(2)], mode: 'enabled', window: '', value: '', payload: { auto_reset_credit_enabled: true } },
+      { name: 'one lower 5h in a batch', targets: [account(1), account(2, true, 0.7)], mode: 'unchanged', window: '5h', value: '75', payload: { auto_reset_credit_5h_threshold: 0.75 } },
+      { name: 'one lower weekly in a batch', targets: [account(1), account(2, true, 0.7)], mode: 'unchanged', window: '7d', value: '75', payload: { auto_reset_credit_7d_threshold: 0.75 } },
+      { name: 'one selected enable', targets: [account(1, false)], mode: 'enabled', window: '', value: '', payload: { auto_reset_credit_enabled: true } },
+      { name: 'one selected lower', targets: [account(1)], mode: 'unchanged', window: '5h', value: '75', payload: { auto_reset_credit_5h_threshold: 0.75 } },
+      { name: 'precise lower threshold', targets: [account(1)], mode: 'unchanged', window: '5h', value: '89.95', payload: { auto_reset_credit_5h_threshold: 0.8995 } },
+      { name: 'one applicable risky parent among unsupported targets', targets: [account(1, false), { ...account(2, false), platform: 'gemini' }, { ...account(3, false), type: 'apikey' }, { ...account(4, false), parent_account_id: 1 }], mode: 'enabled', window: '', value: '', payload: { auto_reset_credit_enabled: true } }
+    ]
+
+    for (const targetMode of ['selected', 'filtered']) {
+      it.each(cases)(`${targetMode}: reviews $name before any write`, async ({ targets, mode, window, value, payload }) => {
+        vi.mocked(adminAPI.accounts.getById).mockImplementation(async id => targets.find(target => target.id === id) as any)
+        vi.mocked(adminAPI.accounts.list).mockResolvedValue({ items: targets, total: targets.length, page: 1, page_size: 1000, pages: 1 } as any)
+        const ids = targets.map(target => target.id)
+        const wrapper = mountModal({
+          accountIds: ids, selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+          ...(targetMode === 'filtered' ? { target: { mode: 'filtered', filters: { status: 'active' }, previewCount: targets.length } } : {})
+        }, true)
+        if (mode !== 'unchanged') await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue(mode)
+        if (window) await wrapper.get(`#bulk-edit-auto-reset-credit-${window}`).setValue(value)
+        const submit = () => wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+        await submit()
+        await flushPromises()
+        const review = wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!
+        expect(review.props('show')).toBe(true)
+        expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+        const applicable = targets.filter(target => target.platform === 'openai' && target.type === 'oauth' && !target.parent_account_id)
+        expect(wrapper.get('[data-testid="reset-credit-review-affected-count"]').text()).toBe(String(applicable.length))
+        await review.vm.$emit('cancel')
+        await flushPromises()
+        expect(review.props('show')).toBe(false)
+        expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+        await submit()
+        await flushPromises()
+        expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+        await review.vm.$emit('confirm')
+        await flushPromises()
+        expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+        if (targetMode === 'filtered') {
+          expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith({ filters: { status: 'active' }, ...payload })
+        } else {
+          expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith(ids, payload)
+        }
+        wrapper.unmount()
+      })
+    }
+
+    it('reads later filtered pages even when preview count is stale and only one target is risky', async () => {
+      const firstPage = Array.from({ length: 1000 }, (_, index) => account(index + 1))
+      vi.mocked(adminAPI.accounts.list).mockImplementation(async page => ({
+        items: page === 1 ? firstPage : [account(1001, false)], total: 1001, page, page_size: 1000, pages: 2
+      } as any))
+      const wrapper = mountModal({
+        accountIds: [], selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+        target: { mode: 'filtered', filters: { platform: 'openai' }, previewCount: 1 }
+      }, true)
+      await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue('enabled')
+      await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(adminAPI.accounts.list).toHaveBeenCalledWith(1, 1000, { platform: 'openai' })
+      expect(adminAPI.accounts.list).toHaveBeenCalledWith(2, 1000, { platform: 'openai' })
+      expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+      expect(wrapper.get('[data-testid="reset-credit-review-affected-count"]').text()).toBe('1001')
+      await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+      await flushPromises()
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith({ filters: { platform: 'openai' }, auto_reset_credit_enabled: true })
+    })
+
+    it.each([
+      { name: 'increased threshold', targets: [account(1)], mode: 'unchanged', value: '95', payload: { auto_reset_credit_5h_threshold: 0.95 } },
+      { name: 'unchanged exact threshold', targets: [account(1, true, 0.8995)], mode: 'unchanged', value: '89.95', payload: { auto_reset_credit_5h_threshold: 0.8995 } },
+      { name: 'disabled remains disabled', targets: [account(1, false)], mode: 'disabled', value: '', payload: { auto_reset_credit_enabled: false } },
+      { name: 'only unsupported targets would become enabled', targets: [{ ...account(1, false), platform: 'gemini' }, account(2)], mode: 'enabled', value: '', payload: { auto_reset_credit_enabled: true } }
+    ])('does not review $name', async ({ targets, mode, value, payload }) => {
+      vi.mocked(adminAPI.accounts.getById).mockImplementation(async id => targets.find(target => target.id === id) as any)
+      const ids = targets.map(target => target.id)
+      const wrapper = mountModal({ accountIds: ids, selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+      if (mode !== 'unchanged') await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue(mode)
+      if (value) await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue(value)
+      await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.props('show')).toBe(false)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith(ids, payload)
+    })
+  })
+
   it('reviews the full target count when only some thresholds become more aggressive', async () => {
     vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
       id, platform: 'openai', type: 'oauth', parent_account_id: null,

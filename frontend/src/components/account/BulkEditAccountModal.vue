@@ -2370,7 +2370,6 @@ const readAutoResetCreditTargets = async (): Promise<Account[]> => {
 }
 
 const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
-  if (targetPreviewCount.value < 2) return false
   const changesEnabled = updates.auto_reset_credit_enabled === true
   const next5h = typeof updates.auto_reset_credit_5h_threshold === 'number'
     ? updates.auto_reset_credit_5h_threshold
@@ -2392,7 +2391,7 @@ const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
     if (enabling || loweredHere) reviewedIDs.add(account.id)
     lowered ||= loweredHere
   }
-  if (reviewedIDs.size < 2) return false
+  if (reviewedIDs.size === 0) return false
 
   pendingAutoResetCreditReview.value = {
     updates,
