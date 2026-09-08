@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
@@ -1474,6 +1474,10 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('[data-testid="auto-reset-credit-7d-threshold"]').setValue('92')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+    await flushPromises()
+
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
     expect(extra).toMatchObject({
@@ -1491,6 +1495,21 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('0')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('round-trips configured threshold precision without confirmation or rounding', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: 0.8995 }
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+
+    expect((wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').element as HTMLInputElement).value).toBe('89.95')
+    expect(wrapper.get('[data-testid="auto-reset-credit-enabled"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ auto_reset_credit_5h_threshold: 0.8995 })
     wrapper.unmount()
   })
 })

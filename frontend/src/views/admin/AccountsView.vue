@@ -252,6 +252,9 @@
           :sort="capacitySort"
           @retry="loadFleetCapacity"
         >
+          <template #account-maintenance="{ account }">
+            <AutoWarmupStatus :account="account" :global-enabled="globalAutoWarmupEnabled" details />
+          </template>
           <template #account-actions="{ account }">
             <button
               type="button"
@@ -411,6 +414,7 @@
               >
                 {{ t(row.extra?.auto_warmup_enabled ? 'admin.accounts.autoWarmup.on' : 'admin.accounts.autoWarmup.off') }}
               </span>
+              <AutoWarmupStatus :account="row" :global-enabled="globalAutoWarmupEnabled" />
             </div>
           </template>
           <template #cell-schedulable="{ row }">
@@ -598,7 +602,7 @@
       </section>
     </div>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" :global-auto-warmup-enabled="globalAutoWarmupEnabled" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -690,6 +694,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
+import AutoWarmupStatus from '@/components/account/AutoWarmupStatus.vue'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
@@ -821,7 +826,7 @@ const menuTrigger = ref<HTMLElement | null>(null)
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
-const globalAutoWarmupEnabled = ref(false)
+const globalAutoWarmupEnabled = ref<boolean | undefined>(undefined)
 const upstreamBillingNow = ref(Date.now())
 const upstreamBillingRateETag = ref<string | null>(null)
 const upstreamBillingRateRefreshing = ref(false)

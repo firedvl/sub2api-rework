@@ -23,13 +23,32 @@ func TestOpenAIAutoWarmupRepositoryClaim(t *testing.T) {
 		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectQuery("(?s)SELECT id.*reset_at BETWEEN \\$3 AND \\$4").
 			WithArgs(int64(42), "5h", now.Add(-time.Minute), now.Add(time.Minute)).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "reset_at", "attempted_at", "status", "error_code", "retryable"}).AddRow(7, now, now, "pending", "", false))
 		mock.ExpectCommit()
 
 		attempt, claimed, err := (&openAIAutoWarmupRepository{db: db}).Claim(context.Background(), 42, "5h", now)
 		require.NoError(t, err)
 		require.False(t, claimed)
-		require.Nil(t, attempt)
+		require.Equal(t, int64(7), attempt.ID)
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("existing preflight failure is returned for bounded retry evaluation", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectQuery("(?s)SELECT id.*reset_at BETWEEN \\$3 AND \\$4").
+			WithArgs(int64(42), "5h", now.Add(-time.Minute), now.Add(time.Minute)).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "reset_at", "attempted_at", "status", "error_code", "retryable"}).AddRow(7, now, now, "failed", "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE", false))
+		mock.ExpectCommit()
+
+		attempt, claimed, err := (&openAIAutoWarmupRepository{db: db}).Claim(context.Background(), 42, "5h", now)
+		require.NoError(t, err)
+		require.False(t, claimed)
+		require.NotNil(t, attempt, "the service needs the durable outcome to decide whether a preflight-only failure is retryable")
+		require.Equal(t, int64(7), attempt.ID)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -63,13 +82,13 @@ func TestOpenAIAutoWarmupRepositoryClaim(t *testing.T) {
 		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(int64(42)).WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectQuery("(?s)SELECT id.*attempted_at >= NOW\\(\\) - \\(\\$3 \\* INTERVAL '1 second'\\)").
 			WithArgs(int64(42), "5h", int64((5*time.Hour)/time.Second)).
-			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+			WillReturnRows(sqlmock.NewRows([]string{"id", "reset_at", "attempted_at", "status", "error_code", "retryable"}).AddRow(7, now, now, "failed", "OPENAI_AUTO_WARMUP_UPSTREAM_FAILED", false))
 		mock.ExpectCommit()
 
 		attempt, claimed, err := (&openAIAutoWarmupRepository{db: db}).ClaimDormant(context.Background(), 42, "5h", now.Add(time.Minute), 5*time.Hour)
 		require.NoError(t, err)
 		require.False(t, claimed)
-		require.Nil(t, attempt)
+		require.Equal(t, int64(7), attempt.ID)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 

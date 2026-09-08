@@ -67,6 +67,7 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":                    {},
 	service.OpenAICodexManifestSnapshotExtraKey: {},
 	service.OpenAIVisionQualificationExtraKey:   {},
+	service.OpenAIAutoWarmupEvaluationExtraKey:  {},
 	"grok_billing_snapshot":                     {},
 	"session_window_utilization":                {},
 }

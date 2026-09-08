@@ -73,6 +73,7 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	normalized := cloneOpenAIAutoResetExtra(extra)
 	delete(normalized, OpenAIAutoResetCreditStateExtraKey)
 	delete(normalized, OpenAIAutoWarmupStateExtraKey)
+	delete(normalized, OpenAIAutoWarmupEvaluationExtraKey)
 
 	_, hasEnabled := normalized[OpenAIAutoResetCreditEnabledExtraKey]
 	_, has5h := normalized[OpenAIAutoResetCredit5hThresholdExtraKey]
@@ -123,6 +124,7 @@ func stripOpenAIAutoResetCreditManagedExtra(extra map[string]any, stripConfig bo
 	}
 	delete(extra, OpenAIAutoResetCreditStateExtraKey)
 	delete(extra, OpenAIAutoWarmupStateExtraKey)
+	delete(extra, OpenAIAutoWarmupEvaluationExtraKey)
 	if stripConfig {
 		delete(extra, OpenAIAutoResetCreditEnabledExtraKey)
 		delete(extra, OpenAIAutoResetCredit5hThresholdExtraKey)

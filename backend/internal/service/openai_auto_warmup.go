@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -17,15 +18,16 @@ const (
 	OpenAIAutoWarmupStatusFailed                   = "failed"
 	OpenAIAutoWarmupStatusWindowStartedWithWarning = "window_started_with_warning"
 
-	openAIAutoWarmupWindowType   = "5h"
-	openAIAutoWarmupResetAdvance = time.Minute
-	openAIAutoWarmupWindowLength = 5 * time.Hour
-	openAIAutoWarmupMinGap       = 30 * time.Second
-	openAIAutoWarmupMaxGap       = 2 * openAIAutoResetSnapshotTTL
-	openAIAutoWarmupHorizonSlack = 2 * time.Minute
-	openAIAutoWarmupAdvanceSlack = 15 * time.Second
-	openAIAutoWarmupIdleMaxUsed  = 0.1
-	openAIAutoWarmupDormantRetry = 5 * time.Hour
+	openAIAutoWarmupWindowType     = "5h"
+	openAIAutoWarmupResetAdvance   = time.Minute
+	openAIAutoWarmupWindowLength   = 5 * time.Hour
+	openAIAutoWarmupMinGap         = 30 * time.Second
+	openAIAutoWarmupMaxGap         = 2 * openAIAutoResetSnapshotTTL
+	openAIAutoWarmupHorizonSlack   = 2 * time.Minute
+	openAIAutoWarmupAdvanceSlack   = 15 * time.Second
+	openAIAutoWarmupIdleMaxUsed    = 0.1
+	openAIAutoWarmupDormantRetry   = 5 * time.Hour
+	OpenAIAutoWarmupPreflightRetry = 10 * time.Minute
 )
 
 type OpenAIAutoWarmupAttempt struct {
@@ -133,6 +135,16 @@ func assessOpenAIAutoWarmupWindow(account *Account, usage *OpenAIQuotaUsage, rec
 	if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used >= 100 {
 		return openAIAutoWarmupWindow{}, false
 	}
+	// Only failures before inference dispatch can retry an anchored window.
+	if state := openAIAutoWarmupStateFromExtra(account.Extra); state != nil && isOpenAIAutoWarmupPreflightFailure(state) {
+		resetAt, resetErr := time.Parse(time.RFC3339, state.ResetAt)
+		attemptedAt, attemptErr := time.Parse(time.RFC3339, state.AttemptedAt)
+		if resetErr == nil && attemptErr == nil && now.Before(resetAt) &&
+			absOpenAIAutoWarmupDuration(newReset.Sub(resetAt)) <= time.Minute &&
+			now.Sub(attemptedAt) >= OpenAIAutoWarmupPreflightRetry {
+			return openAIAutoWarmupWindow{resetAt: resetAt}, true
+		}
+	}
 	if recovered || !now.Before(oldReset) {
 		if newReset.Sub(oldReset) < openAIAutoWarmupResetAdvance {
 			return openAIAutoWarmupWindow{}, false
@@ -198,6 +210,7 @@ func (s *OpenAIQuotaAutoResetService) maybeWarmFreshOpenAIWindow(ctx context.Con
 	}
 	window, ok := assessOpenAIAutoWarmupWindow(previous, usage, recovered, now)
 	if !ok {
+		s.persistOpenAIAutoWarmupEvaluation(ctx, previous, warmupWaitingReason(previous, usage, now), now)
 		return
 	}
 	var attempt *OpenAIAutoWarmupAttempt
@@ -209,12 +222,19 @@ func (s *OpenAIQuotaAutoResetService) maybeWarmFreshOpenAIWindow(ctx context.Con
 		attempt, claimed, err = s.warmupAttempts.Claim(ctx, previous.ID, openAIAutoWarmupWindowType, window.resetAt)
 	}
 	if err != nil {
+		s.persistOpenAIAutoWarmupEvaluation(ctx, previous, "claim_unavailable", now)
 		slog.Warn("openai_auto_warmup_claim_failed", "account_id", previous.ID, "error_code", infraerrors.Reason(err))
 		return
 	}
 	if !claimed || attempt == nil {
+		reason := "already_attempted"
+		if attempt != nil && attempt.Status == OpenAIAutoWarmupStatusPending {
+			reason = "pending"
+		}
+		s.persistOpenAIAutoWarmupEvaluation(ctx, previous, reason, now)
 		return
 	}
+	s.persistOpenAIAutoWarmupEvaluation(ctx, previous, "pending", now)
 	if window.dormant {
 		slog.Info("openai_auto_warmup_idle_confirmed", "account_id", previous.ID, "reset_at", window.resetAt)
 	}
@@ -320,4 +340,21 @@ func (s *OpenAIQuotaAutoResetService) persistOpenAIAutoWarmupState(ctx context.C
 	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{OpenAIAutoWarmupStateExtraKey: state}); err != nil {
 		slog.Warn("openai_auto_warmup_state_write_failed", "account_id", accountID, "error_code", infraerrors.Reason(err))
 	}
+}
+
+func openAIAutoWarmupStateFromExtra(extra map[string]any) *OpenAIAutoWarmupState {
+	raw, err := json.Marshal(extra[OpenAIAutoWarmupStateExtraKey])
+	if err != nil {
+		return nil
+	}
+	var state OpenAIAutoWarmupState
+	if json.Unmarshal(raw, &state) != nil || state.Status == "" {
+		return nil
+	}
+	return &state
+}
+
+func isOpenAIAutoWarmupPreflightFailure(state *OpenAIAutoWarmupState) bool {
+	return state.Status == OpenAIAutoWarmupStatusFailed &&
+		(state.ErrorCode == "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED" || state.ErrorCode == "OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE")
 }

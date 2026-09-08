@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/stretchr/testify/require"
@@ -55,6 +57,38 @@ type autoWarmupAccountRepo struct {
 	AccountRepository
 	mu       sync.Mutex
 	accounts map[int64]*Account
+}
+
+type autoWarmupPagedAccountRepo struct {
+	*autoWarmupAccountRepo
+	pages []int
+}
+
+func (r *autoWarmupPagedAccountRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, _ string, _ int64, _ string) ([]Account, *pagination.PaginationResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	accounts := make([]Account, 0, len(r.accounts))
+	for _, account := range r.accounts {
+		if account.Platform == platform && account.Type == accountType && account.Status == status {
+			accounts = append(accounts, *account)
+		}
+	}
+	sort.Slice(accounts, func(i, j int) bool { return accounts[i].ID < accounts[j].ID })
+	limit := params.Limit()
+	offset := params.Offset()
+	end := offset + limit
+	if end > len(accounts) {
+		end = len(accounts)
+	}
+	if offset > len(accounts) {
+		offset = len(accounts)
+	}
+	r.pages = append(r.pages, params.Page)
+	return accounts[offset:end], &pagination.PaginationResult{
+		Total: int64(len(accounts)), Page: params.Page, PageSize: limit,
+		Pages: (len(accounts) + limit - 1) / limit,
+	}, nil
 }
 
 func (r *autoWarmupAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -285,6 +319,36 @@ func newAutoWarmupTestSettingService(t testing.TB, enabled bool) (*SettingServic
 		settingRepo.values[SettingKeyOpenAIAutoWarmupEnabled] = "true"
 	}
 	return NewSettingService(settingRepo, &config.Config{}), settingRepo
+}
+
+func TestOpenAIAutoWarmupScannerPaginatesEntireFleet(t *testing.T) {
+	const fleetSize = 251
+	now := time.Now().UTC().Truncate(time.Second)
+	accounts := make(map[int64]*Account, fleetSize)
+	for id := int64(1); id <= fleetSize; id++ {
+		accounts[id] = newAutoWarmupTestAccount(id, now)
+	}
+	repo := &autoWarmupPagedAccountRepo{autoWarmupAccountRepo: &autoWarmupAccountRepo{accounts: accounts}}
+	service := newAutoWarmupTestService(t, repo, nil, nil, true)
+	defer service.cancel()
+
+	service.scanAutoResetCreditAccounts(context.Background())
+
+	require.Equal(t, []int{1, 2, 3}, repo.pages)
+	scheduled := make(map[int64]struct{}, fleetSize)
+	for range fleetSize {
+		select {
+		case accountID := <-service.queue:
+			scheduled[accountID] = struct{}{}
+		default:
+			t.Fatal("scanner did not queue every eligible account")
+		}
+	}
+	require.Len(t, scheduled, fleetSize)
+	for id := int64(1); id <= fleetSize; id++ {
+		_, ok := scheduled[id]
+		require.Truef(t, ok, "account %d was skipped", id)
+	}
 }
 
 func TestAssessOpenAIAutoWarmupWindowRequiresFreshPrimaryWindow(t *testing.T) {
@@ -829,7 +893,7 @@ func TestResolveOpenAIAutoWarmupModelPrefersEligibleLightweightModelAcrossManife
 
 func TestResolveOpenAIAutoWarmupModelUsesFreshCachedDiscoveryAfterTemporaryFailure(t *testing.T) {
 	account := newAutoWarmupTestAccount(199, time.Now())
-	setCodexManifestSnapshotForTest(account, "", `{"models":[
+	setCodexManifestSnapshotForTest(account, CodexCanonicalClientVersion(), `{"models":[
 			{"slug":"large-model","context_window":1000000,"max_output_tokens":100000},
 			{"slug":"small-model","context_window":128000,"max_output_tokens":16000},
 			{"slug":"gpt-image-2","input_modalities":["image"]}
@@ -852,7 +916,7 @@ func TestResolveOpenAIAutoWarmupModelUsesFreshCachedDiscoveryAfterTemporaryFailu
 
 func TestResolveOpenAIAutoWarmupModelRejectsCachedDiscoveryAfterOAuth401(t *testing.T) {
 	account := newAutoWarmupTestAccount(200, time.Now())
-	setCodexManifestSnapshotForTest(account, "", `{"models":[{"slug":"cached-model"}]}`, time.Now())
+	setCodexManifestSnapshotForTest(account, CodexCanonicalClientVersion(), `{"models":[{"slug":"cached-model"}]}`, time.Now())
 	repo := &autoWarmupAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"detail":"invalid token"}`, http.StatusUnauthorized)

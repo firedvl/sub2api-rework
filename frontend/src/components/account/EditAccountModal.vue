@@ -2312,6 +2312,9 @@
           <button
             type="button"
             data-testid="auto-reset-credit-enabled"
+            role="switch"
+            :aria-checked="autoResetCreditEnabled"
+            :aria-label="t('admin.accounts.autoResetCredit.title')"
             @click="autoResetCreditEnabled = !autoResetCreditEnabled"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -2328,26 +2331,28 @@
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
-            <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
+            <label for="auto-reset-credit-5h-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
             <input
+              id="auto-reset-credit-5h-threshold"
               v-model.number="autoResetCredit5hThreshold"
               type="number"
               min="0.1"
               max="100"
-              step="0.1"
+              step="any"
               class="input"
               :disabled="!autoResetCreditEnabled"
               data-testid="auto-reset-credit-5h-threshold"
             />
           </div>
           <div>
-            <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
+            <label for="auto-reset-credit-7d-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
             <input
+              id="auto-reset-credit-7d-threshold"
               v-model.number="autoResetCredit7dThreshold"
               type="number"
               min="0.1"
               max="100"
-              step="0.1"
+              step="any"
               class="input"
               :disabled="!autoResetCreditEnabled"
               data-testid="auto-reset-credit-7d-threshold"
@@ -2355,6 +2360,9 @@
           </div>
         </div>
         <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.autoResetCredit.example') }}
+        </p>
       </div>
 
       <div
@@ -2378,6 +2386,7 @@
         <p v-if="autoWarmupLastAttempt" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt">
           {{ autoWarmupLastAttemptLabel }}
         </p>
+        <AutoWarmupStatus v-if="account" :account="account" :global-enabled="globalAutoWarmupEnabled" details />
         <p v-if="autoWarmupLastAttemptDetails" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt-details">
           {{ autoWarmupLastAttemptDetails }}
         </p>
@@ -2887,6 +2896,38 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
+
+  <ConfirmDialog
+    :show="showAutoResetCreditReview"
+    :title="t('admin.accounts.autoResetCredit.review.title')"
+    :message="t('admin.accounts.autoResetCredit.review.message')"
+    :confirm-text="t('common.confirm')"
+    :cancel-text="t('common.cancel')"
+    @confirm="handleAutoResetCreditReviewConfirm"
+    @cancel="handleAutoResetCreditReviewCancel"
+  >
+    <dl v-if="pendingAutoResetCreditReview" class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.review.enabled') }}</dt>
+        <dd class="font-medium text-gray-900 dark:text-gray-100">{{ t('common.enabled') }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.threshold5h') }}</dt>
+        <dd>{{ t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold5h }) }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.threshold7d') }}</dt>
+        <dd>{{ t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold7d }) }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.review.trigger') }}</dt>
+        <dd>{{ t('admin.accounts.autoResetCredit.review.either') }}</dd>
+      </div>
+      <p v-if="pendingAutoResetCreditReview.lowered" class="text-amber-700 dark:text-amber-300">
+        {{ t('admin.accounts.autoResetCredit.review.lowered') }}
+      </p>
+    </dl>
+  </ConfirmDialog>
 </template>
 
 <script setup lang="ts">
@@ -2970,12 +3011,14 @@ import {
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
 import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
+import AutoWarmupStatus from './AutoWarmupStatus.vue'
 
 interface Props {
   show: boolean
   account: Account | null
   proxies: Proxy[]
   groups: AdminGroup[]
+  globalAutoWarmupEnabled?: boolean
 }
 
 const props = defineProps<Props>()
@@ -3229,6 +3272,17 @@ const autoPause7dDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
+const autoResetCredit5hOriginalRate = ref(1)
+const autoResetCredit7dOriginalRate = ref(1)
+const autoResetCreditRate = (percent: number) => Number((percent / 100).toPrecision(15))
+const showAutoResetCreditReview = ref(false)
+const pendingAutoResetCreditReview = ref<{
+  accountID: number
+  payload: Record<string, unknown>
+  threshold5h: number
+  threshold7d: number
+  lowered: boolean
+} | null>(null)
 const autoWarmupEnabled = ref(false)
 const autoWarmupLastAttempt = computed(() => props.account?.extra?.codex_auto_warmup_state)
 const autoWarmupLastAttemptLabel = computed(() => {
@@ -3782,10 +3836,14 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 	autoResetCreditEnabled.value = extra?.auto_reset_credit_enabled === true
+	autoResetCredit5hOriginalRate.value =
+		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold : 1
+	autoResetCredit7dOriginalRate.value =
+		typeof extra?.auto_reset_credit_7d_threshold === 'number' ? extra.auto_reset_credit_7d_threshold : 1
 	autoResetCredit5hThreshold.value =
-		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold * 100 : 100
+		autoResetCredit5hOriginalRate.value * 100
 	autoResetCredit7dThreshold.value =
-		typeof extra?.auto_reset_credit_7d_threshold === 'number' ? extra.auto_reset_credit_7d_threshold * 100 : 100
+		autoResetCredit7dOriginalRate.value * 100
 	autoWarmupEnabled.value = extra?.auto_warmup_enabled === true
 	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
@@ -4652,6 +4710,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 // Methods
 const handleClose = () => {
   antigravityMixedChannelConfirmed.value = false
+  handleAutoResetCreditReviewCancel()
   clearMixedChannelDialog()
   emit('close')
 }
@@ -5274,8 +5333,12 @@ const handleSubmit = async () => {
 		}
 		if (props.account.type === 'oauth' && !isSparkShadow.value) {
 			newExtra.auto_reset_credit_enabled = autoResetCreditEnabled.value
-			newExtra.auto_reset_credit_5h_threshold = autoResetCredit5hThreshold.value / 100
-			newExtra.auto_reset_credit_7d_threshold = autoResetCredit7dThreshold.value / 100
+			newExtra.auto_reset_credit_5h_threshold = autoResetCredit5hThreshold.value === autoResetCredit5hOriginalRate.value * 100
+				? autoResetCredit5hOriginalRate.value
+				: autoResetCreditRate(autoResetCredit5hThreshold.value)
+			newExtra.auto_reset_credit_7d_threshold = autoResetCredit7dThreshold.value === autoResetCredit7dOriginalRate.value * 100
+				? autoResetCredit7dOriginalRate.value
+				: autoResetCreditRate(autoResetCredit7dThreshold.value)
 			newExtra.auto_warmup_enabled = autoWarmupEnabled.value
 		}
 		// 运行态只允许后端服务更新，账号编辑不得回写旧状态。
@@ -5389,6 +5452,18 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
+    if (needsAutoResetCreditReview()) {
+      pendingAutoResetCreditReview.value = {
+        accountID,
+        payload: updatePayload,
+        threshold5h: autoResetCredit5hThreshold.value,
+        threshold7d: autoResetCredit7dThreshold.value,
+        lowered: autoResetCreditThresholdLowered()
+      }
+      showAutoResetCreditReview.value = true
+      return
+    }
+
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)
     })
@@ -5400,6 +5475,34 @@ const handleSubmit = async () => {
   } catch (error: any) {
     appStore.showError(error.message || t('admin.accounts.failedToUpdate'))
   }
+}
+
+const autoResetCreditThresholdLowered = () => {
+  const extra = props.account?.extra
+  const current5h = typeof extra?.auto_reset_credit_5h_threshold === 'number'
+    ? extra.auto_reset_credit_5h_threshold * 100
+    : 100
+  const current7d = typeof extra?.auto_reset_credit_7d_threshold === 'number'
+    ? extra.auto_reset_credit_7d_threshold * 100
+    : 100
+  return autoResetCredit5hThreshold.value < current5h - 1e-12 || autoResetCredit7dThreshold.value < current7d - 1e-12
+}
+
+const needsAutoResetCreditReview = () => {
+  const wasEnabled = props.account?.extra?.auto_reset_credit_enabled === true
+  return autoResetCreditEnabled.value && (!wasEnabled || autoResetCreditThresholdLowered())
+}
+
+const handleAutoResetCreditReviewConfirm = async () => {
+  const review = pendingAutoResetCreditReview.value
+  showAutoResetCreditReview.value = false
+  pendingAutoResetCreditReview.value = null
+  if (review) await submitUpdateAccount(review.accountID, review.payload)
+}
+
+const handleAutoResetCreditReviewCancel = () => {
+  showAutoResetCreditReview.value = false
+  pendingAutoResetCreditReview.value = null
 }
 
 // Handle mixed channel warning confirmation

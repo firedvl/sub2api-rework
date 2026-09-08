@@ -168,14 +168,14 @@ func (s *OpenAIGatewayService) resolveOpenAIAutoWarmupModel(ctx context.Context,
 	if strings.TrimSpace(accessToken) != "" {
 		refreshed.Credentials["access_token"] = accessToken
 	}
-	manifest, err := s.fetchCodexModelsManifestWithLastKnownGood(ctx, &refreshed, "")
+	manifest, err := s.fetchCodexModelsManifestWithLastKnownGood(ctx, &refreshed, CodexCanonicalClientVersion())
 	if err != nil {
 		return "", infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "fetch Codex models: %v", err)
 	}
 	if manifest == nil {
 		return "", infraerrors.New(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "Codex models manifest is invalid")
 	}
-	model, err := selectOpenAIAutoWarmupModel(manifest.Body)
+	model, err := selectOpenAIAutoWarmupModelForAccount(manifest.Body, &refreshed)
 	if err != nil {
 		return "", infraerrors.Newf(http.StatusBadGateway, "OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED", "parse Codex models: %v", err)
 	}
@@ -197,7 +197,7 @@ type openAIAutoWarmupModelCandidate struct {
 // proxy because ChatGPT/Codex OAuth does not publish per-model quota weights.
 // Known smaller context/output limits win, then upstream priority/order, then
 // slug for deterministic behavior. It never hardcodes a model entitlement.
-func selectOpenAIAutoWarmupModel(body []byte) (string, error) {
+func selectOpenAIAutoWarmupModelForAccount(body []byte, account *Account) (string, error) {
 	var envelope struct {
 		Models []struct {
 			Slug             string   `json:"slug"`
@@ -212,12 +212,25 @@ func selectOpenAIAutoWarmupModel(body []byte) (string, error) {
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return "", err
 	}
+	allowedTargets := make(map[string]struct{})
+	if account != nil {
+		for _, target := range account.GetModelMapping() {
+			if target = strings.TrimSpace(target); target != "" {
+				allowedTargets[target] = struct{}{}
+			}
+		}
+	}
 	candidates := make([]openAIAutoWarmupModelCandidate, 0, len(envelope.Models))
 	for index, model := range envelope.Models {
 		slug := strings.TrimSpace(model.Slug)
 		if slug == "" || model.SupportedInAPI != nil && !*model.SupportedInAPI || isCodexDedicatedMediaModel(slug) ||
 			!openAIAutoWarmupSupportsText(model.InputModalities) || !openAIAutoWarmupSupportsText(model.OutputModalities) {
 			continue
+		}
+		if len(allowedTargets) > 0 {
+			if _, ok := allowedTargets[slug]; !ok {
+				continue
+			}
 		}
 		candidates = append(candidates, openAIAutoWarmupModelCandidate{
 			slug: slug, contextWindow: model.ContextWindow, maxOutputTokens: model.MaxOutputTokens,
