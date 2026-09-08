@@ -79,7 +79,7 @@ const fulfill = (route: Route, data: unknown) => route.fulfill({
   body: JSON.stringify({ code: 0, message: 'ok', data }),
 })
 
-async function installResetCreditMock(page: Page) {
+async function installResetCreditMock(page: Page, accounts = resetAccounts) {
   const updates: unknown[] = []
   const bulkUpdates: unknown[] = []
 
@@ -95,30 +95,30 @@ async function installResetCreditMock(page: Page) {
     if (request.method() === 'POST' && url.pathname === '/api/v1/admin/accounts/bulk-update') {
       bulkUpdates.push(request.postDataJSON())
       return fulfill(route, {
-        success: 2,
+        success: accounts.length,
         failed: 0,
-        auto_reset_credit_updated_count: 2,
+        auto_reset_credit_updated_count: accounts.length,
         auto_reset_credit_skipped_count: 0,
         results: [],
       })
     }
     if (request.method() === 'PUT' && Number.isFinite(accountID)) {
       updates.push(request.postDataJSON())
-      return fulfill(route, resetAccounts.find((account) => account.id === accountID))
+      return fulfill(route, accounts.find((account) => account.id === accountID))
     }
     if (request.method() === 'GET' && Number.isFinite(accountID)) {
-      return fulfill(route, resetAccounts.find((account) => account.id === accountID))
+      return fulfill(route, accounts.find((account) => account.id === accountID))
     }
     if (request.method() === 'GET' && url.pathname === '/api/v1/admin/accounts') {
       const pageNumber = Math.max(1, Number(url.searchParams.get('page') || 1))
-      const pageSize = Math.max(1, Number(url.searchParams.get('page_size') || resetAccounts.length))
+      const pageSize = Math.max(1, Number(url.searchParams.get('page_size') || accounts.length))
       const start = (pageNumber - 1) * pageSize
       return fulfill(route, {
-        items: resetAccounts.slice(start, start + pageSize),
-        total: resetAccounts.length,
+        items: accounts.slice(start, start + pageSize),
+        total: accounts.length,
         page: pageNumber,
         page_size: pageSize,
-        pages: Math.ceil(resetAccounts.length / pageSize),
+        pages: Math.ceil(accounts.length / pageSize),
       })
     }
     return route.fallback()
@@ -139,6 +139,17 @@ async function selectAutoResetMode(dialog: ReturnType<Page['getByRole']>, mode: 
   const select = dialog.getByTestId('bulk-edit-auto-reset-credit-select').getByRole('button')
   await select.click()
   await dialog.page().getByRole('option', { name: mode, exact: true }).click()
+}
+
+async function openSelectedBulkEditor(page: Page, accountNames: string[]) {
+  await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Technical' }).click()
+  for (const name of accountNames) {
+    const row = page.locator('.operator-account-table tr').filter({ hasText: name })
+    await row.locator('input[type="checkbox"]').check()
+  }
+  await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+  return page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
 }
 
 test.beforeEach(async ({ page }) => {
@@ -238,6 +249,149 @@ test('reviews selected and filtered bulk changes with their exact scope at narro
   expect(bulkUpdates[1]).toEqual(expect.objectContaining({
     filters: expect.objectContaining({}),
     auto_reset_credit_5h_threshold: 0.75,
+  }))
+})
+
+for (const scenario of [
+  {
+    name: 'enables exactly one account',
+    configure: async (dialog: ReturnType<Page['getByRole']>) => selectAutoResetMode(dialog, 'Enable'),
+    expected: { auto_reset_credit_enabled: true },
+  },
+  {
+    name: 'lowers only one 5-hour threshold',
+    configure: async (dialog: ReturnType<Page['getByRole']>) => dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('85'),
+    expected: { auto_reset_credit_5h_threshold: 0.85 },
+  },
+  {
+    name: 'lowers only one weekly threshold',
+    configure: async (dialog: ReturnType<Page['getByRole']>) => dialog.locator('#bulk-edit-auto-reset-credit-7d').fill('92'),
+    expected: { auto_reset_credit_7d_threshold: 0.92 },
+  },
+  {
+    name: 'preserves a precise 89.95 percent threshold for only one account',
+    configure: async (dialog: ReturnType<Page['getByRole']>) => dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('89.95'),
+    expected: { auto_reset_credit_5h_threshold: 0.8995 },
+  },
+]) {
+  test(`reviews a selected bulk operation that ${scenario.name}`, async ({ page }) => {
+    const { bulkUpdates } = await installResetCreditMock(page)
+    const dialog = await openSelectedBulkEditor(page, ['Codex Team West', 'Codex Team East'])
+    await scenario.configure(dialog)
+    await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+
+    const review = page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })
+    await expect(review).toBeVisible()
+    expect(bulkUpdates).toHaveLength(0)
+    await review.getByRole('button', { name: 'Confirm' }).click()
+    await expect.poll(() => bulkUpdates).toHaveLength(1)
+    expect(bulkUpdates[0]).toEqual(expect.objectContaining({
+      account_ids: [101, 107],
+      ...scenario.expected,
+    }))
+  })
+}
+
+for (const scenario of [
+  {
+    name: 'enables one disabled account',
+    accountName: 'Codex Team East',
+    accountID: 107,
+    configure: async (dialog: ReturnType<Page['getByRole']>) => selectAutoResetMode(dialog, 'Enable'),
+    expected: { auto_reset_credit_enabled: true },
+  },
+  {
+    name: 'lowers one enabled account without enabling it',
+    accountName: 'Codex Team West',
+    accountID: 101,
+    configure: async (dialog: ReturnType<Page['getByRole']>) => dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('75'),
+    expected: { auto_reset_credit_5h_threshold: 0.75 },
+  },
+]) {
+  test(`reviews a one-account bulk operation that ${scenario.name}`, async ({ page }) => {
+    const { bulkUpdates } = await installResetCreditMock(page)
+    const dialog = await openSelectedBulkEditor(page, [scenario.accountName])
+    await scenario.configure(dialog)
+    const review = page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })
+
+    await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+    await expect(review).toBeVisible()
+    await review.getByRole('button', { name: 'Cancel' }).click()
+    await expect(review).toBeHidden()
+    expect(bulkUpdates).toHaveLength(0)
+
+    await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+    await expect(review).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(review).toBeHidden()
+    expect(bulkUpdates).toHaveLength(0)
+
+    await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+    await expect(review).toBeVisible()
+    await review.getByRole('button', { name: 'Confirm' }).click()
+    await expect.poll(() => bulkUpdates).toHaveLength(1)
+    expect(bulkUpdates[0]).toEqual(expect.objectContaining({
+      account_ids: [scenario.accountID],
+      ...scenario.expected,
+    }))
+  })
+}
+
+for (const scenario of [
+  {
+    name: 'increases thresholds',
+    accountNames: ['Codex Team West', 'Codex Team East'],
+    configure: async (dialog: ReturnType<Page['getByRole']>) => {
+      await dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('95')
+      await dialog.locator('#bulk-edit-auto-reset-credit-7d').fill('99')
+    },
+  },
+  {
+    name: 'keeps a disabled account disabled',
+    accountNames: ['Codex Team East'],
+    configure: async (dialog: ReturnType<Page['getByRole']>) => selectAutoResetMode(dialog, 'Disable'),
+  },
+  {
+    name: 'keeps an enabled threshold unchanged',
+    accountNames: ['Codex Team West'],
+    configure: async (dialog: ReturnType<Page['getByRole']>) => dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('90'),
+  },
+]) {
+  test(`does not review a harmless bulk operation that ${scenario.name}`, async ({ page }) => {
+    const { bulkUpdates } = await installResetCreditMock(page)
+    const dialog = await openSelectedBulkEditor(page, scenario.accountNames)
+    await scenario.configure(dialog)
+    await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+
+    await expect(page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })).toBeHidden()
+    await expect.poll(() => bulkUpdates).toHaveLength(1)
+  })
+}
+
+test('reviews a filtered bulk update when exactly one applicable OpenAI OAuth parent is lowered', async ({ page }) => {
+  const filteredAccounts = [
+    { ...resetAccounts[0], extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: 0.9 } },
+    { ...resetAccounts[1], extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: 0.8 } },
+    { ...operatorFixtureAccounts[1], id: 112, name: 'Claude Not Applicable', parent_account_id: null },
+  ]
+  const { bulkUpdates } = await installResetCreditMock(page, filteredAccounts)
+  await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Technical' }).click()
+  await page.getByRole('button', { name: 'Update Accounts', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
+  await dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('85')
+  await dialog.getByRole('button', { name: 'Update Accounts' }).click()
+
+  const review = page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })
+  await expect(review).toBeVisible()
+  await expect(review).toContainText('Accounts affected')
+  await expect(review.getByTestId('reset-credit-review-affected-count')).toHaveText('2')
+  expect(bulkUpdates).toHaveLength(0)
+  await review.getByRole('button', { name: 'Confirm' }).click()
+  await expect.poll(() => bulkUpdates).toHaveLength(1)
+  expect(bulkUpdates[0]).toEqual(expect.objectContaining({
+    filters: expect.objectContaining({}),
+    auto_reset_credit_5h_threshold: 0.85,
   }))
 })
 
