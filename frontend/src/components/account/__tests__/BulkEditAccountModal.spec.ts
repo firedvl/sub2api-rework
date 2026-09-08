@@ -23,7 +23,9 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       bulkUpdate: vi.fn(),
-      checkMixedChannelRisk: vi.fn()
+      checkMixedChannelRisk: vi.fn(),
+      getById: vi.fn(),
+      list: vi.fn()
     }
   }
 }))
@@ -42,7 +44,7 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-function mountModal(extraProps: Record<string, unknown> = {}) {
+function mountModal(extraProps: Record<string, unknown> = {}, renderReview = false) {
   return mount(BulkEditAccountModal, {
     props: {
       show: true,
@@ -56,7 +58,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
     global: {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
-        ConfirmDialog: true,
+        ConfirmDialog: renderReview ? { name: 'ConfirmDialog', props: ['show'], template: '<div v-if="show"><slot /></div>' } : true,
         Select: {
           props: ['modelValue', 'options'],
           emits: ['update:modelValue'],
@@ -96,6 +98,14 @@ describe('BulkEditAccountModal', () => {
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockResolvedValue({
       has_risk: false
     } as any)
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
+      id,
+      platform: 'openai',
+      type: 'oauth',
+      parent_account_id: null,
+      extra: {}
+    } as any))
+    vi.mocked(adminAPI.accounts.list).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1000, pages: 0 } as any)
   })
 
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
@@ -194,6 +204,11 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.props('show')).toBe(true)
+    await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+    await flushPromises()
+
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       auto_reset_credit_enabled: true,
       auto_reset_credit_5h_threshold: 0.75,
@@ -201,7 +216,114 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('only reviews a multi-account threshold change when it lowers an existing threshold', async () => {
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
+      id,
+      platform: 'openai',
+      type: 'oauth',
+      parent_account_id: null,
+      extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: 0.9 }
+    } as any))
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('95')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      auto_reset_credit_5h_threshold: 0.95
+    })
+
+    vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('75')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      auto_reset_credit_5h_threshold: 0.75
+    })
+  })
+
+  it('reviews the full target count when only some thresholds become more aggressive', async () => {
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
+      id, platform: 'openai', type: 'oauth', parent_account_id: null,
+      extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: id === 3 ? 0.5 : 0.9 }
+    } as any))
+    const wrapper = mountModal({ accountIds: [1, 2, 3], selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }, true)
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('75')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="reset-credit-review-affected-count"]').text()).toBe('3')
+  })
+
+  it('reads every filtered target before reviewing a lower threshold', async () => {
+    vi.mocked(adminAPI.accounts.list).mockResolvedValue({
+      items: [1, 2].map((id) => ({
+        id,
+        platform: 'openai',
+        type: 'oauth',
+        parent_account_id: null,
+        extra: { auto_reset_credit_5h_threshold: 0.9 }
+      })),
+      total: 2,
+      page: 1,
+      page_size: 1000,
+      pages: 1
+    } as any)
+    const wrapper = mountModal({
+      target: { mode: 'filtered', filters: { platform: 'openai' }, previewCount: 2 },
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('75')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.list).toHaveBeenCalledWith(1, 1000, { platform: 'openai' })
+    expect(wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.props('show')).toBe(true)
+  })
+
+  it('reviews the union of accounts enabled or lowered and preserves existing threshold precision', async () => {
+    vi.mocked(adminAPI.accounts.getById)
+      .mockResolvedValueOnce({
+        id: 1,
+        platform: 'openai',
+        type: 'oauth',
+        parent_account_id: null,
+        extra: { auto_reset_credit_enabled: false, auto_reset_credit_5h_threshold: 0.8995, auto_reset_credit_7d_threshold: 0.9 }
+      } as any)
+      .mockResolvedValueOnce({
+        id: 2,
+        platform: 'openai',
+        type: 'oauth',
+        parent_account_id: null,
+        extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_threshold: 0.9, auto_reset_credit_7d_threshold: 0.9 }
+      } as any)
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+
+    await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue('enabled')
+    await wrapper.get('#bulk-edit-auto-reset-credit-7d').setValue('80')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    const review = wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!
+    expect(review.props('show')).toBe(true)
+    expect(translate).toHaveBeenCalledWith('admin.accounts.autoResetCredit.review.currentValues', {
+      values: '89.95%, 90%'
+    })
+  })
+
   it('自动重置卡阈值可单独修改并校验范围', async () => {
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
+      id,
+      platform: 'openai',
+      type: 'oauth',
+      parent_account_id: null,
+      extra: { auto_reset_credit_5h_threshold: 0.4 }
+    } as any))
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
       selectedTypes: ['oauth']

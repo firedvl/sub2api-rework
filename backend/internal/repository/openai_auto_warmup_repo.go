@@ -37,32 +37,48 @@ func (r *openAIAutoWarmupRepository) claim(ctx context.Context, accountID int64,
 	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtextextended('openai_auto_warmup:' || $1::text, 0))", accountID); err != nil {
 		return nil, false, err
 	}
-	var existingID int64
+	existing := &service.OpenAIAutoWarmupAttempt{AccountID: accountID, WindowType: windowType}
+	var retryable bool
 	if retryAfter > 0 {
 		err = tx.QueryRowContext(ctx, `
-			SELECT id
+			SELECT id, reset_at, attempted_at, status, COALESCE(error_code, ''),
+			       status = 'failed' AND COALESCE(error_code, '') IN ('OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED', 'OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE')
+			       AND attempted_at <= NOW() - INTERVAL '10 minutes'
 			FROM openai_auto_warmup_attempts
 			WHERE account_id = $1
 			  AND window_type = $2
 			  AND attempted_at >= NOW() - ($3 * INTERVAL '1 second')
 			ORDER BY attempted_at DESC
-			LIMIT 1`, accountID, windowType, int64(retryAfter/time.Second)).Scan(&existingID)
+			LIMIT 1`, accountID, windowType, int64(retryAfter/time.Second)).Scan(&existing.ID, &existing.ResetAt, &existing.AttemptedAt, &existing.Status, &existing.ErrorCode, &retryable)
 	} else {
 		err = tx.QueryRowContext(ctx, `
-			SELECT id
+			SELECT id, reset_at, attempted_at, status, COALESCE(error_code, ''),
+			       status = 'failed' AND COALESCE(error_code, '') IN ('OPENAI_AUTO_WARMUP_MODEL_RESOLUTION_FAILED', 'OPENAI_AUTO_WARMUP_MODEL_UNAVAILABLE')
+			       AND attempted_at <= NOW() - INTERVAL '10 minutes'
 			FROM openai_auto_warmup_attempts
 			WHERE account_id = $1
 			  AND window_type = $2
 			  AND reset_at BETWEEN $3 AND $4
 			LIMIT 1`,
 			accountID, windowType, resetAt.Add(-openAIAutoWarmupResetJitter), resetAt.Add(openAIAutoWarmupResetJitter),
-		).Scan(&existingID)
+		).Scan(&existing.ID, &existing.ResetAt, &existing.AttemptedAt, &existing.Status, &existing.ErrorCode, &retryable)
 	}
 	if err == nil {
+		// No inference was dispatched for these two model preflight failures.
+		// All pending or uncertain sends retain their original claim indefinitely.
+		if retryable {
+			if err = tx.QueryRowContext(ctx, `
+				UPDATE openai_auto_warmup_attempts
+				SET status = 'pending', attempted_at = NOW(), completed_at = NULL, error_code = NULL
+				WHERE id = $1 RETURNING attempted_at`, existing.ID).Scan(&existing.AttemptedAt); err != nil {
+				return nil, false, err
+			}
+			existing.Status, existing.ErrorCode = service.OpenAIAutoWarmupStatusPending, ""
+		}
 		if err = tx.Commit(); err != nil {
 			return nil, false, err
 		}
-		return nil, false, nil
+		return existing, retryable, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err

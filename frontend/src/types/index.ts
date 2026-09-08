@@ -1222,6 +1222,12 @@ export interface Account {
       error_code?: string
     }
     auto_warmup_enabled?: boolean
+    codex_auto_warmup_evaluation?: {
+      reason: string
+      checked_at: string
+      observed_at?: string
+      next_eligible_at?: string
+    }
     codex_auto_warmup_state?: {
       status?: string
       attempted_at?: string

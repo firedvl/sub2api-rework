@@ -246,6 +246,7 @@
                     {{ summary.groups.join(', ') }}
                   </p>
                   <p v-if="summary.error" class="operator-capacity-account-error">{{ summary.error }}</p>
+                  <slot name="account-maintenance" :account="summary.account" />
                 </div>
 
                 <div v-if="summary.windows.length" class="operator-capacity-window-details">

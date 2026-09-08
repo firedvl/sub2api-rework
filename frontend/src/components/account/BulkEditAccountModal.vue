@@ -45,7 +45,7 @@
               type="number"
               min="0.1"
               max="100"
-              step="0.1"
+              step="any"
               class="input"
               :placeholder="t('admin.accounts.bulkEdit.noChange')"
             />
@@ -60,12 +60,18 @@
               type="number"
               min="0.1"
               max="100"
-              step="0.1"
+              step="any"
               class="input"
               :placeholder="t('admin.accounts.bulkEdit.noChange')"
             />
           </div>
         </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.autoResetCredit.thresholdHint') }}
+        </p>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.autoResetCredit.example') }}
+        </p>
       </div>
 
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="bulk-edit-auto-warmup">
@@ -1542,6 +1548,38 @@
     @confirm="handleMixedChannelConfirm"
     @cancel="handleMixedChannelCancel"
   />
+
+  <ConfirmDialog
+    :show="showAutoResetCreditReview"
+    :title="t('admin.accounts.autoResetCredit.review.title')"
+    :message="t('admin.accounts.autoResetCredit.review.bulkMessage')"
+    :confirm-text="t('common.confirm')"
+    :cancel-text="t('common.cancel')"
+    @confirm="handleAutoResetCreditReviewConfirm"
+    @cancel="handleAutoResetCreditReviewCancel"
+  >
+    <dl v-if="pendingAutoResetCreditReview" class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.review.accounts') }}</dt>
+        <dd data-testid="reset-credit-review-affected-count">{{ pendingAutoResetCreditReview.affectedCount }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.threshold5h') }}</dt>
+        <dd>{{ pendingAutoResetCreditReview.threshold5h }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.threshold7d') }}</dt>
+        <dd>{{ pendingAutoResetCreditReview.threshold7d }}</dd>
+      </div>
+      <div class="flex justify-between gap-4">
+        <dt>{{ t('admin.accounts.autoResetCredit.review.trigger') }}</dt>
+        <dd>{{ t('admin.accounts.autoResetCredit.review.either') }}</dd>
+      </div>
+      <p v-if="pendingAutoResetCreditReview.lowered" class="text-amber-700 dark:text-amber-300">
+        {{ t('admin.accounts.autoResetCredit.review.lowered') }}
+      </p>
+    </dl>
+  </ConfirmDialog>
 </template>
 
 <script setup lang="ts">
@@ -1554,6 +1592,7 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
+  Account,
   OpenAICompactMode,
   OpenAIEndpointCapability,
   OpenAIResponsesMode
@@ -1749,6 +1788,7 @@ const autoWarmupMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCreditMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCredit5hThreshold = ref('')
 const autoResetCredit7dThreshold = ref('')
+const autoResetCreditRate = (percent: string) => Number((Number(percent) / 100).toPrecision(15))
 const autoWarmupOptions = computed(() => [
   { value: 'unchanged', label: t('admin.accounts.bulkEdit.noChange') },
   { value: 'enabled', label: t('admin.accounts.bulkEdit.enable') },
@@ -1760,6 +1800,14 @@ const submitting = ref(false)
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningMessage = ref('')
 const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
+const showAutoResetCreditReview = ref(false)
+const pendingAutoResetCreditReview = ref<{
+  updates: Record<string, unknown>
+  affectedCount: number
+  threshold5h: string
+  threshold7d: string
+  lowered: boolean
+} | null>(null)
 const baseUrl = ref('')
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
@@ -2033,10 +2081,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     updates.auto_reset_credit_enabled = autoResetCreditMode.value === 'enabled'
   }
   if (autoResetCredit5hThreshold.value !== '') {
-    updates.auto_reset_credit_5h_threshold = Number(autoResetCredit5hThreshold.value) / 100
+    updates.auto_reset_credit_5h_threshold = autoResetCreditRate(autoResetCredit5hThreshold.value)
   }
   if (autoResetCredit7dThreshold.value !== '') {
-    updates.auto_reset_credit_7d_threshold = Number(autoResetCredit7dThreshold.value) / 100
+    updates.auto_reset_credit_7d_threshold = autoResetCreditRate(autoResetCredit7dThreshold.value)
   }
 
   if (enableConcurrency.value) {
@@ -2291,6 +2339,71 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
   }
 }
 
+const isAutoResetCreditTarget = (account: Account) =>
+  account.platform === 'openai' && account.type === 'oauth' && !account.parent_account_id
+
+const formatAutoResetCreditPercent = (ratio: number) => Number((ratio * 100).toPrecision(14)).toString()
+
+const reviewThresholdLabel = (next: number | null, targets: Account[], key: 'auto_reset_credit_5h_threshold' | 'auto_reset_credit_7d_threshold') => {
+  if (next !== null) {
+    return t('admin.accounts.autoResetCredit.review.usedAt', { value: formatAutoResetCreditPercent(next) })
+  }
+  const values = Array.from(new Set(targets.map((account) => formatAutoResetCreditPercent(account.extra?.[key] ?? 1))))
+  return t('admin.accounts.autoResetCredit.review.currentValues', { values: values.map((value) => `${value}%`).join(', ') })
+}
+
+const readAutoResetCreditTargets = async (): Promise<Account[]> => {
+  if (targetMode.value === 'selected') {
+    return Promise.all(props.accountIds.map((id) => adminAPI.accounts.getById(id)))
+  }
+
+  const filters = (props.target?.filters ?? {}) as Parameters<typeof adminAPI.accounts.list>[2]
+  const first = await adminAPI.accounts.list(1, 1000, filters)
+  const accounts = [...first.items]
+  const pages = Math.max(first.pages ?? 0, Math.ceil(first.total / 1000))
+  for (let page = 2; page <= pages; page++) {
+    const result = await adminAPI.accounts.list(page, 1000, filters)
+    accounts.push(...result.items)
+  }
+  if (accounts.length !== first.total) throw new Error('Incomplete account list')
+  return accounts
+}
+
+const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
+  if (targetPreviewCount.value < 2) return false
+  const changesEnabled = updates.auto_reset_credit_enabled === true
+  const next5h = typeof updates.auto_reset_credit_5h_threshold === 'number'
+    ? updates.auto_reset_credit_5h_threshold
+    : null
+  const next7d = typeof updates.auto_reset_credit_7d_threshold === 'number'
+    ? updates.auto_reset_credit_7d_threshold
+    : null
+  if (!changesEnabled && next5h === null && next7d === null) return false
+
+  const targets = (await readAutoResetCreditTargets()).filter(isAutoResetCreditTarget)
+  const reviewedIDs = new Set<number>()
+  let lowered = false
+  for (const account of targets) {
+    const enabling = changesEnabled && account.extra?.auto_reset_credit_enabled !== true
+    const current5h = account.extra?.auto_reset_credit_5h_threshold ?? 1
+    const current7d = account.extra?.auto_reset_credit_7d_threshold ?? 1
+    const loweredHere = (next5h !== null && next5h < current5h - 1e-12) ||
+      (next7d !== null && next7d < current7d - 1e-12)
+    if (enabling || loweredHere) reviewedIDs.add(account.id)
+    lowered ||= loweredHere
+  }
+  if (reviewedIDs.size < 2) return false
+
+  pendingAutoResetCreditReview.value = {
+    updates,
+    affectedCount: targets.length,
+    threshold5h: reviewThresholdLabel(next5h, targets, 'auto_reset_credit_5h_threshold'),
+    threshold7d: reviewThresholdLabel(next7d, targets, 'auto_reset_credit_7d_threshold'),
+    lowered
+  }
+  return true
+}
+
 const handleSubmit = async () => {
   if (targetMode.value === 'selected' && props.accountIds.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
@@ -2369,6 +2482,16 @@ const handleSubmit = async () => {
   const built = buildUpdatePayload()
   if (!built) {
     appStore.showError(t('admin.accounts.bulkEdit.noFieldsSelected'))
+    return
+  }
+
+  try {
+    if (await needsAutoResetCreditReview(built)) {
+      showAutoResetCreditReview.value = true
+      return
+    }
+  } catch (error: any) {
+    appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
     return
   }
 
@@ -2473,6 +2596,20 @@ const handleMixedChannelCancel = () => {
   pendingUpdatesForConfirm.value = null
 }
 
+const handleAutoResetCreditReviewConfirm = async () => {
+  const review = pendingAutoResetCreditReview.value
+  showAutoResetCreditReview.value = false
+  pendingAutoResetCreditReview.value = null
+  if (!review) return
+  const canContinue = await preCheckMixedChannelRisk(review.updates)
+  if (canContinue) await submitBulkUpdate(review.updates)
+}
+
+const handleAutoResetCreditReviewCancel = () => {
+  showAutoResetCreditReview.value = false
+  pendingAutoResetCreditReview.value = null
+}
+
 // Reset form when modal closes
 watch(
   () => props.show,
@@ -2551,6 +2688,8 @@ watch(
       mixedChannelWarningMessage.value = ''
       pendingUpdatesForConfirm.value = null
       mixedChannelConfirmed.value = false
+      showAutoResetCreditReview.value = false
+      pendingAutoResetCreditReview.value = null
     }
   }
 )

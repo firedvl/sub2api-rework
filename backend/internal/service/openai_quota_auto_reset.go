@@ -388,12 +388,16 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return nil
 	}
 	if !config.Enabled {
+		if !recoverable && warmupEnabled && openAIAutoWarmupQuotaRetryPending(account.Extra, time.Now()) {
+			return nil
+		}
 		if !recoverable && (!warmupEnabled || !account.IsSchedulable() || !openAIAutoResetSnapshotStale(account.Extra, time.Now())) {
 			return nil
 		}
 		now := time.Now()
 		usage, queryErr := s.quota.QueryUsage(ctx, accountID)
 		if queryErr != nil || usage == nil {
+			s.persistOpenAIAutoWarmupEvaluation(ctx, account, openAIAutoWarmupQuotaFailureReason(queryErr), now)
 			return queryErr
 		}
 		if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {
@@ -442,6 +446,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 
 	usage, err := s.quota.QueryUsage(ctx, accountID)
 	if err != nil || usage == nil {
+		s.persistOpenAIAutoWarmupEvaluation(ctx, account, openAIAutoWarmupQuotaFailureReason(err), now)
 		return s.failState(ctx, accountID, checking, "RESET_CREDIT_QUERY_FAILED", err)
 	}
 	if err := s.persistFreshUsage(ctx, accountID, usage, now); err != nil {

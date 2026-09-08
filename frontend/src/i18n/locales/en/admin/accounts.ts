@@ -891,11 +891,25 @@ export default {
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
 	  autoResetCredit: {
 	    title: 'Automatically use reset credits',
-	    hint: 'Uses the earliest-expiring available credit only when actual usage reaches a threshold. Off by default; the account remains paused if no credit is available or reset fails.',
-	    threshold5h: '5h auto-reset threshold (%)',
-	    threshold7d: '7d auto-reset threshold (%)',
-	    thresholdHint: 'Each window is evaluated independently. Enter 0.1–100; both default to 100.',
-	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.'
+	    hint: 'A Reset Credit may be used automatically when either window reaches its configured used-quota threshold.',
+	    threshold5h: '5-hour used-quota threshold (%)',
+	    threshold7d: 'Weekly used-quota threshold (%)',
+	    thresholdHint: '5-hour threshold OR weekly threshold. Enter 0.1–100; both default to 100.',
+	    example: '90% means a Reset Credit becomes eligible at 90% used (about 10% remaining). A lower percentage triggers earlier.',
+	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.',
+	    review: {
+	      title: 'Review automatic Reset Credit use',
+	      message: 'Confirm these settings before saving.',
+	      bulkMessage: 'Confirm the affected accounts and effective trigger settings before saving.',
+	      enabled: 'Auto Reset Credit',
+	      accounts: 'Accounts affected',
+	      unchanged: 'Keep current value',
+	      currentValues: 'Current values: {values} USED',
+	      usedAt: 'Use a credit at >= {value}% USED',
+	      trigger: 'Trigger',
+	      either: 'Either threshold',
+	      lowered: 'Lowering this value causes Reset Credits to become eligible earlier.'
+	    }
 	  },
 	  autoWarmup: {
 	    title: 'Automatic warm-up',
@@ -907,6 +921,27 @@ export default {
 	    filterDisabled: 'Auto Warm-up disabled',
 	    lastAttempt: 'Last attempt: {status}, {time}',
 	    unknownTime: 'time unavailable',
+        observedAt: 'Last quota observation',
+        attemptedAt: 'Last warm-up attempt',
+        succeededAt: 'Last successful warm-up',
+        nextEligibleAt: 'Next eligible check',
+        reason: {
+          disabled_global: 'Warm-up disabled globally',
+          disabled_account: 'Warm-up disabled for this account',
+          account_not_schedulable: 'Account not schedulable',
+          credential_attention: 'Credential attention required',
+          quota_unavailable: 'Quota data unavailable',
+          current_window_complete: 'Warm-up complete for current window',
+          model_unavailable: 'No eligible model available; bounded retry pending',
+          failed: 'Warm-up failed; already attempted this window',
+          pending: 'Warm-up attempt pending',
+          already_attempted: 'Already attempted this window',
+          waiting_new_window: 'Waiting for a new 5-hour window',
+          waiting_second_observation: 'Waiting for second quota observation',
+          retry_floor: 'Waiting for retry time',
+          claim_unavailable: 'Warm-up claim unavailable; next scan will retry',
+          waiting_evaluation: 'Waiting for warm-up evaluation'
+        },
 	    status: {
 	      pending: 'Pending',
 	      succeeded: 'Succeeded',
