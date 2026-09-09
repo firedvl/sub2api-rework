@@ -205,12 +205,12 @@ describe('production router navigation', () => {
     expect((await navigate('/login')).path).toBe('/admin/dashboard')
   })
 
-  it('applies simple-mode restrictions through the production route table', async () => {
+  it('allows simple-mode admins to manage groups', async () => {
     stores.auth.isAuthenticated = true
     stores.auth.isAdmin = true
     stores.auth.isSimpleMode = true
 
-    expect((await navigate('/admin/groups')).path).toBe('/admin/dashboard')
+    expect((await navigate('/admin/groups')).path).toBe('/admin/groups')
   })
 
   it('applies simple-mode restrictions to personal subscription routes', async () => {

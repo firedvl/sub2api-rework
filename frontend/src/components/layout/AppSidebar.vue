@@ -286,8 +286,7 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
-// Track which parent nav groups are expanded
-const expandedGroups = ref<Set<string>>(new Set())
+const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
 
 // Site settings from appStore (cached, no flicker)
 const siteName = computed(() => appStore.siteName)
@@ -852,15 +851,11 @@ function isGroupActive(item: NavItem): boolean {
 }
 
 function isGroupExpanded(item: NavItem): boolean {
-  return expandedGroups.value.has(item.path) || isGroupActive(item)
+  return groupExpandOverrides.value.get(item.path) ?? isGroupActive(item)
 }
 
 function toggleGroup(item: NavItem) {
-  if (expandedGroups.value.has(item.path)) {
-    expandedGroups.value.delete(item.path)
-  } else {
-    expandedGroups.value.add(item.path)
-  }
+  groupExpandOverrides.value.set(item.path, !isGroupExpanded(item))
 }
 
 /**
@@ -872,8 +867,6 @@ function toggleGroup(item: NavItem) {
  */
 function handleGroupClick(item: NavItem) {
   if (sidebarCollapsed.value) {
-    appStore.toggleSidebar()
-    expandedGroups.value.add(item.path)
     return
   }
   if (item.expandOnly) {
@@ -884,9 +877,7 @@ function handleGroupClick(item: NavItem) {
   if (route.path !== item.path) {
     router.push(item.path)
   }
-  if (!expandedGroups.value.has(item.path)) {
-    expandedGroups.value.add(item.path)
-  }
+  groupExpandOverrides.value.set(item.path, true)
 }
 
 // Initialize theme

@@ -62,6 +62,9 @@ const usageLogsUpstreamModelMismatchIndex = "idx_usage_logs_upstream_model_misma
 const usageLogsEffectiveModelIndexesMigration = "226_add_usage_log_effective_model_indexes_notx.sql"
 const usageLogsEffectiveRequestedModelIndex = "idx_usage_logs_effective_requested_model_created"
 const usageLogsEffectiveUpstreamModelIndex = "idx_usage_logs_effective_upstream_model_created"
+const usageLogsUpstreamRequestIDIndexMigration = "241_add_usage_log_upstream_request_id_index_notx.sql"
+const usageLogsUpstreamRequestIDIndex = "idx_usage_logs_upstream_request_id"
+const groupModelAllowlistMigration = "244_group_model_allowlist.sql"
 
 type migrationChecksumCompatibilityRule struct {
 	fileChecksum       string
@@ -278,6 +281,9 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 	}
 
+	if err := ensureGroupModelAllowlistSchema(ctx, lockConn, fsys); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -305,9 +311,78 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 			}
 		}
 		return nil
+	case usageLogsUpstreamRequestIDIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamRequestIDIndex)
 	default:
 		return nil
 	}
+}
+
+func ensureGroupModelAllowlistSchema(ctx context.Context, db migrationConnection, fsys fs.FS) error {
+	if _, err := fs.Stat(fsys, groupModelAllowlistMigration); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect %s: %w", groupModelAllowlistMigration, err)
+	}
+	var applied bool
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE filename = $1)", groupModelAllowlistMigration).Scan(&applied); err != nil {
+		return fmt.Errorf("check %s: %w", groupModelAllowlistMigration, err)
+	}
+	if !applied {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
+		       COALESCE(pg_get_expr(d.adbin, d.adrelid), '')
+		FROM pg_attribute a
+		LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+		WHERE a.attrelid = 'groups'::regclass
+		  AND a.attname IN ('models_list_config', 'model_allowlist')
+		  AND NOT a.attisdropped
+	`)
+	if err != nil {
+		return fmt.Errorf("inspect group model policy schema: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var name, typ, defaultExpr string
+		var notNull bool
+		if err := rows.Scan(&name, &typ, &notNull, &defaultExpr); err != nil {
+			return fmt.Errorf("scan group model policy schema: %w", err)
+		}
+		columns[name] = typ == "jsonb" && notNull && (name != "model_allowlist" || strings.Contains(defaultExpr, "'{}'::jsonb"))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read group model policy schema: %w", err)
+	}
+	if !columns["models_list_config"] || !columns["model_allowlist"] {
+		return fmt.Errorf("%s was recorded but groups display and enforcement JSONB columns are not both present and non-null; restore a verified backup or apply a reviewed repair migration", groupModelAllowlistMigration)
+	}
+
+	var invalid bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM groups
+			WHERE model_allowlist IS NULL
+			   OR jsonb_typeof(model_allowlist) <> 'object'
+			   OR (model_allowlist ? 'enabled' AND jsonb_typeof(model_allowlist->'enabled') <> 'boolean')
+			   OR (model_allowlist ? 'models' AND (
+				jsonb_typeof(model_allowlist->'models') <> 'array'
+				OR EXISTS (SELECT 1 FROM jsonb_array_elements(model_allowlist->'models') AS model WHERE jsonb_typeof(model) <> 'string')
+			   ))
+			   OR (model_allowlist @> '{"enabled": true}'::jsonb AND (
+				NOT (model_allowlist ? 'models') OR jsonb_array_length(model_allowlist->'models') = 0
+			   ))
+		)
+	`).Scan(&invalid); err != nil {
+		return fmt.Errorf("validate group model policy JSON shape: %w", err)
+	}
+	if invalid {
+		return fmt.Errorf("%s was recorded but groups.model_allowlist has an invalid policy shape; restore a verified backup or apply a reviewed repair migration", groupModelAllowlistMigration)
+	}
+	return nil
 }
 
 func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db migrationConnection) error {

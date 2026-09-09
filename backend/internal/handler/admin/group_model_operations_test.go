@@ -46,7 +46,7 @@ func TestGetModelOperationsUsesProviderBackedCatalogWithoutSerializingSecrets(t 
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
-	handler := NewGroupHandler(modelOperationsAdminService{group: group}, nil, nil, gateway, nil)
+	handler := NewGroupHandler(modelOperationsAdminService{group: group}, nil, nil, gateway, nil, nil)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Params = gin.Params{{Key: "id", Value: "42"}}

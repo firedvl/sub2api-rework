@@ -13,8 +13,8 @@ The accepted rework baseline is defined once in
 `backend/internal/releaseinfo/metadata.json`:
 
 ```text
-"upstream_baseline": "v0.2.0"
-"upstream_baseline_sha": "aa236488351eb71e120fc2b6fb32e36b0374c918"
+"upstream_baseline": "v0.2.3"
+"upstream_baseline_sha": "8fa67d477d6651a744754392a8982ea589c26ae6"
 ```
 
 This document explains the baseline; scripts and builds consume the JSON record.
@@ -32,7 +32,7 @@ deploy anything.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.2.0..main v0.2.0..upstream/main
+git range-diff v0.2.3..main v0.2.3..upstream/main
 ./scripts/upstream-status.sh
 ```
 
@@ -105,6 +105,20 @@ The reviewer must compare the full upstream range and verify the classifications
 against the changed backend, API, provider, authentication, account, routing,
 configuration, migration, and frontend surfaces. Keep this a reviewed inventory;
 a diff parser cannot reliably infer feature semantics or applicability.
+
+## v0.2.3 Change Audit
+
+The integration adopts 193 upstream commits and 465 changed files from v0.2.0.
+[The complete capability ledger](UPSTREAM_V023_PARITY.md) records 82 dispositions,
+the independent display/enforcement policy, image-download security adaptation,
+and verification evidence. The first planned build identity is
+`0.2.3-rework.1`; integration metadata does not publish a release or authorize
+deployment. The integration PR requires human review before entering main.
+
+The supported updater source floor is 239, the rehearsed .13 production schema;
+the new tip is 244. Installations below 239 must first use a release qualified for
+that older source state. Fresh installs remain supported. Migrations 235..239
+are unchanged, and ambiguous enforcement restores require verified provenance.
 
 ## v0.2.0 Change Audit
 

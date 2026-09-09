@@ -441,7 +441,7 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCell class="operator-account-routing-groups" :groups="row.groups" :max-display="4" />
+            <AccountGroupsCell class="operator-account-routing-groups" :groups="accountGroupsForRow(row)" :max-display="4" />
           </template>
           <template #header-usage="{ column }">
             <div class="flex items-center">
@@ -695,7 +695,7 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
 import AutoWarmupStatus from '@/components/account/AutoWarmupStatus.vue'
-import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -752,6 +752,11 @@ const setAccountView = (view: AccountView, focus = false) => {
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
+const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
+const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] =>
+  (account.group_ids ?? [])
+    .map(id => groupsByID.value.get(id))
+    .filter((group): group is AdminGroup => Boolean(group))
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
 type AccountBulkEditTarget =
@@ -1293,7 +1298,7 @@ const {
   debouncedReload: baseDebouncedReload,
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
-} = useTableLoader<Account, any>({
+} = useTableLoader<AccountListItem, any>({
   fetchFn: adminAPI.accounts.list,
   initialParams: {
     platform: '',
@@ -1303,6 +1308,7 @@ const {
     auto_warmup: ['enabled', 'disabled'].includes(String(routeAutoWarmup)) ? String(routeAutoWarmup) : '',
     group: '',
     search: '',
+    lite: '1',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -1323,7 +1329,7 @@ const {
   toggleVisible,
   selectVisible: selectCurrentPage,
   batchUpdate
-} = useTableSelection<Account>({
+} = useTableSelection<AccountListItem>({
   rows: accounts,
   getId: (account) => account.id
 })
@@ -1365,8 +1371,6 @@ const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
 }
-
-const isFirstLoad = ref(true)
 
 const buildFleetFilters = () => ({
   platform: params.platform || '',
@@ -1470,17 +1474,11 @@ const load = async (options: AccountLoadOptions = {}) => {
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
-  if (isFirstLoad.value) {
-    requestParams.lite = '1'
-  }
+  requestParams.lite = '1'
   const [tableResult, fleetResult] = await Promise.allSettled([
     baseLoad(),
     loadFleetCapacity(options.forceFleetUsage ?? false)
   ])
-  if (isFirstLoad.value) {
-    isFirstLoad.value = false
-    delete requestParams.lite
-  }
   if (tableResult.status === 'rejected') throw tableResult.reason
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
   return (
@@ -2224,7 +2222,27 @@ const cols = computed(() =>
   )
 )
 
-const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
+const accountDetailLoading = new Set<number>()
+const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {
+  if (accountDetailLoading.has(account.id)) return null
+  accountDetailLoading.add(account.id)
+  try {
+    return await adminAPI.accounts.getById(account.id)
+  } catch (error) {
+    console.error('Failed to load account details:', error)
+    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+    return null
+  } finally {
+    accountDetailLoading.delete(account.id)
+  }
+}
+
+const handleEdit = async (a: AccountListItem) => {
+  const account = await loadAccountDetails(a)
+  if (!account) return
+  edAcc.value = account
+  showEdit.value = true
+}
 const openMenu = (a: Account, e: MouseEvent) => {
   menu.acc = a
 
@@ -2751,8 +2769,18 @@ const accountExportStepUp = useStepUp()
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
-const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }
-const handleViewStats = (a: Account) => { statsAcc.value = a; showStats.value = true }
+const handleTest = async (a: AccountListItem) => {
+  const account = await loadAccountDetails(a)
+  if (!account) return
+  testingAcc.value = account
+  showTest.value = true
+}
+const handleViewStats = async (a: AccountListItem) => {
+  const account = await loadAccountDetails(a)
+  if (!account) return
+  statsAcc.value = account
+  showStats.value = true
+}
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a
   scheduleModelOptions.value = []

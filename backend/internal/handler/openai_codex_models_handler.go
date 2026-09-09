@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,31 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	}
 
 	ifNoneMatch := c.GetHeader("If-None-Match")
+	if apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled {
+		manifest, account, err := h.gatewayService.FetchPinnedCodexModelsManifest(
+			c.Request.Context(), apiKey.Group, c.Query("client_version"),
+		)
+		if err == nil {
+			setOpsSelectedAccount(c, account.ID, account.Platform)
+			if err := service.FilterGroupCodexModelsManifest(manifest, apiKey.Group, ifNoneMatch); err != nil {
+				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to filter Codex models manifest")
+				return
+			}
+			writeCodexModelsManifestResponse(c, manifest)
+			return
+		}
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		if !apiKey.Group.CodexModelsManifestConfig.FallbackToScheduler {
+			if errors.Is(err, service.ErrNoPinnedCodexModelsAccounts) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available pinned OpenAI accounts")
+			} else {
+				h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+			}
+			return
+		}
+	}
 	dynamicManifest, dynamic, err := h.gatewayService.BuildGroupDynamicCodexModelsManifest(
 		c.Request.Context(),
 		apiKey.Group,

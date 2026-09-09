@@ -62,6 +62,9 @@ func newWatcher(client *updateServiceGitHubStub) *UpdateService {
 	svc := NewUpdateService(&updateServiceCacheStub{}, client, BuildInfo{
 		Version: "0.1.184-rework.8", Commit: "abc", Date: "2026-09-04T12:00:00Z", BuildType: "release",
 	})
+	// These fixtures exercise updates from the historical baseline and schema.
+	svc.metadata.UpstreamBaseline = "v0.2.0"
+	svc.metadata.MigrationMax = 239
 	svc.now = func() time.Time { return time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC) }
 	return svc
 }

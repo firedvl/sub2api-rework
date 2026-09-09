@@ -68,7 +68,9 @@ fields, provider identifiers, or compatibility names for translation alone.
 
 This project preserves the history of
 [Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api) and tracks it through the
-`upstream` Git remote. The baseline and sync process are recorded in
+`upstream` Git remote. This branch integrates upstream v0.2.3; the complete
+capability audit is in [UPSTREAM_V023_PARITY.md](docs/UPSTREAM_V023_PARITY.md).
+The baseline and sync process are recorded in
 [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md).
 
 The project remains licensed under the
