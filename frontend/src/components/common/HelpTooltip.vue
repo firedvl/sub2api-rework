@@ -43,7 +43,7 @@ function onEnter() {
 
 function onTriggerLeave(event: MouseEvent) {
   if (props.trigger !== 'hover') return
-  if (props.interactive && tooltipRef.value?.contains(event.relatedTarget as Node | null)) return
+  if (tooltipRef.value?.contains(event.relatedTarget as Node | null)) return
   if (props.interactive && clickedOpen.value) return
   closeTooltip()
 }
@@ -89,9 +89,9 @@ function onTriggerKeydown(event: KeyboardEvent) {
 }
 
 function onPanelLeave(event: MouseEvent) {
-  if (!props.interactive || clickedOpen.value) return
+  if (props.trigger !== 'hover' || clickedOpen.value) return
   if (triggerRef.value?.contains(event.relatedTarget as Node | null)) return
-  if (tooltipRef.value?.contains(document.activeElement)) return
+  if (props.interactive && tooltipRef.value?.contains(document.activeElement)) return
   closeTooltip()
 }
 

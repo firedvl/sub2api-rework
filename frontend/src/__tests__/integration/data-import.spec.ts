@@ -10,12 +10,16 @@ const { showError, previewImportData, importData } = vi.hoisted(() => ({
 
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
 vi.mock('@/api/admin', () => ({ adminAPI: { accounts: { previewImportData, importData } } }))
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values ? `${key}:${JSON.stringify(values)}` : key,
-  }),
-}))
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string, values?: Record<string, unknown>) =>
+        values ? `${key}:${JSON.stringify(values)}` : key,
+    }),
+  }
+})
 
 const account = (index: number) => ({
   name: `account-${index}`,

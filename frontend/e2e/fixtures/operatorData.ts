@@ -1050,6 +1050,10 @@ export function getOperatorFixtureData(
   }
 
   if (pathname === '/api/v1/admin/accounts') return paginated(operatorFixtureAccounts)
+  const accountDetailMatch = pathname.match(/^\/api\/v1\/admin\/accounts\/(\d+)$/)
+  if (accountDetailMatch) {
+    return operatorFixtureAccounts.find(account => account.id === Number(accountDetailMatch[1])) ?? null
+  }
   if (pathname === '/api/v1/admin/accounts/today-stats/batch') return { stats: todayStats }
   if (pathname === '/api/v1/admin/accounts/usage/batch') return { usage: accountUsage, errors: {} }
   const accountUsageMatch = pathname.match(/^\/api\/v1\/admin\/accounts\/(\d+)\/usage$/)

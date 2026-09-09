@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "rework_version": "0.2.0-rework.13",
-  "upstream_baseline": "v0.2.0",
-  "upstream_baseline_sha": "aa236488351eb71e120fc2b6fb32e36b0374c918",
+  "rework_version": "0.2.3-rework.1",
+  "upstream_baseline": "v0.2.3",
+  "upstream_baseline_sha": "8fa67d477d6651a744754392a8982ea589c26ae6",
   "upstream_repository": "Wei-Shaw/sub2api",
   "rework_repository": "firedvl/sub2api-rework",
   "artifact_repository": "ghcr.io/firedvl/sub2api-rework",
   "update_channel": "stable",
   "default_policy": "manual",
   "minimum_updater_version": "1.1.3",
-  "migration_min": 235,
-  "migration_max": 239
+  "migration_min": 239,
+  "migration_max": 244
 }
