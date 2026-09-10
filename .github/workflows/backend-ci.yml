@@ -69,7 +69,7 @@ jobs:
         run: |
           legacy_source=/tmp/sub2api-rework-updater-113-source
           mkdir -p "$legacy_source"
-          git archive 5fe5aa50b15c7e6db5d25333c783c267b1de851f | tar -x -C "$legacy_source"
+          git -C .. archive 5fe5aa50b15c7e6db5d25333c783c267b1de851f | tar -x -C "$legacy_source"
           (
             cd "$legacy_source/backend"
             CGO_ENABLED=0 GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org \
