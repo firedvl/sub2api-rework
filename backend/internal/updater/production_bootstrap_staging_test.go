@@ -26,30 +26,35 @@ import (
 )
 
 const (
-	stagingSourceVersion = "0.1.183-rework.3"
-	stagingTargetVersion = "0.1.183-rework.8"
-	stagingFailedVersion = "0.1.183-rework.9"
+	stagingSourceVersion = "0.2.0-rework.13"
+	stagingTargetVersion = "0.2.3-rework.1"
+	stagingFailedVersion = "0.2.3-rework.2"
 	stagingUpdaterHome   = "/var/lib/sub2api-rework-updater"
 	stagingUpdaterRun    = "/run/sub2api-rework-updater"
-	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingSourceVersion
-	stagingFixtureImage  = "ghcr.io/firedvl/sub2api-rework:0.1.183-rework.4"
-	stagingTargetImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
+	stagingSourceImage   = "ghcr.io/firedvl/sub2api-rework@sha256:e0536d929f078f15989c1cb0e56fc24170f853e4ddc1c4717c12fefc558fae64"
 	stagingFailedImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingFailedVersion
-	stagingTargetDigest  = "sha256:4874cbed4a6bd04edb307af49b13725c31f8da942d0c31b19d1e0d18e5c4dad5"
 	stagingRedisSecret   = "synthetic-staging-redis-password"
 	stagingWrongSecret   = "synthetic-staging-wrong-redis-password"
 )
 
-type stagingManifestFetcher struct{}
+type stagingManifestFetcher struct {
+	targetImage  string
+	targetDigest string
+}
 
-func (stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte, error) {
+func (f stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte, error) {
+	image := f.targetImage
+	digest := f.targetDigest
+	if version == stagingFailedVersion {
+		image = stagingFailedImage
+	}
 	manifest := updatecontract.Manifest{
-		SchemaVersion: 1, ReworkVersion: version, UpstreamVersion: "v0.1.183",
+		SchemaVersion: 1, ReworkVersion: version, UpstreamVersion: "v0.2.3",
 		GitSHA: strings.Repeat(map[string]string{
 			stagingTargetVersion: "a", stagingFailedVersion: "b",
 		}[version], 40),
-		Image: "ghcr.io/firedvl/sub2api-rework:" + version, ImageDigest: stagingTargetDigest,
-		MigrationMin: 232, MigrationMax: 232, ReleaseDate: "2026-08-28T12:00:00Z",
+		Image: image, ImageDigest: digest,
+		MigrationMin: 239, MigrationMax: 244, ReleaseDate: "2026-09-09T00:00:00Z",
 		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: Version,
 	}
 	if manifest.GitSHA == "" {
@@ -60,17 +65,21 @@ func (stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte, 
 
 type stagingRunner struct {
 	ExecRunner
+	targetImage  string
+	targetDigest string
+	targetID     string
 	mu           sync.Mutex
 	failNextUp   bool
 	healthFailed bool
 }
 
 func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error {
-	if len(args) == 2 && args[0] == "pull" && (args[1] == stagingTargetImage || args[1] == stagingFailedImage) {
-		return nil
+	if len(args) == 2 && args[0] == "pull" && (args[1] == runner.targetImage || args[1] == stagingFailedImage) {
+		return nil // The candidate is already verified by Docker's native RepoDigest.
 	}
-	if err := runner.ExecRunner.Run(ctx, stdin, stdout, name, args...); err != nil {
-		return err
+	commandErr := runner.ExecRunner.Run(ctx, stdin, stdout, name, args...)
+	if commandErr != nil {
+		return commandErr
 	}
 	if strings.Contains(strings.Join(args, " "), " up -d --no-deps sub2api") {
 		runner.mu.Lock()
@@ -184,18 +193,24 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 			t.Fatalf("%s Compose config failed under updater sandbox: %v: %s", config.name, err, output)
 		}
 	}
+	candidateImage := strings.TrimSpace(os.Getenv("SUB2API_STAGING_TARGET_IMAGE"))
+	targetDigest := strings.TrimSpace(os.Getenv("SUB2API_STAGING_TARGET_DIGEST"))
+	if candidateImage == "" || targetDigest == "" || !strings.HasPrefix(targetDigest, "sha256:") {
+		t.Fatal("staging target image and OCI digest must be provided by the candidate build")
+	}
+	targetImage := "ghcr.io/firedvl/sub2api-rework:" + stagingTargetVersion
+	targetID, err := runStagingCommand(docker, "image", "inspect", candidateImage, "--format", "{{.Id}}")
+	if err != nil || strings.TrimSpace(targetID) == "" {
+		t.Fatalf("candidate staging image is unavailable: %v: %s", err, targetID)
+	}
+	if output, err := runStagingCommand(docker, "tag", candidateImage, targetImage); err != nil {
+		t.Fatalf("tag candidate staging image: %v: %s", err, output)
+	}
 	t.Cleanup(func() {
 		_, _ = runStagingCommand(docker, append(compose, "down", "-v", "--remove-orphans")...)
-		_, _ = runStagingCommand(docker, "image", "rm", stagingTargetImage)
+		_, _ = runStagingCommand(docker, "image", "rm", targetImage)
 		_, _ = runStagingCommand(docker, "image", "rm", stagingFailedImage)
 	})
-	// The unpublished target uses qualified fixture bytes under a local-only tag.
-	if output, err := runStagingCommand(docker, "pull", stagingFixtureImage); err != nil {
-		t.Fatalf("pull staging fixture image: %v: %s", err, output)
-	}
-	if output, err := runStagingCommand(docker, "tag", stagingFixtureImage, stagingTargetImage); err != nil {
-		t.Fatalf("tag staging target image: %v: %s", err, output)
-	}
 	stateDirectory := filepath.Join(root, "var", "lib", "sub2api-rework-updater")
 	policy := Policy{
 		SchemaVersion:       2,
@@ -212,26 +227,23 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		ManifestBaseURL:        "https://github.com/firedvl/sub2api-rework/releases/download",
 		HealthBaseURL:          "http://127.0.0.1:" + strconv.Itoa(port),
 		MinimumFreeBytes:       1, OperationTimeoutSeconds: 300, HealthTimeoutSeconds: 5,
-		InitialInstalledVersion: stagingSourceVersion, InitialMigration: 232,
+		InitialInstalledVersion: stagingSourceVersion, InitialMigration: 239,
 	}
-	runner := &stagingRunner{ExecRunner: ExecRunner{Directory: deploymentDirectory}}
+	runner := &stagingRunner{ExecRunner: ExecRunner{Directory: deploymentDirectory}, targetImage: targetImage, targetDigest: targetDigest, targetID: strings.TrimSpace(targetID)}
+	fetcher := stagingManifestFetcher{targetImage: targetImage, targetDigest: targetDigest}
 	unsafePolicy := policy
 	unsafePolicy.AuditPath = filepath.Join(unsafeAuditDirectory, "audit.jsonl")
-	if _, err := NewService(unsafePolicy, runner, stagingManifestFetcher{}); err == nil || !strings.Contains(err.Error(), "unsafe parent") {
+	if _, err := NewService(unsafePolicy, runner, fetcher); err == nil || !strings.Contains(err.Error(), "unsafe parent") {
 		t.Fatalf("unsafe /var/log-style audit path was not rejected: %v", err)
 	}
-	service, err := NewService(policy, runner, stagingManifestFetcher{})
-	if err != nil {
+	// The historical binary initializes the persisted .13 updater state before
+	// this test replaces it with the current binary.
+	var service *Service
+	if err := validateManagedPaths(policy); err != nil {
 		t.Fatal(err)
 	}
-	status, err := service.Status()
-	if err != nil || status.UpdaterVersion != Version || status.InstalledVersion != stagingSourceVersion || status.CurrentMigration != 232 {
-		t.Fatalf("unexpected staging bootstrap status: %+v, %v", status, err)
-	}
 	assertStagingManagedPath(t, stateDirectory, 0700)
-	assertStagingManagedPath(t, policy.StatePath, 0600)
 	assertStagingManagedPath(t, policy.BackupDirectory, 0700)
-	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
 
 	var stopServer context.CancelFunc
 	var serverError chan error
@@ -271,24 +283,34 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		stopServer = nil
 		serverError = nil
 	}
-	startUpdater()
 	t.Cleanup(stopUpdater)
+	legacyStop := startStagingLegacyUpdater(t, policy)
+	t.Cleanup(legacyStop)
 	if output, err := runStagingCommand(docker, append(compose, "up", "-d", "--wait", "--wait-timeout", "180")...); err != nil {
 		logs, _ := runStagingCommand(docker, append(compose, "logs", "--no-color", "--tail", "100")...)
 		t.Fatalf("start staging deployment: %v: %s\n%s", err, output, logs)
 	}
+	if migration := stagingMigration(t, docker, compose); migration != 239 {
+		t.Fatalf("source image did not reach migration 239: %d", migration)
+	}
+	if got := stagingApplicationImageReference(t, docker, compose); got != stagingSourceImage {
+		t.Fatalf("source application does not use the exact .13 digest: %q", got)
+	}
+	stagingSQL(t, docker, compose, "CREATE TABLE recovery_source_sentinel (value text NOT NULL); INSERT INTO recovery_source_sentinel VALUES ('source-before-backup')")
 
-	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	assertStagingManagedPath(t, policy.StatePath, 0600)
+	assertStagingUpdaterVersion(t, docker, compose, policy.SocketPath, "1.1.3")
 	runtimeDirectoryBefore, err := os.Stat(socketDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	containerIDsBefore := stagingContainerIDs(t, docker, compose)
-	stopUpdater()
-	service, err = NewService(policy, runner, stagingManifestFetcher{})
+	legacyStop()
+	service, err = NewService(policy, runner, fetcher)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var status updatecontract.UpdaterStatus
 	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
 	startUpdater()
 	runtimeDirectoryAfter, err := os.Stat(socketDirectory)
@@ -302,8 +324,8 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 		}
 	}
 	status, err = service.Status()
-	if err != nil || status.CurrentMigration != 232 {
-		t.Fatalf("updater restart changed migration 232: %+v, %v", status, err)
+	if err != nil || status.CurrentMigration != 239 {
+		t.Fatalf("updater restart changed migration 239: %+v, %v", status, err)
 	}
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	assertStagingRedisAuthModes(t, docker, compose, service, policy)
@@ -312,10 +334,31 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingTargetVersion)
-	waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
+	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
+	if status.CurrentMigration != 244 || stagingMigration(t, docker, compose) != 244 {
+		t.Fatalf("candidate installation did not reach migration 244: %+v", status)
+	}
+	if stagingApplicationImageID(t, docker, compose) != runner.targetID {
+		t.Fatal("candidate container does not use the locally built candidate image")
+	}
+	stagingSQL(t, docker, compose, "CREATE TABLE recovery_post_success_sentinel (value text NOT NULL); INSERT INTO recovery_post_success_sentinel VALUES ('must-be-lost')")
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationRecover, stagingSourceVersion)
+	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
+	if status.InstalledVersion != stagingSourceVersion || status.CurrentMigration != 239 || stagingMigration(t, docker, compose) != 239 {
+		t.Fatalf("post-success recovery did not restore source identity: %+v", status)
+	}
+	if got := stagingQuery(t, docker, compose, "SELECT value FROM recovery_source_sentinel"); got != "source-before-backup" {
+		t.Fatalf("source sentinel was not restored: %q", got)
+	}
+	if got := stagingQuery(t, docker, compose, "SELECT to_regclass('recovery_post_success_sentinel') IS NULL"); got != "t" {
+		t.Fatalf("post-success write survived destructive recovery: %q", got)
+	}
+	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
+	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 
-	if output, err := runStagingCommand(docker, "tag", stagingTargetImage, stagingFailedImage); err != nil {
+	if output, err := runStagingCommand(docker, "tag", targetImage, stagingFailedImage); err != nil {
 		t.Fatalf("tag staging failure image: %v: %s", err, output)
 	}
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingFailedVersion)
@@ -323,8 +366,8 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	runner.failNextApplicationHealth()
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingFailedVersion)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, 5*time.Minute)
-	if status.InstalledVersion != stagingTargetVersion || status.LastAttempt == nil || status.LastAttempt.RollbackResult != "succeeded" {
-		t.Fatalf("automatic rollback did not restore %s: %+v", stagingTargetVersion, status)
+	if status.InstalledVersion != stagingSourceVersion || status.LastAttempt == nil || status.LastAttempt.RollbackResult != "succeeded" {
+		t.Fatalf("automatic rollback did not restore %s: %+v", stagingSourceVersion, status)
 	}
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
@@ -587,6 +630,8 @@ func requestStagingOperation(t *testing.T, docker string, compose []string, sock
 	request := updatecontract.OperationRequest{Version: version, Actor: "admin:1"}
 	if operation == updatecontract.OperationInstall {
 		request.Confirmation = "INSTALL " + version
+	} else if operation == updatecontract.OperationRecover {
+		request.Confirmation = "RESTORE DATABASE AND ROLLBACK " + version
 	}
 	data, err := json.Marshal(request)
 	if err != nil {
@@ -599,6 +644,104 @@ func requestStagingOperation(t *testing.T, docker string, compose []string, sock
 	)
 	if output, err := runStagingCommand(docker, args...); err != nil {
 		t.Fatalf("request staging %s: %v: %s", operation, err, output)
+	}
+}
+
+func stagingSQL(t *testing.T, docker string, compose []string, query string) {
+	t.Helper()
+	args := append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", "sub2api", "-v", "ON_ERROR_STOP=1", "-c", query)
+	if output, err := runStagingCommand(docker, args...); err != nil {
+		t.Fatalf("staging SQL failed: %v: %s", err, output)
+	}
+}
+
+func stagingQuery(t *testing.T, docker string, compose []string, query string) string {
+	t.Helper()
+	args := append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", "sub2api", "-Atc", query)
+	output, err := runStagingCommand(docker, args...)
+	if err != nil {
+		t.Fatalf("staging query failed: %v: %s", err, output)
+	}
+	return strings.TrimSpace(output)
+}
+
+func stagingMigration(t *testing.T, docker string, compose []string) int {
+	t.Helper()
+	value := stagingQuery(t, docker, compose, migrationQuery)
+	migration, err := strconv.Atoi(value)
+	if err != nil {
+		t.Fatalf("parse staging migration %q: %v", value, err)
+	}
+	return migration
+}
+
+func stagingApplicationImageID(t *testing.T, docker string, compose []string) string {
+	t.Helper()
+	containerID, err := runStagingCommand(docker, append(append([]string(nil), compose...), "ps", "-q", "sub2api")...)
+	if err != nil || strings.TrimSpace(containerID) == "" {
+		t.Fatalf("find staging application: %v: %s", err, containerID)
+	}
+	imageID, err := runStagingCommand(docker, "inspect", "--format", "{{.Image}}", strings.TrimSpace(containerID))
+	if err != nil {
+		t.Fatalf("inspect staging application image: %v: %s", err, imageID)
+	}
+	return strings.TrimSpace(imageID)
+}
+
+func stagingApplicationImageReference(t *testing.T, docker string, compose []string) string {
+	t.Helper()
+	containerID, err := runStagingCommand(docker, append(append([]string(nil), compose...), "ps", "-q", "sub2api")...)
+	if err != nil || strings.TrimSpace(containerID) == "" {
+		t.Fatalf("find staging application: %v: %s", err, containerID)
+	}
+	image, err := runStagingCommand(docker, "inspect", "--format", "{{.Config.Image}}", strings.TrimSpace(containerID))
+	if err != nil {
+		t.Fatalf("inspect staging application reference: %v: %s", err, image)
+	}
+	return strings.TrimSpace(image)
+}
+
+func startStagingLegacyUpdater(t *testing.T, policy Policy) func() {
+	t.Helper()
+	path := strings.TrimSpace(os.Getenv("SUB2API_STAGING_LEGACY_UPDATER"))
+	if path == "" || !filepath.IsAbs(path) {
+		t.Fatal("staging legacy updater binary must be provided by the .13 source build")
+	}
+	configPath := filepath.Join(filepath.Dir(policy.StatePath), "legacy-updater.json")
+	data, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil || os.WriteFile(configPath, append(data, '\n'), 0600) != nil {
+		t.Fatal("write legacy updater policy")
+	}
+	command := exec.Command(path, "--config", configPath)
+	command.Dir = policy.DeploymentDirectory
+	if err := command.Start(); err != nil {
+		t.Fatalf("start legacy updater: %v", err)
+	}
+	waitForStagingSocket(t, policy.SocketPath)
+	stopped := false
+	return func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		if command.Process != nil {
+			_ = command.Process.Signal(os.Interrupt)
+		}
+		if err := command.Wait(); err != nil {
+			t.Fatalf("stop legacy updater: %v", err)
+		}
+	}
+}
+
+func assertStagingUpdaterVersion(t *testing.T, docker string, compose []string, socketPath, version string) {
+	t.Helper()
+	args := append(append([]string(nil), compose...),
+		"exec", "-T", "-u", "root", "sub2api", "su-exec", "sub2api",
+		"curl", "--silent", "--show-error", "--fail", "--unix-socket", socketPath, "http://updater/v1/status",
+	)
+	output, err := runStagingCommand(docker, args...)
+	if err != nil || !strings.Contains(output, `"updater_version":"`+version+`"`) {
+		t.Fatalf("application cannot reach updater %s: %v: %s", version, err, output)
 	}
 }
 

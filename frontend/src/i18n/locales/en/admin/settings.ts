@@ -661,7 +661,7 @@ export default {
       },
       updates: {
         title: 'Software Updates',
-        description: 'Check approved Sub2API Rework releases and ask the local updater to prepare, install, or roll back.',
+        description: 'Check approved Sub2API Rework releases and ask the local updater to prepare, install, roll back, or recover.',
         check: 'Check updates',
         loading: 'Checking approved releases...',
         loadFailed: 'Failed to check updates',
@@ -693,8 +693,11 @@ export default {
         prepare: 'Prepare',
         install: 'Install',
         rollback: 'Roll back',
+
+        recover: 'Restore database and roll back',
         installConfirm: 'Installing replaces the running release after the updater verifies the prepared image.',
         rollbackConfirm: 'Rolling back restores the updater-recorded previous release.',
+        recoverConfirm: 'This restores the pre-update PostgreSQL backup. Writes made after that backup will be lost.',
         confirmationLabel: 'Type {value} to confirm',
         confirmationMismatch: 'The confirmation text does not match.',
         states: {

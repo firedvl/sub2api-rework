@@ -30,6 +30,7 @@ type systemUpdater interface {
 	Prepare(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 	Install(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 	Rollback(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
+	Recover(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 }
 
 type SystemHandler struct {
@@ -120,6 +121,30 @@ func (h *SystemHandler) Rollback(c *gin.Context) {
 	middleware2.SetAuditAction(c, "admin.system.update.rollback")
 	h.start(c, updatecontract.OperationRollback, req, func(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
 		return h.updater.Rollback(ctx, request)
+	})
+}
+
+func (h *SystemHandler) Recover(c *gin.Context) {
+	req, ok := decodeUpdaterRequest(c)
+	if !ok {
+		return
+	}
+	status, err := h.updater.Status(c.Request.Context())
+	if err != nil {
+		h.updaterError(c, err)
+		return
+	}
+	if status == nil || status.RollbackVersion == "" || req.Version != status.RollbackVersion {
+		response.BadRequest(c, "Requested version is not the updater's recorded rollback target")
+		return
+	}
+	if req.Confirmation != "RESTORE DATABASE AND ROLLBACK "+req.Version {
+		response.BadRequest(c, "Explicit database recovery confirmation does not match the recorded target")
+		return
+	}
+	middleware2.SetAuditAction(c, "admin.system.update.recover")
+	h.start(c, updatecontract.OperationRecover, req, func(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+		return h.updater.Recover(ctx, request)
 	})
 }
 

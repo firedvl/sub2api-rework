@@ -73,6 +73,9 @@
           <button type="button" class="btn btn-danger btn-sm" :disabled="!canRollback || operating" @click="openConfirmation('rollback')">
             {{ t('admin.settings.updates.rollback') }}
           </button>
+          <button type="button" class="btn btn-danger btn-sm" :disabled="!canRecover || operating" @click="openConfirmation('recover')">
+            {{ t('admin.settings.updates.recover') }}
+          </button>
         </div>
       </template>
     </div>
@@ -82,7 +85,7 @@
       :title="confirmation ? t(`admin.settings.updates.${confirmation}`) : ''"
       :message="confirmationMessage"
       :confirm-text="t('common.confirm')"
-      :danger="confirmation === 'rollback'"
+      :danger="confirmation === 'rollback' || confirmation === 'recover'"
       @confirm="confirmOperation"
       @cancel="closeConfirmation"
     >
@@ -101,7 +104,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
-import { checkUpdates, installUpdate, prepareUpdate, rollbackUpdate, type ReleaseNotes, type UpdateStatus } from '@/api/admin/system'
+import { checkUpdates, installUpdate, prepareUpdate, recoverUpdate, rollbackUpdate, type ReleaseNotes, type UpdateStatus } from '@/api/admin/system'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAppStore } from '@/stores'
@@ -113,7 +116,7 @@ const status = ref<UpdateStatus | null>(null)
 const loading = ref(false)
 const operating = ref(false)
 const error = ref('')
-const confirmation = ref<'install' | 'rollback' | null>(null)
+const confirmation = ref<'install' | 'rollback' | 'recover' | null>(null)
 const confirmationText = ref('')
 let mounted = true
 
@@ -130,7 +133,8 @@ const rollbackVersion = computed(() => status.value?.updater.rollback_version ||
 const canPrepare = computed(() => !!status.value?.installable && !!targetVersion.value && status.value.updater.healthy && !status.value.updater.busy)
 const canInstall = computed(() => canPrepare.value && status.value?.updater.prepared_version === targetVersion.value)
 const canRollback = computed(() => !!rollbackVersion.value && status.value?.updater.healthy && !status.value.updater.busy)
-const expectedConfirmation = computed(() => confirmation.value === 'install' ? `INSTALL ${targetVersion.value}` : confirmation.value === 'rollback' ? `ROLLBACK ${rollbackVersion.value}` : '')
+const canRecover = computed(() => !!rollbackVersion.value && status.value?.updater.healthy && !status.value.updater.busy && supportsRecovery(status.value.updater.updater_version))
+const expectedConfirmation = computed(() => confirmation.value === 'install' ? `INSTALL ${targetVersion.value}` : confirmation.value === 'rollback' ? `ROLLBACK ${rollbackVersion.value}` : confirmation.value === 'recover' ? `RESTORE DATABASE AND ROLLBACK ${rollbackVersion.value}` : '')
 const confirmationMessage = computed(() => confirmation.value ? t(`admin.settings.updates.${confirmation.value}Confirm`) : '')
 const noteKeys: (keyof ReleaseNotes)[] = ['upstream', 'rework', 'compatibility', 'migrations', 'rollback']
 const notes = computed(() => noteKeys.flatMap((key) => {
@@ -141,6 +145,13 @@ const notes = computed(() => noteKeys.flatMap((key) => {
 function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function supportsRecovery(version: string | undefined): boolean {
+  const parts = version?.match(/^(\d+)\.(\d+)\.(\d+)$/)
+  if (!parts) return false
+  const [major, minor, patch] = parts.slice(1).map(Number)
+  return major > 1 || (major === 1 && (minor > 1 || (minor === 1 && patch >= 4)))
 }
 
 async function load(force = false): Promise<boolean> {
@@ -162,7 +173,7 @@ async function prepare() {
   await runOperation(() => prepareUpdate(targetVersion.value))
 }
 
-function openConfirmation(action: 'install' | 'rollback') {
+function openConfirmation(action: 'install' | 'rollback' | 'recover') {
   confirmation.value = action
   confirmationText.value = ''
 }
@@ -180,7 +191,11 @@ async function confirmOperation() {
   const action = confirmation.value
   const version = action === 'install' ? targetVersion.value : rollbackVersion.value
   closeConfirmation()
-  await runOperation(() => action === 'install' ? installUpdate(version, `INSTALL ${version}`) : rollbackUpdate(version, `ROLLBACK ${version}`))
+  await runOperation(() => action === 'install'
+    ? installUpdate(version, `INSTALL ${version}`)
+    : action === 'rollback'
+      ? rollbackUpdate(version, `ROLLBACK ${version}`)
+      : recoverUpdate(version, `RESTORE DATABASE AND ROLLBACK ${version}`))
 }
 
 async function runOperation(operation: () => Promise<unknown>) {

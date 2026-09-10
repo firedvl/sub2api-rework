@@ -116,6 +116,28 @@ func (s *Service) preflightRollback(ctx context.Context) (int, error) {
 	return s.preflight(ctx, nil, false)
 }
 
+// preflightRecovery intentionally does not query the application database:
+// recovery must be retryable after an interrupted database recreation.
+func (s *Service) preflightRecovery(ctx context.Context) error {
+	if err := s.validateDeploymentFiles(ctx); err != nil {
+		return safeDeploymentValidationError(err)
+	}
+	if err := s.checkDiskSpace(); err != nil {
+		return err
+	}
+	if err := s.runDocker(ctx, nil, io.Discard, "version", "--format", "{{.Server.Version}}"); err != nil {
+		return fmt.Errorf("docker is unavailable")
+	}
+	services, err := s.commandOutput(ctx, s.composeArgs("config", "--services")...)
+	if err != nil || !containsLine(services, s.policy.ApplicationService) || !containsLine(services, s.policy.DatabaseService) || !containsLine(services, s.policy.RedisService) {
+		return fmt.Errorf("compose deployment services are unavailable")
+	}
+	if err := s.checkPostgresMaintenance(ctx); err != nil {
+		return err
+	}
+	return s.checkRedis(ctx)
+}
+
 func (s *Service) validateDeploymentFiles(ctx context.Context) error {
 	for _, path := range s.policy.ComposeFiles {
 		if _, err := readManagedFile(path, 2*1024*1024, false); err != nil {
@@ -383,12 +405,21 @@ func (s *Service) createBackup(
 	if dumpErr != nil || closeErr != nil {
 		return nil, fmt.Errorf("postgresql backup failed")
 	}
+	databaseSHA256, err := managedFileChecksum(databaseBackup)
+	if err != nil {
+		return nil, fmt.Errorf("postgresql backup checksum failed")
+	}
+	environmentSHA256, err := managedFileChecksum(environmentCopy)
+	if err != nil {
+		return nil, fmt.Errorf("deployment environment checksum failed")
+	}
 
 	metadata := &backupMetadata{
 		UpdateID: updateID, Directory: directory, DatabaseBackup: databaseBackup,
 		EnvironmentCopy: environmentCopy, ComposeFiles: composeFiles,
 		SourceVersion: sourceVersion, TargetVersion: targetVersion,
 		SourceImage: sourceImage, SourceDigest: sourceDigest, SourceMigration: sourceMigration,
+		DatabaseSHA256: databaseSHA256, EnvironmentSHA256: environmentSHA256,
 		CreatedAt: s.now().UTC(),
 	}
 	data, err := json.MarshalIndent(metadata, "", "  ")
@@ -485,6 +516,7 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 		restoreErr := s.runDocker(ctx, dump, io.Discard, s.composeArgs(
 			"exec", "-T", s.policy.DatabaseService, "pg_restore", "-U", s.policy.DatabaseUser,
 			"-d", s.policy.DatabaseName, "--no-owner", "--no-privileges",
+			"--exit-on-error",
 		)...)
 		_ = dump.Close()
 		if restoreErr != nil {
@@ -497,11 +529,31 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 	return s.validateDeployment(ctx, backup.SourceMigration)
 }
 
-func (s *Service) recreateDatabase(ctx context.Context) error {
-	maintenanceDatabase := "postgres"
-	if s.policy.DatabaseName == maintenanceDatabase {
-		maintenanceDatabase = "template1"
+func (s *Service) pullAndVerifyRecordedImage(ctx context.Context, digest string) error {
+	if err := s.runDocker(ctx, nil, io.Discard, "pull", digest); err != nil {
+		return fmt.Errorf("previous image pull failed")
 	}
+	digests, err := s.imageDigests(ctx, digest)
+	if err != nil || !containsString(digests, digest) {
+		return fmt.Errorf("previous image digest is unavailable")
+	}
+	return nil
+}
+
+func (s *Service) validateRunningApplicationImage(ctx context.Context, expected string) error {
+	containerID, err := s.commandOutput(ctx, s.composeArgs("ps", "-q", s.policy.ApplicationService)...)
+	if err != nil || strings.TrimSpace(containerID) == "" {
+		return fmt.Errorf("recovered application container is unavailable")
+	}
+	image, err := s.commandOutput(ctx, "inspect", "--format", "{{.Config.Image}}", strings.TrimSpace(containerID))
+	if err != nil || strings.TrimSpace(image) != expected {
+		return fmt.Errorf("recovered application image does not match the recorded digest")
+	}
+	return nil
+}
+
+func (s *Service) recreateDatabase(ctx context.Context) error {
+	maintenanceDatabase := s.maintenanceDatabase()
 	database := `"` + s.policy.DatabaseName + `"`
 	owner := `"` + s.policy.DatabaseUser + `"`
 	if err := s.runDocker(ctx, nil, io.Discard, s.composeArgs(
@@ -513,6 +565,13 @@ func (s *Service) recreateDatabase(ctx context.Context) error {
 		return fmt.Errorf("database recreation failed")
 	}
 	return nil
+}
+
+func (s *Service) maintenanceDatabase() string {
+	if s.policy.DatabaseName == "postgres" {
+		return "template1"
+	}
+	return "postgres"
 }
 
 func (s *Service) restoreApplication(ctx context.Context, backup *backupMetadata) error {
@@ -550,6 +609,18 @@ func (s *Service) checkDatabase(ctx context.Context) error {
 	return s.runDocker(ctx, nil, io.Discard, s.composeArgs(
 		"exec", "-T", s.policy.DatabaseService, "pg_isready", "-U", s.policy.DatabaseUser, "-d", s.policy.DatabaseName,
 	)...)
+}
+
+func (s *Service) checkPostgresMaintenance(ctx context.Context) error {
+	maintenanceDatabase := s.maintenanceDatabase()
+	output, err := s.commandOutput(ctx, s.composeArgs(
+		"exec", "-T", s.policy.DatabaseService, "psql", "-U", s.policy.DatabaseUser, "-d", maintenanceDatabase,
+		"-v", "ON_ERROR_STOP=1", "-Atc", "SELECT rolsuper OR rolcreatedb FROM pg_roles WHERE rolname = current_user",
+	)...)
+	if err != nil || strings.TrimSpace(output) != "t" {
+		return fmt.Errorf("database recovery permissions are unavailable")
+	}
+	return nil
 }
 
 func (s *Service) checkRedis(ctx context.Context) error {
@@ -713,6 +784,19 @@ func composeChecksum(data []byte) string {
 	return fmt.Sprintf("sha256:%x", digest)
 }
 
+func managedFileChecksum(path string) (string, error) {
+	file, err := openManagedFile(path, 0, true)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
+}
+
 func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 	if backup == nil || backup.Directory == s.policy.BackupDirectory || !pathWithin(s.policy.BackupDirectory, backup.Directory) {
 		return fmt.Errorf("invalid backup directory")
@@ -763,6 +847,57 @@ func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 		return fmt.Errorf("invalid backup metadata")
 	}
 	return nil
+}
+
+func (s *Service) validateRecoveryBackup(backup *backupMetadata) error {
+	if err := s.validateBackupMetadata(backup); err != nil {
+		return err
+	}
+	databaseSHA256, databaseErr := managedFileChecksum(backup.DatabaseBackup)
+	environmentSHA256, environmentErr := managedFileChecksum(backup.EnvironmentCopy)
+	if databaseErr != nil || environmentErr != nil || backup.DatabaseSHA256 == "" || backup.EnvironmentSHA256 == "" ||
+		backup.DatabaseSHA256 != databaseSHA256 || backup.EnvironmentSHA256 != environmentSHA256 {
+		return fmt.Errorf("invalid recovery backup checksum")
+	}
+	recordedEnvironment, err := recoveryEnvironmentWithoutImage(backup.EnvironmentCopy)
+	if err != nil {
+		return fmt.Errorf("invalid recovery backup environment")
+	}
+	liveEnvironment, err := recoveryEnvironmentWithoutImage(s.policy.EnvironmentFile)
+	if err != nil || liveEnvironment != recordedEnvironment {
+		return fmt.Errorf("live deployment environment does not match recovery backup")
+	}
+	for index, file := range backup.ComposeFiles {
+		data, err := readManagedFile(s.policy.ComposeFiles[index], 2*1024*1024, false)
+		if err != nil || composeChecksum(data) != file.SHA256 {
+			return fmt.Errorf("live compose files do not match recovery backup")
+		}
+	}
+	return nil
+}
+
+func recoveryEnvironmentWithoutImage(path string) (string, error) {
+	data, err := readManagedFile(path, 2*1024*1024, true)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	filtered := make([]string, 0, len(lines))
+	images := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "SUB2API_IMAGE=") {
+			images++
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	if images > 1 {
+		return "", fmt.Errorf("duplicate SUB2API_IMAGE entries")
+	}
+	for len(filtered) > 0 && filtered[len(filtered)-1] == "" {
+		filtered = filtered[:len(filtered)-1]
+	}
+	return strings.Join(filtered, "\n"), nil
 }
 
 func selectImageDigest(image string, digests []string) string {

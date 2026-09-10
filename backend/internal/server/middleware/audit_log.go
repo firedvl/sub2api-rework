@@ -148,6 +148,7 @@ var auditActionOverrides = map[string]string{
 	"POST /api/v1/admin/system/prepare":                       "admin.system.update.prepare",
 	"POST /api/v1/admin/system/install":                       "admin.system.update.install",
 	"POST /api/v1/admin/system/rollback":                      "admin.system.update.rollback",
+	"POST /api/v1/admin/system/recover":                       "admin.system.update.recover",
 }
 
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
@@ -168,6 +169,7 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/system/prepare":                         {},
 	"POST /api/v1/admin/system/install":                         {},
 	"POST /api/v1/admin/system/rollback":                        {},
+	"POST /api/v1/admin/system/recover":                         {},
 	"POST /api/v1/admin/operator-assistant":                     {},
 }
 

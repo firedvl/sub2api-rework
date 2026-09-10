@@ -8,6 +8,7 @@ const (
 	OperationPrepare  Operation = "prepare"
 	OperationInstall  Operation = "install"
 	OperationRollback Operation = "rollback"
+	OperationRecover  Operation = "recover"
 )
 
 type UpdaterState string

@@ -688,8 +688,10 @@ export default {
         prepare: '准备',
         install: '安装',
         rollback: '回滚',
+        recover: '恢复数据库并回滚',
         installConfirm: '更新器验证已准备的镜像后，安装将替换正在运行的发布。',
         rollbackConfirm: '回滚将恢复更新器记录的上一版本。',
+        recoverConfirm: '这会恢复更新前的 PostgreSQL 备份。该备份之后的写入将丢失。',
         confirmationLabel: '输入 {value} 以确认',
         confirmationMismatch: '确认文本不匹配。',
         states: {

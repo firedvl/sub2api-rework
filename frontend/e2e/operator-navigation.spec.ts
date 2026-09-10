@@ -1042,8 +1042,10 @@ test.describe('operator console navigation', () => {
     await expect(summary.locator('[data-testid="capacity-account-segment"]')).toHaveCount(0)
     await expect(summary.getByRole('link', { name: 'View Stats' })).toHaveAttribute('href', '/admin/stats')
 
-    await summary.getByRole('link', { name: 'View Stats' }).click()
-    await expect(page).toHaveURL(/\/admin\/stats$/)
+    await Promise.all([
+      page.waitForURL(/\/admin\/stats$/),
+      summary.getByRole('link', { name: 'View Stats' }).click(),
+    ])
 
     const usage = page.locator('.stats-usage-section')
     await expect(usage).toContainText('Gateway usage')
@@ -1215,8 +1217,16 @@ test.describe('operator console navigation', () => {
     await expect(page.locator('body > .select-dropdown-portal')).toHaveCount(0)
 
     await accountTrigger.press('ArrowDown')
+    await expect(page.locator('.select-dropdown-portal .select-option-focused'))
+      .toContainText('Codex Team West')
     await page.keyboard.press('ArrowDown')
+    await expect(page.locator('.select-dropdown-portal .select-option-focused'))
+      .toContainText('Antigravity Pro')
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('.select-dropdown-portal .select-option-focused'))
+      .toContainText('Gemini Quota Limited')
     await page.keyboard.press('Enter')
+    await expect(accountTrigger).toContainText('Gemini Quota Limited')
     await expect(detail).toContainText('Gemini Quota Limited')
 
     await accountTrigger.click()

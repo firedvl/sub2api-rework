@@ -76,6 +76,10 @@ func (c *Client) Rollback(ctx context.Context, request updatecontract.OperationR
 	return c.start(ctx, "/v1/rollback", request)
 }
 
+func (c *Client) Recover(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+	return c.start(ctx, "/v1/recover", request)
+}
+
 func (c *Client) start(ctx context.Context, path string, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
 	var accepted updatecontract.OperationAccepted
 	if err := c.do(ctx, http.MethodPost, path, request, &accepted); err != nil {

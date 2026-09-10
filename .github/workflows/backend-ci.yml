@@ -45,6 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-docker-action@v5
+        with:
+          daemon-config: |
+            {
+              "features": {
+                "containerd-snapshotter": true
+              }
+            }
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -57,6 +67,22 @@ jobs:
       - name: Production-like updater lifecycle under systemd
         working-directory: backend
         run: |
+          legacy_source=/tmp/sub2api-rework-updater-113-source
+          mkdir -p "$legacy_source"
+          git archive 5fe5aa50b15c7e6db5d25333c783c267b1de851f | tar -x -C "$legacy_source"
+          (
+            cd "$legacy_source/backend"
+            CGO_ENABLED=0 GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org \
+              go build -trimpath -o /tmp/sub2api-rework-updater-113 ./cmd/updater
+          )
+          docker buildx build --load --metadata-file /tmp/sub2api-rework-staging-image.json \
+            --build-arg GOPROXY=https://proxy.golang.org,direct \
+            --build-arg GOSUMDB=sum.golang.org \
+            --build-arg VERSION=0.2.3-rework.1 \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            -t sub2api-v023-recovery-candidate:ci ..
+          staging_digest="$(jq -er '."containerimage.digest"' /tmp/sub2api-rework-staging-image.json)"
+          test -n "$staging_digest"
           CGO_ENABLED=0 go build -trimpath -o /tmp/sub2api-rework-updater ./cmd/updater
           CGO_ENABLED=0 go test -c -tags=staging \
             -o /tmp/sub2api-rework-updater-qualification ./internal/updater
@@ -64,6 +90,8 @@ jobs:
           test "$(getent group sub2api-updater | cut -d: -f3)" -ne 0
           sudo install -o root -g root -m 0755 \
             /tmp/sub2api-rework-updater /usr/local/sbin/sub2api-rework-updater
+          sudo install -D -o root -g root -m 0755 \
+            /tmp/sub2api-rework-updater-113 /usr/local/libexec/sub2api-rework-updater-113
           sudo install -D -o root -g root -m 0755 \
             /tmp/sub2api-rework-updater-qualification \
             /usr/local/libexec/sub2api-rework-updater-qualification
@@ -89,6 +117,9 @@ jobs:
             'Type=oneshot' \
             'RemainAfterExit=yes' \
             'Environment=SUB2API_STAGING_COMPOSE=/usr/local/share/sub2api-rework-qualification/docker-compose.yml' \
+            'Environment=SUB2API_STAGING_LEGACY_UPDATER=/usr/local/libexec/sub2api-rework-updater-113' \
+            'Environment=SUB2API_STAGING_TARGET_IMAGE=sub2api-v023-recovery-candidate:ci' \
+            "Environment=SUB2API_STAGING_TARGET_DIGEST=$staging_digest" \
             'ExecStart=' \
             'ExecStart=/usr/local/libexec/sub2api-rework-updater-qualification -test.run=^TestProductionBootstrapPreservesUpdaterAccess$ -test.v -test.count=1 -test.timeout=20m' \
             'Restart=no' \

@@ -31,7 +31,7 @@ export interface ReleaseNotes {
 
 export interface OperationSummary {
   operation_id: string
-  action: 'prepare' | 'install' | 'rollback'
+  action: 'prepare' | 'install' | 'rollback' | 'recover'
   actor: string
   source_version: string
   target_version: string
@@ -102,7 +102,7 @@ export interface VersionInfo {
 
 export interface OperationAccepted {
   operation_id: string
-  action: 'prepare' | 'install' | 'rollback'
+  action: 'prepare' | 'install' | 'rollback' | 'recover'
   state: string
 }
 
@@ -133,6 +133,11 @@ export async function rollbackUpdate(version: string, confirmation: string): Pro
   return data
 }
 
-export const systemAPI = { getVersion, checkUpdates, prepareUpdate, installUpdate, rollbackUpdate }
+export async function recoverUpdate(version: string, confirmation: string): Promise<OperationAccepted> {
+  const { data } = await apiClient.post<OperationAccepted>('/admin/system/recover', { version, confirmation })
+  return data
+}
+
+export const systemAPI = { getVersion, checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate }
 
 export default systemAPI

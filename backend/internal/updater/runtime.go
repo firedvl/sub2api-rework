@@ -65,17 +65,19 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 }
 
 type backupMetadata struct {
-	UpdateID        string              `json:"update_id"`
-	Directory       string              `json:"directory"`
-	DatabaseBackup  string              `json:"database_backup"`
-	EnvironmentCopy string              `json:"environment_copy"`
-	ComposeFiles    []backupComposeFile `json:"compose_files"`
-	SourceVersion   string              `json:"source_version"`
-	TargetVersion   string              `json:"target_version"`
-	SourceImage     string              `json:"source_image"`
-	SourceDigest    string              `json:"source_digest"`
-	SourceMigration int                 `json:"source_migration"`
-	CreatedAt       time.Time           `json:"created_at"`
+	UpdateID          string              `json:"update_id"`
+	Directory         string              `json:"directory"`
+	DatabaseBackup    string              `json:"database_backup"`
+	EnvironmentCopy   string              `json:"environment_copy"`
+	ComposeFiles      []backupComposeFile `json:"compose_files"`
+	SourceVersion     string              `json:"source_version"`
+	TargetVersion     string              `json:"target_version"`
+	SourceImage       string              `json:"source_image"`
+	SourceDigest      string              `json:"source_digest"`
+	SourceMigration   int                 `json:"source_migration"`
+	DatabaseSHA256    string              `json:"database_sha256,omitempty"`
+	EnvironmentSHA256 string              `json:"environment_sha256,omitempty"`
+	CreatedAt         time.Time           `json:"created_at"`
 }
 
 type backupComposeFile struct {

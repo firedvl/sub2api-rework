@@ -4,7 +4,7 @@ const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 
 vi.mock('../client', () => ({ apiClient: { get, post } }))
 
-import { checkUpdates, installUpdate, prepareUpdate, rollbackUpdate } from '@/api/admin/system'
+import { checkUpdates, installUpdate, prepareUpdate, recoverUpdate, rollbackUpdate } from '@/api/admin/system'
 
 describe('admin system update API', () => {
   beforeEach(() => { get.mockReset(); post.mockReset() })
@@ -21,11 +21,13 @@ describe('admin system update API', () => {
     expect(post).toHaveBeenCalledWith('/admin/system/prepare', { version: '1.2.3-rework.4' })
   })
 
-  it('sends exact confirmation payloads for install and rollback', async () => {
+  it('sends exact confirmation payloads for install, rollback, and recovery', async () => {
     post.mockResolvedValue({ data: { operation_id: 'op-1' } })
     await installUpdate('1.2.3-rework.4', 'INSTALL 1.2.3-rework.4')
     await rollbackUpdate('1.2.3-rework.3', 'ROLLBACK 1.2.3-rework.3')
+    await recoverUpdate('1.2.3-rework.3', 'RESTORE DATABASE AND ROLLBACK 1.2.3-rework.3')
     expect(post).toHaveBeenNthCalledWith(1, '/admin/system/install', { version: '1.2.3-rework.4', confirmation: 'INSTALL 1.2.3-rework.4' })
     expect(post).toHaveBeenNthCalledWith(2, '/admin/system/rollback', { version: '1.2.3-rework.3', confirmation: 'ROLLBACK 1.2.3-rework.3' })
+    expect(post).toHaveBeenNthCalledWith(3, '/admin/system/recover', { version: '1.2.3-rework.3', confirmation: 'RESTORE DATABASE AND ROLLBACK 1.2.3-rework.3' })
   })
 })
