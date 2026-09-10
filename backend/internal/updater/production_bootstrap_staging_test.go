@@ -747,6 +747,11 @@ func assertStagingUpdaterVersion(t *testing.T, docker string, compose []string, 
 
 func assertStagingApplicationAccess(t *testing.T, docker string, compose []string, policy Policy, updaterGID string) {
 	t.Helper()
+	// Install the socket probe in the disposable container, never in release images.
+	probeArgs := append(append([]string(nil), compose...), "exec", "-T", "-u", "root", "sub2api", "apk", "add", "--no-cache", "curl")
+	if output, err := runStagingCommand(docker, probeArgs...); err != nil {
+		t.Fatalf("install staging socket probe: %v: %s", err, output)
+	}
 	statusArgs := append(append([]string(nil), compose...),
 		"exec", "-T", "-u", "root", "sub2api", "su-exec", "sub2api",
 		"curl", "--silent", "--show-error", "--fail", "--unix-socket", policy.SocketPath,
