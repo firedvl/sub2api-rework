@@ -23,6 +23,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/prepare", s.handleOperation(updatecontract.OperationPrepare))
 	mux.HandleFunc("POST /v1/install", s.handleOperation(updatecontract.OperationInstall))
 	mux.HandleFunc("POST /v1/rollback", s.handleOperation(updatecontract.OperationRollback))
+	mux.HandleFunc("POST /v1/recover", s.handleOperation(updatecontract.OperationRecover))
 	return http.MaxBytesHandler(mux, maxOperationRequestBytes)
 }
 

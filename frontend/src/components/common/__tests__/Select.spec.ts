@@ -146,6 +146,125 @@ describe('Select keyboard interaction', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
     expect(document.activeElement).toBe(trigger.element)
   })
+
+  it('selects from a searchable list when follow-up keys arrive on the trigger', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: 'alpha',
+        searchable: true,
+        options: [
+          { value: 'alpha', label: 'Alpha account' },
+          { value: 'beta', label: 'Beta account' },
+        ],
+      },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    const trigger = wrapper.get('button')
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await trigger.trigger('keydown', { key: 'Enter' })
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
+    expect(document.activeElement).toBe(trigger.element)
+  })
+
+  it('keeps keyboard focus when the menu appears beneath a stationary pointer', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: 'alpha',
+        searchable: true,
+        options: [
+          { value: 'alpha', label: 'Alpha account' },
+          { value: 'beta', label: 'Beta account' },
+        ],
+      },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    const trigger = wrapper.get('button')
+    await trigger.trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    const dropdown = document.body.querySelector<HTMLElement>('.select-dropdown-portal')!
+    dropdown.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    dropdown.querySelectorAll<HTMLElement>('[role="option"]')[0]
+      .dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+    dropdown.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
+  })
+
+  it('uses a real pointer move to update the focused option', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: {
+        modelValue: 'alpha',
+        searchable: true,
+        options: [
+          { value: 'alpha', label: 'Alpha account' },
+          { value: 'beta', label: 'Beta account' },
+        ],
+      },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    await wrapper.get('button').trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    const dropdown = document.body.querySelector<HTMLElement>('.select-dropdown-portal')!
+    dropdown.querySelectorAll<HTMLElement>('[role="option"]')[1]
+      .dispatchEvent(new Event('pointermove', { bubbles: true }))
+    dropdown.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['beta']])
+  })
+
+  it('does not capture keys from an unrelated control while open', async () => {
+    const wrapper = mount(Select, {
+      attachTo: document.body,
+      props: { modelValue: 'alpha', options: [{ value: 'alpha', label: 'Alpha account' }] },
+    })
+    unmountWrapper = () => wrapper.unmount()
+    await wrapper.get('button').trigger('click')
+    await nextTick()
+
+    const unrelated = document.createElement('input')
+    document.body.append(unrelated)
+    const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    expect(unrelated.dispatchEvent(event)).toBe(true)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('does not open a disabled trigger from the keyboard', async () => {
+    const wrapper = mount(Select, {
+      props: { disabled: true, modelValue: null, options: [{ value: 'alpha', label: 'Alpha account' }] },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    await wrapper.get('button').trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+
+    expect(document.body.querySelector('.select-dropdown-portal')).toBeNull()
+  })
+
+  it('keeps a closed trigger closed on Escape', async () => {
+    const wrapper = mount(Select, {
+      props: {
+        modelValue: null,
+        options: [{ value: 'alpha', label: 'Alpha account' }],
+      },
+    })
+    unmountWrapper = () => wrapper.unmount()
+
+    await wrapper.get('button').trigger('keydown', { key: 'Escape' })
+    await nextTick()
+
+    expect(document.body.querySelector('.select-dropdown-portal')).toBeNull()
+  })
 })
 
 describe('Select remote search', () => {

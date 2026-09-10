@@ -107,7 +107,6 @@ func (a *Account) SetUpstreamModelInventorySnapshot(snapshot UpstreamModelInvent
 		a.Extra = make(map[string]any)
 	}
 	a.Extra[UpstreamModelInventoryExtraKey] = snapshot
-	a.modelMappingCacheReady = false
 }
 
 func (a *Account) GetUpstreamModelInventorySnapshot() *UpstreamModelInventorySnapshot {

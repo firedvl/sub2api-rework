@@ -19,6 +19,8 @@
       ]"
       @keydown.down.prevent="onTriggerKeyDown"
       @keydown.up.prevent="onTriggerKeyDown"
+      @keydown.enter.prevent="onTriggerKeyDown"
+      @keydown.esc.prevent="onTriggerKeyDown"
     >
       <span class="select-value">
         <slot name="selected" :option="selectedOption">
@@ -84,7 +86,7 @@
               :aria-selected="isSelected(option)"
               :aria-disabled="isOptionDisabled(option)"
               @click.stop="!isOptionDisabled(option) && selectOption(option)"
-              @mouseenter="handleOptionMouseEnter(option, index)"
+              @pointermove="handleOptionPointerMove(option, index)"
               :class="[
                 'select-option operator-menu-item',
                 isGroupHeaderOption(option) && 'select-option-group',
@@ -335,9 +337,16 @@ const findPrevEnabledIndex = (startIndex: number): number => {
   return -1
 }
 
-const handleOptionMouseEnter = (option: any, index: number) => {
+const handleOptionPointerMove = (option: any, index: number) => {
   if (isOptionDisabled(option) || isGroupHeaderOption(option)) return
   focusedIndex.value = index
+}
+
+const focusSelectedOption = () => {
+  const selectedIndex = filteredOptions.value.findIndex(isSelected)
+  focusedIndex.value = selectedIndex >= 0 && !isOptionDisabled(filteredOptions.value[selectedIndex])
+    ? selectedIndex
+    : findNextEnabledIndex(0)
 }
 
 // Update trigger rect periodically while open to follow scroll/resize
@@ -367,23 +376,18 @@ const calculateDropdownPosition = () => {
 
 const toggle = () => {
   if (props.disabled) return
-  isOpen.value = !isOpen.value
+  if (isOpen.value) {
+    isOpen.value = false
+    return
+  }
+  focusSelectedOption()
+  isOpen.value = true
 }
 
 watch(isOpen, (open) => {
   if (open) {
     calculateDropdownPosition()
-    // Reset focused index to current selection or first item
-    if (filteredOptions.value.length === 0) {
-      focusedIndex.value = -1
-    } else {
-      const selectedIdx = filteredOptions.value.findIndex(isSelected)
-      const initialIdx = selectedIdx >= 0 ? selectedIdx : 0
-      focusedIndex.value = isOptionDisabled(filteredOptions.value[initialIdx])
-        ? findNextEnabledIndex(initialIdx + 1)
-        : initialIdx
-    }
-
+    focusSelectedOption()
     if (isSearchable.value) {
       nextTick(() => searchInputRef.value?.focus())
     } else {
@@ -429,13 +433,6 @@ const clearSelection = () => {
   emit('change', null, null)
 }
 
-// Keyboards
-const onTriggerKeyDown = () => {
-  if (!isOpen.value) {
-    isOpen.value = true
-  }
-}
-
 const onDropdownKeyDown = (e: KeyboardEvent) => {
   switch (e.key) {
     case 'ArrowDown':
@@ -464,6 +461,16 @@ const onDropdownKeyDown = (e: KeyboardEvent) => {
       isOpen.value = false
       break
   }
+}
+
+const onTriggerKeyDown = (event: KeyboardEvent) => {
+  if (props.disabled) return
+  if (!isOpen.value && event.key === 'Escape') return
+  if (!isOpen.value) {
+    isOpen.value = true
+    return
+  }
+  onDropdownKeyDown(event)
 }
 
 const scrollToFocused = () => {

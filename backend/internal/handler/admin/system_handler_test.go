@@ -45,6 +45,9 @@ func (s *systemUpdaterStub) Install(_ context.Context, request updatecontract.Op
 func (s *systemUpdaterStub) Rollback(_ context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
 	return s.accepted(updatecontract.OperationRollback, request)
 }
+func (s *systemUpdaterStub) Recover(_ context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+	return s.accepted(updatecontract.OperationRecover, request)
+}
 
 func readyUpdateInfo() *service.UpdateInfo {
 	return &service.UpdateInfo{
@@ -64,6 +67,7 @@ func systemTestRouter(handler *SystemHandler) *gin.Engine {
 	router.POST("/api/v1/admin/system/prepare", handler.Prepare)
 	router.POST("/api/v1/admin/system/install", handler.Install)
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
+	router.POST("/api/v1/admin/system/recover", handler.Recover)
 	return router
 }
 
@@ -149,4 +153,24 @@ func TestSystemHandlerRollbackOnlyAllowsRecordedTarget(t *testing.T) {
 	router.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Empty(t, updater.action)
+}
+
+func TestSystemHandlerRecoveryRequiresRecordedTargetAndExactConfirmation(t *testing.T) {
+	updater := &systemUpdaterStub{status: &updatecontract.UpdaterStatus{RollbackVersion: "0.1.183-rework.1"}}
+	handler := NewSystemHandler(&systemWatcherStub{info: readyUpdateInfo()}, updater)
+	router := systemTestRouter(handler)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/recover", strings.NewReader(`{"version":"0.1.183-rework.1","confirmation":"ROLLBACK 0.1.183-rework.1"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, updater.action)
+
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/recover", strings.NewReader(`{"version":"0.1.183-rework.1","confirmation":"RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Equal(t, updatecontract.OperationRecover, updater.action)
 }

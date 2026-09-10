@@ -122,6 +122,8 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 		default:
 			_, _ = io.WriteString(stdout, "PONG\n")
 		}
+	case strings.Contains(joined, "rolsuper OR rolcreatedb"):
+		_, _ = io.WriteString(stdout, "t\n")
 	case strings.Contains(joined, " psql "):
 		_, _ = fmt.Fprintf(stdout, "%d\n", f.migration)
 	case strings.Contains(joined, "image inspect"):
@@ -138,6 +140,10 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 		}
 		data, _ := json.Marshal(digests)
 		_, _ = stdout.Write(data)
+	case strings.Contains(joined, " ps -q sub2api"):
+		_, _ = io.WriteString(stdout, "synthetic-sub2api\n")
+	case strings.Contains(joined, "inspect --format {{.Config.Image}} synthetic-sub2api"):
+		_, _ = io.WriteString(stdout, testSourceDigest+"\n")
 	case strings.Contains(joined, " pg_dump "):
 		if f.failBackup {
 			return fmt.Errorf("backup failed")
@@ -347,6 +353,12 @@ func prepareUpdater(t *testing.T, service *Service) {
 func installRequest() updatecontract.OperationRequest {
 	return updatecontract.OperationRequest{
 		Version: "0.1.184-rework.1", Confirmation: "INSTALL 0.1.184-rework.1", Actor: "admin:1",
+	}
+}
+
+func recoverRequest() updatecontract.OperationRequest {
+	return updatecontract.OperationRequest{
+		Version: "0.1.183-rework.1", Confirmation: "RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1", Actor: "admin:1",
 	}
 }
 
@@ -737,6 +749,132 @@ func TestManualRollbackBlocksAfterMigrationAdvance(t *testing.T) {
 	status := waitForUpdater(t, service, 3*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateFailed, status.State)
 	require.Contains(t, status.LastError, "migrations changed")
+}
+
+func TestPostSuccessRecoveryRestoresRecordedDatabaseAndIdentity(t *testing.T) {
+	runner := &fakeRunner{}
+	service, _ := newUpdaterTestService(t, runner)
+	prepareUpdater(t, service)
+	_, err := service.Start(updatecontract.OperationInstall, installRequest())
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 5*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateSucceeded, status.State)
+	require.Equal(t, "0.1.183-rework.1", status.InstalledVersion)
+	require.Equal(t, 232, status.CurrentMigration)
+	require.Equal(t, "0.1.183-rework.1", status.RollbackVersion, "recovery keeps its sole recorded retry target")
+	require.Equal(t, updatecontract.OperationRecover, status.LastRollback.Action)
+	require.True(t, runner.hasCall(" pg_restore "))
+
+	state, err := service.store.load(service.policy.InitialInstalledVersion, service.policy.InitialMigration, Version)
+	require.NoError(t, err)
+	require.NotNil(t, state.Backup, "recovery preserves its audit evidence")
+	_, err = service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: "0.1.184-rework.1", Actor: "admin:1"})
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStatePrepared, waitForUpdater(t, service, 3*time.Second).State)
+}
+
+func TestRecoveryRejectsLegacyOrTamperedBackupWithoutMutation(t *testing.T) {
+	for name, mutate := range map[string]func(t *testing.T, backup *backupMetadata){
+		"legacy": func(t *testing.T, backup *backupMetadata) {
+			backup.DatabaseSHA256, backup.EnvironmentSHA256 = "", ""
+			data, err := json.MarshalIndent(backup, "", "  ")
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(backup.Directory, "metadata.json"), append(data, '\n'), 0600))
+		},
+		"tampered": func(t *testing.T, backup *backupMetadata) {
+			require.NoError(t, os.WriteFile(backup.DatabaseBackup, []byte("tampered-dump"), 0600))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{}
+			service, _ := newUpdaterTestService(t, runner)
+			prepareUpdater(t, service)
+			_, err := service.Start(updatecontract.OperationInstall, installRequest())
+			require.NoError(t, err)
+			require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+			state, err := service.store.load(service.policy.InitialInstalledVersion, service.policy.InitialMigration, Version)
+			require.NoError(t, err)
+			mutate(t, state.Backup)
+			require.NoError(t, service.store.save(state))
+
+			_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+			require.ErrorContains(t, err, "recorded recovery backup is invalid")
+			require.False(t, runner.hasCall(" pg_restore "))
+		})
+	}
+}
+
+func TestRecoveryFailureStaysCriticalAndPreservesRecordedBackup(t *testing.T) {
+	runner := &fakeRunner{}
+	service, _ := newUpdaterTestService(t, runner)
+	prepareUpdater(t, service)
+	_, err := service.Start(updatecontract.OperationInstall, installRequest())
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+	runner.failRestore = true
+
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 5*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
+	require.Equal(t, "0.1.183-rework.1", status.RollbackVersion)
+	state, err := service.store.load(service.policy.InitialInstalledVersion, service.policy.InitialMigration, Version)
+	require.NoError(t, err)
+	require.NotNil(t, state.Backup)
+	startsBeforeRollback := runner.upCount
+	_, err = service.Start(updatecontract.OperationRollback, updatecontract.OperationRequest{
+		Version: "0.1.183-rework.1", Confirmation: "ROLLBACK 0.1.183-rework.1", Actor: "admin:1",
+	})
+	require.ErrorContains(t, err, "requires recovery")
+	require.Equal(t, startsBeforeRollback, runner.upCount, "ordinary rollback must not start an application after recovery failure")
+	_, err = service.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: "0.1.184-rework.1", Actor: "admin:1"})
+	require.ErrorContains(t, err, "requires recovery")
+}
+
+func TestAcceptedRecoveryPreflightFailureStaysCriticalWithoutRestore(t *testing.T) {
+	runner := &fakeRunner{}
+	service, _ := newUpdaterTestService(t, runner)
+	prepareUpdater(t, service)
+	_, err := service.Start(updatecontract.OperationInstall, installRequest())
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+	runner.failRedis = true
+
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	require.NoError(t, err)
+	status := waitForUpdater(t, service, 5*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
+	require.Equal(t, "0.1.183-rework.1", status.RollbackVersion)
+	require.False(t, runner.hasCall(" pg_restore "))
+}
+
+func TestUpdater114LoadsLegacyStateButRejectsDestructiveRecovery(t *testing.T) {
+	runner := &fakeRunner{}
+	service, policy := newUpdaterTestService(t, runner)
+	prepareUpdater(t, service)
+	_, err := service.Start(updatecontract.OperationInstall, installRequest())
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+	state, err := service.store.load(service.policy.InitialInstalledVersion, service.policy.InitialMigration, Version)
+	require.NoError(t, err)
+	state.Backup.DatabaseSHA256, state.Backup.EnvironmentSHA256 = "", ""
+	data, err := json.MarshalIndent(state.Backup, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(state.Backup.Directory, "metadata.json"), append(data, '\n'), 0600))
+	state.Status.UpdaterVersion = "1.1.3"
+	require.NoError(t, service.store.save(state))
+
+	replacement, err := NewService(policy, runner, &fakeManifestFetcher{data: validUpdaterManifest(t)})
+	require.NoError(t, err)
+	status, err := replacement.Status()
+	require.NoError(t, err)
+	require.Equal(t, Version, status.UpdaterVersion)
+	_, err = replacement.Start(updatecontract.OperationRecover, recoverRequest())
+	require.ErrorContains(t, err, "recorded recovery backup is invalid")
 }
 
 func TestFinalStateSaveFailureIsVisibleAsCritical(t *testing.T) {

@@ -237,6 +237,12 @@ or recreate the application. Do not retry `0.1.183-rework.7` after `.8` exists.
 
 ### Replace An Active Updater
 
+Release `0.2.3-rework.1` requires updater `1.1.4` before preparing or installing
+the release. Follow this replacement procedure while `.13` remains healthy and
+idle. Version `1.1.4` accepts the existing `1.1.3` policy/state and keeps the
+status response schema compatible with the running `.13` application. New
+backups record checksums required for explicit post-success database recovery.
+
 When the application already bind-mounts `/run/sub2api-rework-updater`, replace
 the updater without stopping it first. The base unit uses
 `RuntimeDirectoryPreserve=restart`, which keeps the same runtime directory for
@@ -368,6 +374,15 @@ The checks send no provider credentials and no paid model traffic.
 
 ## Rollback Behavior And Limits
 
+There are three distinct paths:
+
+1. A failed install uses automatic snapshot restore within that installation.
+2. Ordinary manual rollback is application-only and allowed only with an
+   unchanged migration.
+3. A successful schema-advancing installation uses **Restore database and roll
+   back**, which restores the recorded pre-update database snapshot and loses
+   later writes.
+
 If migration or health validation fails after deployment mutation, the updater
 uses a fresh bounded recovery timeout and stops the application. Whenever
 migration execution was attempted, it forcibly disconnects remaining clients,
@@ -386,11 +401,28 @@ only while the database migration number still equals the backup's source
 migration. It is blocked after schema advancement because substituting an older
 application without restoring the database is not generally safe.
 
+For a successful schema-advancing installation, use the separate **Restore
+database and roll back** operation. It accepts only the updater-recorded source
+version and requires typing `RESTORE DATABASE AND ROLLBACK <version>`. The
+updater verifies the recorded Compose, environment, and PostgreSQL dump
+checksums, restores that exact pre-update dump, pins and verifies the recorded
+immutable source image, then validates PostgreSQL, Redis, HTTP, and the source
+migration. Writes made after the backup will be lost. It never accepts a backup
+path, image, command, or SQL from the application request.
+
+This recovery path is available only for backups created by updater `1.1.4` or
+later, which record the required dump and environment checksums. Existing
+backups remain valid for failed-install recovery and same-schema rollback, but
+do not silently qualify for destructive post-success recovery. An accepted
+recovery enters `critical` before any destructive work. A failed or interrupted
+recovery retains its backup evidence, blocks prepare/install, and may be
+retried only against that recorded target.
+
 Database recreation is destructive and discards writes made after the backup,
 including objects created by the failed migration. Use automatic restore only
-during the bounded failed-install window. Outside that window, stop traffic and
-choose recovery based on the incident timeline; do not claim application
-rollback alone reverses database changes.
+during the bounded failed-install window. After a successful schema-advancing
+installation, use the confirmed recovery operation above; do not claim
+application rollback alone reverses database changes.
 
 ## Staging Qualification
 
@@ -400,7 +432,7 @@ Before any production installation:
    a deployment directory other than `/opt/sub2api-rework/deploy`.
 2. Start the application with a base file plus the updater socket override.
 3. Model a root-owned, non-root-group `/var/log` ancestor with mode `0775`.
-   Confirm a custom audit path below it fails, then start updater `1.1.3` with
+   Confirm a custom audit path below it fails, then start updater `1.1.4` with
    state, audit, and backups under its private state tree, the same ordered set,
    staging-only paths, and a loopback health URL. Verify its systemd drop-in
    permits the configured deployment directory and no broader tree.
@@ -436,15 +468,11 @@ and the deployment directory before changing anything. Inspect the bounded
 updater audit and Docker service state locally; service logs remain in the
 systemd journal and are not exposed in the UI.
 
-Do not prepare or install another release while state is `critical`. Resolve the
-recorded rollback or complete a reviewed manual recovery first; a new install
-would replace the recovery metadata needed for the current incident.
-
-For application-only recovery with an unchanged schema, set `SUB2API_IMAGE` to
-the recorded prior digest and recreate only the application service. If the
-schema advanced, stop application traffic and restore the recorded PostgreSQL
-dump before starting the prior image. Validate health and migration state before
-reopening traffic.
+Do not prepare or install another release while state is `critical`. Use the
+recorded same-schema rollback or the recorded **Restore database and roll back**
+operation above; a new install would replace the recovery metadata needed for
+the current incident. Do not edit updater state, migration records, images, or
+database contents by hand to simulate recovery.
 
 ## Disable The Updater
 

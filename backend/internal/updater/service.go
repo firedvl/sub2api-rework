@@ -14,7 +14,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const Version = "1.1.3"
+const Version = "1.1.4"
 
 var actorPattern = regexp.MustCompile(`^admin:[1-9][0-9]*$`)
 
@@ -109,18 +109,29 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 		lock.release()
 		return nil, ErrOperationBusy
 	}
-	if state.Status.State == updatecontract.UpdaterStateCritical && action != updatecontract.OperationRollback {
+	if state.Status.State == updatecontract.UpdaterStateCritical &&
+		(action != updatecontract.OperationRecover &&
+			(action != updatecontract.OperationRollback || recoveryWasInterruptedOrFailed(state.Status.LastAttempt))) {
 		lock.release()
 		return nil, fmt.Errorf("updater requires recovery before another prepare or install")
 	}
-	if action == updatecontract.OperationRollback {
+	if action == updatecontract.OperationRollback || action == updatecontract.OperationRecover {
 		if state.Backup == nil || state.Backup.SourceVersion != request.Version || state.Status.RollbackVersion != request.Version {
 			lock.release()
 			return nil, fmt.Errorf("requested version is not the recorded rollback target")
 		}
 		if err := s.validateBackupMetadata(state.Backup); err != nil {
 			lock.release()
+			if action == updatecontract.OperationRecover {
+				return nil, fmt.Errorf("recorded recovery backup is invalid")
+			}
 			return nil, fmt.Errorf("recorded rollback backup is invalid")
+		}
+		if action == updatecontract.OperationRecover {
+			if err := s.validateRecoveryBackup(state.Backup); err != nil {
+				lock.release()
+				return nil, fmt.Errorf("recorded recovery backup is invalid")
+			}
 		}
 	} else if updatecontract.CompareRework(request.Version, state.Status.InstalledVersion) <= 0 {
 		lock.release()
@@ -141,7 +152,10 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 	state.Status.Busy = true
 	state.Status.LastError = ""
 	state.Status.LastAttempt = &summary
-	if state.Status.State != updatecontract.UpdaterStateCritical {
+	if action == updatecontract.OperationRecover {
+		// An accepted database restore must survive interruption as critical.
+		state.Status.State = updatecontract.UpdaterStateCritical
+	} else if state.Status.State != updatecontract.UpdaterStateCritical {
 		state.Status.State = operationState(action)
 	}
 	if err := s.store.save(state); err != nil {
@@ -151,6 +165,10 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 
 	go s.runOperation(action, request, summary, state, lock)
 	return &updatecontract.OperationAccepted{OperationID: operationID, Action: action, State: "accepted"}, nil
+}
+
+func recoveryWasInterruptedOrFailed(summary *updatecontract.OperationSummary) bool {
+	return summary != nil && summary.Action == updatecontract.OperationRecover
 }
 
 func validateOperationRequest(action updatecontract.Operation, request updatecontract.OperationRequest) error {
@@ -170,6 +188,10 @@ func validateOperationRequest(action updatecontract.Operation, request updatecon
 		if request.Confirmation != "ROLLBACK "+request.Version {
 			return fmt.Errorf("rollback confirmation mismatch")
 		}
+	case updatecontract.OperationRecover:
+		if request.Confirmation != "RESTORE DATABASE AND ROLLBACK "+request.Version {
+			return fmt.Errorf("recovery confirmation mismatch")
+		}
 	default:
 		return fmt.Errorf("unsupported updater operation")
 	}
@@ -183,6 +205,8 @@ func operationState(action updatecontract.Operation) updatecontract.UpdaterState
 	case updatecontract.OperationInstall:
 		return updatecontract.UpdaterStateInstalling
 	case updatecontract.OperationRollback:
+		return updatecontract.UpdaterStateRollingBack
+	case updatecontract.OperationRecover:
 		return updatecontract.UpdaterStateRollingBack
 	default:
 		return updatecontract.UpdaterStateFailed
@@ -207,9 +231,11 @@ func (s *Service) runOperation(
 		operationErr = s.install(ctx, request.Version, &summary, &state)
 	case updatecontract.OperationRollback:
 		operationErr = s.rollback(ctx, request.Version, &state)
+	case updatecontract.OperationRecover:
+		operationErr = s.recover(ctx, request.Version, &state)
 	}
-	lock.release()
 	s.finish(summary, operationErr, &state)
+	lock.release()
 }
 
 func (s *Service) prepare(ctx context.Context, version string, state *persistedState) error {
@@ -318,6 +344,37 @@ func (s *Service) rollback(ctx context.Context, version string, state *persisted
 	return nil
 }
 
+// recover restores only the updater-recorded pre-install snapshot. It is the
+// explicit destructive path for a successful schema-advancing installation.
+func (s *Service) recover(ctx context.Context, version string, state *persistedState) error {
+	backup := state.Backup
+	if backup == nil || backup.SourceVersion != version || state.Status.RollbackVersion != version {
+		return fmt.Errorf("recorded recovery backup is unavailable")
+	}
+	state.Status.State = updatecontract.UpdaterStateCritical
+	if err := s.validateRecoveryBackup(backup); err != nil {
+		return fmt.Errorf("recorded recovery backup is invalid")
+	}
+	if err := s.preflightRecovery(ctx); err != nil {
+		return fmt.Errorf("recovery preflight failed")
+	}
+	if err := s.pullAndVerifyRecordedImage(ctx, backup.SourceDigest); err != nil {
+		return err
+	}
+	if err := s.restoreImmediate(ctx, backup, true); err != nil {
+		return fmt.Errorf("database recovery failed")
+	}
+	if err := s.validateRunningApplicationImage(ctx, backup.SourceDigest); err != nil {
+		return fmt.Errorf("recovered application image validation failed")
+	}
+	state.Prepared = nil
+	state.Status.PreparedVersion = ""
+	state.Status.InstalledVersion = backup.SourceVersion
+	state.Status.CurrentMigration = backup.SourceMigration
+	state.Status.State = updatecontract.UpdaterStateSucceeded
+	return nil
+}
+
 func (s *Service) approvedManifest(ctx context.Context, version string, currentMigration int) (*updatecontract.Manifest, error) {
 	data, err := s.fetcher.Fetch(ctx, version)
 	if err != nil {
@@ -358,13 +415,15 @@ func (s *Service) finish(summary updatecontract.OperationSummary, operationErr e
 			state.Status.State = updatecontract.UpdaterStateSucceeded
 		}
 	}
-	state.Status.LastAttempt = &summary
-	if summary.Action == updatecontract.OperationRollback {
-		state.Status.LastRollback = &summary
-	}
 	if err := s.store.audit(summary); err != nil {
+		summary.Result = "failed"
+		summary.Error = "Updater audit persistence failed."
 		state.Status.State = updatecontract.UpdaterStateCritical
-		state.Status.LastError = "Updater audit persistence failed."
+		state.Status.LastError = summary.Error
+	}
+	state.Status.LastAttempt = &summary
+	if summary.Action == updatecontract.OperationRollback || summary.Action == updatecontract.OperationRecover {
+		state.Status.LastRollback = &summary
 	}
 	if err := s.store.save(*state); err != nil {
 		failed := state.Status
@@ -372,6 +431,14 @@ func (s *Service) finish(summary updatecontract.OperationSummary, operationErr e
 		failed.Busy = false
 		failed.State = updatecontract.UpdaterStateCritical
 		failed.LastError = "Updater state persistence failed."
+		if failed.LastAttempt != nil {
+			failed.LastAttempt.Result = "failed"
+			failed.LastAttempt.Error = failed.LastError
+		}
+		if failed.LastRollback != nil {
+			failed.LastRollback.Result = "failed"
+			failed.LastRollback.Error = failed.LastError
+		}
 		s.statusMu.Lock()
 		s.statusErr = &failed
 		s.statusMu.Unlock()
