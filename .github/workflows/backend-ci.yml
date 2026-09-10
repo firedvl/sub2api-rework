@@ -47,14 +47,18 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: docker/setup-docker-action@v5
-        with:
-          daemon-config: |
-            {
-              "features": {
-                "containerd-snapshotter": true
-              }
-            }
+      - name: Enable native OCI image storage on the staging daemon
+        run: |
+          sudo install -d -m 0755 /etc/docker
+          if sudo test -f /etc/docker/daemon.json; then
+            sudo cat /etc/docker/daemon.json > /tmp/sub2api-docker-daemon.json
+          else
+            printf '{}\n' > /tmp/sub2api-docker-daemon.json
+          fi
+          jq '.features["containerd-snapshotter"] = true' /tmp/sub2api-docker-daemon.json > /tmp/sub2api-docker-daemon-next.json
+          sudo install -m 0644 /tmp/sub2api-docker-daemon-next.json /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
