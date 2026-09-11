@@ -428,18 +428,24 @@ func openAICodexManifestSnapshotFreshBody(snapshot openAICodexManifestSnapshot, 
 	return body, err == nil
 }
 
-func openAIPublicModelIDsFromCodexManifestSnapshots(account *Account, now time.Time) []string {
+func openAICodexManifestLatestFreshBody(account *Account, now time.Time) ([]byte, bool) {
 	if account == nil || account.Extra == nil {
-		return nil
+		return nil, false
 	}
 	snapshots, ok := decodeOpenAICodexManifestSnapshots(account.Extra[OpenAICodexManifestSnapshotExtraKey])
 	if !ok || snapshots.Identity == "" || snapshots.Identity != openAICodexManifestIdentity(account) {
-		return nil
+		return nil, false
 	}
 
 	var latestBody []byte
 	latestSyncedAt := time.Time{}
-	for _, snapshot := range snapshots.Versions {
+	versions := make([]string, 0, len(snapshots.Versions))
+	for version := range snapshots.Versions {
+		versions = append(versions, version)
+	}
+	sort.Strings(versions)
+	for _, version := range versions {
+		snapshot := snapshots.Versions[version]
 		body, fresh := openAICodexManifestSnapshotFreshBody(snapshot, now)
 		if !fresh {
 			continue
@@ -452,6 +458,15 @@ func openAIPublicModelIDsFromCodexManifestSnapshots(account *Account, now time.T
 		latestSyncedAt = syncedAt
 	}
 	if latestBody == nil {
+		return nil, false
+	}
+
+	return latestBody, true
+}
+
+func openAIPublicModelIDsFromCodexManifestSnapshots(account *Account, now time.Time) []string {
+	latestBody, ok := openAICodexManifestLatestFreshBody(account, now)
+	if !ok {
 		return nil
 	}
 

@@ -519,6 +519,17 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 }
 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
+	paused, decision := evaluateOpenAIAccountQuotaPause(ctx, account)
+	if paused && decision.reason != "" {
+		notifyOpenAIAutoReset(account.ID)
+	}
+	return paused, decision
+}
+
+// evaluateOpenAIAccountQuotaPause evaluates quota state without scheduling an
+// Auto Reset check. Read-only callers use this to avoid turning observation
+// into a reset-credit side effect.
+func evaluateOpenAIAccountQuotaPause(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
 	if account == nil || !account.IsOpenAI() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
@@ -529,11 +540,9 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 		utilization5h, has5h := resolveOpenAIQuotaUtilization(account.Extra, "5h", now)
 		utilization7d, has7d := resolveOpenAIQuotaUtilization(account.Extra, "7d", now)
 		if has5h && utilization5h >= config.Threshold5h {
-			notifyOpenAIAutoReset(account.ID)
 			return true, openAIQuotaAutoPauseDecision{window: "5h", threshold: config.Threshold5h, utilization: utilization5h, reason: "quota_auto_reset_pending_5h"}
 		}
 		if has7d && utilization7d >= config.Threshold7d {
-			notifyOpenAIAutoReset(account.ID)
 			return true, openAIQuotaAutoPauseDecision{window: "7d", threshold: config.Threshold7d, utilization: utilization7d, reason: "quota_auto_reset_pending_7d"}
 		}
 
@@ -547,7 +556,6 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 			if state != nil && state.Status == OpenAIAutoResetStatusAvailable && state.AvailableCount > 0 && !openAIAutoResetStateStale(state, now) {
 				return false, openAIQuotaAutoPauseDecision{}
 			}
-			notifyOpenAIAutoReset(account.ID)
 			if pauseReached5h {
 				return true, openAIQuotaAutoPauseDecision{window: "5h", threshold: pause5h, utilization: utilization5h, reason: "quota_auto_reset_credit_check_5h"}
 			}
