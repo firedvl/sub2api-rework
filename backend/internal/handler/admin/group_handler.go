@@ -26,7 +26,6 @@ type GroupHandler struct {
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
 	gatewayService       *service.GatewayService
-	openAIGatewayService *service.OpenAIGatewayService
 	cfg                  *config.Config
 }
 
@@ -93,13 +92,12 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 }
 
 // NewGroupHandler creates a new admin group handler
-func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, gatewayService *service.GatewayService, openAIGatewayService *service.OpenAIGatewayService, cfg *config.Config) *GroupHandler {
+func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService, gatewayService *service.GatewayService, cfg *config.Config) *GroupHandler {
 	return &GroupHandler{
 		adminService:         adminService,
 		dashboardService:     dashboardService,
 		groupCapacityService: groupCapacityService,
 		gatewayService:       gatewayService,
-		openAIGatewayService: openAIGatewayService,
 		cfg:                  cfg,
 	}
 }

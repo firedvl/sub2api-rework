@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -110,7 +111,25 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 	currentByPlatform := snapshot.currentByPlatform
 	configured, configuredKnown := snapshot.configured, snapshot.configuredKnown
 	routes, routesKnown := snapshot.routes, snapshot.routesKnown
-	modelIDs := gatewayCapabilityVisibleModelIDs(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks)
+	// Reuse each account snapshot's manifest observation for publication and
+	// discovery labels. Keep durable and scheduler records separate.
+	now := time.Now()
+	manifestIDs := make(map[*Account][]string)
+	observeManifest := func(account *Account) []string {
+		ids, ok := manifestIDs[account]
+		if !ok {
+			ids = openAIPublicModelIDsFromCodexManifestSnapshots(account, now)
+			manifestIDs[account] = ids
+		}
+		return ids
+	}
+	configuredManifestIDs := make(map[int64][]string, len(configured))
+	for i := range configured {
+		configuredManifestIDs[configured[i].ID] = observeManifest(&configured[i])
+	}
+	modelIDs := gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, func(accounts []Account, platform string) []string {
+		return availableModelIDsFromAccountsWithManifestIDs(accounts, platform, observeManifest)
+	})
 
 	models := make([]GatewayCapabilityModel, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
@@ -169,9 +188,9 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 			Routing:               routing,
 			Capacity:              capacity,
 			ActualPlatform:        actualPlatform,
-			DiscoverySource:       gatewayCapabilityDiscoverySource(modelID, route, configuredPaths),
+			DiscoverySource:       gatewayCapabilityDiscoverySource(modelID, route, configuredPaths, configuredManifestIDs),
 			Configured:            configuredModel,
-			Discovered:            gatewayCapabilityDiscoveredByAccounts(modelID, route, configuredPaths),
+			Discovered:            gatewayCapabilityDiscoveredByAccounts(modelID, route, configuredPaths, configuredManifestIDs),
 			RateLimitedOrCooldown: gatewayCapabilityHasTransientBlock(configuredPaths),
 		})
 	}
@@ -250,12 +269,12 @@ func DefaultGatewayCapabilityFallbacks() map[string][]string {
 	}
 }
 
-func gatewayCapabilityDiscoverySource(model string, route gatewayCapabilityRoute, accounts []Account) string {
+func gatewayCapabilityDiscoverySource(model string, route gatewayCapabilityRoute, accounts []Account, manifestIDs map[int64][]string) string {
 	if route.decision.Source == CompositeRouteSourceExplicit {
 		return "explicit_route"
 	}
 	for i := range accounts {
-		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel) {
+		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel, manifestIDs[accounts[i].ID]) {
 			return "provider_discovery"
 		}
 	}
@@ -267,21 +286,17 @@ func gatewayCapabilityDiscoverySource(model string, route gatewayCapabilityRoute
 	return "provider_default"
 }
 
-func gatewayCapabilityDiscoveredByAccounts(model string, route gatewayCapabilityRoute, accounts []Account) bool {
+func gatewayCapabilityDiscoveredByAccounts(model string, route gatewayCapabilityRoute, accounts []Account, manifestIDs map[int64][]string) bool {
 	for i := range accounts {
-		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel) {
+		if gatewayCapabilityAccountDiscoveredModel(&accounts[i], model, route.upstreamModel, manifestIDs[accounts[i].ID]) {
 			return true
 		}
 	}
 	return false
 }
 
-func gatewayCapabilityAccountDiscoveredModel(account *Account, publicModel, upstreamModel string) bool {
+func gatewayCapabilityAccountDiscoveredModel(account *Account, publicModel, upstreamModel string, manifestIDs []string) bool {
 	if account == nil {
-		return false
-	}
-	inventory := account.GetUpstreamModelInventorySnapshot()
-	if inventory == nil {
 		return false
 	}
 	upstreamModel = strings.TrimSpace(upstreamModel)
@@ -289,6 +304,13 @@ func gatewayCapabilityAccountDiscoveredModel(account *Account, publicModel, upst
 		upstreamModel = mapped
 	}
 	upstreamModel = strings.TrimPrefix(strings.TrimSpace(upstreamModel), "models/")
+	if slices.Contains(manifestIDs, upstreamModel) {
+		return true
+	}
+	inventory := account.GetUpstreamModelInventorySnapshot()
+	if inventory == nil {
+		return false
+	}
 	for _, discovered := range inventory.Models {
 		discovered = strings.TrimPrefix(strings.TrimSpace(discovered), "models/")
 		if discovered == upstreamModel || publicCatalogModelID(account, discovered) == publicModel {
@@ -353,19 +375,6 @@ func (s *GatewayService) gatewayCapabilityCompositeRoutes(ctx context.Context, g
 	}
 	routes, err := s.compositeResolver.repo.ListByGroup(ctx, group.ID, false)
 	return routes, err == nil
-}
-
-func gatewayCapabilityVisibleModelIDs(
-	group *Group,
-	current []Account,
-	currentKnown bool,
-	configured []Account,
-	configuredKnown bool,
-	routes []CompositeModelRoute,
-	routesKnown bool,
-	fallbacks map[string][]string,
-) []string {
-	return gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, availableModelIDsFromAccounts)
 }
 
 func gatewayCapabilityVisibleModelIDsWithSource(

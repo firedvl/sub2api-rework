@@ -120,46 +120,6 @@ func (h *GroupHandler) GetModelOperations(c *gin.Context) {
 		}
 	}
 
-	if h.openAIGatewayService != nil && (group.Platform == service.PlatformOpenAI || group.Platform == service.PlatformComposite) {
-		manifest, dynamic, manifestErr := h.openAIGatewayService.BuildGroupDynamicCodexModelsManifest(
-			c.Request.Context(), group, c.Query("client_version"), "",
-		)
-		if manifestErr != nil {
-			if warning == "" {
-				warning = "Live OpenAI picker discovery is unavailable."
-			}
-		} else if dynamic && manifest != nil {
-			modelIDs, parseErr := service.CodexModelsManifestModelIDs(manifest.Body)
-			if parseErr != nil {
-				if warning == "" {
-					warning = "Live OpenAI picker discovery is unavailable."
-				}
-			} else {
-				for _, modelID := range modelIDs {
-					row, exists := modelsByID[modelID]
-					if !exists {
-						row = modelOperationsModel{
-							ModelID:             modelID,
-							PublicID:            modelID,
-							ActualPlatform:      service.PlatformOpenAI,
-							DiscoverySource:     "provider_discovery",
-							Configured:          true,
-							Discovered:          true,
-							CatalogMember:       true,
-							CurrentAvailability: service.GatewayAvailabilityUnknown,
-							RouteType:           service.GatewayRouteUnknown,
-						}
-						applyModelOperationsUsage(&row, usage[modelID])
-					}
-					row.CodexPickerVisible = true
-					row.Discovered = true
-					row.DiscoverySource = "provider_discovery"
-					modelsByID[modelID] = row
-				}
-			}
-		}
-	}
-
 	models := make([]modelOperationsModel, 0, len(modelsByID))
 	for _, model := range modelsByID {
 		models = append(models, model)
