@@ -17,6 +17,8 @@ function compile(filename) {
 }
 const capabilities = compile('integration-contract-v2.schema.json');
 const preflight = compile('gateway-preflight-v2.schema.json');
+const decisionSchema = JSON.parse(fs.readFileSync(path.join(root, 'docs/integration-contract-v2.schema.json'), 'utf8')).$defs.decision;
+const routingDecision = ajv.compile(decisionSchema);
 function validate(value, validator) {
   assert(validator(value), JSON.stringify(validator.errors));
 }
@@ -42,10 +44,20 @@ let responses = 0;
 for (const line of output.split('\n')) {
   const match = line.match(/GATEWAY_SCHEMA_(CAPABILITIES|RESPONSE) (\{.*\})/);
   if (match) {
-    validate(JSON.parse(match[2]), match[1] === 'CAPABILITIES' ? capabilities : preflight);
+    const value = JSON.parse(match[2]);
+    validate(value, match[1] === 'CAPABILITIES' ? capabilities : preflight);
+    const decisions = value.models ? value.models.flatMap(model => Object.values(model.protocols).map(protocol => protocol.decision)) : [value.decision];
+    assert(decisions.length > 0);
+    for (const decision of decisions) {
+      assert(decision, 'Missing decision in current service output');
+      validate(decision, routingDecision);
+    }
+    if (!value.models) {
+      assert(!preflight({ ...value, decision: { ...value.decision, candidate_routes: 12 } }), 'Exact candidate counts must fail the response schema');
+    }
     responses++;
   }
 }
 assert.equal(responses, 4, 'Missing serialized fixture coverage');
-assert.equal(examples, 4, 'Documentation example coverage changed');
+assert.equal(examples, 5, 'Documentation example coverage changed');
 console.log(`PASS: ${examples} documentation examples and ${responses} serialized service responses`);

@@ -292,3 +292,91 @@ all JSON examples and actual serialized capabilities/preflight fixtures with the
 repository's installed AJV (using the schemas' draft-07-compatible keyword
 subset and local references). Backend tests separately guard emitted reason
 codes against both schema enums. No provider connection is used.
+
+## Routing decision transparency
+
+Schema v2 adds `decision` to each protocol entry and to preflight responses.
+This is an additive response field; older v2 responses may omit it. Existing
+`catalog`, `routing`, `availability`, and `support` meanings do not change.
+Schema v1 and the model-list endpoints do not change.
+
+| Field | Meaning |
+| --- | --- |
+| `state` | `deterministic`: one configured candidate, passively usable; `constrained`: multiple configured candidates or only a supported subset; `blocked`: a known veto or no currently usable candidate; `indeterminate`: missing evidence prevents a conclusion. |
+| `stage` | `policy`, `routing`, `protocol`, `capability`, `availability`, or `ready`. This names the evaluated blocking stage, not a trace of live scheduler execution. |
+| `reason` | Stable, provider-neutral explanation; omitted at readiness unless support depends on the selected route. |
+| `candidate_routes` | `none`, `single`, `multiple`, or `unknown`. Capabilities counts configured protocol candidates; preflight counts candidates proven to support the whole submitted shape. |
+| `available_routes` | The same buckets after passive availability checks. Any unresolved candidate evidence makes the bucket `unknown`; it is not an estimate or lower bound. |
+| `retryability` | `retry_later`, `change_request`, `change_configuration`, `unknown`, or `not_applicable`. Guidance only; no retry timestamp or recovery guarantee. |
+| `transient_conditions` | Sorted, distinct broad vetoes observed on shape-compatible candidates. Empty means no reported condition, not proven provider health. |
+
+`deterministic` describes passive candidate uniqueness. It does not promise live
+selection, admission, quota reservation, concurrency, credential validity, or
+upstream success. In preflight, `constrained` with `ROUTE_DEPENDENT` means the
+scheduler may still select a candidate that does not support the optional traits.
+A feature from one candidate never combines with a feature from another.
+Unknown feature evidence prevents an exact bucket and leaves the decision
+indeterminate even if another candidate has positive evidence.
+
+Publication remains separate: display-only configuration can hide a routable
+model, and a published model can lack a route. Read `catalog.published` and
+`catalog.discovery` alongside `decision`; lack of publication is not an admission
+veto. Caller allowlist denial returns only the policy result without reading
+account evidence. Request-cost, client-identity, or dispatch-dependent policy
+returns `REQUEST_DEPENDENT_POLICY_UNKNOWN` with unknown buckets.
+
+The decision reuses durable configuration, normalized capability observations,
+existing scheduler snapshots, and synchronized runtime observations. A snapshot
+miss remains unknown. A known snapshot with no candidate reports a generic
+`TEMPORARILY_UNAVAILABLE`; this alone does not prove waiting will help.
+`RATE_LIMIT_ACTIVE`, `COOLDOWN_ACTIVE`,
+`PROVIDER_TEMPORARILY_UNAVAILABLE` (an observed overload window), and
+`QUOTA_TEMPORARILY_UNAVAILABLE` (the existing window quota gate) can suggest
+`retry_later`. `QUOTA_UNAVAILABLE` includes local total quotas, so retry guidance
+remains unknown. Conditions describe stored observations, not active probes or
+raw upstream failure diagnoses. A condition on an incompatible candidate is
+excluded from preflight. Known conditions can coexist with an indeterminate
+result when another candidate lacks evidence.
+
+Policy/configuration vetoes suggest `change_configuration`; protocol or
+capability/combination vetoes suggest `change_request`. Readiness uses
+`not_applicable`. These values do not instruct a client to alter Gateway policy
+or bypass authentication.
+
+For example, a configured model affected by a rate limit can return:
+
+```json
+{
+  "schema_version": 2,
+  "generated_at": "2026-09-12T00:00:00Z",
+  "advisory": true,
+  "model": "public-model",
+  "protocol": "responses",
+  "catalog": { "published": true, "discovery": "observed" },
+  "routing": { "state": "configured" },
+  "availability": { "state": "temporarily_unavailable", "reason": "TEMPORARILY_UNAVAILABLE" },
+  "support": { "state": "supported" },
+  "decision": {
+    "state": "blocked",
+    "stage": "availability",
+    "reason": "RATE_LIMIT_ACTIVE",
+    "candidate_routes": "single",
+    "available_routes": "none",
+    "retryability": "retry_later",
+    "transient_conditions": ["RATE_LIMIT_ACTIVE"]
+  }
+}
+```
+
+Buckets intentionally reveal only zero/one/multiple eligible alternatives within
+the caller's authorized scope. They do not reveal pool size beyond that category,
+provider identity, account or route IDs, mappings, scores, quota records, reset
+times, credentials, or other tenants' state. Repeated observations can reveal
+changes between these categories; clients must not treat them as private admin
+telemetry. Standard mode uses group scope; Simple mode retains its deliberately
+broader existing scheduling scope. Responses remain `Cache-Control: no-store`;
+no response cache or new shared runtime state is added.
+
+This extension performs no provider call, manifest refresh, credential refresh,
+account mutation, scheduler reservation/rebuild, warm-up, or Reset Credit action.
+Existing authentication telemetry remains unchanged.

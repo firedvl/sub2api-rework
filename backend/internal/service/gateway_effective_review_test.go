@@ -76,6 +76,7 @@ func TestGatewayEffectiveFutureManifestAndPolicy(t *testing.T) {
 	result := gateway.BuildGatewayEffectiveCapabilities(context.Background(), group, nil)
 	require.Len(t, result.Models, 1)
 	require.Equal(t, "gpt-future-codex-model", result.Models[0].ID)
+	require.Equal(t, "single", result.Models[0].Protocols["responses"].Decision.CandidateRoutes)
 	require.Equal(t, "observed", result.Models[0].Catalog.Discovery)
 	require.Equal(t, "configured", result.Models[0].Protocols["responses"].Routing.State)
 	require.Equal(t, "unknown", result.Models[0].Protocols["responses"].Capabilities.Features["reasoning"])
@@ -88,6 +89,7 @@ func TestGatewayEffectiveFutureManifestAndPolicy(t *testing.T) {
 	result = gateway.BuildGatewayEffectiveCapabilities(context.Background(), group, nil)
 	require.Len(t, result.Models, 1)
 	require.Equal(t, "operator-alias", result.Models[0].ID)
+	require.Equal(t, "single", result.Models[0].Protocols["responses"].Decision.CandidateRoutes)
 }
 
 func TestGatewayEffectiveTransientCasesPreserveCatalog(t *testing.T) {
@@ -198,6 +200,7 @@ func TestGatewayEffectiveCompositeUsesSchedulerMixedEligibility(t *testing.T) {
 	require.Equal(t, "configured", result.Routing.State)
 	require.Equal(t, "supported", result.Support.State)
 	require.Equal(t, "available", result.Availability.State)
+	require.Equal(t, "deterministic", result.Decision.State)
 	account.Extra["mixed_scheduling"] = false
 	repo.configured = []Account{account}
 	result, err = gateway.PreflightGatewayRequest(context.Background(), group, GatewayPreflightRequest{SchemaVersion: 2, Model: "public-alias", Protocol: "responses"}, nil)
@@ -226,6 +229,8 @@ func TestGatewayEffectiveGeminiChatRejectsMixedAccount(t *testing.T) {
 	result, err := gateway.PreflightGatewayRequest(context.Background(), &Group{ID: 42, Platform: PlatformComposite}, GatewayPreflightRequest{SchemaVersion: 2, Model: "public-alias", Protocol: "chat_completions"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "not_configured", result.Routing.State)
+	require.Equal(t, "PROTOCOL_UNSUPPORTED", result.Decision.Reason)
+	require.Equal(t, "none", result.Decision.CandidateRoutes)
 }
 
 func TestGatewayEffectiveDynamicDiscoveryUsesRequestSnapshot(t *testing.T) {

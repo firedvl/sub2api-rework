@@ -6,6 +6,25 @@
     { "$ref": "#/$defs/response" }
   ],
   "$defs": {
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "stage", "candidate_routes", "available_routes", "retryability", "transient_conditions"],
+      "properties": {
+        "state": { "enum": ["deterministic", "constrained", "blocked", "indeterminate"] },
+        "stage": { "enum": ["policy", "routing", "protocol", "capability", "availability", "ready"] },
+        "reason": { "enum": ["UNKNOWN", "MODEL_NOT_ALLOWED", "OPERATOR_RESTRICTED", "NO_CONFIGURED_ROUTE", "PROTOCOL_UNSUPPORTED", "REQUEST_DEPENDENT_POLICY_UNKNOWN", "CAPABILITY_UNSUPPORTED", "CAPABILITY_COMBINATION_UNSUPPORTED", "ROUTE_DEPENDENT", "AVAILABILITY_UNKNOWN", "TEMPORARILY_UNAVAILABLE", "RATE_LIMIT_ACTIVE", "COOLDOWN_ACTIVE", "PROVIDER_TEMPORARILY_UNAVAILABLE", "QUOTA_TEMPORARILY_UNAVAILABLE", "QUOTA_UNAVAILABLE"] },
+        "candidate_routes": { "enum": ["none", "single", "multiple", "unknown"] },
+        "available_routes": { "enum": ["none", "single", "multiple", "unknown"] },
+        "retryability": { "enum": ["retry_later", "change_request", "change_configuration", "unknown", "not_applicable"] },
+        "transient_conditions": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "enum": ["TEMPORARILY_UNAVAILABLE", "RATE_LIMIT_ACTIVE", "COOLDOWN_ACTIVE", "PROVIDER_TEMPORARILY_UNAVAILABLE", "QUOTA_TEMPORARILY_UNAVAILABLE", "QUOTA_UNAVAILABLE"] }
+        }
+      }
+    },
     "reason": {
       "enum": [
         "CAPABILITY_COMBINATION_UNSUPPORTED",
@@ -84,6 +103,7 @@
       "type": "object",
       "required": ["schema_version", "generated_at", "advisory", "model", "protocol", "catalog", "routing", "availability", "support"],
       "properties": {
+        "decision": { "$ref": "#/$defs/decision" },
         "schema_version": { "const": 2 },
         "generated_at": { "type": "string", "format": "date-time" },
         "advisory": { "const": true },
