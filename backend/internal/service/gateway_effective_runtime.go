@@ -14,23 +14,26 @@ const (
 // gatewayEffectiveOpenAIRuntimeState reads OpenAI runtime gates without
 // initializing, pruning, refreshing, or notifying any runtime component.
 func gatewayEffectiveOpenAIRuntimeState(ctx context.Context, svc *OpenAIGatewayService, account *Account, model string) string {
+	return gatewayEffectiveOpenAIRuntimeObservation(ctx, svc, account, model, time.Now()).State
+}
+
+func gatewayEffectiveOpenAIRuntimeObservation(ctx context.Context, svc *OpenAIGatewayService, account *Account, model string, now time.Time) GatewayEffectiveState {
 	if svc == nil || account == nil {
-		return gatewayEffectiveRuntimeUnknown
+		return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 	}
 	if account.IsShadow() {
 		// Live selection additionally verifies the parent credential state.
-		return gatewayEffectiveRuntimeUnknown
+		return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 	}
 
-	now := time.Now()
 	if isOpenAIAccount(account) {
 		if value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID); ok {
 			until, valid := value.(time.Time)
 			if !valid || until.IsZero() {
-				return gatewayEffectiveRuntimeUnknown
+				return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 			}
 			if now.Before(until) {
-				return gatewayEffectiveRuntimeTemporarilyUnavailable
+				return GatewayEffectiveState{gatewayEffectiveRuntimeTemporarilyUnavailable, "COOLDOWN_ACTIVE"}
 			}
 		}
 	}
@@ -39,24 +42,24 @@ func gatewayEffectiveOpenAIRuntimeState(ctx context.Context, svc *OpenAIGatewayS
 		canonicalModel := canonicalOpenAIAccountSchedulingModel(account, model)
 		key, valid := openAIAccountModelTransientKey(account.ID, openAIAccountModelTransientModel(canonicalModel))
 		if !valid {
-			return gatewayEffectiveRuntimeUnknown
+			return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 		}
 		state.mu.Lock()
 		entry, ok := state.entries[key]
 		state.mu.Unlock()
 		if ok && !entry.lastFailure.IsZero() && now.Sub(entry.lastFailure) <= openAIModelTransientStreakTTL &&
 			!entry.blockUntil.IsZero() && now.Before(entry.blockUntil) {
-			return gatewayEffectiveRuntimeTemporarilyUnavailable
+			return GatewayEffectiveState{gatewayEffectiveRuntimeTemporarilyUnavailable, "COOLDOWN_ACTIVE"}
 		}
 	}
 
 	if account.ProxyID != nil && *account.ProxyID > 0 {
 		// Inspecting the lazy circuit would initialize it; live selection also
 		// has a fail-open retry, so a passive observer cannot make a final claim.
-		return gatewayEffectiveRuntimeUnknown
+		return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 	}
 	if !account.IsOpenAI() {
-		return gatewayEffectiveRuntimeAvailable
+		return GatewayEffectiveState{State: gatewayEffectiveRuntimeAvailable}
 	}
 
 	if svc.settingService != nil {
@@ -66,12 +69,12 @@ func gatewayEffectiveOpenAIRuntimeState(ctx context.Context, svc *OpenAIGatewayS
 		}
 	}
 	if paused, _ := evaluateOpenAIAccountQuotaPause(ctx, account); paused {
-		return gatewayEffectiveRuntimeTemporarilyUnavailable
+		return GatewayEffectiveState{gatewayEffectiveRuntimeTemporarilyUnavailable, "QUOTA_TEMPORARILY_UNAVAILABLE"}
 	}
 	if svc.settingService != nil && !gatewayEffectiveQuotaSettingsKnown(ctx, account) {
-		return gatewayEffectiveRuntimeUnknown
+		return GatewayEffectiveState{gatewayEffectiveRuntimeUnknown, "AVAILABILITY_UNKNOWN"}
 	}
-	return gatewayEffectiveRuntimeAvailable
+	return GatewayEffectiveState{State: gatewayEffectiveRuntimeAvailable}
 }
 
 func gatewayEffectiveQuotaSettingsKnown(ctx context.Context, account *Account) bool {

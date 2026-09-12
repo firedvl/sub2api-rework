@@ -26,9 +26,10 @@ type GatewayEffectiveCatalog struct {
 }
 
 type GatewayEffectiveProtocol struct {
-	Routing      GatewayEffectiveState `json:"routing"`
-	Availability GatewayEffectiveState `json:"availability"`
-	Capabilities GatewayFeatureSet     `json:"capabilities"`
+	Routing      GatewayEffectiveState  `json:"routing"`
+	Availability GatewayEffectiveState  `json:"availability"`
+	Capabilities GatewayFeatureSet      `json:"capabilities"`
+	Decision     GatewayRoutingDecision `json:"decision"`
 }
 
 type GatewayEffectiveModel struct {
@@ -98,12 +99,15 @@ type GatewayPreflightResponse struct {
 	Routing       GatewayEffectiveState   `json:"routing"`
 	Availability  GatewayEffectiveState   `json:"availability"`
 	Support       GatewayEffectiveState   `json:"support"`
+	Decision      GatewayRoutingDecision  `json:"decision"`
 }
 
 type gatewayEffectiveCandidates struct {
-	configured []GatewayFeatureSet
-	current    []GatewayFeatureSet
-	view       GatewayEffectiveProtocol
+	configured   []GatewayFeatureSet
+	current      []GatewayFeatureSet
+	observations []GatewayEffectiveState
+	reason       string
+	view         GatewayEffectiveProtocol
 }
 
 // Decode once per account per request; no shared cache or account writes.
@@ -151,7 +155,10 @@ func (s *GatewayService) BuildGatewayEffectiveCapabilities(ctx context.Context, 
 	for _, model := range s.gatewayEffectiveModelIDs(ctx, group, snapshot) {
 		entry := GatewayEffectiveModel{ID: model, Catalog: s.gatewayEffectiveCatalog(ctx, group, model, true, snapshot), Protocols: make(map[string]GatewayEffectiveProtocol)}
 		for _, protocol := range gatewayEffectiveProtocols {
-			entry.Protocols[protocol] = s.gatewayEffectiveCandidates(ctx, group, model, protocol, snapshot, openAI).view
+			candidates := s.gatewayEffectiveCandidates(ctx, group, model, protocol, snapshot, openAI)
+			view := candidates.view
+			view.Decision = gatewayRoutingDecision(GatewayPreflightRequest{Model: model, Protocol: protocol}, candidates, false)
+			entry.Protocols[protocol] = view
 		}
 		result.Models = append(result.Models, entry)
 	}
@@ -170,6 +177,7 @@ func (s *GatewayService) PreflightGatewayRequest(ctx context.Context, group *Gro
 		result.Routing = GatewayEffectiveState{"restricted", "MODEL_NOT_ALLOWED"}
 		result.Availability = GatewayEffectiveState{State: "not_applicable"}
 		result.Support = GatewayEffectiveState{"unsupported", "MODEL_NOT_ALLOWED"}
+		result.Decision = gatewayRoutingDecision(request, gatewayEffectiveCandidates{view: GatewayEffectiveProtocol{Routing: result.Routing, Availability: result.Availability}}, true)
 		return result, nil
 	}
 	snapshot := s.loadGatewayEffectiveSnapshot(ctx, group)
@@ -177,6 +185,7 @@ func (s *GatewayService) PreflightGatewayRequest(ctx context.Context, group *Gro
 	published := slices.Contains(s.gatewayEffectiveModelIDs(ctx, group, snapshot), request.Model)
 	result.Catalog = s.gatewayEffectiveCatalog(ctx, group, request.Model, published, snapshot)
 	candidates := s.gatewayEffectiveCandidates(ctx, group, request.Model, request.Protocol, snapshot, openAI)
+	result.Decision = gatewayRoutingDecision(request, candidates, true)
 	result.Routing = candidates.view.Routing
 	result.Availability = candidates.view.Availability
 	result.Support = gatewayEvaluateRequestSets(request, candidates.configured)
@@ -282,6 +291,7 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 	if group != nil && group.ClaudeCodeOnly && (route.targetPlatform == PlatformAnthropic || route.targetPlatform == PlatformGemini || route.targetPlatform == PlatformAntigravity) {
 		if protocol == CompositeRouteEndpointMessages {
 			// Client identity and fallback-group admission require the real request.
+			result.reason = "REQUEST_DEPENDENT_POLICY_UNKNOWN"
 			return result
 		}
 		result.view.Routing = GatewayEffectiveState{"restricted", "OPERATOR_RESTRICTED"}
@@ -290,6 +300,7 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 	}
 	if group != nil && group.ProfitControlEnabled {
 		// Token-cost eligibility requires request pricing and input size.
+		result.reason = "REQUEST_DEPENDENT_POLICY_UNKNOWN"
 		return result
 	}
 	var groupID *int64
@@ -315,6 +326,7 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 			// promise a single effective shape across those branches.
 			if mapping.Mapped || group != nil && group.ResolveMessagesDispatchModel(selectionModel) != "" &&
 				(group.Platform != PlatformComposite || route.targetPlatform == PlatformOpenAI) {
+				result.reason = "REQUEST_DEPENDENT_POLICY_UNKNOWN"
 				return result
 			}
 			selectionModel = NormalizeOpenAICompatRequestedModel(selectionModel)
@@ -337,10 +349,12 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 	}
 	upstreamRestriction := s != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	policyBlocked := false
+	protocolBlocked := false
 	currentUnknown := false
 	for i := range configured {
 		account := &configured[i]
 		if protocol == CompositeRouteEndpointChatCompletions && !GatewayChatAccountCompatible(route.targetPlatform, account) {
+			protocolBlocked = true
 			continue
 		}
 		if group != nil && group.RequirePrivacySet && !account.IsPrivacySet() {
@@ -361,21 +375,22 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 			features.Features["reasoning"] = "unknown"
 		}
 		if features.Features["protocol"] == "unsupported" {
+			protocolBlocked = true
 			continue
 		}
 		result.configured = append(result.configured, features)
 		current, ok := currentByID[account.ID]
-		if !ok || current.Platform != account.Platform || !account.IsSchedulableForModelWithContext(ctx, selectionModel) || !current.IsSchedulableForModelWithContext(ctx, selectionModel) {
-			continue
+		observation := GatewayEffectiveState{"unknown", "AVAILABILITY_UNKNOWN"}
+		if pool.known {
+			observation = gatewayCandidateAvailability(ctx, account, current, ok, selectionModel, openAI, snapshot.observedAt)
 		}
-		if account.IsOpenAICompatible() {
-			switch gatewayEffectiveOpenAIRuntimeState(ctx, openAI, account, selectionModel) {
-			case "temporarily_unavailable":
-				continue
-			case "unknown":
-				currentUnknown = true
-				continue
-			}
+		result.observations = append(result.observations, observation)
+		switch observation.State {
+		case "unknown":
+			currentUnknown = true
+			continue
+		case "temporarily_unavailable":
+			continue
 		}
 
 		result.current = append(result.current, features)
@@ -383,7 +398,11 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 	result.view.Capabilities = gatewayIntersectFeatures(result.configured)
 	if len(result.configured) == 0 {
 		result.view.Routing = GatewayEffectiveState{"not_configured", "NO_CONFIGURED_ROUTE"}
+		if protocolBlocked {
+			result.reason = "PROTOCOL_UNSUPPORTED"
+		}
 		if policyBlocked {
+			result.reason = "OPERATOR_RESTRICTED"
 			result.view.Routing = GatewayEffectiveState{"restricted", "OPERATOR_RESTRICTED"}
 		}
 		result.view.Availability = GatewayEffectiveState{State: "not_applicable"}

@@ -93,6 +93,7 @@ func TestGatewayEffectiveCapabilitiesRemainGroupScoped(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(defaultV1.Body.Bytes(), &v1))
 	require.Equal(t, 1, v1.SchemaVersion)
+	require.NotContains(t, defaultV1.Body.String(), `"decision"`)
 	require.Len(t, v1.Models, 2)
 	require.ElementsMatch(t, []string{shared, "partner-a-only"}, []string{v1.Models[0].ID, v1.Models[1].ID})
 
@@ -125,6 +126,13 @@ func TestGatewayEffectiveCapabilitiesRemainGroupScoped(t *testing.T) {
 	require.Equal(t, "unknown", features(bV2.Body.Bytes(), shared))
 	require.NotContains(t, aV2.Body.String(), "partner-b-only")
 	require.NotContains(t, bV2.Body.String(), "partner-a-only")
+	for _, body := range [][]byte{aV2.Body.Bytes(), bV2.Body.Bytes()} {
+		var scoped service.GatewayEffectiveCapabilities
+		require.NoError(t, json.Unmarshal(body, &scoped))
+		for _, model := range scoped.Models {
+			require.Equal(t, "single", model.Protocols["responses"].Decision.CandidateRoutes, "other groups must not contribute to multiplicity")
+		}
+	}
 
 	displayOnlyA := *groupA
 	displayOnlyA.ModelsListConfig = service.GroupModelsListConfig{Enabled: true, Models: []string{"partner-a-only"}}
