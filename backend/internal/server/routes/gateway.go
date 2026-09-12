@@ -183,12 +183,21 @@ func RegisterGatewayRoutes(
 
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
+	gateway.Use(func(c *gin.Context) {
+		if c.Request.URL.Path == "/v1/gateway/capabilities" || c.Request.URL.Path == "/v1/gateway/preflight" {
+			c.Header("Cache-Control", "no-store")
+		}
+		c.Next()
+	})
 	gateway.Use(bodyLimit)
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	// Preflight evaluates the public model itself. Do not rewrite its body or
+	// run inference admission; it needs to report policy denials as data.
+	gateway.POST("/gateway/preflight", requireGroupAnthropic, h.Gateway.Preflight)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)

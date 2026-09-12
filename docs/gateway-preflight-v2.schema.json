@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gateway Preflight Contract v2",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "reason": {
+      "enum": [
+        "CAPABILITY_COMBINATION_UNSUPPORTED",
+        "CAPABILITY_UNSUPPORTED",
+        "ROUTE_DEPENDENT",
+        "MODEL_NOT_ALLOWED",
+        "NO_CONFIGURED_ROUTE",
+        "OPERATOR_RESTRICTED",
+        "TEMPORARILY_UNAVAILABLE",
+        "UNKNOWN"
+      ]
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["published", "discovery"],
+      "properties": {
+        "published": { "type": "boolean" },
+        "discovery": { "enum": ["observed", "unknown"] }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["configured", "not_configured", "restricted", "unknown"] },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["available", "temporarily_unavailable", "unknown", "not_applicable"] },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "support": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["supported", "unsupported", "conditional", "unknown"] },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "request": {
+      "title": "Preflight request",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "model", "protocol"],
+      "properties": {
+        "schema_version": { "const": 2 },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^(?=.*\\S)[^\\r\\n\\t\\u0000*]+$"
+        },
+        "protocol": { "enum": ["responses", "chat_completions", "messages"] },
+        "input_modalities": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "enum": ["text", "image", "audio", "video"] }
+        },
+        "tools": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "enum": ["functions", "web_search", "tool_discovery"] }
+        },
+        "streaming": { "type": "boolean" },
+        "service_tier": { "enum": ["auto", "default", "scale", "priority", "flex", "ultrafast"] },
+        "reasoning_effort": { "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] }
+      }
+    },
+    "response": {
+      "title": "Preflight response",
+      "type": "object",
+      "required": ["schema_version", "generated_at", "advisory", "model", "protocol", "catalog", "routing", "availability", "support"],
+      "properties": {
+        "schema_version": { "const": 2 },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "advisory": { "const": true },
+        "model": { "type": "string", "minLength": 1 },
+        "protocol": { "enum": ["responses", "chat_completions", "messages"] },
+        "catalog": { "$ref": "#/$defs/catalog" },
+        "routing": { "$ref": "#/$defs/routing" },
+        "availability": { "$ref": "#/$defs/availability" },
+        "support": { "$ref": "#/$defs/support" }
+      }
+    }
+  }
+}

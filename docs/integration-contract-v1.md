@@ -1,5 +1,9 @@
 # Gateway Integration Contract v1
 
+Schema v1 remains the default for `GET /v1/gateway/capabilities`. The opt-in
+effective capability contract is documented separately in
+[integration-contract-v2.md](integration-contract-v2.md).
+
 ## Endpoint
 
 ```text

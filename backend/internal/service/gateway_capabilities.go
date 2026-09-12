@@ -105,37 +105,11 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 	group *Group,
 	fallbacks map[string][]string,
 ) []GatewayCapabilityModel {
-	var current []Account
-	currentKnown := false
-	var currentByPlatform map[string]gatewayCapabilityAccountPool
-	if s != nil && s.schedulerSnapshot != nil {
-		currentByPlatform = make(map[string]gatewayCapabilityAccountPool, len(gatewayCapabilityPlatforms))
-		platforms := gatewayCapabilityPlatforms
-		if group == nil || group.Platform != PlatformComposite {
-			platform := PlatformAnthropic
-			if group != nil && strings.TrimSpace(group.Platform) != "" {
-				platform = group.Platform
-			}
-			platforms = []string{platform}
-		}
-		var groupID *int64
-		if group != nil && group.ID > 0 {
-			id := group.ID
-			groupID = &id
-		}
-		for _, platform := range platforms {
-			accounts, _, hit, err := s.schedulerSnapshot.PeekSchedulableAccounts(ctx, groupID, platform, false)
-			known := err == nil && hit
-			if known {
-				accounts = s.filterGatewayCapabilityCurrentAccounts(ctx, accounts)
-				current = append(current, accounts...)
-				currentKnown = true
-			}
-			currentByPlatform[platform] = gatewayCapabilityAccountPool{accounts: accounts, known: known}
-		}
-	}
-	configured, configuredKnown := s.gatewayCapabilityConfiguredAccounts(ctx, group)
-	routes, routesKnown := s.gatewayCapabilityCompositeRoutes(ctx, group)
+	snapshot := s.loadGatewayCapabilitySnapshot(ctx, group)
+	current, currentKnown := snapshot.current, snapshot.currentKnown
+	currentByPlatform := snapshot.currentByPlatform
+	configured, configuredKnown := snapshot.configured, snapshot.configuredKnown
+	routes, routesKnown := snapshot.routes, snapshot.routesKnown
 	modelIDs := gatewayCapabilityVisibleModelIDs(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks)
 
 	models := make([]GatewayCapabilityModel, 0, len(modelIDs))
@@ -203,6 +177,58 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models
+}
+
+type gatewayCapabilitySnapshot struct {
+	observedAt        time.Time
+	manifestIDs       map[int64][]string
+	current           []Account
+	currentKnown      bool
+	currentByPlatform map[string]gatewayCapabilityAccountPool
+	configured        []Account
+	configuredKnown   bool
+	routes            []CompositeModelRoute
+	routesKnown       bool
+	metadata          map[int64]map[string]UpstreamModelMetadata
+	observedModels    map[int64]map[string]bool
+}
+
+func (s *GatewayService) loadGatewayCapabilitySnapshot(ctx context.Context, group *Group) gatewayCapabilitySnapshot {
+	var current []Account
+	currentKnown := false
+	var currentByPlatform map[string]gatewayCapabilityAccountPool
+	if s != nil && s.schedulerSnapshot != nil {
+		currentByPlatform = make(map[string]gatewayCapabilityAccountPool, len(gatewayCapabilityPlatforms))
+		platforms := gatewayCapabilityPlatforms
+		if group == nil || group.Platform != PlatformComposite {
+			platform := PlatformAnthropic
+			if group != nil && strings.TrimSpace(group.Platform) != "" {
+				platform = group.Platform
+			}
+			platforms = []string{platform}
+		}
+		var groupID *int64
+		if group != nil && group.ID > 0 {
+			id := group.ID
+			groupID = &id
+		}
+		for _, platform := range platforms {
+			accounts, _, hit, err := s.schedulerSnapshot.PeekSchedulableAccounts(ctx, groupID, platform, false)
+			known := err == nil && hit
+			if known {
+				accounts = s.filterGatewayCapabilityCurrentAccounts(ctx, accounts)
+				current = append(current, accounts...)
+				currentKnown = true
+			}
+			currentByPlatform[platform] = gatewayCapabilityAccountPool{accounts: accounts, known: known}
+		}
+	}
+	configured, configuredKnown := s.gatewayCapabilityConfiguredAccounts(ctx, group)
+	routes, routesKnown := s.gatewayCapabilityCompositeRoutes(ctx, group)
+	return gatewayCapabilitySnapshot{
+		current: current, currentKnown: currentKnown, currentByPlatform: currentByPlatform,
+		configured: configured, configuredKnown: configuredKnown, routes: routes, routesKnown: routesKnown,
+	}
 }
 
 func DefaultGatewayCapabilityFallbacks() map[string][]string {
@@ -339,6 +365,20 @@ func gatewayCapabilityVisibleModelIDs(
 	routesKnown bool,
 	fallbacks map[string][]string,
 ) []string {
+	return gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, availableModelIDsFromAccounts)
+}
+
+func gatewayCapabilityVisibleModelIDsWithSource(
+	group *Group,
+	current []Account,
+	currentKnown bool,
+	configured []Account,
+	configuredKnown bool,
+	routes []CompositeModelRoute,
+	routesKnown bool,
+	fallbacks map[string][]string,
+	modelIDs func([]Account, string) []string,
+) []string {
 	platform := PlatformAnthropic
 	if group != nil && strings.TrimSpace(group.Platform) != "" {
 		platform = group.Platform
@@ -348,11 +388,11 @@ func gatewayCapabilityVisibleModelIDs(
 		available := make([]string, 0)
 		hasPlatform := false
 		if configuredKnown {
-			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(configured, platform))
+			available = mergeGatewayCapabilityModelIDs(available, modelIDs(configured, platform))
 			hasPlatform = gatewayCapabilityHasPlatform(configured, platform)
 		}
 		if currentKnown {
-			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(current, platform))
+			available = mergeGatewayCapabilityModelIDs(available, modelIDs(current, platform))
 			hasPlatform = hasPlatform || gatewayCapabilityHasPlatform(current, platform)
 		}
 		fallback := cloneStringSlice(fallbacks[platform])
@@ -379,11 +419,11 @@ func gatewayCapabilityVisibleModelIDs(
 		platformModels := make([]string, 0)
 		hasPlatform := false
 		if configuredKnown {
-			platformModels = mergeGatewayCapabilityModelIDs(platformModels, availableModelIDsFromAccounts(configured, concrete))
+			platformModels = mergeGatewayCapabilityModelIDs(platformModels, modelIDs(configured, concrete))
 			hasPlatform = gatewayCapabilityHasPlatform(configured, concrete)
 		}
 		if currentKnown {
-			platformModels = mergeGatewayCapabilityModelIDs(platformModels, availableModelIDsFromAccounts(current, concrete))
+			platformModels = mergeGatewayCapabilityModelIDs(platformModels, modelIDs(current, concrete))
 			hasPlatform = hasPlatform || gatewayCapabilityHasPlatform(current, concrete)
 		}
 		if len(platformModels) == 0 && hasPlatform && !IsCNProvider(concrete) {
@@ -448,6 +488,10 @@ func mergeGatewayCapabilityModelIDs(first, second []string) []string {
 }
 
 func gatewayCapabilityRouteForModel(group *Group, model string, routes []CompositeModelRoute, routesKnown bool, accounts []Account, preferDetected bool) gatewayCapabilityRoute {
+	return gatewayCapabilityRouteForEndpoint(group, model, CompositeRouteEndpointResponses, routes, routesKnown, accounts, preferDetected)
+}
+
+func gatewayCapabilityRouteForEndpoint(group *Group, model, endpoint string, routes []CompositeModelRoute, routesKnown bool, accounts []Account, preferDetected bool) gatewayCapabilityRoute {
 	platform := PlatformAnthropic
 	if group != nil && strings.TrimSpace(group.Platform) != "" {
 		platform = group.Platform
@@ -458,7 +502,7 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 	if !routesKnown {
 		return gatewayCapabilityRoute{upstreamModel: model, routeType: GatewayRouteUnknown}
 	}
-	if explicit, ok := matchCompositeRoute(routes, model, CompositeRouteEndpointResponses, true); ok {
+	if explicit, ok := matchCompositeRoute(routes, model, endpoint, true); ok {
 		upstreamModel := strings.TrimSpace(explicit.UpstreamModel)
 		if upstreamModel == "" {
 			upstreamModel = model
@@ -470,7 +514,7 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 			PublicModel:    model,
 			TargetPlatform: explicit.TargetPlatform,
 			UpstreamModel:  upstreamModel,
-			Endpoint:       CompositeRouteEndpointResponses,
+			Endpoint:       endpoint,
 		}
 		return gatewayCapabilityRoute{targetPlatform: explicit.TargetPlatform, upstreamModel: upstreamModel, routeType: GatewayRouteComposite, known: isConcreteRequestPlatform(explicit.TargetPlatform), decision: decision}
 	}
@@ -486,7 +530,7 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 			PublicModel:    model,
 			TargetPlatform: ownership.TargetPlatform,
 			UpstreamModel:  model,
-			Endpoint:       CompositeRouteEndpointResponses,
+			Endpoint:       endpoint,
 		}
 		return gatewayCapabilityRoute{targetPlatform: ownership.TargetPlatform, upstreamModel: model, routeType: GatewayRouteComposite, known: isConcreteRequestPlatform(ownership.TargetPlatform), decision: decision}
 	}
@@ -498,7 +542,7 @@ func gatewayCapabilityRouteForModel(group *Group, model string, routes []Composi
 			PublicModel:    model,
 			TargetPlatform: detected,
 			UpstreamModel:  model,
-			Endpoint:       CompositeRouteEndpointResponses,
+			Endpoint:       endpoint,
 		}
 		return gatewayCapabilityRoute{targetPlatform: detected, upstreamModel: model, routeType: GatewayRouteComposite, known: true, decision: decision}
 	}

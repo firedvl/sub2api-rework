@@ -41,9 +41,20 @@ type gatewayCapabilityTransport struct {
 // Capabilities returns the versioned, API-key-scoped Gateway discovery contract.
 // GET /v1/gateway/capabilities
 func (h *GatewayHandler) Capabilities(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
+		return
+	}
+
+	switch c.Query("schema_version") {
+	case "", "1":
+	case "2":
+		c.JSON(http.StatusOK, h.gatewayService.BuildGatewayEffectiveCapabilities(c.Request.Context(), apiKey.Group, h.openAIGatewayService))
+		return
+	default:
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Unsupported schema_version")
 		return
 	}
 
@@ -53,6 +64,16 @@ func (h *GatewayHandler) Capabilities(c *gin.Context) {
 	} else {
 		models = (&service.GatewayService{}).BuildGatewayCapabilityModels(c.Request.Context(), apiKey.Group, service.DefaultGatewayCapabilityFallbacks())
 	}
+	if apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
+		filtered := make([]service.GatewayCapabilityModel, 0, len(models))
+		for _, model := range models {
+			if apiKey.Group.ModelAllowlist.Allows(model.ID) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
+
 	for i := range models {
 		models[i].DisplayName = gatewayCapabilityDisplayName(models[i].ID)
 		models[i].Capabilities = gatewayCapabilityMetadata(models[i].ID)

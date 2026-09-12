@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gateway Effective Model Capabilities Contract v2",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "advisory", "catalog_state", "models"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "advisory": { "const": true },
+    "catalog_state": { "enum": ["known", "unknown"] },
+    "models": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/model" }
+    }
+  },
+  "$defs": {
+    "reason": {
+      "enum": [
+        "CAPABILITY_COMBINATION_UNSUPPORTED",
+        "CAPABILITY_UNSUPPORTED",
+        "ROUTE_DEPENDENT",
+        "MODEL_NOT_ALLOWED",
+        "NO_CONFIGURED_ROUTE",
+        "OPERATOR_RESTRICTED",
+        "TEMPORARILY_UNAVAILABLE",
+        "UNKNOWN"
+      ]
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["published", "discovery"],
+      "properties": {
+        "published": { "type": "boolean" },
+        "discovery": { "enum": ["observed", "unknown"] }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["configured", "not_configured", "restricted", "unknown"] },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["available", "temporarily_unavailable", "unknown", "not_applicable"] },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "feature-state": {
+      "enum": ["supported", "unsupported", "conditional", "unknown"]
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["all_of", "reason"],
+      "properties": {
+        "all_of": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reason": { "$ref": "#/$defs/reason" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["features", "constraints"],
+      "properties": {
+        "features": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/feature-state" }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/constraint" }
+        },
+        "reasoning_efforts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "context_window": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "required": ["routing", "availability", "capabilities"],
+      "properties": {
+        "routing": { "$ref": "#/$defs/routing" },
+        "availability": { "$ref": "#/$defs/availability" },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "catalog", "protocols"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "catalog": { "$ref": "#/$defs/catalog" },
+        "protocols": {
+          "type": "object",
+          "required": ["responses", "chat_completions", "messages"],
+          "properties": {
+            "responses": { "$ref": "#/$defs/protocol" },
+            "chat_completions": { "$ref": "#/$defs/protocol" },
+            "messages": { "$ref": "#/$defs/protocol" }
+          }
+        }
+      }
+    }
+  }
+}

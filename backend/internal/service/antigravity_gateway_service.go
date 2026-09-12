@@ -641,7 +641,10 @@ func antigravityV1InternalUsesMixedTools(body []byte) bool {
 		hasGoogleSearch = hasGoogleSearch || tool.Get("googleSearch").Exists()
 		hasFunctions = hasFunctions || len(tool.Get("functionDeclarations").Array()) > 0
 	}
-	return hasGoogleSearch && hasFunctions
+	return gatewayFeatureConstraintMatches(
+		GatewayCapabilityConstraint{AllOf: []string{"functions", "web_search"}},
+		map[string]bool{"functions": hasFunctions, "web_search": hasGoogleSearch},
+	)
 }
 
 // unwrapV1InternalResponse 解包 v1internal 响应

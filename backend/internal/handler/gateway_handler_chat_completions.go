@@ -251,7 +251,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
-		if groupPlatform == service.PlatformGemini && account.Platform != service.PlatformGemini {
+		if !service.GatewayChatAccountCompatible(groupPlatform, account) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
