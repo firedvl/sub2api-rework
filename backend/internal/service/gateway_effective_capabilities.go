@@ -108,19 +108,28 @@ type gatewayEffectiveCandidates struct {
 
 // Decode once per account per request; no shared cache or account writes.
 func (s *GatewayService) loadGatewayEffectiveSnapshot(ctx context.Context, group *Group) gatewayCapabilitySnapshot {
+	now := time.Now()
+	return s.loadGatewayEffectiveSnapshotAt(ctx, group, now)
+}
+
+func (s *GatewayService) loadGatewayEffectiveSnapshotAt(ctx context.Context, group *Group, now time.Time) gatewayCapabilitySnapshot {
 	snapshot := s.loadGatewayCapabilitySnapshot(ctx, group)
+	snapshot.observedAt = now
+	snapshot.manifestIDs = make(map[int64][]string, len(snapshot.configured))
 	snapshot.metadata = make(map[int64]map[string]UpstreamModelMetadata, len(snapshot.configured))
 	snapshot.observedModels = make(map[int64]map[string]bool, len(snapshot.configured))
 	for i := range snapshot.configured {
 		account := &snapshot.configured[i]
-		snapshot.metadata[account.ID] = gatewayAccountMetadata(account)
+		observation := observeOpenAICodexManifest(account, now)
+		snapshot.metadata[account.ID] = gatewayAccountMetadataWithManifest(account, observation)
+		snapshot.manifestIDs[account.ID] = observation.publicIDs
 		observed := make(map[string]bool)
 		if inventory := account.GetUpstreamModelInventorySnapshot(); inventory != nil {
 			for _, model := range inventory.Models {
 				observed[strings.TrimPrefix(strings.TrimSpace(model), "models/")] = true
 			}
 		}
-		for _, model := range openAIPublicModelIDsFromCodexManifestSnapshots(account, time.Now()) {
+		for _, model := range observation.publicIDs {
 			observed[model] = true
 		}
 		snapshot.observedModels[account.ID] = observed
@@ -133,7 +142,7 @@ func (s *GatewayService) loadGatewayEffectiveSnapshot(ctx context.Context, group
 func (s *GatewayService) BuildGatewayEffectiveCapabilities(ctx context.Context, group *Group, openAI *OpenAIGatewayService) GatewayEffectiveCapabilities {
 	snapshot := s.loadGatewayEffectiveSnapshot(ctx, group)
 	result := GatewayEffectiveCapabilities{
-		SchemaVersion: 2, GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano), Advisory: true,
+		SchemaVersion: 2, GeneratedAt: snapshot.observedAt.UTC().Format(time.RFC3339Nano), Advisory: true,
 		CatalogState: "known", Models: []GatewayEffectiveModel{},
 	}
 	if !snapshot.configuredKnown || !snapshot.routesKnown {
@@ -164,6 +173,7 @@ func (s *GatewayService) PreflightGatewayRequest(ctx context.Context, group *Gro
 		return result, nil
 	}
 	snapshot := s.loadGatewayEffectiveSnapshot(ctx, group)
+	result.GeneratedAt = snapshot.observedAt.UTC().Format(time.RFC3339Nano)
 	published := slices.Contains(s.gatewayEffectiveModelIDs(ctx, group, snapshot), request.Model)
 	result.Catalog = s.gatewayEffectiveCatalog(ctx, group, request.Model, published, snapshot)
 	candidates := s.gatewayEffectiveCandidates(ctx, group, request.Model, request.Protocol, snapshot, openAI)
@@ -193,7 +203,9 @@ func (s *GatewayService) PreflightGatewayRequest(ctx context.Context, group *Gro
 
 func (s *GatewayService) gatewayEffectiveModelIDs(ctx context.Context, group *Group, snapshot gatewayCapabilitySnapshot) []string {
 	// A stale scheduler snapshot cannot republish removed account policy.
-	ids := gatewayCapabilityVisibleModelIDs(group, nil, false, snapshot.configured, snapshot.configuredKnown, nil, false, DefaultGatewayCapabilityFallbacks())
+	ids := gatewayCapabilityVisibleModelIDsWithSource(group, nil, false, snapshot.configured, snapshot.configuredKnown, nil, false, DefaultGatewayCapabilityFallbacks(), func(accounts []Account, platform string) []string {
+		return availableModelIDsFromAccountsWithManifestIDs(accounts, platform, func(account *Account) []string { return snapshot.manifestIDs[account.ID] })
+	})
 	if group != nil && group.Platform == PlatformComposite && snapshot.routesKnown {
 		for _, route := range snapshot.routes {
 			if !route.Enabled || normalizeCompositeRouteMatchType(route.MatchType) != CompositeRouteMatchExact {

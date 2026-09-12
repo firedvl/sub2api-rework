@@ -276,7 +276,11 @@ fields.
 
 A request makes one durable account-pool read, at most one Composite-route read,
 and at most one scheduler peek per relevant provider. Channel lookups use the
-existing cache. Metadata is decoded once per account into request-local maps;
+existing cache. The effective snapshot captures one timestamp before its reads. Each account's
+same-identity Codex manifest is selected and decoded into one request-local
+observation; metadata, discovery and publication derive from that observation.
+The 24-hour freshness rule and deterministic equal-timestamp ordering are
+unchanged. Metadata is decoded once per account into request-local maps;
 there is no shared caller/model response cache. Account/model predicates still
 scan the scoped candidates. No upstream manifest fetch is part of either path.
 

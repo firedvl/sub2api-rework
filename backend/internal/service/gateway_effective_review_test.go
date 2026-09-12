@@ -147,24 +147,37 @@ func TestGatewayEffectiveRuntimeConcurrentObservation(t *testing.T) {
 }
 
 func BenchmarkGatewayEffectiveCapabilities(b *testing.B) {
-	mapping := map[string]string{}
-	metadata := map[string]UpstreamModelMetadata{}
+	models := make([]map[string]any, 0, 50)
 	for i := range 50 {
-		model := fmt.Sprintf("future-%d", i)
-		mapping[model] = model
-		metadata[model] = UpstreamModelMetadata{ID: model, InputModalities: []string{"text"}, ContextWindow: 128000}
+		models = append(models, map[string]any{"slug": fmt.Sprintf("future-%d", i), "input_modalities": []string{"text"}, "context_window": 128000})
+	}
+	body, err := json.Marshal(map[string]any{"models": models})
+	if err != nil {
+		b.Fatal(err)
 	}
 	accounts := make([]Account, 10)
 	for i := range accounts {
-		accounts[i] = gatewayCapabilityTestAccount(int64(i+1), PlatformOpenAI, mapping)
-		accounts[i].SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: metadata})
+		accounts[i] = gatewayCapabilityTestAccount(int64(i+1), PlatformOpenAI, nil)
+		accounts[i].Type = AccountTypeOAuth
+		accounts[i].Extra[codexFingerprintSeedExtraKey] = fmt.Sprintf("11111111-1111-4111-8111-%012d", i)
+		raw, err := json.Marshal(openAICodexManifestSnapshots{
+			Identity: openAICodexManifestIdentity(&accounts[i]),
+			Versions: map[string]openAICodexManifestSnapshot{"test": {SyncedAt: time.Now().UTC().Format(time.RFC3339Nano), Body: body}},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		accounts[i].Extra[OpenAICodexManifestSnapshotExtraKey] = json.RawMessage(raw)
 	}
 	repo := &gatewayCapabilityAccountRepoStub{configured: accounts}
 	gateway := &GatewayService{accountRepo: repo}
 	group := &Group{ID: 42, Platform: PlatformOpenAI}
 	b.ReportAllocs()
 	for b.Loop() {
-		gateway.BuildGatewayEffectiveCapabilities(context.Background(), group, nil)
+		result := gateway.BuildGatewayEffectiveCapabilities(context.Background(), group, nil)
+		if len(result.Models) != 50 {
+			b.Fatalf("expected 50 manifest models, got %d", len(result.Models))
+		}
 	}
 	if repo.configuredCalls != b.N {
 		b.Fatalf("expected one pool read per request, got %d", repo.configuredCalls)

@@ -1504,8 +1504,14 @@ func (s *GatewayService) modelCatalogAccountScope(groupID *int64) (*int64, bool)
 }
 
 func availableModelIDsFromAccounts(accounts []Account, platform string) []string {
-	modelSet := make(map[string]struct{})
 	now := time.Now()
+	return availableModelIDsFromAccountsWithManifestIDs(accounts, platform, func(account *Account) []string {
+		return openAIPublicModelIDsFromCodexManifestSnapshots(account, now)
+	})
+}
+
+func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform string, manifestIDs func(*Account) []string) []string {
+	modelSet := make(map[string]struct{})
 	if platform == PlatformOpenAI {
 		hasPassthrough := false
 		for i := range accounts {
@@ -1514,7 +1520,7 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 				continue
 			}
 			hasPassthrough = true
-			for _, model := range openAIPublicModelIDsFromCodexManifestSnapshots(account, now) {
+			for _, model := range manifestIDs(account) {
 				modelSet[model] = struct{}{}
 			}
 		}
@@ -1528,7 +1534,7 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 			continue
 		}
 		if platform == PlatformOpenAI && len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0 {
-			for _, model := range openAIPublicModelIDsFromCodexManifestSnapshots(account, now) {
+			for _, model := range manifestIDs(account) {
 				modelSet[model] = struct{}{}
 			}
 		}

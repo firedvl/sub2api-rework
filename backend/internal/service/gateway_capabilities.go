@@ -180,6 +180,8 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 }
 
 type gatewayCapabilitySnapshot struct {
+	observedAt        time.Time
+	manifestIDs       map[int64][]string
 	current           []Account
 	currentKnown      bool
 	currentByPlatform map[string]gatewayCapabilityAccountPool
@@ -363,6 +365,20 @@ func gatewayCapabilityVisibleModelIDs(
 	routesKnown bool,
 	fallbacks map[string][]string,
 ) []string {
+	return gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, availableModelIDsFromAccounts)
+}
+
+func gatewayCapabilityVisibleModelIDsWithSource(
+	group *Group,
+	current []Account,
+	currentKnown bool,
+	configured []Account,
+	configuredKnown bool,
+	routes []CompositeModelRoute,
+	routesKnown bool,
+	fallbacks map[string][]string,
+	modelIDs func([]Account, string) []string,
+) []string {
 	platform := PlatformAnthropic
 	if group != nil && strings.TrimSpace(group.Platform) != "" {
 		platform = group.Platform
@@ -372,11 +388,11 @@ func gatewayCapabilityVisibleModelIDs(
 		available := make([]string, 0)
 		hasPlatform := false
 		if configuredKnown {
-			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(configured, platform))
+			available = mergeGatewayCapabilityModelIDs(available, modelIDs(configured, platform))
 			hasPlatform = gatewayCapabilityHasPlatform(configured, platform)
 		}
 		if currentKnown {
-			available = mergeGatewayCapabilityModelIDs(available, availableModelIDsFromAccounts(current, platform))
+			available = mergeGatewayCapabilityModelIDs(available, modelIDs(current, platform))
 			hasPlatform = hasPlatform || gatewayCapabilityHasPlatform(current, platform)
 		}
 		fallback := cloneStringSlice(fallbacks[platform])
@@ -403,11 +419,11 @@ func gatewayCapabilityVisibleModelIDs(
 		platformModels := make([]string, 0)
 		hasPlatform := false
 		if configuredKnown {
-			platformModels = mergeGatewayCapabilityModelIDs(platformModels, availableModelIDsFromAccounts(configured, concrete))
+			platformModels = mergeGatewayCapabilityModelIDs(platformModels, modelIDs(configured, concrete))
 			hasPlatform = gatewayCapabilityHasPlatform(configured, concrete)
 		}
 		if currentKnown {
-			platformModels = mergeGatewayCapabilityModelIDs(platformModels, availableModelIDsFromAccounts(current, concrete))
+			platformModels = mergeGatewayCapabilityModelIDs(platformModels, modelIDs(current, concrete))
 			hasPlatform = hasPlatform || gatewayCapabilityHasPlatform(current, concrete)
 		}
 		if len(platformModels) == 0 && hasPlatform && !IsCNProvider(concrete) {

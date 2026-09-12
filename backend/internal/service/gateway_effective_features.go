@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -173,6 +175,10 @@ func gatewayCodexCapabilityBool(capabilities map[string]json.RawMessage, key str
 // from the same account identity. The manifest is dynamic provider evidence;
 // generated local descriptors are deliberately excluded.
 func gatewayAccountMetadata(account *Account) map[string]UpstreamModelMetadata {
+	return gatewayAccountMetadataWithManifest(account, observeOpenAICodexManifest(account, time.Now()))
+}
+
+func gatewayAccountMetadataWithManifest(account *Account, observation codexManifestObservation) map[string]UpstreamModelMetadata {
 	if account == nil {
 		return nil
 	}
@@ -182,7 +188,7 @@ func gatewayAccountMetadata(account *Account) map[string]UpstreamModelMetadata {
 			metadata[strings.TrimSpace(modelID)] = entry
 		}
 	}
-	for modelID, entry := range gatewayFreshCodexManifestMetadata(account) {
+	for modelID, entry := range observation.metadata {
 		if durable, found := metadata[modelID]; found {
 			entry = gatewayMergeUpstreamModelMetadata(entry, durable)
 		}
@@ -206,33 +212,72 @@ func gatewayMergeUpstreamModelMetadata(primary, fallback UpstreamModelMetadata) 
 	return merged
 }
 
-func gatewayFreshCodexManifestMetadata(account *Account) map[string]UpstreamModelMetadata {
-	if account == nil || account.Extra == nil {
-		return nil
+// codexManifestObservation is owned by one request. Both consumers use the
+// same selected, freshness-checked and decoded body.
+type codexManifestObservation struct {
+	metadata  map[string]UpstreamModelMetadata
+	publicIDs []string
+}
+
+type codexManifestModel struct {
+	Visibility               string          `json:"visibility"`
+	Slug                     string          `json:"slug"`
+	ID                       string          `json:"id"`
+	SupportedInAPI           *bool           `json:"supported_in_api"`
+	Reasoning                *bool           `json:"reasoning"`
+	SupportedReasoningLevels []string        `json:"supported_reasoning_levels"`
+	InputModalities          []string        `json:"input_modalities"`
+	ContextWindow            int64           `json:"context_window"`
+	SupportsSearchTool       json.RawMessage `json:"supports_search_tool"`
+}
+
+// Decode the complete JSON once. Entry validation below preserves the old
+// distinction: malformed metadata drops that entry, while malformed publication
+// fields invalidate the selected body's public list (never select an older body).
+func parseCodexManifestObservation(body []byte) (codexManifestObservation, bool) {
+	// Invalid candidates are scanned, not decoded, so fallback never decodes
+	// more than the one selected manifest body.
+	if !gjson.ValidBytes(body) {
+		return codexManifestObservation{}, false
 	}
-	body, ok := openAICodexManifestLatestFreshBody(account, time.Now())
-	if !ok {
-		return nil
+	root := gjson.ParseBytes(body)
+	if !root.IsObject() {
+		return codexManifestObservation{}, false
 	}
-	var manifest struct {
-		Models []json.RawMessage `json:"models"`
-	}
-	if json.Unmarshal(body, &manifest) != nil {
-		return nil
-	}
-	metadata := make(map[string]UpstreamModelMetadata, len(manifest.Models))
-	for _, raw := range manifest.Models {
-		var entry struct {
-			Slug                     string            `json:"slug"`
-			ID                       string            `json:"id"`
-			SupportedInAPI           *bool             `json:"supported_in_api"`
-			Reasoning                *bool             `json:"reasoning"`
-			SupportedReasoningLevels []json.RawMessage `json:"supported_reasoning_levels"`
-			InputModalities          []string          `json:"input_modalities"`
-			ContextWindow            int64             `json:"context_window"`
-			SupportsSearchTool       json.RawMessage   `json:"supports_search_tool"`
+	var modelArray gjson.Result
+	root.ForEach(func(key, value gjson.Result) bool {
+		if key.String() == "models" {
+			modelArray = value
 		}
-		if json.Unmarshal(raw, &entry) != nil {
+		return true
+	})
+	if !modelArray.IsArray() {
+		return codexManifestObservation{}, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var envelope map[string]any
+	if decoder.Decode(&envelope) != nil {
+		return codexManifestObservation{}, false
+	}
+	models, ok := envelope["models"].([]any)
+	if !ok {
+		return codexManifestObservation{}, false
+	}
+
+	metadata := make(map[string]UpstreamModelMetadata, len(models))
+	publicIDs := make(map[string]struct{})
+	publicationValid := true
+	for _, raw := range models {
+		entry, metadataOK, publicOK := codexManifestEntry(raw)
+		publicationValid = publicationValid && publicOK
+		slug, visibility := strings.TrimSpace(entry.Slug), strings.TrimSpace(entry.Visibility)
+		if slug != "" && (visibility == "" || visibility == "list") &&
+			(entry.SupportedInAPI == nil || *entry.SupportedInAPI) &&
+			!strings.Contains(slug, "*") && !strings.HasPrefix(slug, codexAutoModelPrefix) && !isCodexDedicatedMediaModel(slug) {
+			publicIDs[slug] = struct{}{}
+		}
+		if !metadataOK {
 			continue
 		}
 		modelID := strings.TrimSpace(entry.Slug)
@@ -243,7 +288,7 @@ func gatewayFreshCodexManifestMetadata(account *Account) map[string]UpstreamMode
 			continue
 		}
 		manifestMetadata := UpstreamModelMetadata{ID: modelID, Reasoning: entry.Reasoning, InputModalities: normalizeCodexInputModalities(entry.InputModalities), ContextWindow: entry.ContextWindow}
-		manifestMetadata.SupportedReasoningLevels = reasoningLevelsFromRawEntries(entry.SupportedReasoningLevels)
+		manifestMetadata.SupportedReasoningLevels = normalizeReasoningLevels(entry.SupportedReasoningLevels)
 		if entry.SupportedInAPI != nil {
 			manifestMetadata.CodexToolCapabilities = map[string]json.RawMessage{"supported_in_api": []byte(strconv.FormatBool(*entry.SupportedInAPI))}
 		}
@@ -262,7 +307,104 @@ func gatewayFreshCodexManifestMetadata(account *Account) map[string]UpstreamMode
 			}
 		}
 	}
-	return metadata
+	if !publicationValid {
+		publicIDs = nil
+	}
+	return codexManifestObservation{metadata: metadata, publicIDs: sortedModelIDSet(publicIDs)}, true
+}
+
+func codexManifestEntry(raw any) (codexManifestModel, bool, bool) {
+	var entry codexManifestModel
+	if raw == nil {
+		return entry, true, true
+	}
+	fields, ok := raw.(map[string]any)
+	if !ok {
+		return entry, false, false
+	}
+	fields = codexManifestFoldFields(fields)
+	stringField := func(key string, target *string) bool {
+		if fields[key] == nil {
+			return true
+		}
+		value, ok := fields[key].(string)
+		*target = value
+		return ok
+	}
+	boolField := func(key string, target **bool) bool {
+		if fields[key] == nil {
+			return true
+		}
+		value, ok := fields[key].(bool)
+		if ok {
+			*target = &value
+		}
+		return ok
+	}
+	slugOK := stringField("slug", &entry.Slug)
+	apiOK := boolField("supported_in_api", &entry.SupportedInAPI)
+	publicOK := stringField("visibility", &entry.Visibility) && slugOK && apiOK
+	// Visibility was not part of the old metadata decoder.
+	metadataOK := stringField("id", &entry.ID) && slugOK && apiOK
+	metadataOK = boolField("reasoning", &entry.Reasoning) && metadataOK
+
+	if fields["context_window"] != nil {
+		value, ok := fields["context_window"].(json.Number)
+		if ok {
+			var err error
+			entry.ContextWindow, err = value.Int64()
+			metadataOK = metadataOK && err == nil
+		} else {
+			metadataOK = false
+		}
+	}
+	if fields["input_modalities"] != nil {
+		values, ok := fields["input_modalities"].([]any)
+		metadataOK = metadataOK && ok
+		for _, raw := range values {
+			value, ok := raw.(string)
+			metadataOK = metadataOK && (ok || raw == nil)
+			entry.InputModalities = append(entry.InputModalities, value)
+		}
+	}
+	if fields["supported_reasoning_levels"] != nil {
+		values, ok := fields["supported_reasoning_levels"].([]any)
+		metadataOK = metadataOK && ok
+		for _, raw := range values {
+			if value, ok := raw.(string); ok {
+				entry.SupportedReasoningLevels = append(entry.SupportedReasoningLevels, value)
+			} else if object, ok := raw.(map[string]any); ok {
+				if value, ok := codexManifestFoldFields(object)["effort"].(string); ok {
+					entry.SupportedReasoningLevels = append(entry.SupportedReasoningLevels, value)
+				}
+			}
+		}
+	}
+	if raw, exists := fields["supports_search_tool"]; exists {
+		entry.SupportsSearchTool, _ = json.Marshal(raw)
+	}
+	return entry, metadataOK, publicOK
+}
+
+func codexManifestFoldFields(fields map[string]any) map[string]any {
+	// The former typed decoder matched field names case-insensitively after
+	// canonical key sorting. Keep that behavior without decoding an entry again.
+	for key := range fields {
+		if key != strings.ToLower(key) {
+			keys := make([]string, 0, len(fields))
+			for name := range fields {
+				keys = append(keys, name)
+			}
+			sort.Strings(keys)
+			normalized := make(map[string]any, len(fields))
+			for _, name := range keys {
+				normalized[strings.ToLower(name)] = fields[name]
+			}
+			fields = normalized
+			break
+		}
+	}
+	return fields
 }
 
 func gatewayIntersectFeatures(sets []GatewayFeatureSet) GatewayFeatureSet {
