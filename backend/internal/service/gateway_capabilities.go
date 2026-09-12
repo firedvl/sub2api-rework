@@ -377,19 +377,6 @@ func (s *GatewayService) gatewayCapabilityCompositeRoutes(ctx context.Context, g
 	return routes, err == nil
 }
 
-func gatewayCapabilityVisibleModelIDs(
-	group *Group,
-	current []Account,
-	currentKnown bool,
-	configured []Account,
-	configuredKnown bool,
-	routes []CompositeModelRoute,
-	routesKnown bool,
-	fallbacks map[string][]string,
-) []string {
-	return gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, availableModelIDsFromAccounts)
-}
-
 func gatewayCapabilityVisibleModelIDsWithSource(
 	group *Group,
 	current []Account,
