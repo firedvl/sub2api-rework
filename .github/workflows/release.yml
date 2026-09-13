@@ -28,6 +28,9 @@ permissions:
 jobs:
   qualify:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+      GITHUB_REPO_NAME: ${{ github.event.repository.name }}
     outputs:
       qualified_sha: ${{ steps.release_identity.outputs.qualified_sha }}
       release_tag: ${{ steps.release_identity.outputs.release_tag }}
@@ -67,14 +70,29 @@ jobs:
         working-directory: backend
         run: go test -tags=unit ./internal/releaseinfo ./internal/updatecontract ./internal/updater ./internal/updaterclient
 
-      - name: Qualify clean release build metadata
+      - name: Qualify clean source metadata
         env:
           QUALIFIED_SHA: ${{ steps.release_identity.outputs.qualified_sha }}
         run: |
           set -eu
           (cd backend && go mod tidy -diff)
           ! grep -R -n 'go mod tidy' .goreleaser.yaml .goreleaser.simple.yaml
-          ./tools/verify_release_integrity.sh "$QUALIFIED_SHA"
+          test "$(git rev-parse HEAD)" = "$QUALIFIED_SHA"
+          test -z "$(git status --porcelain=v1)"
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Check full GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: check --config=.goreleaser.yaml
+
+      - name: Check simple GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: '~> v2'
+          args: check --config=.goreleaser.simple.yaml
 
   build-frontend:
     needs: qualify
@@ -111,9 +129,44 @@ jobs:
           name: frontend-dist
           path: backend/internal/web/dist/
           retention-days: 1
+          if-no-files-found: error
+
+  release-integrity:
+    needs: [qualify, build-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.qualify.outputs.qualified_sha }}
+
+      - name: Require fresh checkout
+        run: |
+          test ! -e backend/internal/web/dist
+          test -z "$(git status --porcelain=v1)"
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: backend/internal/web/dist/
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache-dependency-path: backend/go.sum
+
+      - name: Qualify embedded release binaries
+        env:
+          QUALIFIED_SHA: ${{ needs.qualify.outputs.qualified_sha }}
+        run: ./tools/verify_release_integrity.sh "$QUALIFIED_SHA"
 
   release:
-    needs: [qualify, build-frontend]
+    needs: [qualify, build-frontend, release-integrity]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -168,6 +221,10 @@ jobs:
           QUALIFIED_SHA: ${{ needs.qualify.outputs.qualified_sha }}
         run: |
           set -eu
+          test -s backend/internal/web/dist/index.html
+          test -z "$(git status --porcelain=v1)"
+          git diff --exit-code
+          git diff --cached --exit-code
           test "$(git rev-parse HEAD)" = "$QUALIFIED_SHA"
           git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           test "$(git rev-parse --verify "${RELEASE_TAG}^{commit}")" = "$QUALIFIED_SHA"
