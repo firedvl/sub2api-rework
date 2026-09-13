@@ -11,7 +11,7 @@ import (
 
 func TestEmbeddedMetadataIsCanonicalAndManual(t *testing.T) {
 	metadata := Current()
-	require.Equal(t, "0.2.3-rework.1", metadata.ReworkVersion)
+	require.Equal(t, "0.2.3-rework.2", metadata.ReworkVersion)
 	require.Equal(t, "v0.2.3", metadata.UpstreamBaseline)
 	require.Equal(t, "8fa67d477d6651a744754392a8982ea589c26ae6", metadata.UpstreamBaselineSHA)
 	require.Equal(t, "ghcr.io/firedvl/sub2api-rework", metadata.ArtifactRepository)

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rework_version": "0.2.3-rework.1",
+  "rework_version": "0.2.3-rework.2",
   "upstream_baseline": "v0.2.3",
   "upstream_baseline_sha": "8fa67d477d6651a744754392a8982ea589c26ae6",
   "upstream_repository": "Wei-Shaw/sub2api",
