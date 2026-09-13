@@ -332,12 +332,41 @@ func waitForUpdater(t *testing.T, service *Service, timeout time.Duration) updat
 		status, err := service.Status()
 		require.NoError(t, err)
 		if !status.Busy {
-			return status
+			// Completion is saved just before the operation releases its lock.
+			lock, lockErr := tryOperationLock(service.policy.LockPath)
+			if lockErr == nil {
+				lock.release()
+				return status
+			}
+			require.ErrorIs(t, lockErr, ErrOperationBusy)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("updater operation did not finish")
 	return updatecontract.UpdaterStatus{}
+}
+
+func TestWaitForUpdaterWaitsForOperationLock(t *testing.T) {
+	svc, _ := newUpdaterTestService(t, &fakeRunner{})
+	lock, err := tryOperationLock(svc.policy.LockPath)
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() {
+		waitForUpdater(t, svc, time.Second)
+		close(done)
+	}()
+	select {
+	case <-done:
+		lock.release()
+		t.Fatal("wait returned before the operation released its lock")
+	case <-time.After(50 * time.Millisecond):
+		lock.release()
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("wait did not observe the released lock")
+	}
 }
 
 func prepareUpdater(t *testing.T, service *Service) {
