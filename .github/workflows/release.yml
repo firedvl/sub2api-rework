@@ -67,6 +67,15 @@ jobs:
         working-directory: backend
         run: go test -tags=unit ./internal/releaseinfo ./internal/updatecontract ./internal/updater ./internal/updaterclient
 
+      - name: Qualify clean release build metadata
+        env:
+          QUALIFIED_SHA: ${{ steps.release_identity.outputs.qualified_sha }}
+        run: |
+          set -eu
+          (cd backend && go mod tidy -diff)
+          ! grep -R -n 'go mod tidy' .goreleaser.yaml .goreleaser.simple.yaml
+          ./tools/verify_release_integrity.sh "$QUALIFIED_SHA"
+
   build-frontend:
     needs: qualify
     runs-on: ubuntu-latest
