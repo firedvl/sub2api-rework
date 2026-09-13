@@ -6,8 +6,8 @@ expected_version=${2:-$(jq -er .rework_version backend/internal/releaseinfo/meta
 
 [[ "$(git rev-parse HEAD)" == "$expected_sha" ]]
 [[ -z "$(git status --porcelain=v1)" ]]
-[[ "$(git diff --exit-code)" ]]
-[[ "$(git diff --cached --exit-code)" ]]
+git diff --exit-code >/dev/null
+git diff --cached --exit-code >/dev/null
 [[ "$(git rev-parse --verify HEAD^{commit})" == "$expected_sha" ]]
 
 tmp=$(mktemp -d)
