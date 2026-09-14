@@ -161,6 +161,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Require fresh frontend checkout
+        run: test ! -e backend/internal/web/dist
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -184,6 +186,15 @@ jobs:
         run: node tools/check_gateway_contract.cjs
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
+      - name: Verify release workflow ordering
+        run: node tools/check_release_workflow.cjs
+      - name: Build real frontend for release qualification
+        working-directory: frontend
+        run: pnpm run build
+      - name: Qualify embedded release from fresh checkout
+        run: |
+          (cd backend && go mod tidy -diff)
+          ./tools/verify_release_integrity.sh "$(git rev-parse HEAD)"
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
