@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
@@ -166,6 +167,11 @@ func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte
 	}
 
 	changed := false
+	if lifted, did := apicompat.LiftResponsesToolOutputMedia(input); did {
+		requestBody["input"] = lifted
+		input = lifted
+		changed = true
+	}
 	if applyImages {
 		if aliased, aliasedChanged := aliasDeepSeekResponsesInputImages(input); aliasedChanged {
 			requestBody["input"] = aliased
