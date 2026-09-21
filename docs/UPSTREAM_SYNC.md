@@ -133,7 +133,7 @@ The accepted range is `v0.1.184..v0.2.0` (86 commits, 182 changed files).
 | Capacity | Sorts accounts by the soonest 5-hour and weekly resets and bounds effective 5-hour capacity by weekly quota. |
 | Auto Warm-up | Added filtered fleet bulk management and restart-safe dormant-window detection with PostgreSQL claim deduplication, a five-hour retry floor, and four-request concurrency. |
 | Gateway routing | Preserved unified keys, Composite Groups, `/v1/models`, `/v1/gateway/capabilities`, and Antigravity mixed built-in/function-tool compatibility. |
-| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and WebSocket-disabled production policy. |
+| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and existing production WebSocket settings. This was not proof that client upgrade handshakes were disabled; see [policy clarification](websocket-policy.md). |
 | Verification | Release qualification covers backend unit and integration suites, frontend Vitest/build/lint/Playwright, PostgreSQL fresh and `235 -> 239` migration rehearsals, static analysis, dependency audit, and secret scan. |
 
 ## v0.2.1 Qualification Notes (Not Synced)
@@ -160,7 +160,7 @@ The accepted range is `v0.1.183..v0.1.184` (170 commits, 342 changed files).
 | Access control | Added per-user public-group restrictions and invalidated legacy API-key cache snapshots that predate the new authorization field. |
 | Gateway routing | Preserved unified keys, Composite Groups, exact account aliases, deterministic public model IDs, web search, and Gateway Integration Contract v1. |
 | Antigravity | Preserved mixed-tool compatibility and compact normalized quota presentation while importing applicable upstream fixes. |
-| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and WebSocket-disabled production policy. |
+| Updater and deployment | Preserved updater `1.1.3`, the Unix-socket privilege boundary, manual update policy, and existing production WebSocket settings. This was not proof that client upgrade handshakes were disabled; see [policy clarification](websocket-policy.md). |
 | Verification | Full backend unit and integration suites, frontend Vitest/build/lint/Playwright, PostgreSQL fresh and `232 -> 235` migration rehearsals, static analysis, dependency audit, and secret scan passed. |
 
 ## v0.1.183 Change Audit

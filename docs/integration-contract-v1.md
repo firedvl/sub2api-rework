@@ -81,6 +81,13 @@ integration contract for this deployment. This discovery field does not alter
 legacy inference routes or expose the transport used between Gateway and an
 upstream provider.
 
+In particular, it does not promise that an authenticated WebSocket upgrade is
+rejected. The Responses ingress handler accepts the connection before reading
+the first model-bearing frame and selecting an eligible upstream account.
+`gateway.openai_ws.force_http` controls OpenAI upstream transport, not that
+handshake. See [WebSocket policy and acceptance](websocket-policy.md) for the
+separate ingress, upstream, and deployment checks.
+
 ## Response Fields
 
 | Field | Meaning |

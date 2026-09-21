@@ -154,6 +154,7 @@ docs/*
 !docs/UPSTREAM_CONTRIBUTION_NOTES.md
 !docs/UPSTREAM_SYNC.md
 !docs/UPSTREAM_V023_PARITY.md
+!docs/websocket-policy.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

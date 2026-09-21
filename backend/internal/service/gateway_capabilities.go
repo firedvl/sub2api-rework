@@ -127,7 +127,9 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 	for i := range configured {
 		configuredManifestIDs[configured[i].ID] = observeManifest(&configured[i])
 	}
-	modelIDs := gatewayCapabilityVisibleModelIDsWithSource(group, current, currentKnown, configured, configuredKnown, routes, routesKnown, fallbacks, func(accounts []Account, platform string) []string {
+	// Scheduler snapshots may outlive account membership or model-policy changes.
+	// Only durable policy may publish models; snapshots supply observations below.
+	modelIDs := gatewayCapabilityVisibleModelIDsWithSource(group, nil, false, configured, configuredKnown, routes, routesKnown, fallbacks, func(accounts []Account, platform string) []string {
 		return availableModelIDsFromAccountsWithManifestIDs(accounts, platform, observeManifest)
 	})
 
@@ -144,7 +146,17 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 			modelCtx = WithCompositeRouteDecision(modelCtx, route.decision)
 		}
 		configuredPaths := s.gatewayCapabilitySupportingAccounts(modelCtx, configured, route, false)
-		currentPaths := s.gatewayCapabilitySupportingAccounts(modelCtx, modelCurrent, route, true)
+		modelCurrentKnown = modelCurrentKnown && configuredKnown
+		configuredIDs := make(map[int64]struct{}, len(configuredPaths))
+		for _, account := range configuredPaths {
+			configuredIDs[account.ID] = struct{}{}
+		}
+		currentPaths := make([]Account, 0, len(modelCurrent))
+		for _, account := range s.gatewayCapabilitySupportingAccounts(modelCtx, modelCurrent, route, true) {
+			if _, allowed := configuredIDs[account.ID]; allowed && modelCurrentKnown {
+				currentPaths = append(currentPaths, account)
+			}
+		}
 
 		availability := GatewayAvailabilityUnknown
 		if route.known && modelCurrentKnown {

@@ -172,8 +172,11 @@ operator/browser tests. Lint, typecheck and the full production build passed.
 The browser suite includes saved/reopened pinned sources, independent group
 enforcement, one-risky-target Reset Credit review, and warm-up configuration.
 Other new component behaviors have unit coverage and are not claimed as separate
-browser or live-provider acceptance tests. Production WebSockets remain disabled;
-all backend WebSocket checks use synthetic local fixtures.
+browser or live-provider acceptance tests. The production OpenAI accounts have
+WebSocket forwarding disabled; this does not disable client upgrade handshakes.
+All backend WebSocket checks use synthetic local fixtures. See
+[WebSocket policy and acceptance](websocket-policy.md) for the corrected scope
+of this historical production-policy statement.
 
 ## Migration and Recovery Contract
 

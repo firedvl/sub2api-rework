@@ -135,3 +135,67 @@ application. The first full/unit attempts exposed two new test-fixture mistakes
 (raw JSON type comparison and equal-time snapshot expectation); both were fixed
 and the complete suites rerun successfully. Frontend validation is not applicable: no frontend
 source or dependency files changed. No production/provider acceptance is claimed.
+
+## Post-.4 caller-isolation review
+
+The stable request path carries API-key identity into its hydrated group policy.
+Auth caches use the complete key's hash; scheduler snapshots use group,
+platform and mode keys. Capabilities and preflight allocate response maps per
+request. V2 joins transient observations against durable eligible account IDs,
+and publishes only bounded public decisions. Pinned model caches retain raw
+account-scoped data, then copy and filter the caller's response and ETag.
+
+The review found a v1 policy-revocation defect: after an account moved out of a
+group, an old scheduler entry could still publish its model and aggregate
+capacity. Membership writes precede asynchronous snapshot rebuilding, so a
+request can observe that state. The new regression reproduced the disclosure.
+The shared v1 builder now publishes models from durable policy and intersects
+each model's current observations with its durable eligible account IDs. A
+failed durable read cannot turn stale scheduler data into positive evidence.
+This also covers the admin model-operations caller without changing the wire
+schema or mutating scheduler state. It is future-release work, not a deployed
+change to `.4`.
+
+Production's `simple` mode intentionally shares account pools. Group allowlists,
+explicit Composite routes and channel restrictions still apply. A test that
+expects private backing pools in this mode would assert a policy the product
+does not provide. Standard-mode account membership and simple-mode caller
+allowlists must be tested separately, with different models, capabilities and
+candidate counts so contamination is detectable.
+
+### Future live two-caller check
+
+Classification: `LIVE_SECOND_CALLER_RECOMMENDED`. The contract defines caller
+scope but does not require a second live production identity as its proof
+method. Local contract and concurrent tests establish implementation evidence;
+they do not claim live two-caller execution. Creating a temporary production
+identity needs separate authorization and was not done in this audit.
+
+1. Inspect an existing restricted group and default subscriptions through admin
+   surfaces. Use an enforced model allowlist with a deliberately different
+   catalog from the existing caller. If no suitable group exists, obtain
+   authorization for group changes before proceeding. Confirm ordinary model
+   listing takes the passive catalog path; pinned OpenAI manifest listing can
+   fetch upstream and is unsuitable for a strictly passive check.
+2. Through admin Users, create one normal user with
+   `restrict_public_groups=true` and only the intended allowed group. Inspect
+   default subscriptions first because user creation assigns them automatically.
+   Current simple mode does not need funded balance; use zero balance.
+3. Log in as that user and create one key through the normal API Keys surface,
+   bound to the restricted group. An optional IP allowlist can further constrain
+   it. Simple mode bypasses expiry/quota checks, so those are not cleanup or
+   containment guarantees.
+4. Compare `/v1/models`, capabilities v1/v2, and preflight for allowed,
+   forbidden and unknown models against the existing caller. Assert exclusive
+   models and metadata stay absent and decisions reflect each caller's policy.
+   Do not send inference frames, provider requests, warm-up or Reset Credit.
+   Normal authentication may update last-used bookkeeping.
+5. Delete the temporary key through its owner's API Keys surface; verify a
+   subsequent discovery request is rejected. Do not rely on expiry.
+6. Delete the temporary user through admin Users if retaining a tombstone is
+   acceptable. This is soft deletion, not erasure: historical usage/audit
+   records remain; auth identities/channels are removed, identity-adoption
+   references cleared, owned keys tombstoned and auth caches invalidated.
+
+Never create or delete these identities through SQL. The normal user/key
+services own revocation and cache invalidation.
