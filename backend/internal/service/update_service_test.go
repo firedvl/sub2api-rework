@@ -224,3 +224,29 @@ func TestUpdateWatcherUsesCachedStatusWhenGitHubFails(t *testing.T) {
 	require.True(t, info.Cached)
 	require.Equal(t, "upstream release check failed", info.Warning)
 }
+
+func TestUpdateWatcherDot4PrefersQualifiedDot5(t *testing.T) {
+	var manifest updatecontract.Manifest
+	require.NoError(t, json.Unmarshal(watcherManifest(t, updatecontract.CompatibilityApproved), &manifest))
+	manifest.ReworkVersion = "0.2.3-rework.5"
+	manifest.UpstreamVersion = "v0.2.3"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:0.2.3-rework.5"
+	manifest.MigrationMin, manifest.MigrationMax = 239, 244
+	manifest.MinimumUpdaterVersion = "1.1.4"
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	client := &updateServiceGitHubStub{
+		upstream: upstreamRelease("v0.2.3"),
+		// .2 is a historical failed release; .3 was never published.
+		rework:   []*GitHubRelease{reworkRelease("v0.2.3-rework.2"), reworkRelease("v0.2.3-rework.5"), reworkRelease("v0.2.3-rework.4")},
+		manifest: data,
+	}
+	svc := NewUpdateService(&updateServiceCacheStub{}, client, BuildInfo{Version: "0.2.3-rework.4", BuildType: "release"})
+	info, err := svc.CheckUpdate(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, ReleaseStateUpdateReady, info.State)
+	require.Equal(t, "0.2.3-rework.5", info.LatestCompatibleRework)
+	require.Equal(t, "manual", info.UpdatePolicy)
+	require.Equal(t, 244, info.MigrationMax)
+	require.True(t, info.Installable)
+}
