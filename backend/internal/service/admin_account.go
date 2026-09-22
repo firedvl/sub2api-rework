@@ -639,6 +639,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err != nil {
 			return nil, err
 		}
+		if err := validateOpenAIAutoResetCreditWindowUpdate(account, normalizedExtra); err != nil {
+			return nil, err
+		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
 			return nil, err
 		}
@@ -1095,6 +1098,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				return nil, ErrAccountNotFound
 			}
 			if IsOpenAIAutoWarmupConfigurable(account) {
+				if err := validateOpenAIAutoResetCreditWindowUpdate(account, resetCreditUpdates); err != nil {
+					return nil, err
+				}
 				eligibleManagedOpenAIIDs = append(eligibleManagedOpenAIIDs, accountID)
 				continue
 			}
@@ -1331,9 +1337,15 @@ func bulkOpenAIAutoResetCreditUpdates(input *BulkUpdateAccountsInput) (map[strin
 	if input == nil {
 		return nil, nil
 	}
-	updates := make(map[string]any, 3)
+	updates := make(map[string]any, 5)
 	if input.AutoResetCreditEnabled != nil {
 		updates[OpenAIAutoResetCreditEnabledExtraKey] = *input.AutoResetCreditEnabled
+	}
+	if input.AutoResetCredit5hEnabled != nil {
+		updates[OpenAIAutoResetCredit5hEnabledExtraKey] = *input.AutoResetCredit5hEnabled
+	}
+	if input.AutoResetCredit7dEnabled != nil {
+		updates[OpenAIAutoResetCredit7dEnabledExtraKey] = *input.AutoResetCredit7dEnabled
 	}
 	for key, value := range map[string]*float64{
 		OpenAIAutoResetCredit5hThresholdExtraKey: input.AutoResetCredit5hThreshold,
@@ -1343,7 +1355,7 @@ func bulkOpenAIAutoResetCreditUpdates(input *BulkUpdateAccountsInput) (map[strin
 			continue
 		}
 		if !isValidOpenAIAutoResetThreshold(*value) {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID", "%s must be between 0.001 and 1.0", key)
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID", "%s must be between 0 and 1.0", key)
 		}
 		updates[key] = *value
 	}

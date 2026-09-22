@@ -427,7 +427,7 @@ describe('BulkEditAccountModal', () => {
       selectedTypes: ['oauth']
     })
 
-    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('0.05')
+    await wrapper.get('#bulk-edit-auto-reset-credit-5h').setValue('-1')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()

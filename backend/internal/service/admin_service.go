@@ -479,6 +479,8 @@ type BulkUpdateAccountsInput struct {
 	ProbeEnabled               *bool
 	AutoWarmupEnabled          *bool
 	AutoResetCreditEnabled     *bool
+	AutoResetCredit5hEnabled   *bool
+	AutoResetCredit7dEnabled   *bool
 	AutoResetCredit5hThreshold *float64
 	AutoResetCredit7dThreshold *float64
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.

@@ -170,7 +170,7 @@ test('reviews a single enable or lower threshold, supports Escape, and sends onl
   const review = page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })
   await expect(review).toContainText('Use a credit at >= 75% USED')
   await expect(review).toContainText('Use a credit at >= 90% USED')
-  await expect(review).toContainText('Either threshold')
+  await expect(review).toContainText('Any enabled threshold')
   await expect(review).toContainText('Lowering this value causes Reset Credits to become eligible earlier.')
   await page.screenshot({ path: testInfo.outputPath('single-reset-credit-review-desktop.png'), animations: 'disabled' })
   await page.keyboard.press('Escape')
@@ -188,6 +188,25 @@ test('reviews a single enable or lower threshold, supports Escape, and sends onl
       auto_reset_credit_7d_threshold: 0.9,
     }),
   }))
+})
+
+test('weekly-only ignores the 5-hour control and saves zero used-quota threshold', async ({ page }) => {
+  const { updates } = await installResetCreditMock(page)
+  const dialog = await openAccountEditor(page)
+  await dialog.getByTestId('auto-reset-credit-5h-enabled').click()
+  await expect(dialog.getByTestId('auto-reset-credit-5h-threshold')).toBeDisabled()
+  await dialog.getByTestId('auto-reset-credit-7d-threshold').fill('0')
+  await dialog.getByRole('button', { name: 'Update' }).click()
+  const review = page.getByRole('dialog', { name: 'Review automatic Reset Credit use' })
+  await expect(review).toContainText('Ignored')
+  await expect(review).toContainText('Use a credit at >= 0% USED')
+  await review.getByRole('button', { name: 'Confirm' }).click()
+  await expect.poll(() => updates).toHaveLength(1)
+  expect(updates[0]).toEqual(expect.objectContaining({ extra: expect.objectContaining({
+    auto_reset_credit_5h_enabled: false,
+    auto_reset_credit_7d_enabled: true,
+    auto_reset_credit_7d_threshold: 0,
+  }) }))
 })
 
 test('does not interrupt a harmless single-account threshold increase', async ({ page }) => {
@@ -222,7 +241,7 @@ test('reviews selected and filtered bulk changes with their exact scope at narro
   await expect(review).toContainText('2')
   await expect(review).toContainText('Use a credit at >= 75% USED')
   await expect(review).toContainText('Use a credit at >= 90% USED')
-  await expect(review).toContainText('Either threshold')
+  await expect(review).toContainText('Any enabled threshold')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('bulk-reset-credit-review-mobile.png'), animations: 'disabled' })
   await review.getByRole('button', { name: 'Confirm' }).click()

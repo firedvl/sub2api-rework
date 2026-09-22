@@ -15,7 +15,7 @@ func TestOpenAIAutoResetCreditThresholdsAreUsedQuotaOR(t *testing.T) {
 		"auto_pause_5h_disabled": true,
 		"auto_pause_7d_disabled": true,
 	}}
-	config := OpenAIAutoResetCreditConfig{Enabled: true, Threshold5h: 0.9, Threshold7d: 0.9}
+	config := OpenAIAutoResetCreditConfig{Enabled: true, Enabled5h: true, Enabled7d: true, Threshold5h: 0.9, Threshold7d: 0.9}
 
 	for _, test := range []struct {
 		name     string
@@ -32,7 +32,7 @@ func TestOpenAIAutoResetCreditThresholdsAreUsedQuotaOR(t *testing.T) {
 		{name: "weekly 95 percent reaches threshold", fiveHour: 0.2, sevenDay: 0.95, eligible: true, trigger: "7d"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			assessment := service.buildAssessment(account, config, test.fiveHour, test.sevenDay)
+			assessment := service.buildAssessment(account, config, test.fiveHour, true, test.sevenDay, true)
 			require.Equal(t, test.eligible, assessment.resetReached)
 			require.Equal(t, test.trigger, assessment.triggerWindow)
 		})
@@ -99,7 +99,18 @@ func TestOpenAIAutoResetCreditFailsClosedBeforeConsumption(t *testing.T) {
 }
 
 func TestOpenAIAutoResetCreditConfigAndBulkBounds(t *testing.T) {
-	for _, threshold := range []float64{0.001, 1} {
+	falseValue, trueValue, zero := false, true, 0.0
+	updates, err := bulkOpenAIAutoResetCreditUpdates(&BulkUpdateAccountsInput{
+		AutoResetCreditEnabled:     &trueValue,
+		AutoResetCredit5hEnabled:   &falseValue,
+		AutoResetCredit7dEnabled:   &trueValue,
+		AutoResetCredit7dThreshold: &zero,
+	})
+	require.NoError(t, err)
+	require.Equal(t, false, updates[OpenAIAutoResetCredit5hEnabledExtraKey])
+	require.Equal(t, float64(0), updates[OpenAIAutoResetCredit7dThresholdExtraKey])
+
+	for _, threshold := range []float64{0, 0.001, 1} {
 		extra, err := normalizeOpenAIAutoResetCreditExtra(PlatformOpenAI, AccountTypeOAuth, false, map[string]any{
 			OpenAIAutoResetCreditEnabledExtraKey:     true,
 			OpenAIAutoResetCredit5hThresholdExtraKey: threshold,
@@ -112,7 +123,7 @@ func TestOpenAIAutoResetCreditConfigAndBulkBounds(t *testing.T) {
 		require.Equal(t, threshold, updates[OpenAIAutoResetCredit5hThresholdExtraKey])
 	}
 
-	for _, threshold := range []float64{0, -0.001, 0.0009, 1.0001, math.Inf(1), math.NaN()} {
+	for _, threshold := range []float64{-0.001, 1.0001, math.Inf(1), math.NaN()} {
 		_, err := normalizeOpenAIAutoResetCreditExtra(PlatformOpenAI, AccountTypeOAuth, false, map[string]any{
 			OpenAIAutoResetCreditEnabledExtraKey:     true,
 			OpenAIAutoResetCredit5hThresholdExtraKey: threshold,
@@ -124,7 +135,7 @@ func TestOpenAIAutoResetCreditConfigAndBulkBounds(t *testing.T) {
 	}
 
 	threshold := 0.9 // UI percent input 90 is converted to this API/storage ratio.
-	updates, err := bulkOpenAIAutoResetCreditUpdates(&BulkUpdateAccountsInput{AutoResetCredit5hThreshold: &threshold})
+	updates, err = bulkOpenAIAutoResetCreditUpdates(&BulkUpdateAccountsInput{AutoResetCredit5hThreshold: &threshold})
 	require.NoError(t, err)
 	require.Equal(t, 0.9, updates[OpenAIAutoResetCredit5hThresholdExtraKey])
 

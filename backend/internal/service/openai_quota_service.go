@@ -288,7 +288,7 @@ func (s *OpenAIQuotaService) CachePostResetSnapshot(ctx context.Context, account
 		ctx,
 		accountID,
 		usage.RateLimitResetCredits,
-		buildOpenAIAutoResetUsageUpdates(usage, time.Now()),
+		buildOpenAIAutoResetUsageUpdates(usage, time.Now(), false),
 	)
 }
 

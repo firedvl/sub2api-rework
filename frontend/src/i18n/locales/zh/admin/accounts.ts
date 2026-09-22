@@ -976,12 +976,15 @@ export default {
 	  autoPauseDisabledHint: '开启后该账号永不进入自动暂停（即使全局默认阈值已配置）。',
 	  autoResetCredit: {
 	    title: '自动使用重置卡',
-	    hint: '任一窗口达到配置的已用配额阈值时，可能自动使用一张重置卡。',
+	    hint: '仅启用的用量窗口可触发重置卡；阈值按已用配额百分比计算。',
+	    window5h: '5 小时用量',
+	    window7d: '每周用量',
+	    windowRequired: '自动使用重置卡时至少启用一个用量窗口。',
 	    threshold5h: '5 小时已用配额阈值 (%)',
 	    threshold7d: '每周已用配额阈值 (%)',
-	    thresholdHint: '5 小时阈值 OR 每周阈值。可填写 0.1–100，默认均为 100。',
-	    example: '90% 表示已用 90% 时重置卡可被使用（约剩余 10%）。较低的百分比会更早触发。',
-	    thresholdInvalid: '自动使用重置卡阈值必须在 0.1% 到 100% 之间。',
+	    thresholdHint: '任一已启用窗口达到阈值即可触发。可填写 0–100，默认均为 100。',
+	    example: '已用 90% 表示约剩余 10%；已用 100% 表示无剩余额度。已用 0% 在收到有效用量数据时即可触发。',
+	    thresholdInvalid: '自动使用重置卡阈值必须在 0% 到 100% 之间。',
 	    review: {
 	      title: '确认自动用重置卡设置',
 	      message: '保存前请确认以下设置。',
@@ -991,8 +994,9 @@ export default {
 	      unchanged: '保持当前值',
 	      currentValues: '当前值：{values} 已用',
 	      usedAt: '已用 >= {value}% 时使用一张卡',
+	      ignored: '不参与',
 	      trigger: '触发条件',
-	      either: '任一阈值达到',
+	      either: '任一已启用阈值达到',
 	      lowered: '降低此值会让重置卡更早符合使用条件。'
 	    }
 	  },
