@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -394,8 +393,8 @@ func (autoResetTestRecoverer) RecoverAccountState(context.Context, int64, Accoun
 }
 
 func TestOpenAIQuotaAutoResetService_WeeklyOnlyIgnoresMissingFiveHour(t *testing.T) {
-	for _, disableBeforeConsume := range []bool{false, true} {
-		t.Run(fmt.Sprintf("disable_before_consume=%t", disableBeforeConsume), func(t *testing.T) {
+	for _, changeBeforeConsume := range []string{"none", "swap_window", "change_threshold"} {
+		t.Run(changeBeforeConsume, func(t *testing.T) {
 			now := time.Now().UTC()
 			account := &Account{ID: 201, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 				Extra: map[string]any{
@@ -418,11 +417,15 @@ func TestOpenAIQuotaAutoResetService_WeeklyOnlyIgnoresMissingFiveHour(t *testing
 				autoResetCandidates: []openAIAutoResetCreditCandidate{{ID: "weekly-only-credit", ExpiresAt: creditExpiry}},
 			}}
 			repo := &autoResetTestAccountRepo{account: account}
-			if disableBeforeConsume {
+			if changeBeforeConsume != "none" {
 				repo.onGet = func(a *Account, reads int) {
 					if reads == 3 {
-						a.Extra[OpenAIAutoResetCredit5hEnabledExtraKey] = true
-						a.Extra[OpenAIAutoResetCredit7dEnabledExtraKey] = false
+						if changeBeforeConsume == "swap_window" {
+							a.Extra[OpenAIAutoResetCredit5hEnabledExtraKey] = true
+							a.Extra[OpenAIAutoResetCredit7dEnabledExtraKey] = false
+						} else {
+							a.Extra[OpenAIAutoResetCredit7dThresholdExtraKey] = 0.9
+						}
 					}
 				}
 			}
@@ -431,11 +434,61 @@ func TestOpenAIQuotaAutoResetService_WeeklyOnlyIgnoresMissingFiveHour(t *testing
 			s := NewOpenAIQuotaAutoResetService(repo, quota, autoResetTestRecoverer{},
 				NewIdempotencyCoordinator(newInMemoryIdempotencyRepo(), options), nil, nil, nil)
 			require.NoError(t, s.evaluateAccount(context.Background(), account.ID))
-			if disableBeforeConsume {
+			if changeBeforeConsume != "none" {
 				require.Zero(t, quota.resetCalls.Load())
 			} else {
 				require.Equal(t, int32(1), quota.resetCalls.Load())
 			}
+		})
+	}
+}
+
+func TestOpenAIQuotaAutoResetService_DisabledWindowRolloverDoesNotConsumeAgain(t *testing.T) {
+	for _, enabledWindow := range []string{"5h", "7d"} {
+		t.Run(enabledWindow, func(t *testing.T) {
+			now := time.Now().UTC()
+			extra := map[string]any{
+				OpenAIAutoResetCreditEnabledExtraKey:     true,
+				OpenAIAutoResetCredit5hEnabledExtraKey:   enabledWindow == "5h",
+				OpenAIAutoResetCredit7dEnabledExtraKey:   enabledWindow == "7d",
+				OpenAIAutoResetCredit5hThresholdExtraKey: 1.0,
+				OpenAIAutoResetCredit7dThresholdExtraKey: 1.0,
+				"codex_5h_used_percent":                  20.0,
+				"codex_7d_used_percent":                  20.0,
+				"codex_usage_updated_at":                 now.Format(time.RFC3339),
+				"codex_5h_reset_at":                      now.Add(time.Hour).Format(time.RFC3339),
+				"codex_7d_reset_at":                      now.Add(24 * time.Hour).Format(time.RFC3339),
+			}
+			fiveHour := &OpenAIRateLimitWindow{UsedPercent: 20, LimitWindowSeconds: 5 * 60 * 60, ResetAt: now.Add(time.Hour).Unix()}
+			weekly := &OpenAIRateLimitWindow{UsedPercent: 20, LimitWindowSeconds: 7 * 24 * 60 * 60, ResetAt: now.Add(24 * time.Hour).Unix()}
+			if enabledWindow == "5h" {
+				extra["codex_5h_used_percent"] = 100.0
+				fiveHour.UsedPercent = 100
+			} else {
+				extra["codex_7d_used_percent"] = 100.0
+				weekly.UsedPercent = 100
+			}
+			account := &Account{ID: 203, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: extra}
+			creditExpiry := now.Add(48 * time.Hour).Format(time.RFC3339)
+			quota := &autoResetTestQuota{usage: &OpenAIQuotaUsage{
+				FetchedAt: now.Unix(), RateLimit: &OpenAIRateLimit{PrimaryWindow: fiveHour, SecondaryWindow: weekly},
+				RateLimitResetCredits: &OpenAIRateLimitResetCredits{AvailableCount: 1,
+					Credits: []OpenAIRateLimitResetCreditDetail{{ExpiresAt: creditExpiry}}},
+				autoResetCandidates: []openAIAutoResetCreditCandidate{{ID: "single-window-credit", ExpiresAt: creditExpiry}},
+			}}
+			options := DefaultIdempotencyConfig()
+			options.ObserveOnly = false
+			s := NewOpenAIQuotaAutoResetService(&autoResetTestAccountRepo{account: account}, quota,
+				autoResetTestRecoverer{}, NewIdempotencyCoordinator(newInMemoryIdempotencyRepo(), options), nil, nil, nil)
+			require.NoError(t, s.evaluateAccount(context.Background(), account.ID))
+			require.Equal(t, int32(1), quota.resetCalls.Load())
+			if enabledWindow == "5h" {
+				weekly.ResetAt = now.Add(48 * time.Hour).Unix()
+			} else {
+				fiveHour.ResetAt = now.Add(2 * time.Hour).Unix()
+			}
+			require.NoError(t, s.evaluateAccount(context.Background(), account.ID))
+			require.Equal(t, int32(1), quota.resetCalls.Load(), "disabled window must not change the idempotency cycle")
 		})
 	}
 }

@@ -497,7 +497,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		})
 	}
 
-	cycleSeed := openAIAutoResetCycleSeed(usage)
+	cycleSeed := openAIAutoResetCycleSeed(usage, config)
 	cycleHash := shortOpenAIAutoResetHash(cycleSeed)
 	candidate, selectErr := selectOpenAIAutoResetCandidate(usage.autoResetCandidates, available, state, cycleHash)
 	if selectErr != nil {
@@ -522,12 +522,13 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		return err
 	}
 
+	selectedConfig := config
 	account, err = s.accountRepo.GetByID(ctx, accountID)
 	if err != nil || account == nil {
 		return err
 	}
 	config = ResolveOpenAIAutoResetCreditConfig(account)
-	if !config.Enabled {
+	if !config.Enabled || config != selectedConfig {
 		return nil
 	}
 	assessment = s.assessUsage(usage, account, config, now)
@@ -802,7 +803,7 @@ func selectOpenAIAutoResetCandidate(candidates []openAIAutoResetCreditCandidate,
 	return sorted[0], nil
 }
 
-func openAIAutoResetCycleSeed(usage *OpenAIQuotaUsage) string {
+func openAIAutoResetCycleSeed(usage *OpenAIQuotaUsage, config OpenAIAutoResetCreditConfig) string {
 	if usage == nil || usage.RateLimit == nil {
 		return "5h:0|7d:0"
 	}
@@ -815,9 +816,9 @@ func openAIAutoResetCycleSeed(usage *OpenAIQuotaUsage) string {
 		if resetAt <= 0 {
 			resetAt = usage.FetchedAt + window.ResetAfterSeconds
 		}
-		if window.LimitWindowSeconds <= 6*60*60 {
+		if window.LimitWindowSeconds <= 6*60*60 && config.Enabled5h {
 			fiveHour = resetAt
-		} else {
+		} else if window.LimitWindowSeconds > 6*60*60 && config.Enabled7d {
 			sevenDay = resetAt
 		}
 	}
