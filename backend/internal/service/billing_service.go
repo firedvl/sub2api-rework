@@ -831,6 +831,11 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:    2,
 		LongContextOutputMultiplier:   2,
 	}
+	s.fallbackPrices["grok-4.7"] = &ModelPricing{
+		InputPricePerToken: 2e-6, OutputPricePerToken: 6e-6, CacheReadPricePerToken: 0.5e-6,
+		LongContextInputThreshold: 200000, LongContextThresholdInclusive: true,
+		LongContextInputMultiplier: 2, LongContextOutputMultiplier: 2,
+	}
 
 	// Keep legacy Grok 3 Mini requests on their own historical xAI price card;
 	// otherwise the generic Grok fallback bills them as Grok 4.5.
@@ -1072,6 +1077,8 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 
 	switch modelLower {
+	case "grok-4.7", "grok-4.7-latest":
+		return s.fallbackPrices["grok-4.7"]
 	case "grok", "grok-latest", "grok-4.6", "grok-4.6-latest":
 		return s.fallbackPrices["grok-4.6"]
 	case "grok-4.5", "grok-4.5-latest":

@@ -1161,6 +1161,19 @@ func TestGetModelPricing_Grok46OfficialFallback(t *testing.T) {
 	}
 }
 
+func TestGetModelPricing_Grok47OfficialFallback(t *testing.T) {
+	svc := newTestBillingService()
+	for _, model := range []string{"grok-4.7", "grok-4.7-latest"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err)
+		require.InDelta(t, 2e-6, pricing.InputPricePerToken, 1e-12)
+		require.InDelta(t, 6e-6, pricing.OutputPricePerToken, 1e-12)
+		require.InDelta(t, 0.5e-6, pricing.CacheReadPricePerToken, 1e-12)
+		require.Equal(t, 200000, pricing.LongContextInputThreshold)
+		require.True(t, pricing.LongContextThresholdInclusive)
+	}
+}
+
 func TestGetModelPricing_GrokOfficialFamilyCards(t *testing.T) {
 	svc := newTestBillingService()
 	for _, tc := range []struct {
