@@ -362,6 +362,81 @@ func TestDefaultPricingIncludesOfficialGPT56Rates(t *testing.T) {
 	}
 }
 
+func TestFrontierModelPricingCatalogAndFallbackAgree(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+	parser := &PricingService{}
+	prices, err := parser.parsePricingData(data)
+	require.NoError(t, err)
+
+	for name, pricingService := range map[string]*PricingService{
+		"bundled":  {pricingData: prices},
+		"fallback": {pricingData: map[string]*LiteLLMModelPricing{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			billing := NewBillingService(&config.Config{}, pricingService)
+			for _, tc := range []struct {
+				model                                string
+				input, output, cacheWrite, cacheRead float64
+				threshold                            int
+			}{
+				{"gpt-6-sol", 2e-6, 10e-6, 2.5e-6, 0.2e-6, 272_000},
+				{"gpt-6-luna", 0.1e-6, 0.5e-6, 0.125e-6, 0.01e-6, 272_000},
+				{"claude-opus-5-5", 4e-6, 20e-6, 5e-6, 0.2e-6, 0},
+			} {
+				t.Run(tc.model, func(t *testing.T) {
+					pricing, err := billing.GetModelPricing(tc.model)
+					require.NoError(t, err)
+					require.InDelta(t, tc.input, pricing.InputPricePerToken, 1e-12)
+					require.InDelta(t, tc.output, pricing.OutputPricePerToken, 1e-12)
+					require.InDelta(t, tc.cacheWrite, pricing.CacheCreationPricePerToken, 1e-12)
+					require.InDelta(t, tc.cacheRead, pricing.CacheReadPricePerToken, 1e-12)
+					require.InDelta(t, tc.input*2, pricing.InputPricePerTokenPriority, 1e-12)
+					require.Equal(t, tc.threshold, pricing.LongContextInputThreshold)
+				})
+			}
+		})
+	}
+}
+
+func TestGPT6SolLongContextBillingBoundaryAndPriority(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+	parser := &PricingService{}
+	prices, err := parser.parsePricingData(data)
+	require.NoError(t, err)
+
+	for name, pricingService := range map[string]*PricingService{
+		"bundled":  {pricingData: prices},
+		"fallback": {pricingData: map[string]*LiteLLMModelPricing{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			billing := NewBillingService(&config.Config{}, pricingService)
+			for _, tc := range []struct {
+				cached                  int
+				tier                    string
+				inputScale, outputScale float64
+				long                    bool
+			}{
+				{cached: 72_000, inputScale: 1, outputScale: 1},
+				{cached: 73_000, inputScale: 2, outputScale: 1.5, long: true},
+				{cached: 73_000, tier: "priority", inputScale: 4, outputScale: 3, long: true},
+			} {
+				cost, err := billing.CalculateCostWithServiceTier("gpt-6-sol", UsageTokens{
+					InputTokens: 100_000, CacheCreationTokens: 100_000,
+					CacheReadTokens: tc.cached, OutputTokens: 10,
+				}, 1, tc.tier)
+				require.NoError(t, err)
+				require.Equal(t, tc.long, cost.LongContextBillingApplied)
+				require.InDelta(t, 100_000*2e-6*tc.inputScale, cost.InputCost, 1e-12)
+				require.InDelta(t, 100_000*2.5e-6*tc.inputScale, cost.CacheCreationCost, 1e-12)
+				require.InDelta(t, float64(tc.cached)*0.2e-6*tc.inputScale, cost.CacheReadCost, 1e-12)
+				require.InDelta(t, 10*10e-6*tc.outputScale, cost.OutputCost, 1e-12)
+			}
+		})
+	}
+}
+
 func TestGPT56DedicatedFallbacksUseOfficialRates(t *testing.T) {
 	tests := []struct {
 		model                             string
