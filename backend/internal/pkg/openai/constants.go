@@ -153,3 +153,19 @@ func CodexBaseInstructionsForModel(model string) string {
 	}
 	return latestCodexInstructions()
 }
+
+func IsGPT6SolOrLunaModelSpelling(model string) bool {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	for _, base := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		if canonical == base {
+			return true
+		}
+		if suffix, ok := strings.CutPrefix(canonical, base+"-"); ok {
+			switch suffix {
+			case "none", "low", "medium", "high", "xhigh", "max", "openai-compact":
+				return true
+			}
+		}
+	}
+	return false
+}
