@@ -723,6 +723,17 @@ func TestChatCompletionsToResponses_GPT6SamplingDependsOnEffort(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsToResponses_GPT6PromptCacheFields(t *testing.T) {
+	req := &ChatCompletionsRequest{
+		Model: "gpt-6-sol", PromptCacheOptions: json.RawMessage(`{"mode":"explicit","ttl":"30m"}`),
+		Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]`)}},
+	}
+	out, err := ChatCompletionsToResponses(req)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"mode":"explicit","ttl":"30m"}`, string(out.PromptCacheOptions))
+	require.Contains(t, string(out.Input), `"prompt_cache_breakpoint":{"mode":"explicit"}`)
+}
+
 func TestChatCompletionsToResponses_AssistantWithTextAndToolCalls(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
