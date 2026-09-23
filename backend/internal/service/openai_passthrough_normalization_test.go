@@ -161,6 +161,24 @@ func TestNormalizeOpenAIResponsesReasoningMode_AstraPreservesBody(t *testing.T) 
 	}
 }
 
+func TestNormalizeOpenAIResponsesReasoningMode_GPT6SolSampling(t *testing.T) {
+	body := []byte(`{"model":"public-alias","reasoning":{"mode":"pro","effort":"max"},"temperature":0.7,"top_p":0.8,"top_logprobs":2,"logprobs":true,"include":["reasoning.encrypted_content","message.output_text.logprobs"]}`)
+	got, changed, err := normalizeOpenAIResponsesReasoningMode(body, "gpt-6-sol")
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "pro", gjson.GetBytes(got, "reasoning.mode").String())
+	require.Equal(t, "max", gjson.GetBytes(got, "reasoning.effort").String())
+	for _, field := range []string{"temperature", "top_p", "top_logprobs", "logprobs"} {
+		require.False(t, gjson.GetBytes(got, field).Exists())
+	}
+	require.Equal(t, `["reasoning.encrypted_content"]`, gjson.GetBytes(got, "include").Raw)
+	got, changed, err = normalizeOpenAIResponsesReasoningMode([]byte(`{"model":"gpt-6-luna","reasoning":{"mode":"standard","effort":"none"},"temperature":0.7}`))
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, float64(0.7), gjson.GetBytes(got, "temperature").Float())
+	require.Equal(t, "none", normalizeOpenAIReasoningEffortForModel("none", "gpt-6-luna"))
+}
+
 func TestNormalizeOpenAIResponsesReasoningMode_NonAstraKeepsLegacyBehavior(t *testing.T) {
 	// 确保 guard 只放过 Astra，非 Astra model 字段不影响既有 strip/pro->max 语义。
 	tests := []struct {
