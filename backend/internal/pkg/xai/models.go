@@ -97,6 +97,8 @@ var defaultModels = []Model{
 var grokTextResponsesModelAliases = map[string]string{
 	"grok":                         DefaultTextModel,
 	"grok-latest":                  DefaultTextModel,
+	"grok-4.7":                     "grok-4.7",
+	"grok-4.7-latest":              "grok-4.7",
 	"grok-4.6":                     "grok-4.6",
 	"grok-4.6-latest":              "grok-4.6",
 	"grok-4.5":                     "grok-4.5",
