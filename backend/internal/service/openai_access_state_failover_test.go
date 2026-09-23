@@ -215,6 +215,9 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 		{"forbidden", `{"type":"response.failed","response":{"error":{"type":"permission_error","message":"forbidden"}}}`, http.StatusForbidden, false},
 		{"rate_limit", `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`, http.StatusTooManyRequests, true},
 		{"overload_529", `{"type":"error","error":{"status_code":529,"code":"overloaded","message":"overloaded"}}`, 529, true},
+		{"response_error_status_401", `{"type":"response.failed","response":{"error":{"status":401,"message":"credential rejected"}}}`, http.StatusUnauthorized, true},
+		{"error_status_429", `{"type":"error","error":{"status":429,"message":"rate limited"}}`, http.StatusTooManyRequests, true},
+		{"error_status_529", `{"type":"error","error":{"status":529,"message":"overloaded"}}`, 529, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,6 +227,12 @@ func TestOpenAIStreamSemanticStatusesPreservedAcrossTerminalShapes(t *testing.T)
 			require.Equal(t, tt.wantFailover, openAIStreamErrorEventShouldFailover(payload, message))
 		})
 	}
+}
+
+func TestOpenAIStreamCredentialFailureUsesErrorStatusAlias(t *testing.T) {
+	require.True(t, openAIStreamCredentialAuthFailure([]byte(`{"type":"error","error":{"status":401,"message":"credential rejected"}}`)))
+	require.True(t, openAIStreamCredentialAuthFailure([]byte(`{"type":"response.failed","response":{"error":{"status":401,"message":"credential rejected"}}}`)))
+	require.False(t, openAIStreamCredentialAuthFailure([]byte(`{"type":"response.failed","response":{"error":{"status":500,"message":"temporary failure"}}}`)))
 }
 
 func TestOpenAIStreamBareErrorUsesSemanticFailover(t *testing.T) {
