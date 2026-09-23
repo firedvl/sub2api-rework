@@ -84,7 +84,7 @@ var (
 	claudeOpus55FallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken: 4e-6, OutputCostPerToken: 20e-6,
 		CacheCreationInputTokenCost: 5e-6, CacheCreationInputTokenCostAbove1hr: 8e-6,
-		CacheReadInputTokenCost: 0.2e-6,
+		CacheReadInputTokenCost:   0.2e-6,
 		InputCostPerTokenPriority: 8e-6, OutputCostPerTokenPriority: 40e-6,
 		CacheCreationInputTokenCostPriority: 10e-6, CacheReadInputTokenCostPriority: 0.4e-6,
 		SupportsServiceTier: true, LiteLLMProvider: "anthropic", Mode: "chat", SupportsPromptCaching: true,

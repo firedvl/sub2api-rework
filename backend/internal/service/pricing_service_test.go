@@ -370,15 +370,15 @@ func TestFrontierModelPricingCatalogAndFallbackAgree(t *testing.T) {
 	require.NoError(t, err)
 
 	for name, pricingService := range map[string]*PricingService{
-		"bundled": {pricingData: prices},
+		"bundled":  {pricingData: prices},
 		"fallback": {pricingData: map[string]*LiteLLMModelPricing{}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			billing := NewBillingService(&config.Config{}, pricingService)
 			for _, tc := range []struct {
-				model string
+				model                                string
 				input, output, cacheWrite, cacheRead float64
-				threshold int
+				threshold                            int
 			}{
 				{"gpt-6-sol", 2e-6, 10e-6, 2.5e-6, 0.2e-6, 272_000},
 				{"gpt-6-luna", 0.1e-6, 0.5e-6, 0.125e-6, 0.01e-6, 272_000},
