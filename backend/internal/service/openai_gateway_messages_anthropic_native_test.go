@@ -147,6 +147,19 @@ func TestNativeAnthropicPassthroughNoEffortStaysNil(t *testing.T) {
 	require.Nil(t, result.ReasoningEffort)
 }
 
+func TestNativeAnthropicPassthroughSanitizesToolSchema(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"k3","max_tokens":32,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"read","input_schema":{"type":"object","required":null,"properties":{"path":{"type":"string"}}}}]}`)
+	upstream := &httpUpstreamRecorder{resp: nativeAnthropicBufferedResponse()}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.ForwardAsAnthropic(context.Background(),
+		adaptiveProtocolTestContext("/v1/messages", body), nativeAnthropicTestAccount(), body, "", "")
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(upstream.lastBody, "tools.0.input_schema.required").Exists())
+	require.Equal(t, "string", gjson.GetBytes(upstream.lastBody, "tools.0.input_schema.properties.path.type").String())
+}
+
 func TestNativeAnthropicPassthroughNormalizesGLM53Thinking(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {

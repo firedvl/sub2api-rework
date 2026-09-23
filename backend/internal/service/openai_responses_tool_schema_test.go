@@ -52,6 +52,18 @@ func TestSanitizeOpenAIResponsesToolParameterTypes_ValidSchemaUntouched(t *testi
 	require.Equal(t, string(body), string(sanitized))
 }
 
+func TestSanitizeOpenAIResponsesToolParameterTypes_NullRequiredScope(t *testing.T) {
+	body := []byte(`{"tools":[{"name":"read","input_schema":{"type":"object","required":null,"properties":{"value":{"type":"object","required":["id"],"default":{"required":null}}},"contentSchema":{"required":null}}}]}`)
+	sanitized, changed, err := sanitizeOpenAIResponsesToolParameterTypes(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, json.Valid(sanitized))
+	require.False(t, gjson.GetBytes(sanitized, "tools.0.input_schema.required").Exists())
+	require.False(t, gjson.GetBytes(sanitized, "tools.0.input_schema.contentSchema.required").Exists())
+	require.Equal(t, `["id"]`, gjson.GetBytes(sanitized, "tools.0.input_schema.properties.value.required").Raw)
+	require.True(t, gjson.GetBytes(sanitized, "tools.0.input_schema.properties.value.default.required").Exists())
+}
+
 // 缺失 type 的 Schema 本身合法（等价于不约束），不得补写——补写会收窄客户端语义。
 func TestSanitizeOpenAIResponsesToolParameterTypes_MissingTypeNotInvented(t *testing.T) {
 	body := []byte(`{"tools":[{"type":"function","name":"ok","parameters":{"properties":{}}}]}`)
