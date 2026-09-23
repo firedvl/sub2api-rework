@@ -117,7 +117,7 @@ func assessOpenAIAutoWarmupWindow(account *Account, usage *OpenAIQuotaUsage, rec
 	if fiveHourWindow == nil || !fiveHourWindow.usedPercentPresent {
 		return openAIAutoWarmupWindow{}, false
 	}
-	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+	updates := buildOpenAIAutoResetUsageUpdates(usage, now, false)
 	newReset, err := parseTime(strings.TrimSpace(fmt.Sprint(updates["codex_5h_reset_at"])))
 	if err != nil || newReset.IsZero() {
 		return openAIAutoWarmupWindow{}, false

@@ -12,6 +12,8 @@ import (
 
 const (
 	OpenAIAutoResetCreditEnabledExtraKey     = "auto_reset_credit_enabled"
+	OpenAIAutoResetCredit5hEnabledExtraKey   = "auto_reset_credit_5h_enabled"
+	OpenAIAutoResetCredit7dEnabledExtraKey   = "auto_reset_credit_7d_enabled"
 	OpenAIAutoResetCredit5hThresholdExtraKey = "auto_reset_credit_5h_threshold"
 	OpenAIAutoResetCredit7dThresholdExtraKey = "auto_reset_credit_7d_threshold"
 	OpenAIAutoResetCreditStateExtraKey       = "codex_auto_reset_credit_state"
@@ -19,13 +21,14 @@ const (
 	OpenAIAutoWarmupStateExtraKey            = "codex_auto_warmup_state"
 
 	openAIAutoResetCreditDefaultThreshold = 1.0
-	openAIAutoResetCreditMinimumThreshold = 0.001
 )
 
 // OpenAIAutoResetCreditConfig 是账号级自动用卡配置。阈值采用 0-1 比例，
 // 避免后端调度与前端百分比展示混用同一数值语义。
 type OpenAIAutoResetCreditConfig struct {
 	Enabled     bool
+	Enabled5h   bool
+	Enabled7d   bool
 	Threshold5h float64
 	Threshold7d float64
 }
@@ -34,6 +37,8 @@ type OpenAIAutoResetCreditConfig struct {
 // 始终保持关闭，防止升级后产生意外消费。
 func ResolveOpenAIAutoResetCreditConfig(account *Account) OpenAIAutoResetCreditConfig {
 	config := OpenAIAutoResetCreditConfig{
+		Enabled5h:   true,
+		Enabled7d:   true,
 		Threshold5h: openAIAutoResetCreditDefaultThreshold,
 		Threshold7d: openAIAutoResetCreditDefaultThreshold,
 	}
@@ -41,6 +46,13 @@ func ResolveOpenAIAutoResetCreditConfig(account *Account) OpenAIAutoResetCreditC
 		return config
 	}
 	config.Enabled = resolveAccountExtraBool(account.Extra, OpenAIAutoResetCreditEnabledExtraKey)
+	if value, ok := account.Extra[OpenAIAutoResetCredit5hEnabledExtraKey].(bool); ok {
+		config.Enabled5h = value
+	}
+	if value, ok := account.Extra[OpenAIAutoResetCredit7dEnabledExtraKey].(bool); ok {
+		config.Enabled7d = value
+	}
+	config.Enabled = config.Enabled && (config.Enabled5h || config.Enabled7d)
 	if value, ok := resolveAccountExtraNumber(account.Extra, OpenAIAutoResetCredit5hThresholdExtraKey); ok && isValidOpenAIAutoResetThreshold(value) {
 		config.Threshold5h = value
 	}
@@ -76,10 +88,12 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	delete(normalized, OpenAIAutoWarmupEvaluationExtraKey)
 
 	_, hasEnabled := normalized[OpenAIAutoResetCreditEnabledExtraKey]
+	_, has5hEnabled := normalized[OpenAIAutoResetCredit5hEnabledExtraKey]
+	_, has7dEnabled := normalized[OpenAIAutoResetCredit7dEnabledExtraKey]
 	_, has5h := normalized[OpenAIAutoResetCredit5hThresholdExtraKey]
 	_, has7d := normalized[OpenAIAutoResetCredit7dThresholdExtraKey]
 	_, hasWarmup := normalized[OpenAIAutoWarmupEnabledExtraKey]
-	if !hasEnabled && !has5h && !has7d && !hasWarmup {
+	if !hasEnabled && !has5hEnabled && !has7dEnabled && !has5h && !has7d && !hasWarmup {
 		return normalized, nil
 	}
 	if platform != PlatformOpenAI || accountType != AccountTypeOAuth || isShadow {
@@ -94,6 +108,16 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 		}
 		enabled = value
 	}
+	for _, key := range []string{OpenAIAutoResetCredit5hEnabledExtraKey, OpenAIAutoResetCredit7dEnabledExtraKey} {
+		if value, present := normalized[key]; present {
+			if _, ok := value.(bool); !ok {
+				return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_WINDOW_INVALID", "%s must be a boolean", key)
+			}
+		}
+	}
+	if enabled && normalized[OpenAIAutoResetCredit5hEnabledExtraKey] == false && normalized[OpenAIAutoResetCredit7dEnabledExtraKey] == false {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_WINDOWS_DISABLED", "enable at least one usage window for automatic reset credits")
+	}
 	for key, present := range map[string]bool{
 		OpenAIAutoResetCredit5hThresholdExtraKey: has5h,
 		OpenAIAutoResetCredit7dThresholdExtraKey: has7d,
@@ -106,7 +130,7 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 		}
 		value, ok := parseOpenAIAutoResetThreshold(normalized[key])
 		if !ok || !isValidOpenAIAutoResetThreshold(value) {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID", "%s must be between 0.001 and 1.0", key)
+			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID", "%s must be between 0 and 1.0", key)
 		}
 		normalized[key] = value
 	}
@@ -118,6 +142,25 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	return normalized, nil
 }
 
+func validateOpenAIAutoResetCreditWindowUpdate(account *Account, updates map[string]any) error {
+	if account == nil || len(updates) == 0 {
+		return nil
+	}
+	extra := cloneOpenAIAutoResetExtra(account.Extra)
+	if extra == nil {
+		extra = make(map[string]any)
+	}
+	for key, value := range updates {
+		extra[key] = value
+	}
+	if extra[OpenAIAutoResetCreditEnabledExtraKey] == true &&
+		extra[OpenAIAutoResetCredit5hEnabledExtraKey] == false &&
+		extra[OpenAIAutoResetCredit7dEnabledExtraKey] == false {
+		return infraerrors.New(http.StatusBadRequest, "OPENAI_AUTO_RESET_CREDIT_WINDOWS_DISABLED", "enable at least one usage window for automatic reset credits")
+	}
+	return nil
+}
+
 func stripOpenAIAutoResetCreditManagedExtra(extra map[string]any, stripConfig bool) map[string]any {
 	if extra == nil {
 		return nil
@@ -127,6 +170,8 @@ func stripOpenAIAutoResetCreditManagedExtra(extra map[string]any, stripConfig bo
 	delete(extra, OpenAIAutoWarmupEvaluationExtraKey)
 	if stripConfig {
 		delete(extra, OpenAIAutoResetCreditEnabledExtraKey)
+		delete(extra, OpenAIAutoResetCredit5hEnabledExtraKey)
+		delete(extra, OpenAIAutoResetCredit7dEnabledExtraKey)
 		delete(extra, OpenAIAutoResetCredit5hThresholdExtraKey)
 		delete(extra, OpenAIAutoResetCredit7dThresholdExtraKey)
 		delete(extra, OpenAIAutoWarmupEnabledExtraKey)
@@ -156,7 +201,7 @@ func parseOpenAIAutoResetThreshold(value any) (float64, bool) {
 }
 
 func isValidOpenAIAutoResetThreshold(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= openAIAutoResetCreditMinimumThreshold && value <= 1
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
 }
 
 func cloneOpenAIAutoResetExtra(source map[string]any) map[string]any {

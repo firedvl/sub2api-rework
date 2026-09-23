@@ -292,7 +292,9 @@ func TestBulkUpdateForwardsAutoResetCreditFields(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"account_ids":                    []int64{1, 2},
 		"auto_reset_credit_enabled":      true,
-		"auto_reset_credit_5h_threshold": 0.75,
+		"auto_reset_credit_5h_enabled":   false,
+		"auto_reset_credit_7d_enabled":   true,
+		"auto_reset_credit_5h_threshold": 0,
 		"auto_reset_credit_7d_threshold": 0.9,
 	})
 	rec := httptest.NewRecorder()
@@ -304,8 +306,12 @@ func TestBulkUpdateForwardsAutoResetCreditFields(t *testing.T) {
 	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput)
 	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCreditEnabled)
 	require.True(t, *adminSvc.lastBulkUpdateAccountInput.AutoResetCreditEnabled)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hEnabled)
+	require.False(t, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hEnabled)
+	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dEnabled)
+	require.True(t, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dEnabled)
 	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hThreshold)
-	require.Equal(t, 0.75, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hThreshold)
+	require.Zero(t, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit5hThreshold)
 	require.NotNil(t, adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dThreshold)
 	require.Equal(t, 0.9, *adminSvc.lastBulkUpdateAccountInput.AutoResetCredit7dThreshold)
 }

@@ -36,6 +36,8 @@
         />
         <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
+            <label id="bulk-auto-reset-5h-label" class="input-label">{{ t('admin.accounts.autoResetCredit.window5h') }}</label>
+            <Select v-model="autoResetCredit5hMode" :options="autoWarmupOptions" aria-labelledby="bulk-auto-reset-5h-label" data-testid="bulk-auto-reset-5h-mode" />
             <label for="bulk-edit-auto-reset-credit-5h" class="input-label">
               {{ t('admin.accounts.autoResetCredit.threshold5h') }}
             </label>
@@ -43,14 +45,17 @@
               id="bulk-edit-auto-reset-credit-5h"
               v-model="autoResetCredit5hThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="any"
               class="input"
+              :disabled="autoResetCreditMode === 'disabled' || autoResetCredit5hMode === 'disabled'"
               :placeholder="t('admin.accounts.bulkEdit.noChange')"
             />
           </div>
           <div>
+            <label id="bulk-auto-reset-7d-label" class="input-label">{{ t('admin.accounts.autoResetCredit.window7d') }}</label>
+            <Select v-model="autoResetCredit7dMode" :options="autoWarmupOptions" aria-labelledby="bulk-auto-reset-7d-label" data-testid="bulk-auto-reset-7d-mode" />
             <label for="bulk-edit-auto-reset-credit-7d" class="input-label">
               {{ t('admin.accounts.autoResetCredit.threshold7d') }}
             </label>
@@ -58,10 +63,11 @@
               id="bulk-edit-auto-reset-credit-7d"
               v-model="autoResetCredit7dThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="any"
               class="input"
+              :disabled="autoResetCreditMode === 'disabled' || autoResetCredit7dMode === 'disabled'"
               :placeholder="t('admin.accounts.bulkEdit.noChange')"
             />
           </div>
@@ -1786,6 +1792,8 @@ const enableRpmLimit = ref(false)
 type AutoWarmupMode = 'unchanged' | 'enabled' | 'disabled'
 const autoWarmupMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCreditMode = ref<AutoWarmupMode>('unchanged')
+const autoResetCredit5hMode = ref<AutoWarmupMode>('unchanged')
+const autoResetCredit7dMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCredit5hThreshold = ref('')
 const autoResetCredit7dThreshold = ref('')
 const autoResetCreditRate = (percent: string) => Number((Number(percent) / 100).toPrecision(15))
@@ -2079,6 +2087,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (autoResetCreditMode.value !== 'unchanged') {
     updates.auto_reset_credit_enabled = autoResetCreditMode.value === 'enabled'
+  }
+  if (autoResetCredit5hMode.value !== 'unchanged') {
+    updates.auto_reset_credit_5h_enabled = autoResetCredit5hMode.value === 'enabled'
+  }
+  if (autoResetCredit7dMode.value !== 'unchanged') {
+    updates.auto_reset_credit_7d_enabled = autoResetCredit7dMode.value === 'enabled'
   }
   if (autoResetCredit5hThreshold.value !== '') {
     updates.auto_reset_credit_5h_threshold = autoResetCreditRate(autoResetCredit5hThreshold.value)
@@ -2377,7 +2391,8 @@ const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
   const next7d = typeof updates.auto_reset_credit_7d_threshold === 'number'
     ? updates.auto_reset_credit_7d_threshold
     : null
-  if (!changesEnabled && next5h === null && next7d === null) return false
+  const changesWindows = autoResetCredit5hMode.value !== 'unchanged' || autoResetCredit7dMode.value !== 'unchanged'
+  if (!changesEnabled && !changesWindows && next5h === null && next7d === null) return false
 
   const targets = (await readAutoResetCreditTargets()).filter(isAutoResetCreditTarget)
   const reviewedIDs = new Set<number>()
@@ -2386,9 +2401,13 @@ const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
     const enabling = changesEnabled && account.extra?.auto_reset_credit_enabled !== true
     const current5h = account.extra?.auto_reset_credit_5h_threshold ?? 1
     const current7d = account.extra?.auto_reset_credit_7d_threshold ?? 1
-    const loweredHere = (next5h !== null && next5h < current5h - 1e-12) ||
-      (next7d !== null && next7d < current7d - 1e-12)
-    if (enabling || loweredHere) reviewedIDs.add(account.id)
+    const next5hEnabled = autoResetCredit5hMode.value === 'unchanged' ? account.extra?.auto_reset_credit_5h_enabled !== false : autoResetCredit5hMode.value === 'enabled'
+    const next7dEnabled = autoResetCredit7dMode.value === 'unchanged' ? account.extra?.auto_reset_credit_7d_enabled !== false : autoResetCredit7dMode.value === 'enabled'
+    const loweredHere = (next5hEnabled && next5h !== null && next5h < current5h - 1e-12) ||
+      (next7dEnabled && next7d !== null && next7d < current7d - 1e-12)
+    const windowEnabled = (autoResetCredit5hMode.value === 'enabled' && account.extra?.auto_reset_credit_5h_enabled === false) ||
+      (autoResetCredit7dMode.value === 'enabled' && account.extra?.auto_reset_credit_7d_enabled === false)
+    if (enabling || loweredHere || (windowEnabled && account.extra?.auto_reset_credit_enabled === true)) reviewedIDs.add(account.id)
     lowered ||= loweredHere
   }
   if (reviewedIDs.size === 0) return false
@@ -2396,8 +2415,8 @@ const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
   pendingAutoResetCreditReview.value = {
     updates,
     affectedCount: targets.length,
-    threshold5h: reviewThresholdLabel(next5h, targets, 'auto_reset_credit_5h_threshold'),
-    threshold7d: reviewThresholdLabel(next7d, targets, 'auto_reset_credit_7d_threshold'),
+    threshold5h: autoResetCredit5hMode.value === 'disabled' ? t('admin.accounts.autoResetCredit.review.ignored') : reviewThresholdLabel(next5h, targets, 'auto_reset_credit_5h_threshold'),
+    threshold7d: autoResetCredit7dMode.value === 'disabled' ? t('admin.accounts.autoResetCredit.review.ignored') : reviewThresholdLabel(next7d, targets, 'auto_reset_credit_7d_threshold'),
     lowered
   }
   return true
@@ -2438,6 +2457,8 @@ const handleSubmit = async () => {
     enableRpmLimit.value ||
     autoWarmupMode.value !== 'unchanged' ||
     autoResetCreditMode.value !== 'unchanged' ||
+    autoResetCredit5hMode.value !== 'unchanged' ||
+    autoResetCredit7dMode.value !== 'unchanged' ||
     autoResetCredit5hThreshold.value !== '' ||
     autoResetCredit7dThreshold.value !== '' ||
     userMsgQueueMode.value !== null
@@ -2448,7 +2469,7 @@ const handleSubmit = async () => {
   }
 
   for (const threshold of [autoResetCredit5hThreshold.value, autoResetCredit7dThreshold.value]) {
-    if (threshold !== '' && (!Number.isFinite(Number(threshold)) || Number(threshold) < 0.1 || Number(threshold) > 100)) {
+    if (threshold !== '' && (!Number.isFinite(Number(threshold)) || Number(threshold) < 0 || Number(threshold) > 100)) {
       appStore.showError(t('admin.accounts.autoResetCredit.thresholdInvalid'))
       return
     }
@@ -2523,7 +2544,7 @@ const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
     const resetCreditUpdated = res.auto_reset_credit_updated_count || 0
     const resetCreditSkipped = res.auto_reset_credit_skipped_count || 0
 
-    if ((autoResetCreditMode.value !== 'unchanged' || autoResetCredit5hThreshold.value !== '' || autoResetCredit7dThreshold.value !== '') && failed === 0) {
+    if ((autoResetCreditMode.value !== 'unchanged' || autoResetCredit5hMode.value !== 'unchanged' || autoResetCredit7dMode.value !== 'unchanged' || autoResetCredit5hThreshold.value !== '' || autoResetCredit7dThreshold.value !== '') && failed === 0) {
       const message = t('admin.accounts.bulkEdit.autoResetCreditResult', {
         updated: resetCreditUpdated,
         skipped: resetCreditSkipped
@@ -2644,6 +2665,8 @@ watch(
       enableRpmLimit.value = false
       autoWarmupMode.value = 'unchanged'
       autoResetCreditMode.value = 'unchanged'
+      autoResetCredit5hMode.value = 'unchanged'
+      autoResetCredit7dMode.value = 'unchanged'
       autoResetCredit5hThreshold.value = ''
       autoResetCredit7dThreshold.value = ''
 

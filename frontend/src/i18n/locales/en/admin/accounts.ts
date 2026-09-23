@@ -906,12 +906,15 @@ export default {
 	  autoPauseDisabledHint: 'When enabled, this account is never auto-paused (even if a global default threshold is configured).',
 	  autoResetCredit: {
 	    title: 'Automatically use reset credits',
-	    hint: 'A Reset Credit may be used automatically when either window reaches its configured used-quota threshold.',
+    hint: 'Only enabled usage windows can trigger a Reset Credit. Thresholds use the percentage of quota used.',
+	    window5h: '5-hour usage',
+	    window7d: 'Weekly usage',
+	    windowRequired: 'Enable at least one usage window for automatic Reset Credit use.',
 	    threshold5h: '5-hour used-quota threshold (%)',
 	    threshold7d: 'Weekly used-quota threshold (%)',
-	    thresholdHint: '5-hour threshold OR weekly threshold. Enter 0.1–100; both default to 100.',
-	    example: '90% means a Reset Credit becomes eligible at 90% used (about 10% remaining). A lower percentage triggers earlier.',
-	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0.1% and 100%.',
+	    thresholdHint: 'Any enabled window may trigger a credit. Enter 0–100; both default to 100.',
+	    example: '90% used means about 10% remaining. 100% used means none remaining; 0% used can trigger immediately when valid usage is reported.',
+	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0% and 100%.',
 	    review: {
 	      title: 'Review automatic Reset Credit use',
 	      message: 'Confirm these settings before saving.',
@@ -921,8 +924,9 @@ export default {
 	      unchanged: 'Keep current value',
 	      currentValues: 'Current values: {values} USED',
 	      usedAt: 'Use a credit at >= {value}% USED',
+	      ignored: 'Ignored',
 	      trigger: 'Trigger',
-	      either: 'Either threshold',
+	      either: 'Any enabled threshold',
 	      lowered: 'Lowering this value causes Reset Credits to become eligible earlier.'
 	    }
 	  },

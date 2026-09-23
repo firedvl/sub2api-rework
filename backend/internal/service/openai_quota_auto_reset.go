@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -360,13 +361,14 @@ func (s *OpenAIQuotaAutoResetService) tryAcquireScanLock(ctx context.Context) (f
 }
 
 type openAIAutoResetAssessment struct {
-	triggerWindow string
-	resetReached  bool
-	pauseReached  bool
-	utilization5h float64
-	utilization7d float64
-	threshold5h   float64
-	threshold7d   float64
+	triggerWindow  string
+	resetReached   bool
+	pauseReached   bool
+	missingEnabled bool
+	utilization5h  float64
+	utilization7d  float64
+	threshold5h    float64
+	threshold7d    float64
 }
 
 func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accountID int64) error {
@@ -414,7 +416,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	now := time.Now()
 	assessment := s.assessExtra(account, config, now)
 	state := openAIAutoResetStateFromExtra(account.Extra)
-	needsQuery := recoverable || openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached
+	needsQuery := recoverable || openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached || assessment.missingEnabled
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
 	}
@@ -521,8 +523,16 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	}
 
 	account, err = s.accountRepo.GetByID(ctx, accountID)
-	if err != nil || account == nil || !ResolveOpenAIAutoResetCreditConfig(account).Enabled {
+	if err != nil || account == nil {
 		return err
+	}
+	config = ResolveOpenAIAutoResetCreditConfig(account)
+	if !config.Enabled {
+		return nil
+	}
+	assessment = s.assessUsage(usage, account, config, now)
+	if !assessment.resetReached {
+		return nil
 	}
 	result, err := s.idempotency.Execute(ctx, IdempotencyExecuteOptions{
 		Scope:          "openai_auto_reset_credit",
@@ -632,27 +642,51 @@ func decodeOpenAIAutoResetConsumeResult(value any) openAIAutoResetConsumeResult 
 }
 
 func (s *OpenAIQuotaAutoResetService) assessExtra(account *Account, config OpenAIAutoResetCreditConfig, now time.Time) openAIAutoResetAssessment {
-	utilization5h, _ := resolveOpenAIQuotaUtilization(account.Extra, "5h", now)
-	utilization7d, _ := resolveOpenAIQuotaUtilization(account.Extra, "7d", now)
-	return s.buildAssessment(account, config, utilization5h, utilization7d)
+	var utilization5h, utilization7d float64
+	var has5h, has7d bool
+	if config.Enabled5h {
+		utilization5h, has5h = autoResetUtilization(account.Extra, "5h", now, true)
+	}
+	if config.Enabled7d {
+		utilization7d, has7d = autoResetUtilization(account.Extra, "7d", now, true)
+	}
+	return s.buildAssessment(account, config, utilization5h, has5h, utilization7d, has7d)
 }
 
 func (s *OpenAIQuotaAutoResetService) assessUsage(usage *OpenAIQuotaUsage, account *Account, config OpenAIAutoResetCreditConfig, now time.Time) openAIAutoResetAssessment {
-	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
-	utilization5h := readOpenAIQuotaUsedPercent(updates, "5h") / 100
-	utilization7d := readOpenAIQuotaUsedPercent(updates, "7d") / 100
-	return s.buildAssessment(account, config, utilization5h, utilization7d)
+	updates := buildOpenAIAutoResetUsageUpdates(usage, now, true)
+	var utilization5h, utilization7d float64
+	var has5h, has7d bool
+	if config.Enabled5h {
+		utilization5h, has5h = autoResetUtilization(updates, "5h", now, false)
+	}
+	if config.Enabled7d {
+		utilization7d, has7d = autoResetUtilization(updates, "7d", now, false)
+	}
+	return s.buildAssessment(account, config, utilization5h, has5h, utilization7d, has7d)
 }
 
-func (s *OpenAIQuotaAutoResetService) buildAssessment(account *Account, config OpenAIAutoResetCreditConfig, utilization5h, utilization7d float64) openAIAutoResetAssessment {
+func autoResetUtilization(extra map[string]any, window string, now time.Time, cached bool) (float64, bool) {
+	used, ok := resolveAccountExtraNumber(extra, "codex_"+window+"_used_percent")
+	if !ok || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
+		return 0, false
+	}
+	if cached && (openAIAutoResetSnapshotStale(extra, now) || openAIQuotaWindowReset(extra, window, now)) {
+		return 0, false
+	}
+	return used / 100, true
+}
+
+func (s *OpenAIQuotaAutoResetService) buildAssessment(account *Account, config OpenAIAutoResetCreditConfig, utilization5h float64, has5h bool, utilization7d float64, has7d bool) openAIAutoResetAssessment {
 	assessment := openAIAutoResetAssessment{
 		utilization5h: utilization5h,
 		utilization7d: utilization7d,
 		threshold5h:   config.Threshold5h,
 		threshold7d:   config.Threshold7d,
 	}
-	reset5h := utilization5h >= config.Threshold5h
-	reset7d := utilization7d >= config.Threshold7d
+	reset5h := config.Enabled && config.Enabled5h && has5h && utilization5h >= config.Threshold5h
+	reset7d := config.Enabled && config.Enabled7d && has7d && utilization7d >= config.Threshold7d
+	assessment.missingEnabled = config.Enabled && ((config.Enabled5h && !has5h) || (config.Enabled7d && !has7d))
 	assessment.resetReached = reset5h || reset7d
 	assessment.triggerWindow = joinOpenAIAutoResetWindows(reset5h, reset7d)
 
@@ -685,14 +719,15 @@ func joinOpenAIAutoResetWindows(fiveHour, sevenDay bool) string {
 	}
 }
 
-func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time) map[string]any {
+func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time, requireUsedPercent bool) map[string]any {
 	if usage == nil || usage.RateLimit == nil {
 		return nil
 	}
 	rateLimit := usage.RateLimit
 	snapshot := &OpenAICodexUsageSnapshot{UpdatedAt: now.UTC().Format(time.RFC3339)}
 	applyWindow := func(window *OpenAIRateLimitWindow, primary bool) {
-		if window == nil {
+		if window == nil || (requireUsedPercent && ((!window.usedPercentPresent && window.UsedPercent == 0) ||
+			math.IsNaN(window.UsedPercent) || math.IsInf(window.UsedPercent, 0) || window.UsedPercent < 0 || window.UsedPercent > 100)) {
 			return
 		}
 		used := window.UsedPercent
@@ -714,7 +749,7 @@ func buildOpenAIAutoResetUsageUpdates(usage *OpenAIQuotaUsage, now time.Time) ma
 }
 
 func (s *OpenAIQuotaAutoResetService) persistFreshUsage(ctx context.Context, accountID int64, usage *OpenAIQuotaUsage, now time.Time) error {
-	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+	updates := buildOpenAIAutoResetUsageUpdates(usage, now, false)
 	if len(updates) > 0 {
 		if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
 			return err

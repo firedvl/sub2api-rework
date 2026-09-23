@@ -1230,6 +1230,8 @@ export interface Account {
       credits?: { expires_at?: string }[]
     }
     auto_reset_credit_enabled?: boolean
+    auto_reset_credit_5h_enabled?: boolean
+    auto_reset_credit_7d_enabled?: boolean
     auto_reset_credit_5h_threshold?: number
     auto_reset_credit_7d_threshold?: number
     codex_auto_reset_credit_state?: {

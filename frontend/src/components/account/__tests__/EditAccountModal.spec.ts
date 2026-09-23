@@ -1612,13 +1612,39 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     wrapper.unmount()
   })
 
-  it('开启后拒绝超出 0.1–100 范围的任一阈值', async () => {
+  it('开启后拒绝超出 0–100 范围的任一阈值', async () => {
     const wrapper = mountModal(buildOpenAIOAuthParentAccount())
     await wrapper.get('[data-testid="auto-reset-credit-enabled"]').trigger('click')
-    await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('0')
+    await wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').setValue('-1')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('saves weekly-only with zero threshold and reloads explicit false', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="auto-reset-credit-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="auto-reset-credit-5h-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="auto-reset-credit-7d-threshold"]').setValue('0')
+    expect(wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      auto_reset_credit_enabled: true,
+      auto_reset_credit_5h_enabled: false,
+      auto_reset_credit_7d_enabled: true,
+      auto_reset_credit_7d_threshold: 0
+    })
+    wrapper.unmount()
+
+    account.extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    const reloaded = mountModal(account)
+    expect(reloaded.get('[data-testid="auto-reset-credit-5h-enabled"]').attributes('aria-checked')).toBe('false')
+    expect((reloaded.get('[data-testid="auto-reset-credit-7d-threshold"]').element as HTMLInputElement).value).toBe('0')
+    reloaded.unmount()
   })
 
   it('round-trips configured threshold precision without confirmation or rounding', async () => {

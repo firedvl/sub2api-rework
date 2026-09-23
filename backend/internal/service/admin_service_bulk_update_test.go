@@ -324,12 +324,23 @@ func TestAdminServiceBulkUpdateAccounts_AutoResetCreditThresholdOnlyAndValidatio
 	require.Equal(t, 1, result.Success)
 	require.Equal(t, map[string]any{OpenAIAutoResetCredit7dThresholdExtraKey: 0.9}, repo.lastBulkUpdate.Extra)
 
-	invalid := 0.0009
+	invalid := -0.0001
 	repo.bulkUpdateCalls = 0
 	_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
 		AccountIDs: []int64{1}, AutoResetCredit5hThreshold: &invalid,
 	})
 	requireApplicationErrorReason(t, err, "OPENAI_AUTO_RESET_CREDIT_THRESHOLD_INVALID")
+	require.Zero(t, repo.bulkUpdateCalls)
+
+	disabled := false
+	repo.getByIDsAccounts[0].Extra = map[string]any{
+		OpenAIAutoResetCreditEnabledExtraKey:   true,
+		OpenAIAutoResetCredit5hEnabledExtraKey: false,
+	}
+	_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1}, AutoResetCredit7dEnabled: &disabled,
+	})
+	requireApplicationErrorReason(t, err, "OPENAI_AUTO_RESET_CREDIT_WINDOWS_DISABLED")
 	require.Zero(t, repo.bulkUpdateCalls)
 }
 

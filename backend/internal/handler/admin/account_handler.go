@@ -172,6 +172,8 @@ type BulkUpdateAccountsRequest struct {
 	ProbeEnabled               *bool                     `json:"upstream_billing_probe_enabled"`
 	AutoWarmupEnabled          *bool                     `json:"auto_warmup_enabled"`
 	AutoResetCreditEnabled     *bool                     `json:"auto_reset_credit_enabled"`
+	AutoResetCredit5hEnabled   *bool                     `json:"auto_reset_credit_5h_enabled"`
+	AutoResetCredit7dEnabled   *bool                     `json:"auto_reset_credit_7d_enabled"`
 	AutoResetCredit5hThreshold *float64                  `json:"auto_reset_credit_5h_threshold"`
 	AutoResetCredit7dThreshold *float64                  `json:"auto_reset_credit_7d_threshold"`
 	ConfirmMixedChannelRisk    *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
@@ -2278,6 +2280,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.ProbeEnabled != nil ||
 		req.AutoWarmupEnabled != nil ||
 		req.AutoResetCreditEnabled != nil ||
+		req.AutoResetCredit5hEnabled != nil ||
+		req.AutoResetCredit7dEnabled != nil ||
 		req.AutoResetCredit5hThreshold != nil ||
 		req.AutoResetCredit7dThreshold != nil
 
@@ -2303,6 +2307,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		ProbeEnabled:               req.ProbeEnabled,
 		AutoWarmupEnabled:          req.AutoWarmupEnabled,
 		AutoResetCreditEnabled:     req.AutoResetCreditEnabled,
+		AutoResetCredit5hEnabled:   req.AutoResetCredit5hEnabled,
+		AutoResetCredit7dEnabled:   req.AutoResetCredit7dEnabled,
 		AutoResetCredit5hThreshold: req.AutoResetCredit5hThreshold,
 		AutoResetCredit7dThreshold: req.AutoResetCredit7dThreshold,
 		SkipMixedChannelCheck:      skipCheck,

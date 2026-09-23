@@ -2367,30 +2367,38 @@
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.window5h') }}</label>
+              <Toggle v-model="autoResetCredit5hEnabled" :disabled="!autoResetCreditEnabled" :aria-label="t('admin.accounts.autoResetCredit.window5h')" data-testid="auto-reset-credit-5h-enabled" />
+            </div>
             <label for="auto-reset-credit-5h-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
             <input
               id="auto-reset-credit-5h-threshold"
               v-model.number="autoResetCredit5hThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="any"
               class="input"
-              :disabled="!autoResetCreditEnabled"
+              :disabled="!autoResetCreditEnabled || !autoResetCredit5hEnabled"
               data-testid="auto-reset-credit-5h-threshold"
             />
           </div>
           <div>
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.window7d') }}</label>
+              <Toggle v-model="autoResetCredit7dEnabled" :disabled="!autoResetCreditEnabled" :aria-label="t('admin.accounts.autoResetCredit.window7d')" data-testid="auto-reset-credit-7d-enabled" />
+            </div>
             <label for="auto-reset-credit-7d-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
             <input
               id="auto-reset-credit-7d-threshold"
               v-model.number="autoResetCredit7dThreshold"
               type="number"
-              min="0.1"
+              min="0"
               max="100"
               step="any"
               class="input"
-              :disabled="!autoResetCreditEnabled"
+              :disabled="!autoResetCreditEnabled || !autoResetCredit7dEnabled"
               data-testid="auto-reset-credit-7d-threshold"
             />
           </div>
@@ -2949,11 +2957,11 @@
       </div>
       <div class="flex justify-between gap-4">
         <dt>{{ t('admin.accounts.autoResetCredit.threshold5h') }}</dt>
-        <dd>{{ t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold5h }) }}</dd>
+        <dd>{{ autoResetCredit5hEnabled ? t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold5h }) : t('admin.accounts.autoResetCredit.review.ignored') }}</dd>
       </div>
       <div class="flex justify-between gap-4">
         <dt>{{ t('admin.accounts.autoResetCredit.threshold7d') }}</dt>
-        <dd>{{ t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold7d }) }}</dd>
+        <dd>{{ autoResetCredit7dEnabled ? t('admin.accounts.autoResetCredit.review.usedAt', { value: pendingAutoResetCreditReview.threshold7d }) : t('admin.accounts.autoResetCredit.review.ignored') }}</dd>
       </div>
       <div class="flex justify-between gap-4">
         <dt>{{ t('admin.accounts.autoResetCredit.review.trigger') }}</dt>
@@ -3308,6 +3316,8 @@ const autoPause7dThreshold = ref<number | null>(null)
 const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
+const autoResetCredit5hEnabled = ref(true)
+const autoResetCredit7dEnabled = ref(true)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
 const autoResetCredit5hOriginalRate = ref(1)
@@ -3882,6 +3892,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 	autoResetCreditEnabled.value = extra?.auto_reset_credit_enabled === true
+	autoResetCredit5hEnabled.value = extra?.auto_reset_credit_5h_enabled !== false
+	autoResetCredit7dEnabled.value = extra?.auto_reset_credit_7d_enabled !== false
 	autoResetCredit5hOriginalRate.value =
 		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold : 1
 	autoResetCredit7dOriginalRate.value =
@@ -4794,8 +4806,12 @@ const handleSubmit = async () => {
     return
   }
 	if (autoResetCreditEnabled.value) {
+		if (!autoResetCredit5hEnabled.value && !autoResetCredit7dEnabled.value) {
+			appStore.showError(t('admin.accounts.autoResetCredit.windowRequired'))
+			return
+		}
 		const thresholds = [autoResetCredit5hThreshold.value, autoResetCredit7dThreshold.value]
-		if (thresholds.some((value) => !Number.isFinite(value) || value < 0.1 || value > 100)) {
+		if (thresholds.some((value) => !Number.isFinite(value) || value < 0 || value > 100)) {
 			appStore.showError(t('admin.accounts.autoResetCredit.thresholdInvalid'))
 			return
 		}
@@ -5384,6 +5400,8 @@ const handleSubmit = async () => {
 		}
 		if (props.account.type === 'oauth' && !isSparkShadow.value) {
 			newExtra.auto_reset_credit_enabled = autoResetCreditEnabled.value
+			newExtra.auto_reset_credit_5h_enabled = autoResetCredit5hEnabled.value
+			newExtra.auto_reset_credit_7d_enabled = autoResetCredit7dEnabled.value
 			newExtra.auto_reset_credit_5h_threshold = autoResetCredit5hThreshold.value === autoResetCredit5hOriginalRate.value * 100
 				? autoResetCredit5hOriginalRate.value
 				: autoResetCreditRate(autoResetCredit5hThreshold.value)
@@ -5545,12 +5563,15 @@ const autoResetCreditThresholdLowered = () => {
   const current7d = typeof extra?.auto_reset_credit_7d_threshold === 'number'
     ? extra.auto_reset_credit_7d_threshold * 100
     : 100
-  return autoResetCredit5hThreshold.value < current5h - 1e-12 || autoResetCredit7dThreshold.value < current7d - 1e-12
+  return (autoResetCredit5hEnabled.value && autoResetCredit5hThreshold.value < current5h - 1e-12) ||
+    (autoResetCredit7dEnabled.value && autoResetCredit7dThreshold.value < current7d - 1e-12)
 }
 
 const needsAutoResetCreditReview = () => {
   const wasEnabled = props.account?.extra?.auto_reset_credit_enabled === true
-  return autoResetCreditEnabled.value && (!wasEnabled || autoResetCreditThresholdLowered())
+  return autoResetCreditEnabled.value && (!wasEnabled || autoResetCreditThresholdLowered() ||
+    (autoResetCredit5hEnabled.value && props.account?.extra?.auto_reset_credit_5h_enabled === false) ||
+    (autoResetCredit7dEnabled.value && props.account?.extra?.auto_reset_credit_7d_enabled === false))
 }
 
 const handleAutoResetCreditReviewConfirm = async () => {

@@ -99,7 +99,7 @@ func assessOpenAIQuotaRecovery(account *Account, usage *OpenAIQuotaUsage, now ti
 		return nil, nil, false
 	}
 
-	updates := buildOpenAIAutoResetUsageUpdates(usage, now)
+	updates := buildOpenAIAutoResetUsageUpdates(usage, now, false)
 	used := make(map[string]float64, 2)
 	resets := make(map[string]int64, 2)
 	for _, window := range []string{"5h", "7d"} {
