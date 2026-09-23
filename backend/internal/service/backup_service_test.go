@@ -372,6 +372,24 @@ func TestBackupService_S3ConfigKeepExistingSecret(t *testing.T) {
 	require.Equal(t, "AKID-NEW", internal.AccessKeyID)
 }
 
+func TestBackupService_S3ConfigInheritedSecretStaysEncrypted(t *testing.T) {
+	repo := newMockSettingRepo()
+	svc := newTestBackupService(repo, &mockDumper{}, newMockObjectStore())
+	ctx := context.Background()
+
+	_, err := svc.UpdateS3Config(ctx, BackupS3Config{Bucket: "bucket", AccessKeyID: "AKID", SecretAccessKey: "secret"})
+	require.NoError(t, err)
+	for _, accessKeyID := range []string{"AKID-2", "AKID-3"} {
+		_, err = svc.UpdateS3Config(ctx, BackupS3Config{Bucket: "bucket", AccessKeyID: accessKeyID})
+		require.NoError(t, err)
+		raw, err := repo.GetValue(ctx, settingKeyBackupS3Config)
+		require.NoError(t, err)
+		var stored BackupS3Config
+		require.NoError(t, json.Unmarshal([]byte(raw), &stored))
+		require.Equal(t, "ENC:secret", stored.SecretAccessKey)
+	}
+}
+
 func TestBackupService_UpdateS3Config_RejectsEphemeralKey(t *testing.T) {
 	repo := newMockSettingRepo()
 	svc := newTestBackupServiceEphemeralKey(repo)
