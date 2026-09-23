@@ -493,6 +493,67 @@ func TestOpenAIQuotaAutoResetService_DisabledWindowRolloverDoesNotConsumeAgain(t
 	}
 }
 
+func TestOpenAIQuotaAutoResetService_WindowActionMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		master, fiveHour, weekly bool
+		used5h, used7d           float64
+		missing5h, missing7d     bool
+		threshold7d              float64
+		wantCalls                int32
+	}{
+		{name: "master off", fiveHour: true, weekly: true, used5h: 100, used7d: 100},
+		{name: "5h only qualifies", master: true, fiveHour: true, used5h: 100, used7d: 20, threshold7d: 1, wantCalls: 1},
+		{name: "5h only ignores weekly", master: true, fiveHour: true, used5h: 20, used7d: 100, threshold7d: 1},
+		{name: "5h only ignores missing weekly", master: true, fiveHour: true, used5h: 100, missing7d: true, threshold7d: 1, wantCalls: 1},
+		{name: "weekly only qualifies", master: true, weekly: true, used5h: 20, used7d: 100, threshold7d: 1, wantCalls: 1},
+		{name: "weekly only ignores 5h", master: true, weekly: true, used5h: 100, used7d: 20, threshold7d: 1},
+		{name: "weekly only ignores missing 5h", master: true, weekly: true, missing5h: true, used7d: 100, threshold7d: 1, wantCalls: 1},
+		{name: "both 5h qualifies", master: true, fiveHour: true, weekly: true, used5h: 100, used7d: 20, threshold7d: 1, wantCalls: 1},
+		{name: "both weekly qualifies", master: true, fiveHour: true, weekly: true, used5h: 20, used7d: 100, threshold7d: 1, wantCalls: 1},
+		{name: "both neither qualifies", master: true, fiveHour: true, weekly: true, used5h: 20, used7d: 20, threshold7d: 1},
+		{name: "weekly zero exact", master: true, weekly: true, used5h: 100, used7d: 0, threshold7d: 0, wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			extra := map[string]any{
+				OpenAIAutoResetCreditEnabledExtraKey:     tc.master,
+				OpenAIAutoResetCredit5hEnabledExtraKey:   tc.fiveHour,
+				OpenAIAutoResetCredit7dEnabledExtraKey:   tc.weekly,
+				OpenAIAutoResetCredit5hThresholdExtraKey: 1.0,
+				OpenAIAutoResetCredit7dThresholdExtraKey: tc.threshold7d,
+				"codex_usage_updated_at":                 now.Format(time.RFC3339),
+				"codex_5h_reset_at":                      now.Add(time.Hour).Format(time.RFC3339),
+				"codex_7d_reset_at":                      now.Add(24 * time.Hour).Format(time.RFC3339),
+			}
+			var fiveHourWindow, weeklyWindow *OpenAIRateLimitWindow
+			if !tc.missing5h {
+				extra["codex_5h_used_percent"] = tc.used5h
+				fiveHourWindow = &OpenAIRateLimitWindow{UsedPercent: tc.used5h, LimitWindowSeconds: 5 * 60 * 60, usedPercentPresent: true}
+			}
+			if !tc.missing7d {
+				extra["codex_7d_used_percent"] = tc.used7d
+				weeklyWindow = &OpenAIRateLimitWindow{UsedPercent: tc.used7d, LimitWindowSeconds: 7 * 24 * 60 * 60, usedPercentPresent: true}
+			}
+			account := &Account{ID: 202, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: extra}
+			creditExpiry := now.Add(48 * time.Hour).Format(time.RFC3339)
+			quota := &autoResetTestQuota{usage: &OpenAIQuotaUsage{
+				FetchedAt: now.Unix(),
+				RateLimit: &OpenAIRateLimit{PrimaryWindow: fiveHourWindow, SecondaryWindow: weeklyWindow},
+				RateLimitResetCredits: &OpenAIRateLimitResetCredits{AvailableCount: 1,
+					Credits: []OpenAIRateLimitResetCreditDetail{{ExpiresAt: creditExpiry}}},
+				autoResetCandidates: []openAIAutoResetCreditCandidate{{ID: "matrix-credit", ExpiresAt: creditExpiry}},
+			}}
+			options := DefaultIdempotencyConfig()
+			options.ObserveOnly = false
+			s := NewOpenAIQuotaAutoResetService(&autoResetTestAccountRepo{account: account}, quota, autoResetTestRecoverer{},
+				NewIdempotencyCoordinator(newInMemoryIdempotencyRepo(), options), nil, nil, nil)
+			require.NoError(t, s.evaluateAccount(context.Background(), account.ID))
+			require.Equal(t, tc.wantCalls, quota.resetCalls.Load())
+		})
+	}
+}
+
 func TestOpenAIQuotaAutoResetService_ConcurrentInstancesConsumeOnce(t *testing.T) {
 	now := time.Now().UTC()
 	account := &Account{
