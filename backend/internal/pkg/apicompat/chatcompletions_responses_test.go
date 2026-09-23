@@ -706,6 +706,23 @@ func TestChatCompletionsToResponses_TemperaturePreservedForNonReasoningModel(t *
 	assert.InDelta(t, 0.7, *resp.TopP, 1e-9)
 }
 
+func TestChatCompletionsToResponses_GPT6SamplingDependsOnEffort(t *testing.T) {
+	temperature := 0.7
+	for _, tc := range []struct {
+		effort string
+		want   bool
+	}{{"none", true}, {"high", false}} {
+		req := &ChatCompletionsRequest{
+			Model: "gpt-6-sol", Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+			ReasoningEffort: tc.effort, Temperature: &temperature, TopP: &temperature,
+		}
+		resp, err := ChatCompletionsToResponses(req)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, resp.Temperature != nil)
+		require.Equal(t, tc.want, resp.TopP != nil)
+	}
+}
+
 func TestChatCompletionsToResponses_AssistantWithTextAndToolCalls(t *testing.T) {
 	req := &ChatCompletionsRequest{
 		Model: "gpt-4o",
