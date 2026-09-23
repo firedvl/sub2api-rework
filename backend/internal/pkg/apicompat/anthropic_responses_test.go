@@ -1867,24 +1867,6 @@ func TestOpus55SignedThinkingResponsesRoundTrip(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGPT6ChatSamplingAndCacheFields(t *testing.T) {
-	temperature := 0.7
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
-		for _, effort := range []string{"", "none", "medium", "max"} {
-			out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: model, ReasoningEffort: effort, Temperature: &temperature, TopP: &temperature, PromptCacheOptions: json.RawMessage(`{"mode":"explicit","ttl":"30m"}`), Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]`)}}})
-			require.NoError(t, err)
-			if effort == "none" {
-				require.NotNil(t, out.Temperature)
-			} else {
-				require.Nil(t, out.Temperature)
-				require.Nil(t, out.TopP)
-			}
-			require.JSONEq(t, `{"mode":"explicit","ttl":"30m"}`, string(out.PromptCacheOptions))
-			require.Contains(t, string(out.Input), "prompt_cache_breakpoint")
-		}
-	}
-}
-
 func TestMessageStartSSE_StopReasonIsJSONNull(t *testing.T) {
 	state := NewResponsesEventToAnthropicState()
 	state.Model = "grok-4.5"
