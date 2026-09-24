@@ -302,6 +302,64 @@ WHERE filename IN (
 	require.Equal(t, 4, applied)
 }
 
+func TestMigrationsRunner_UpgradeFrom244PreservesModerationLogs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dbName := fmt.Sprintf("sub2api_upgrade_244_%d", time.Now().UnixNano())
+	_, err := integrationDB.ExecContext(ctx, "CREATE DATABASE "+dbName)
+	require.NoError(t, err)
+	var upgradeDB *sql.DB
+	t.Cleanup(func() {
+		if upgradeDB != nil {
+			_ = upgradeDB.Close()
+		}
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer dropCancel()
+		if _, dropErr := integrationDB.ExecContext(dropCtx, "DROP DATABASE IF EXISTS "+dbName+" WITH (FORCE)"); dropErr != nil {
+			t.Errorf("drop upgrade rehearsal database: %v", dropErr)
+		}
+	})
+
+	dsn, err := url.Parse(integrationPostgresDSN)
+	require.NoError(t, err)
+	dsn.Path = "/" + dbName
+	dsn.RawPath = ""
+	upgradeDB, err = openSQLWithRetry(ctx, dsn.String(), 30*time.Second)
+	require.NoError(t, err)
+
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	require.NoError(t, err)
+	migrations244 := fstest.MapFS{}
+	for _, name := range files {
+		if name >= "245_" {
+			continue
+		}
+		data, readErr := migrations.FS.ReadFile(name)
+		require.NoError(t, readErr)
+		migrations244[name] = &fstest.MapFile{Data: data}
+	}
+	_, has244 := migrations244["244_group_model_allowlist.sql"]
+	require.True(t, has244)
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, migrations244))
+	var oldColumnCount int
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='content_moderation_logs' AND column_name='engine_meta'`).Scan(&oldColumnCount))
+	require.Zero(t, oldColumnCount)
+	_, err = upgradeDB.ExecContext(ctx, `INSERT INTO content_moderation_logs (request_id) VALUES ('upgrade-244-log')`)
+	require.NoError(t, err)
+
+	require.NoError(t, ApplyMigrations(ctx, upgradeDB))
+	require.NoError(t, ApplyMigrations(ctx, upgradeDB))
+	var requestID string
+	var engineMeta []byte
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT request_id, engine_meta FROM content_moderation_logs WHERE request_id='upgrade-244-log'`).Scan(&requestID, &engineMeta))
+	require.Equal(t, "upgrade-244-log", requestID)
+	require.Nil(t, engineMeta)
+	var applied int
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename='245_content_moderation_engine_meta.sql'`).Scan(&applied))
+	require.Equal(t, 1, applied)
+}
+
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {
 	tx := testTx(t)
 
