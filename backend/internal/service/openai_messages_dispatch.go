@@ -62,10 +62,10 @@ func claudeMessagesDispatchFamily(model string) string {
 // GroupAllowsMessagesDispatch is the shared admission policy for Messages
 // bridged through an OpenAI-compatible target.
 func GroupAllowsMessagesDispatch(group *Group, targetPlatform string) bool {
-	if group == nil || group.Platform == PlatformGrok || IsCNProvider(group.Platform) {
+	if group == nil || group.Platform == PlatformGrok || IsMultiProtocolAPIKeyProvider(group.Platform) {
 		return true
 	}
-	if group.Platform == PlatformComposite && (targetPlatform == PlatformGrok || IsCNProvider(targetPlatform)) {
+	if group.Platform == PlatformComposite && (targetPlatform == PlatformGrok || IsMultiProtocolAPIKeyProvider(targetPlatform)) {
 		return true
 	}
 	return group.AllowMessagesDispatch
@@ -91,10 +91,10 @@ func (g *Group) ResolveMessagesDispatchModel(requestedModel string) string {
 		return xai.ModelMappingWithOptions(opts)["claude-*"]
 	}
 
-	// 国产供应商分组:调度级模型映射不适用(其配置被 sanitize 置空,且下方的
-	// gpt-5.x 默认值是 openai 专属,发给 CN 上游必错)。模型改写完全交给账号级
-	// model_mapping;anthropic 协议上游本身接受 claude-* 模型名。
-	if IsCNProvider(g.Platform) {
+	// 国产供应商 / OpenCode 分组:调度级模型映射不适用(其配置被 sanitize 置空,
+	// 且下方的 gpt-5.x 默认值是 openai 专属,发给这些上游必错)。模型改写完全
+	// 交给账号级 model_mapping;Anthropic 协议上游本身接受 claude-* 模型名。
+	if IsMultiProtocolAPIKeyProvider(g.Platform) {
 		return ""
 	}
 

@@ -364,6 +364,8 @@ func TestMigrationsRunner_UpgradeFrom244PreservesModerationAndAffiliateData(t *t
 	require.Equal(t, 1, applied)
 	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename='248_add_minimax_platform.sql'`).Scan(&applied))
 	require.Equal(t, 1, applied)
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename='249_opencode_go_platform.sql'`).Scan(&applied))
+	require.Equal(t, 1, applied)
 	var operationColumnCount int
 	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='user_affiliate_ledger' AND column_name='operation_id'`).Scan(&operationColumnCount))
 	require.Equal(t, 1, operationColumnCount)

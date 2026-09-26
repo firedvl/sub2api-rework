@@ -499,6 +499,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   zhipu: 'Zhipu',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  opencode_go: 'OpenCode Go',
 })[platform]
 
 const accountTypeLabel = (type: AccountType) => ({

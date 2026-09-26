@@ -43,6 +43,7 @@ var gatewayCapabilityPlatforms = []string{
 	PlatformZhipu,
 	PlatformDeepseek,
 	PlatformMiniMax,
+	PlatformOpenCodeGo,
 }
 
 // GatewayCapabilityModel is an explicit public DTO. Account and route records

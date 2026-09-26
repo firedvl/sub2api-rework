@@ -147,6 +147,15 @@ func TestCompositeCatalogModelsIncludesConfiguredMiniMax(t *testing.T) {
 	require.NotContains(t, models, "MiniMax-M2.7")
 }
 
+func TestCompositeCatalogModelsIncludesConfiguredOpenCodeGo(t *testing.T) {
+	account := gatewayCapabilityTestAccount(1, PlatformOpenCodeGo, map[string]string{"custom-go": "claude-sonnet-4-5"})
+	repo := &gatewayCapabilityAccountRepoStub{configured: []Account{account}}
+	groupID := int64(9)
+	models := (&GatewayService{accountRepo: repo}).GetCompositeCatalogModels(context.Background(), &groupID)
+	require.Contains(t, models, "custom-go")
+	require.NotContains(t, models, "gpt-5.6-sol")
+}
+
 func TestCatalogModelsUsesDurableSimpleScope(t *testing.T) {
 	account := gatewayCapabilityTestAccount(1, PlatformOpenAI, map[string]string{
 		"public-model": "upstream-model",
