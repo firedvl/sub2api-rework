@@ -54,7 +54,7 @@ func (f stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte
 			stagingTargetVersion: "a", stagingFailedVersion: "b",
 		}[version], 40),
 		Image: image, ImageDigest: digest,
-		MigrationMin: 239, MigrationMax: 247, ReleaseDate: "2026-09-09T00:00:00Z",
+		MigrationMin: 239, MigrationMax: 248, ReleaseDate: "2026-09-09T00:00:00Z",
 		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: Version,
 	}
 	if manifest.GitSHA == "" {
@@ -335,8 +335,8 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingTargetVersion)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
-	if status.CurrentMigration != 247 || stagingMigration(t, docker, compose) != 247 {
-		t.Fatalf("candidate installation did not reach migration 247: %+v", status)
+	if status.CurrentMigration != 248 || stagingMigration(t, docker, compose) != 248 {
+		t.Fatalf("candidate installation did not reach migration 248: %+v", status)
 	}
 	if stagingApplicationImageID(t, docker, compose) != runner.targetID {
 		t.Fatal("candidate container does not use the locally built candidate image")
