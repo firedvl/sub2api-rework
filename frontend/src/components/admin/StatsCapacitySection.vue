@@ -337,6 +337,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   zhipu: 'Zhipu',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
+  opencode_go: 'OpenCode Go',
 })[platform]
 const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 const remainingLabel = (value: number | null) => value === null

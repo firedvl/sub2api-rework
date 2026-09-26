@@ -117,7 +117,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// OpenCode Go：按模型原生协议分流（与 inbound 协议正交）。
 	// 规则未命中一律兜底 Chat Completions，只有显式 Responses 才走下方转换链。
 	if account.IsOpenCodeGo() {
-		proto := openCodeGoNativeProtocol(account, resolveOpenCodeGoMappedModel(account, body, defaultMappedModel))
+		mapped := resolveOpenCodeGoMappedModel(account, body, defaultMappedModel)
+		proto := openCodeGoNativeProtocol(account, mapped)
 		if proto != APIProtocolResponses {
 			if isResponsesShape {
 				if proto == APIProtocolAnthropic {
