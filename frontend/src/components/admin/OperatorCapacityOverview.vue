@@ -498,6 +498,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   kimi: 'Kimi',
   zhipu: 'Zhipu',
   deepseek: 'DeepSeek',
+  minimax: 'MiniMax',
 })[platform]
 
 const accountTypeLabel = (type: AccountType) => ({

@@ -138,6 +138,15 @@ func TestCompositeCatalogModelsUsesDurableSimpleScopeAndBackedExactRoutes(t *tes
 	require.Equal(t, CompositeRouteSourceAccount, route.decision.Source)
 }
 
+func TestCompositeCatalogModelsIncludesConfiguredMiniMax(t *testing.T) {
+	account := gatewayCapabilityTestAccount(1, PlatformMiniMax, map[string]string{"custom-mini": "MiniMax-M3"})
+	repo := &gatewayCapabilityAccountRepoStub{configured: []Account{account}}
+	groupID := int64(9)
+	models := (&GatewayService{accountRepo: repo}).GetCompositeCatalogModels(context.Background(), &groupID)
+	require.Contains(t, models, "custom-mini")
+	require.NotContains(t, models, "MiniMax-M2.7")
+}
+
 func TestCatalogModelsUsesDurableSimpleScope(t *testing.T) {
 	account := gatewayCapabilityTestAccount(1, PlatformOpenAI, map[string]string{
 		"public-model": "upstream-model",
