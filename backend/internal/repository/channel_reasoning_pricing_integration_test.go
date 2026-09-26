@@ -160,6 +160,8 @@ func TestGroupReasoningPricingRoundTripAndBilling(t *testing.T) {
 			multiplier := 1.0
 			if configured, ok := expected[effort]; ok {
 				multiplier = configured
+			} else if effort == "max" {
+				multiplier = 3
 			}
 			cost, err := billing.CalculateTokenCostForRequest(service.TokenCostRequest{
 				Ctx: ctx, Model: "claude-fable-5-1", Group: loaded, Resolver: resolver,
