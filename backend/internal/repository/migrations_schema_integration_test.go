@@ -302,7 +302,7 @@ WHERE filename IN (
 	require.Equal(t, 4, applied)
 }
 
-func TestMigrationsRunner_UpgradeFrom244PreservesModerationLogs(t *testing.T) {
+func TestMigrationsRunner_UpgradeFrom244PreservesModerationAndAffiliateData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -358,6 +358,11 @@ func TestMigrationsRunner_UpgradeFrom244PreservesModerationLogs(t *testing.T) {
 	var applied int
 	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename='245_content_moderation_engine_meta.sql'`).Scan(&applied))
 	require.Equal(t, 1, applied)
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename='246_affiliate_ledger_operation_id.sql'`).Scan(&applied))
+	require.Equal(t, 1, applied)
+	var operationColumnCount int
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='user_affiliate_ledger' AND column_name='operation_id'`).Scan(&operationColumnCount))
+	require.Equal(t, 1, operationColumnCount)
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {
