@@ -62,10 +62,10 @@ func claudeMessagesDispatchFamily(model string) string {
 // GroupAllowsMessagesDispatch is the shared admission policy for Messages
 // bridged through an OpenAI-compatible target.
 func GroupAllowsMessagesDispatch(group *Group, targetPlatform string) bool {
-	if group == nil || group.Platform == PlatformGrok || IsCNProvider(group.Platform) {
+	if group == nil || group.Platform == PlatformGrok || IsMultiProtocolAPIKeyProvider(group.Platform) {
 		return true
 	}
-	if group.Platform == PlatformComposite && (targetPlatform == PlatformGrok || IsCNProvider(targetPlatform)) {
+	if group.Platform == PlatformComposite && (targetPlatform == PlatformGrok || IsMultiProtocolAPIKeyProvider(targetPlatform)) {
 		return true
 	}
 	return group.AllowMessagesDispatch
