@@ -216,6 +216,48 @@ export default {
           OLLAMA_CLOUD_USAGE_REFRESH_RATE_LIMITED: '刷新过于频繁，请在 {retry_after_seconds} 秒后重试。'
         }
       },
+      opencodeGo: {
+        accountMode: {
+          zen: 'Zen',
+          zenDesc: '按量付费网关，消耗账户余额，按 Token 计费。',
+          go: 'GO',
+          goDesc: '订阅制网关，按 5 小时 / 周 / 月滚动用量窗口限流。',
+        },
+        protocolRules: {
+          title: '模型协议分流',
+          hint: '自适应模式下按模型匹配上游协议。支持精确 ID 或末尾 * 通配（如 grok-*、qwen*）；自上而下第一条命中生效；未命中走 Chat Completions。',
+          patternPlaceholder: 'grok-* 或 deepseek-v4-flash',
+          add: '添加规则',
+          remove: '删除规则',
+          restoreDefaults: '恢复默认',
+          fallback: '未命中以上规则 → Chat Completions（/v1/chat/completions）',
+        },
+        title: 'OpenCode Go 用量',
+        panelHint: '上游 OpenCode Go 账号上报的用量窗口。可手动刷新，或开启自动刷新。',
+        notRefreshed: '尚未刷新',
+        refreshNow: '刷新用量',
+        autoRefresh: '自动刷新用量',
+        autoRefreshHint: '只有账号开关和全局开关同时启用时才会定时刷新。',
+        rolling: '5 小时',
+        rollingShort: '5h',
+        weekly: '周',
+        weeklyShort: '7d',
+        monthly: '月',
+        monthlyShort: '1m',
+        status: '状态',
+        updatedAt: '更新时间',
+        ok: '正常',
+        unauthorized: '会话已过期',
+        failed: '刷新失败',
+        windowWithReset: '已用 {percent}，{reset} 重置',
+        loadFailed: '加载 OpenCode Go 用量设置失败',
+        autoRefreshFailed: '更新自动刷新设置失败',
+        refreshSuccess: 'OpenCode Go 用量已刷新',
+        refreshFailed: '刷新 OpenCode Go 用量失败',
+        errors: {
+          OPENCODE_GO_USAGE_REFRESH_RATE_LIMITED: '刷新过于频繁，请在 {retry_after_seconds} 秒后重试。'
+        }
+      },
       upstreamBilling: {
         trustWarning: '此倍率由上游站点针对当前 API Key 自行声明。Sub2API 无法验证该值是否与实际扣费一致；上游站点或中间代理可能返回伪造、过期或被篡改的数据。请结合账单、余额变化和实际用量自行核验。',
         autoProbe: '自动探测上游声明倍率',
@@ -400,23 +442,6 @@ export default {
         balanceProbeTooltip: '请求供应商余额端点，查询账户余额',
         balanceLow: '余额不足',
         noBalanceEndpoint: '该平台暂无余额查询接口',
-      },
-      opencodeGo: {
-        accountMode: {
-          zen: 'Zen',
-          zenDesc: '按量付费网关，消耗账户余额，按 Token 计费。',
-          go: 'GO',
-          goDesc: '订阅制网关，按 5 小时 / 周 / 月滚动用量窗口限流。',
-        },
-        protocolRules: {
-          title: '模型协议分流',
-          hint: '自适应模式下按模型匹配上游协议。支持精确 ID 或末尾 * 通配（如 grok-*、qwen*）；自上而下第一条命中生效；未命中走 Chat Completions。',
-          patternPlaceholder: 'grok-* 或 deepseek-v4-flash',
-          add: '添加规则',
-          remove: '删除规则',
-          restoreDefaults: '恢复默认',
-          fallback: '未命中以上规则 → Chat Completions（/v1/chat/completions）',
-        },
       },
       types: {
         oauth: 'OAuth',
