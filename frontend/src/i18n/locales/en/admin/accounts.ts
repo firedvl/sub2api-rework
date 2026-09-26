@@ -196,23 +196,6 @@ export default {
         balanceLow: 'Insufficient balance',
         noBalanceEndpoint: 'This platform has no balance query endpoint',
       },
-      opencodeGo: {
-        accountMode: {
-          zen: 'Zen',
-          zenDesc: 'Pay-as-you-go gateway. Consumes account credits, billed per token.',
-          go: 'GO',
-          goDesc: 'Subscription gateway, rate-limited by 5-hour / weekly / monthly usage windows.',
-        },
-        protocolRules: {
-          title: 'Model protocol routing',
-          hint: 'In adaptive mode, each model is sent to a native upstream protocol. Use an exact ID or a trailing * glob (e.g. grok-*, qwen*). The first matching rule wins; unmatched models use Chat Completions.',
-          patternPlaceholder: 'grok-* or deepseek-v4-flash',
-          add: 'Add rule',
-          remove: 'Remove rule',
-          restoreDefaults: 'Restore defaults',
-          fallback: 'Unmatched models → Chat Completions (/v1/chat/completions)',
-        },
-      },
       types: {
         oauth: 'OAuth',
         chatgptOauth: 'ChatGPT OAuth',
@@ -341,6 +324,21 @@ export default {
         }
       },
       opencodeGo: {
+        accountMode: {
+          zen: 'Zen',
+          zenDesc: 'Pay-as-you-go gateway. Consumes account credits, billed per token.',
+          go: 'GO',
+          goDesc: 'Subscription gateway, rate-limited by 5-hour / weekly / monthly usage windows.',
+        },
+        protocolRules: {
+          title: 'Model protocol routing',
+          hint: 'In adaptive mode, each model is sent to a native upstream protocol. Use an exact ID or a trailing * glob (e.g. grok-*, qwen*). The first matching rule wins; unmatched models use Chat Completions.',
+          patternPlaceholder: 'grok-* or deepseek-v4-flash',
+          add: 'Add rule',
+          remove: 'Remove rule',
+          restoreDefaults: 'Restore defaults',
+          fallback: 'Unmatched models → Chat Completions (/v1/chat/completions)',
+        },
         title: 'OpenCode Go usage',
         panelHint: 'Usage windows reported by the upstream OpenCode Go account. Refreshed on demand or automatically when enabled.',
         notRefreshed: 'Not refreshed',

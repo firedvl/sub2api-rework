@@ -3132,8 +3132,6 @@ import type {
   OpenAIResponsesMode,
   OpenAIEndpointCapability,
   OllamaCloudUsageState,
-  GrokMediaEligibilityMode,
-  GrokMediaEligibilityState,
   OpenCodeGoUsageState,
   OpenCodeGoUsageWindow
 } from '@/types'

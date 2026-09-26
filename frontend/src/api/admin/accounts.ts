@@ -30,8 +30,6 @@ import type {
   OllamaCloudUsageSettings,
   OllamaCloudUsageState,
   OpenAIVisionQualificationReport,
-  GrokMediaEligibilityMode,
-  GrokMediaEligibilityState,
   OpenCodeGoUsageSettings,
   OpenCodeGoUsageState
 } from '@/types'
