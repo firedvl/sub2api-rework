@@ -286,11 +286,12 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *t
 func TestCalculateCost_OpenAIGPT54LongContextMarkerRequiresActualCostIncrease(t *testing.T) {
 	svc := newTestBillingServiceWithOpenAILadderCatalog(t)
 
-	cost, err := svc.calculateCostWithServiceTierPolicy(
+	cost, err := svc.calculateCostInternalWithPolicy(
 		"gpt-5.4-2026-03-05",
 		UsageTokens{InputTokens: 300000},
 		0,
 		"",
+		nil,
 		true,
 	)
 
@@ -1812,8 +1813,7 @@ func TestGetModelPricing_Fable51FallbackPricing(t *testing.T) {
 	require.InDelta(t, 12.5e-6, pricing.CacheCreation5mPrice, 1e-12)
 	require.InDelta(t, 20e-6, pricing.CacheCreation1hPrice, 1e-12)
 	require.InDelta(t, 0.25e-6, pricing.CacheReadPricePerToken, 1e-12)
-	require.NotNil(t, pricing.MaxReasoningEffortMultiplier)
-	require.Equal(t, 3.0, *pricing.MaxReasoningEffortMultiplier)
+	require.Empty(t, pricing.ReasoningEffortMultipliers)
 }
 
 func TestGetModelPricingWithChannel_CacheReadPriceAffectsPriority(t *testing.T) {

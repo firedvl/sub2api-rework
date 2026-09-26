@@ -716,17 +716,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 			LongContextBillingEnabled: longContextBillingGate,
 		})
 	}
-	breakdown, err := s.billingService.calculateCostWithServiceTierPolicy(
-		billingModel,
-		tokens,
-		multiplier,
-		serviceTier,
-		longContextBillingGate == nil || *longContextBillingGate,
-	)
-	if err == nil {
-		applyCostBreakdownMultiplier(breakdown, maxReasoningEffortBillingMultiplier(billingModel, reasoningEffort, nil))
-	}
-	return breakdown, err
+	return s.billingService.CalculateCostUnified(CostInput{
+		Ctx: ctx, Model: billingModel, Tokens: tokens, RateMultiplier: multiplier,
+		ServiceTier: serviceTier, ReasoningEffort: reasoningEffort, PricingAt: pricingAt,
+		LongContextBillingEnabled: longContextBillingGate,
+	})
 }
 
 func (s *OpenAIGatewayService) calculateOpenAIImageCost(
