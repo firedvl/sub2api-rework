@@ -858,8 +858,9 @@ func schedulerBucketsForGroup(groupID int64) []SchedulerBucket {
 }
 
 func schedulerCanonicalBuckets(groupID int64) []SchedulerBucket {
-	buckets := make([]SchedulerBucket, 0, 18)
-	for _, platform := range schedulerSnapshotPlatforms() {
+	platforms := schedulerSnapshotPlatforms()
+	buckets := make([]SchedulerBucket, 0, len(platforms)*2+2)
+	for _, platform := range platforms {
 		buckets = append(buckets,
 			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeSingle},
 			SchedulerBucket{GroupID: groupID, Platform: platform, Mode: SchedulerModeForced},

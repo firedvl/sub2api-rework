@@ -336,6 +336,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   kimi: 'Kimi',
   zhipu: 'Zhipu',
   deepseek: 'DeepSeek',
+  minimax: 'MiniMax',
 })[platform]
 const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 const remainingLabel = (value: number | null) => value === null
