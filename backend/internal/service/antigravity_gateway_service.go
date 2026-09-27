@@ -294,7 +294,42 @@ func mapAntigravityModel(account *Account, requestedModel string) string {
 // getMappedModel 获取映射后的模型名
 // 完全依赖映射配置：账户映射（通配符）→ 默认映射兜底
 func (s *AntigravityGatewayService) getMappedModel(account *Account, requestedModel string) string {
+	return s.getMappedModelForThinkingLevel(account, requestedModel, "")
+}
+
+func (s *AntigravityGatewayService) getMappedModelForThinkingLevel(account *Account, requestedModel, thinkingLevel string) string {
+	if mapped, ok := resolveGeminiThinkingVariantForLevel(account, requestedModel, thinkingLevel); ok {
+		return mapped
+	}
+	if !antigravityKnownRouteAvailable(account, requestedModel) {
+		return ""
+	}
 	return mapAntigravityModel(account, requestedModel)
+}
+
+func antigravityKnownRouteAvailable(account *Account, requestedModel string) bool {
+	if account == nil {
+		return false
+	}
+	mapped := mapAntigravityModel(account, requestedModel)
+	model := strings.TrimSpace(strings.TrimPrefix(requestedModel, "models/"))
+	if !strings.HasPrefix(model, "gemini-") || hasGeminiThinkingVariantSuffix(model) {
+		return mapped != ""
+	}
+	snapshot := account.GetUpstreamModelInventorySnapshot()
+	if snapshot == nil {
+		return mapped != ""
+	}
+	if _, explicit := resolveRequestedModelInMapping(stringMappingFromRaw(account.Credentials["model_mapping"]), model); explicit {
+		return mapped != ""
+	}
+	for _, upstreamID := range snapshot.Models {
+		if upstreamID == model {
+			return mapped != ""
+		}
+	}
+	_, hasVariant := resolveGeminiThinkingVariantForLevel(account, model, "")
+	return hasVariant
 }
 
 func resolveAntigravityProjectID(account *Account) (string, error) {
