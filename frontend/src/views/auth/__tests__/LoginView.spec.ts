@@ -116,4 +116,3 @@ describe('LoginView registration entry', () => {
     expect(wrapper.text()).not.toContain('auth.signUp')
   })
 })
-
