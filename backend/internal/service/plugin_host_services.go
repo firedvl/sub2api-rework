@@ -50,7 +50,7 @@ type PluginOutboundIdentity struct {
 // PluginAccountInfo 是宿主向插件公开的、单个账号的「可读、非机密」视图。它绝不包含
 // 凭据（access_token / refresh_token / cookie 等）——凭据只经 ResolvePluginOutboundIdentity
 // 交付。范围内的账号一律返回（包含 active 但当前被暂停的：限流 / 临时不可调度 / 过载），
-// 由插件自行决策（例如跳过已暂停账号，避免密集打扰）；管理性禁用 / 过期账号由仓储查询
+// 由插件自行决策（例如跳过已暂停账号，避免密集打扰）；管理性禁用账号由仓储查询
 // 上游过滤，不在此出现。Schedulable 是宿主权威判定（account.IsSchedulable），是插件
 // 排除账号的首选信号。
 //
@@ -125,7 +125,7 @@ func (s PluginAccountScope) Platforms() []string {
 	return out
 }
 
-// PluginAccountDirectory 让插件枚举其范围内的账号（携带全量可读元数据），并按需解析
+// PluginAccountDirectory 让插件枚举其范围内的账号（携带明确允许的元数据），并按需解析
 // 这些账号的出站身份，无需等待一条真实请求流经插件。ResolvePluginOutboundIdentity 会把
 // 账号凭据交给插件进程，属敏感能力；ListPluginAccounts 只交付非机密元数据。两者都必须
 // 把范围收敛到宿主传入的 scope。宿主只对「清单声明了对应账号能力」的插件构造 scope

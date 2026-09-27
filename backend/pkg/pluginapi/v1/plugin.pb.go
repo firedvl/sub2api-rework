@@ -1709,12 +1709,11 @@ type ListAccountsResponse struct {
 	// The host keeps filling it (the ids of the accounts in `accounts`) so those
 	// plugins keep working; new plugins should read `accounts` instead.
 	AccountIds []int64 `protobuf:"varint,1,rep,packed,name=account_ids,json=accountIds,proto3" json:"account_ids,omitempty"`
-	// accounts carries the full readable metadata for every account in the
+	// accounts carries allowlisted operational metadata for every account in the
 	// plugin's scope — including active accounts that are currently NOT
 	// schedulable because they are paused (rate-limited / temp-unschedulable /
-	// overloaded). This lets a plugin make its own decisions (e.g. skip paused
-	// accounts) instead of hammering them. (Administratively disabled / expired
-	// accounts are already excluded upstream by the host.) Available when
+	// overloaded or expired). This lets a plugin skip paused accounts. Accounts
+	// with a disabled or error lifecycle status are excluded. Available when
 	// host_service_api_version >= 2.
 	Accounts      []*AccountInfo `protobuf:"bytes,2,rep,name=accounts,proto3" json:"accounts,omitempty"`
 	unknownFields protoimpl.UnknownFields

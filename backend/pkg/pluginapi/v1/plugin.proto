@@ -28,7 +28,7 @@ service HostService {
   rpc KVDelete(KVDeleteRequest) returns (KVDeleteResponse);
   rpc KVList(KVListRequest) returns (KVListResponse);
   // Account directory: enumerate the accounts the plugin is bound to act on
-  // (with full readable metadata) and resolve the outbound identity
+  // (with allowlisted operational metadata) and resolve the outbound identity
   // (credentials/headers/proxy) the host would attach to a live request. The
   // host restricts both calls to the account scope the requesting plugin's
   // declared capabilities cover; a plugin can never widen that scope. Metadata
@@ -213,12 +213,11 @@ message ListAccountsResponse {
   // The host keeps filling it (the ids of the accounts in `accounts`) so those
   // plugins keep working; new plugins should read `accounts` instead.
   repeated int64 account_ids = 1;
-  // accounts carries the full readable metadata for every account in the
+  // accounts carries allowlisted operational metadata for every account in the
   // plugin's scope — including active accounts that are currently NOT
   // schedulable because they are paused (rate-limited / temp-unschedulable /
-  // overloaded). This lets a plugin make its own decisions (e.g. skip paused
-  // accounts) instead of hammering them. (Administratively disabled / expired
-  // accounts are already excluded upstream by the host.) Available when
+  // overloaded or expired). This lets a plugin skip paused accounts. Accounts
+  // with a disabled or error lifecycle status are excluded. Available when
   // host_service_api_version >= 2.
   repeated AccountInfo accounts = 2;
 }

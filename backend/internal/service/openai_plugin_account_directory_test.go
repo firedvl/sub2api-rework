@@ -11,15 +11,19 @@ import (
 )
 
 // pluginDirRepoStub embeds AccountRepository so it satisfies the full interface;
-// only ListByPlatform is implemented (the sole method the directory listing uses).
-// Any other call panics, which keeps the test honest about the surface it touches.
+// only the two account-directory methods are implemented.
 type pluginDirRepoStub struct {
 	AccountRepository
 	byPlatform map[string][]Account
+	byID       map[int64]*Account
 }
 
 func (r *pluginDirRepoStub) ListByPlatform(_ context.Context, platform string) ([]Account, error) {
 	return r.byPlatform[platform], nil
+}
+
+func (r *pluginDirRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	return r.byID[id], nil
 }
 
 func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
@@ -131,4 +135,13 @@ func TestListPluginAccounts_EmptyScopeReturnsNothing(t *testing.T) {
 	infos, err := svc.ListPluginAccounts(context.Background(), PluginAccountScope{}, "", "")
 	require.NoError(t, err)
 	assert.Empty(t, infos, "an empty scope must never enumerate accounts")
+}
+
+func TestResolvePluginOutboundIdentity_RejectsInactiveAccount(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusDisabled}
+	svc := &OpenAIGatewayService{accountRepo: &pluginDirRepoStub{byID: map[int64]*Account{1: account}}}
+	scope := newPluginAccountScope(pluginAccountScopeEntry{Platform: PlatformOpenAI, AccountType: AccountTypeOAuth})
+	identity, err := svc.ResolvePluginOutboundIdentity(context.Background(), scope, 1)
+	require.NoError(t, err)
+	require.Nil(t, identity)
 }

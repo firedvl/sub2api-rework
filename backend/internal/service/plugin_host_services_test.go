@@ -320,15 +320,14 @@ func TestPluginAccountScopeFromManifest(t *testing.T) {
 		t.Fatal("scope must not leak to other platforms")
 	}
 
-	// The granted scope is pinned to the capability id, so a manifest cannot widen
-	// it by declaring a different platform/account_type on a known capability.
+	// A mismatched declaration grants no scope even for a known capability ID.
 	spoof := PluginManifest{Capabilities: []PluginCapability{{ID: PluginCapabilityOpenAIOAuthOutbound, Platform: "anthropic", AccountType: "apikey"}}}
 	spoofScope := pluginAccountScopeFromManifest(spoof)
 	if spoofScope.Contains("anthropic", "apikey") {
 		t.Fatal("granted scope must be pinned to the capability id, not the declared platform/type")
 	}
-	if !spoofScope.Contains(PlatformOpenAI, AccountTypeOAuth) {
-		t.Fatal("known capability must still grant its pinned (openai, oauth) scope")
+	if !spoofScope.Empty() {
+		t.Fatal("mismatched capability declaration must not grant account access")
 	}
 
 	// An unknown capability grants nothing.

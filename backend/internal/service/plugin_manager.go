@@ -1087,7 +1087,7 @@ func pluginAccountScopeFromManifest(manifest PluginManifest) PluginAccountScope 
 	entries := make([]pluginAccountScopeEntry, 0, len(manifest.Capabilities))
 	for _, capability := range manifest.Capabilities {
 		grant, ok := pluginCapabilityAccountScopeGrants[capability.ID]
-		if !ok {
+		if !ok || capability.Platform != grant.Platform || capability.AccountType != grant.AccountType {
 			continue
 		}
 		entries = append(entries, grant)

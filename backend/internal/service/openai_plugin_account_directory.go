@@ -28,8 +28,8 @@ import (
 // they are paused (rate-limited / temp-unschedulable / overloaded) are included
 // with their status intact, so the plugin can skip them instead of probing them —
 // a paused account keeps Status=="active", so the repository's active-only query
-// still returns it. (Administratively disabled / expired accounts are already
-// excluded by the repository query.) Shadow accounts are excluded here: they hold
+// still returns it. Accounts with a disabled or error status are excluded by
+// the repository query. Shadow accounts are excluded here: they hold
 // no credentials of their own and are not independently schedulable.
 func (s *OpenAIGatewayService) ListPluginAccounts(ctx context.Context, scope PluginAccountScope, platform, accountType string) ([]PluginAccountInfo, error) {
 	if s == nil || s.accountRepo == nil || scope.Empty() {
@@ -53,7 +53,7 @@ func (s *OpenAIGatewayService) ListPluginAccounts(ctx context.Context, scope Plu
 				continue
 			}
 			// Defense-in-depth: the contract exposes only active accounts (paused
-			// ones stay active; disabled/expired are out). ListByPlatform already
+		// ones stay active; disabled/error statuses are out). ListByPlatform already
 			// filters to active at the DB, but do not silently depend on that — a
 			// paused account keeps Status=="active" and still passes here.
 			if !account.IsActive() {
@@ -120,7 +120,8 @@ func accountReadableMetadataJSON(account *Account) ([]byte, error) {
 // ResolvePluginOutboundIdentity resolves the access token plus the outbound
 // identity headers and proxy the host would attach to a live request for the
 // account. It returns (nil, nil) for accounts outside the plugin's scope, for
-// account kinds it cannot mint tokens for, or when no token can be resolved.
+// inactive accounts, account kinds it cannot mint tokens for, or when no token
+// can be resolved.
 func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context, scope PluginAccountScope, accountID int64) (*PluginOutboundIdentity, error) {
 	if s == nil || s.accountRepo == nil || accountID <= 0 || scope.Empty() {
 		return nil, nil
@@ -129,7 +130,7 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	if account == nil || account.IsShadow() {
+	if account == nil || !account.IsActive() || account.IsShadow() {
 		return nil, nil
 	}
 	// Scope is the authoritative permission boundary: refuse any account the
