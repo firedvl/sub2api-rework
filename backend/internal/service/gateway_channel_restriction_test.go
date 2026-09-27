@@ -297,3 +297,28 @@ func TestIsUpstreamModelRestrictedByChannel_UnsupportedModel(t *testing.T) {
 	require.False(t, svc.isUpstreamModelRestrictedByChannel(context.Background(), 10, account, "totally-unknown-model"),
 		"unmappable model → upstream model empty → not restricted (account filter handles this)")
 }
+
+func TestIsUpstreamModelRestrictedByChannel_AntigravityThinkingVariant(t *testing.T) {
+	ch := Channel{
+		ID: 1, Status: StatusActive, GroupIDs: []int64{10},
+		RestrictModels: true, BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{Platform: "gemini", Models: []string{"gemini-3.6-flash"}}},
+	}
+	svc := &GatewayService{channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))}
+	account := &Account{Platform: PlatformAntigravity, Credentials: map[string]any{}}
+	account.SetUpstreamModelInventorySnapshot(UpstreamModelInventorySnapshot{Source: "account", Models: []string{"gemini-3.6-flash-low", "gemini-3.6-flash-high"}})
+
+	for name, ctx := range map[string]context.Context{
+		"native": WithAntigravityGeminiThinking(context.Background(), []byte(`{"generationConfig":{"thinkingConfig":{"thinkingLevel":"low"}}}`)),
+		"claude": WithAntigravityClaudeThinking(context.Background(), []byte(`{"thinking":{"type":"enabled","budget_tokens":512}}`)),
+		"chat":   WithRequestedReasoningEffort(context.Background(), "low"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, "gemini-3.6-flash-low", (&AntigravityGatewayService{}).getMappedModelForThinkingLevel(account, "gemini-3.6-flash", antigravityThinkingLevelFromContext(ctx)))
+			require.True(t, svc.isUpstreamModelRestrictedByChannel(ctx, 10, account, "gemini-3.6-flash"))
+		})
+	}
+	ch.ModelPricing[0].Models = []string{"gemini-3.6-flash-low"}
+	svc.channelService = newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))
+	require.False(t, svc.isUpstreamModelRestrictedByChannel(WithRequestedReasoningEffort(context.Background(), "low"), 10, account, "gemini-3.6-flash"))
+}

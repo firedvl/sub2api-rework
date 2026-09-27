@@ -1010,6 +1010,9 @@ func (s *GatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context,
 		return false
 	}
 	upstreamModel := resolveAccountUpstreamModel(account, requestedModel)
+	if account != nil && account.Platform == PlatformAntigravity {
+		upstreamModel = (&AntigravityGatewayService{}).getMappedModelForThinkingLevel(account, requestedModel, antigravityThinkingLevelFromContext(ctx))
+	}
 	if upstreamModel == "" {
 		return false
 	}

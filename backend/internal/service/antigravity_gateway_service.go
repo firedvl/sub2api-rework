@@ -301,27 +301,32 @@ func (s *AntigravityGatewayService) getMappedModelForThinkingLevel(account *Acco
 	if mapped, ok := resolveGeminiThinkingVariantForLevel(account, requestedModel, thinkingLevel); ok {
 		return mapped
 	}
-	if account != nil {
-		model := strings.TrimSpace(strings.TrimPrefix(requestedModel, "models/"))
-		if strings.HasPrefix(model, "gemini-") && !hasGeminiThinkingVariantSuffix(model) {
-			if snapshot := account.GetUpstreamModelInventorySnapshot(); snapshot != nil {
-				_, explicitlyMapped := resolveRequestedModelInMapping(stringMappingFromRaw(account.Credentials["model_mapping"]), model)
-				if !explicitlyMapped {
-					found := false
-					for _, upstreamID := range snapshot.Models {
-						if upstreamID == model {
-							found = true
-							break
-						}
-					}
-					if !found {
-						return ""
-					}
-				}
-			}
-		}
+	if !antigravityKnownRouteAvailable(account, requestedModel) {
+		return ""
 	}
 	return mapAntigravityModel(account, requestedModel)
+}
+
+func antigravityKnownRouteAvailable(account *Account, requestedModel string) bool {
+	mapped := mapAntigravityModel(account, requestedModel)
+	model := strings.TrimSpace(strings.TrimPrefix(requestedModel, "models/"))
+	if !strings.HasPrefix(model, "gemini-") || hasGeminiThinkingVariantSuffix(model) {
+		return mapped != ""
+	}
+	snapshot := account.GetUpstreamModelInventorySnapshot()
+	if snapshot == nil {
+		return mapped != ""
+	}
+	if _, explicit := resolveRequestedModelInMapping(stringMappingFromRaw(account.Credentials["model_mapping"]), model); explicit {
+		return mapped != ""
+	}
+	for _, upstreamID := range snapshot.Models {
+		if upstreamID == model {
+			return mapped != ""
+		}
+	}
+	_, hasVariant := resolveGeminiThinkingVariantForLevel(account, model, "")
+	return hasVariant
 }
 
 func resolveAntigravityProjectID(account *Account) (string, error) {

@@ -1,11 +1,33 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 )
+
+type antigravityThinkingLevelContextKey struct{}
+
+func WithAntigravityGeminiThinking(ctx context.Context, body []byte) context.Context {
+	return context.WithValue(ctx, antigravityThinkingLevelContextKey{}, geminiThinkingLevelFromBody(body))
+}
+
+func WithAntigravityClaudeThinking(ctx context.Context, body []byte) context.Context {
+	var request struct {
+		Thinking *antigravity.ThinkingConfig `json:"thinking"`
+	}
+	_ = json.Unmarshal(body, &request)
+	return context.WithValue(ctx, antigravityThinkingLevelContextKey{}, geminiThinkingLevelFromClaudeThinking(request.Thinking))
+}
+
+func antigravityThinkingLevelFromContext(ctx context.Context) string {
+	if level, ok := ctx.Value(antigravityThinkingLevelContextKey{}).(string); ok {
+		return level
+	}
+	return antigravityCompatThinkingLevel(RequestedReasoningEffortFromContext(ctx), nil)
+}
 
 // Gemini 原生请求（/v1beta/models/{model}:generateContent 等）经 Antigravity 账号转发时，
 // 客户端（如 Antigravity CLI / go-genai）习惯发"裸"模型名（gemini-3.8-flash）并用

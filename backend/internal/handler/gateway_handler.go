@@ -187,6 +187,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		reqModel = parsedReq.Model
 		reqStream = parsedReq.Stream
 	}
+	c.Request = c.Request.WithContext(service.WithAntigravityClaudeThinking(c.Request.Context(), body))
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	// 解析渠道级模型映射
