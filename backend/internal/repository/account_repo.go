@@ -2605,10 +2605,42 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 		return err
 	}
 
+	baseCtx := ctx
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(
-		ctx,
-		`UPDATE accounts SET 
+	var tx *dbent.Tx
+	if scope == "openai:image_generation" && len(reason) > 0 && reason[0] == "openai_images_insufficient_balance" {
+		if dbent.TxFromContext(ctx) == nil {
+			tx, err = r.client.Tx(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+		account, lockErr := client.Account.Query().Where(dbaccount.IDEQ(id)).ForUpdate().Only(ctx)
+		if lockErr != nil {
+			return translatePersistenceError(lockErr, service.ErrAccountNotFound, nil)
+		}
+		if limits, ok := account.Extra["model_rate_limits"].(map[string]any); ok {
+			if entry, ok := limits[scope].(map[string]any); ok {
+				if rawReset, ok := entry["rate_limit_reset_at"].(string); ok {
+					if existing, parseErr := time.Parse(time.RFC3339, rawReset); parseErr == nil && existing.After(resetAt) {
+						if tx != nil {
+							if err := tx.Commit(); err != nil {
+								return err
+							}
+						}
+						if dbent.TxFromContext(baseCtx) == nil {
+							r.syncSchedulerAccountSnapshot(baseCtx, id)
+						}
+						return nil
+					}
+				}
+			}
+		}
+	}
+	result, err := client.ExecContext(ctx, `UPDATE accounts SET
 			extra = jsonb_set(
 				jsonb_set(COALESCE(extra, '{}'::jsonb), '{model_rate_limits}'::text[], COALESCE(extra->'model_rate_limits', '{}'::jsonb), true),
 				ARRAY['model_rate_limits', $1]::text[],
@@ -2616,11 +2648,7 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 				true
 			),
 			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL`,
-		scope,
-		raw,
-		id,
-	)
+		WHERE id = $3 AND deleted_at IS NULL`, scope, raw, id)
 	if err != nil {
 		return err
 	}
@@ -2632,10 +2660,17 @@ func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, sco
 	if affected == 0 {
 		return service.ErrAccountNotFound
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue model rate limit failed: account=%d err=%v", id, err)
 	}
-	r.syncSchedulerAccountSnapshot(ctx, id)
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if dbent.TxFromContext(baseCtx) == nil {
+		r.syncSchedulerAccountSnapshot(baseCtx, id)
+	}
 	return nil
 }
 
