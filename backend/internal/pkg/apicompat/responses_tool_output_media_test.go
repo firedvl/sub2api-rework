@@ -55,3 +55,27 @@ func TestLiftResponsesToolOutputMediaLeavesPlainOutputUntouched(t *testing.T) {
 	require.False(t, changed)
 	require.Equal(t, input, lifted)
 }
+
+func TestLiftResponsesToolOutputMediaKeepsParallelRepliesTogether(t *testing.T) {
+	var input any
+	require.NoError(t, json.Unmarshal([]byte(`[
+		{"type":"function_call_output","call_id":"image_call","output":[{"type":"input_image","image_url":"data:image/png;base64,AQID"}]},
+		{"type":"function_call_output","call_id":"text_call","output":"done"}
+	]`), &input))
+
+	lifted, changed := LiftResponsesToolOutputMedia(input)
+	require.True(t, changed)
+	items, ok := lifted.([]any)
+	require.True(t, ok)
+	require.Len(t, items, 3)
+	second, ok := items[1].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "text_call", second["call_id"])
+	message, ok := items[2].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "user", message["role"])
+	parts, ok := message["content"].([]map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "[Tool output media for call image_call]", parts[0]["text"])
+	require.Equal(t, "data:image/png;base64,AQID", parts[1]["image_url"])
+}
