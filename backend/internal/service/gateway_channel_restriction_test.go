@@ -304,7 +304,10 @@ func TestIsUpstreamModelRestrictedByChannel_AntigravityThinkingVariant(t *testin
 		RestrictModels: true, BillingModelSource: BillingModelSourceUpstream,
 		ModelPricing: []ChannelModelPricing{{Platform: "gemini", Models: []string{"gemini-3.6-flash"}}},
 	}
-	svc := &GatewayService{channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))}
+	svc := &GatewayService{
+		channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"})),
+		groupRepo:      &mockGroupRepoForGateway{groups: map[int64]*Group{10: {ID: 10, Platform: PlatformGemini}}},
+	}
 	account := &Account{Platform: PlatformAntigravity, Credentials: map[string]any{}}
 	account.SetUpstreamModelInventorySnapshot(UpstreamModelInventorySnapshot{Source: "account", Models: []string{"gemini-3.6-flash-low", "gemini-3.6-flash-high"}})
 
@@ -328,6 +331,24 @@ func TestIsUpstreamModelRestrictedByChannel_AntigravityThinkingVariant(t *testin
 	ch.ModelPricing[0].Models = []string{"gemini-3.6-flash"}
 	svc.channelService = newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))
 	require.True(t, svc.isUpstreamModelRestrictedByChannel(WithRequestedReasoningEffort(context.Background(), "low"), 10, account, "public-flash"))
+	require.True(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash-low"))
+	require.False(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash"))
+}
+
+func TestUpstreamFallbackRestrictionUsesEffectiveGroup(t *testing.T) {
+	fallbackID := int64(11)
+	ch := Channel{
+		ID: 1, Status: StatusActive, GroupIDs: []int64{fallbackID},
+		RestrictModels: true, BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{Platform: PlatformGemini, Models: []string{"gemini-3.6-flash"}}},
+	}
+	svc := &GatewayService{
+		channelService: newTestChannelService(makeStandardRepo(ch, map[int64]string{fallbackID: PlatformGemini})),
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			10: {ID: 10, Platform: PlatformGemini, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
+			11: {ID: 11, Platform: PlatformGemini},
+		}},
+	}
 	require.True(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash-low"))
 	require.False(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash"))
 }

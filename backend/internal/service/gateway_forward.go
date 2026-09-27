@@ -1060,5 +1060,9 @@ func (s *GatewayService) isStickyAccountUpstreamRestricted(ctx context.Context, 
 }
 
 func (s *GatewayService) IsUpstreamFallbackRestricted(ctx context.Context, groupID int64, model string) bool {
-	return s.needsUpstreamChannelRestrictionCheck(ctx, &groupID) && s.channelService.IsModelRestricted(ctx, groupID, model)
+	_, effectiveGroupID, err := s.checkClaudeCodeRestriction(ctx, &groupID)
+	if err != nil || effectiveGroupID == nil {
+		return true
+	}
+	return s.needsUpstreamChannelRestrictionCheck(ctx, effectiveGroupID) && s.channelService.IsModelRestricted(ctx, *effectiveGroupID, model)
 }
