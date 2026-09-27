@@ -1049,6 +1049,21 @@ func TestAntigravityGatewayService_ForwardGemini_FallbackReportsActualUpstreamMo
 	require.Len(t, upstream.requestBodies, 2)
 	require.Contains(t, string(upstream.requestBodies[0]), `"model":"`+mappedModel+`"`)
 	require.Contains(t, string(upstream.requestBodies[1]), `"model":"`+fallbackModel+`"`)
+
+	upstream.responses = []*http.Response{{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":404,"message":"model not found"}}`)),
+	}}
+	upstream.requestBodies = nil
+	c, _ = gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-primary:generateContent", bytes.NewReader(body))
+	_, _ = svc.ForwardGemini(context.Background(), c, account, originalModel, "generateContent", true, body, false,
+		WithForwardGeminiSession(10, ""), WithForwardGeminiFallbackAllowed(func(model string) bool { return model != fallbackModel }))
+	require.NotEmpty(t, upstream.requestBodies)
+	for _, requestBody := range upstream.requestBodies {
+		require.NotContains(t, string(requestBody), `"model":"`+fallbackModel+`"`, "an unpriced fallback must not be sent upstream")
+	}
 }
 
 func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignature(t *testing.T) {

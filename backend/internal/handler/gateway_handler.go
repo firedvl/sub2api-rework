@@ -187,6 +187,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		reqModel = parsedReq.Model
 		reqStream = parsedReq.Stream
 	}
+	c.Request = c.Request.WithContext(service.WithAntigravityClaudeThinking(c.Request.Context(), body))
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	// 解析渠道级模型映射
@@ -488,6 +489,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					body,
 					hasBoundSession,
 					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
+					service.WithForwardGeminiFallbackAllowed(func(model string) bool {
+						return !h.gatewayService.IsUpstreamFallbackRestricted(requestCtx, derefGroupID(apiKey.GroupID), model)
+					}),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)

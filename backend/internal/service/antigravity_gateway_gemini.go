@@ -30,8 +30,9 @@ import (
 type ForwardGeminiOption func(*forwardGeminiOptions)
 
 type forwardGeminiOptions struct {
-	groupID     int64
-	sessionHash string
+	groupID         int64
+	sessionHash     string
+	fallbackAllowed func(string) bool
 }
 
 func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOption {
@@ -39,6 +40,10 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 		opts.groupID = groupID
 		opts.sessionHash = sessionHash
 	}
+}
+
+func WithForwardGeminiFallbackAllowed(allowed func(string) bool) ForwardGeminiOption {
+	return func(opts *forwardGeminiOptions) { opts.fallbackAllowed = allowed }
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
@@ -86,7 +91,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		return nil, s.writeGoogleError(c, http.StatusNotFound, "Unsupported action: "+action)
 	}
 
-	mappedModel := s.getMappedModel(account, originalModel)
+	mappedModel := s.getMappedModelForThinkingLevel(account, originalModel, geminiThinkingLevelFromBody(body))
 	if mappedModel == "" {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		return nil, s.writeGoogleError(c, http.StatusForbidden, fmt.Sprintf("model %s not in whitelist", originalModel))
@@ -196,7 +201,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		if s.settingService != nil && s.settingService.IsModelFallbackEnabled(ctx) &&
 			isModelNotFoundError(resp.StatusCode, respBody) {
 			fallbackModel := s.settingService.GetFallbackModel(ctx, PlatformAntigravity)
-			if fallbackModel != "" && fallbackModel != mappedModel {
+			if fallbackModel != "" && fallbackModel != mappedModel &&
+				(forwardOpts.groupID == 0 || (forwardOpts.fallbackAllowed != nil && forwardOpts.fallbackAllowed(fallbackModel))) {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
 
 				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
