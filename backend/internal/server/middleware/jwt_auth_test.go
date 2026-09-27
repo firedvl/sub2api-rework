@@ -21,12 +21,16 @@ import (
 type stubJWTUserRepo struct {
 	service.UserRepository
 	users map[int64]*service.User
+	err   error
 }
 
 func (r *stubJWTUserRepo) GetByID(_ context.Context, id int64) (*service.User, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	u, ok := r.users[id]
 	if !ok {
-		return nil, errors.New("user not found")
+		return nil, service.ErrUserNotFound
 	}
 	return u, nil
 }
@@ -230,6 +234,65 @@ func TestJWTAuth_TamperedToken(t *testing.T) {
 	var body ErrorResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, "INVALID_TOKEN", body.Code)
+}
+
+func TestJWTAuth_UserLookupErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.JWT.Secret = "test-jwt-secret-32bytes-long!!!"
+	cfg.JWT.AccessTokenExpireMinutes = 60
+	authSvc := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	token, err := authSvc.GenerateToken(context.Background(), &service.User{ID: 1, Role: service.RoleAdmin})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"missing user", service.ErrUserNotFound, http.StatusUnauthorized, "USER_NOT_FOUND"},
+		{"database timeout", context.DeadlineExceeded, http.StatusInternalServerError, "INTERNAL_ERROR"},
+		{"database failure", errors.New("database unavailable"), http.StatusInternalServerError, "INTERNAL_ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			userSvc := service.NewUserService(&stubJWTUserRepo{err: tc.err}, nil, nil, nil)
+			for _, route := range []struct {
+				name      string
+				handler   gin.HandlerFunc
+				websocket bool
+			}{
+				{"user", gin.HandlerFunc(NewJWTAuthMiddleware(authSvc, userSvc, nil, nil)), false},
+				{"admin", gin.HandlerFunc(NewAdminAuthMiddleware(authSvc, userSvc, nil, nil)), false},
+				{"admin websocket", gin.HandlerFunc(NewAdminAuthMiddleware(authSvc, userSvc, nil, nil)), true},
+			} {
+				t.Run(route.name, func(t *testing.T) {
+					called := false
+					router := gin.New()
+					router.Use(route.handler)
+					router.GET("/protected", func(c *gin.Context) {
+						called = true
+						c.Status(http.StatusOK)
+					})
+					req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+					if route.websocket {
+						req.Header.Set("Upgrade", "websocket")
+						req.Header.Set("Connection", "Upgrade")
+						req.Header.Set("Sec-WebSocket-Protocol", "sub2api-admin, jwt."+token)
+					} else {
+						req.Header.Set("Authorization", "Bearer "+token)
+					}
+					w := httptest.NewRecorder()
+					router.ServeHTTP(w, req)
+					require.Equal(t, tc.status, w.Code)
+					var body ErrorResponse
+					require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+					require.Equal(t, tc.code, body.Code)
+					require.False(t, called)
+				})
+			}
+		})
+	}
 }
 
 func TestJWTAuth_UserNotFound(t *testing.T) {
