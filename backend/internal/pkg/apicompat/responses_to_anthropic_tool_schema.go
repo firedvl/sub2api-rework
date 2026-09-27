@@ -10,7 +10,7 @@ import (
 var anthropicInputSchemaUnionKeywords = []string{"oneOf", "anyOf", "allOf"}
 
 // flattenAnthropicRootUnions 用单一 object schema 替换顶层的 oneOf/anyOf/allOf：
-// 属性取各分支并集，同名属性用嵌套联合保留两侧约束；required 在 oneOf/anyOf
+// 属性取各分支并集，同名属性用对应的嵌套联合保留约束；required 在 oneOf/anyOf
 // 下取分支交集、在 allOf 下取分支并集。非对象分支无法用 Anthropic 的 object
 // schema 表达，视为不贡献属性与必填字段。
 func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
@@ -34,7 +34,18 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 		if !ok {
 			continue
 		}
-		mergeAnthropicObjectBranchProperties(properties, branches)
+		branchProperties := make(map[string]json.RawMessage)
+		mergeAnthropicObjectBranchProperties(branchProperties, branches, keyword)
+		for name, property := range branchProperties {
+			if existing, ok := properties[name]; ok && !anthropicSchemaJSONEqual(existing, property) {
+				merged, err := json.Marshal(map[string][]json.RawMessage{"allOf": {existing, property}})
+				if err == nil {
+					properties[name] = merged
+				}
+			} else {
+				properties[name] = property
+			}
+		}
 		if keyword == "allOf" {
 			for _, branch := range branches {
 				required = appendAnthropicRequired(required, anthropicBranchRequired(branch))
@@ -88,7 +99,7 @@ func decodeAnthropicUnionBranches(raw json.RawMessage) ([]map[string]json.RawMes
 	return branches, true
 }
 
-func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, branches []map[string]json.RawMessage) {
+func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, branches []map[string]json.RawMessage, keyword string) {
 	for _, branch := range branches {
 		if !anthropicSchemaBranchIsObject(branch) {
 			continue
@@ -110,7 +121,11 @@ func mergeAnthropicObjectBranchProperties(into map[string]json.RawMessage, branc
 			if anthropicSchemaJSONEqual(existing, property) {
 				continue
 			}
-			merged, err := json.Marshal(map[string][]json.RawMessage{"anyOf": {existing, property}})
+			propertyKeyword := "anyOf"
+			if keyword == "allOf" {
+				propertyKeyword = "allOf"
+			}
+			merged, err := json.Marshal(map[string][]json.RawMessage{propertyKeyword: {existing, property}})
 			if err != nil {
 				continue
 			}

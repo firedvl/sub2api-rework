@@ -210,6 +210,38 @@ func TestResponsesToAnthropic_AllOfRootKeepsUnionRequired(t *testing.T) {
 	assert.JSONEq(t, `["path","encoding"]`, string(schema["required"]))
 }
 
+func TestResponsesToAnthropic_AllOfRootIntersectsSharedProperty(t *testing.T) {
+	tools := convertResponsesToAnthropicTools([]ResponsesTool{{
+		Type: "function", Name: "strict_tool",
+		Parameters: json.RawMessage(`{"allOf":[
+			{"type":"object","properties":{"value":{"type":"string"}}},
+			{"type":"object","properties":{"value":{"minLength":3}}}
+		]}`),
+	}})
+
+	require.Len(t, tools, 1)
+	schema := requireObjectInputSchema(t, tools[0].InputSchema)
+	var properties map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(schema["properties"], &properties))
+	assert.JSONEq(t, `{"allOf":[{"type":"string"},{"minLength":3}]}`, string(properties["value"]))
+}
+
+func TestResponsesToAnthropic_RootPropertyConstrainsUnionBranches(t *testing.T) {
+	tools := convertResponsesToAnthropicTools([]ResponsesTool{{
+		Type: "function", Name: "constrained_tool",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}},"anyOf":[
+			{"type":"object","properties":{"value":{"minLength":3}}},
+			{"type":"object","properties":{"value":{"maxLength":8}}}
+		]}`),
+	}})
+
+	require.Len(t, tools, 1)
+	schema := requireObjectInputSchema(t, tools[0].InputSchema)
+	var properties map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(schema["properties"], &properties))
+	assert.JSONEq(t, `{"allOf":[{"type":"string"},{"anyOf":[{"minLength":3},{"maxLength":8}]}]}`, string(properties["value"]))
+}
+
 func TestResponsesToAnthropic_MultipleRootUnionsKeepIndependentRequired(t *testing.T) {
 	tools := convertResponsesToAnthropicTools([]ResponsesTool{{
 		Type: "function", Name: "combined",
