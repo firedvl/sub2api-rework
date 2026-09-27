@@ -1009,6 +1009,9 @@ func (s *GatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context,
 	if s.channelService == nil {
 		return false
 	}
+	if mapping := s.channelService.ResolveChannelMapping(ctx, groupID, requestedModel); mapping.Mapped {
+		requestedModel = mapping.MappedModel
+	}
 	upstreamModel := resolveAccountUpstreamModel(account, requestedModel)
 	if account != nil && account.Platform == PlatformAntigravity {
 		upstreamModel = (&AntigravityGatewayService{}).getMappedModelForThinkingLevel(account, requestedModel, antigravityThinkingLevelFromContext(ctx))
@@ -1054,4 +1057,8 @@ func (s *GatewayService) isStickyAccountUpstreamRestricted(ctx context.Context, 
 		return false
 	}
 	return s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
+}
+
+func (s *GatewayService) IsUpstreamFallbackRestricted(ctx context.Context, groupID int64, model string) bool {
+	return s.needsUpstreamChannelRestrictionCheck(ctx, &groupID) && s.channelService.IsModelRestricted(ctx, groupID, model)
 }

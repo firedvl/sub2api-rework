@@ -489,6 +489,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					body,
 					hasBoundSession,
 					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
+					service.WithForwardGeminiFallbackAllowed(func(model string) bool {
+						return !h.gatewayService.IsUpstreamFallbackRestricted(requestCtx, derefGroupID(apiKey.GroupID), model)
+					}),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)

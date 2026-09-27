@@ -595,6 +595,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				body,
 				hasBoundSession,
 				service.WithForwardGeminiSession(sessionGroupID, sessionKey),
+				service.WithForwardGeminiFallbackAllowed(func(model string) bool {
+					return !h.gatewayService.IsUpstreamFallbackRestricted(requestCtx, sessionGroupID, model)
+				}),
 			)
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)

@@ -321,4 +321,13 @@ func TestIsUpstreamModelRestrictedByChannel_AntigravityThinkingVariant(t *testin
 	ch.ModelPricing[0].Models = []string{"gemini-3.6-flash-low"}
 	svc.channelService = newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))
 	require.False(t, svc.isUpstreamModelRestrictedByChannel(WithRequestedReasoningEffort(context.Background(), "low"), 10, account, "gemini-3.6-flash"))
+
+	ch.ModelMapping = map[string]map[string]string{"gemini": {"public-flash": "gemini-3.6-flash"}}
+	svc.channelService = newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))
+	require.False(t, svc.isUpstreamModelRestrictedByChannel(WithRequestedReasoningEffort(context.Background(), "low"), 10, account, "public-flash"))
+	ch.ModelPricing[0].Models = []string{"gemini-3.6-flash"}
+	svc.channelService = newTestChannelService(makeStandardRepo(ch, map[int64]string{10: "gemini"}))
+	require.True(t, svc.isUpstreamModelRestrictedByChannel(WithRequestedReasoningEffort(context.Background(), "low"), 10, account, "public-flash"))
+	require.True(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash-low"))
+	require.False(t, svc.IsUpstreamFallbackRestricted(context.Background(), 10, "gemini-3.6-flash"))
 }
