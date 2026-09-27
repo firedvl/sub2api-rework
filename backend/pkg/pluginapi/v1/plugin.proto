@@ -27,10 +27,13 @@ service HostService {
   rpc KVSet(KVSetRequest) returns (KVSetResponse);
   rpc KVDelete(KVDeleteRequest) returns (KVDeleteResponse);
   rpc KVList(KVListRequest) returns (KVListResponse);
-  // Account directory: enumerate the accounts the plugin is bound to act on and
-  // resolve the outbound identity (credentials/headers/proxy) the host would
-  // attach to a live request. The host restricts both calls to accounts the
-  // requesting plugin's capability already covers.
+  // Account directory: enumerate the accounts the plugin is bound to act on
+  // (with allowlisted operational metadata) and resolve the outbound identity
+  // (credentials/headers/proxy) the host would attach to a live request. The
+  // host restricts both calls to the account scope the requesting plugin's
+  // declared capabilities cover; a plugin can never widen that scope. Metadata
+  // never carries raw credentials — those are only handed out by
+  // ResolveOutboundIdentity, the dedicated (equally sensitive) credential channel.
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
   rpc ResolveOutboundIdentity(ResolveOutboundIdentityRequest) returns (ResolveOutboundIdentityResponse);
 }
@@ -206,7 +209,42 @@ message ListAccountsRequest {
 }
 
 message ListAccountsResponse {
+  // account_ids is retained for plugins built against host_service_api_version 1.
+  // The host keeps filling it (the ids of the accounts in `accounts`) so those
+  // plugins keep working; new plugins should read `accounts` instead.
   repeated int64 account_ids = 1;
+  // accounts carries allowlisted operational metadata for every account in the
+  // plugin's scope — including active accounts that are currently NOT
+  // schedulable because they are paused (rate-limited / temp-unschedulable /
+  // overloaded or expired). This lets a plugin skip paused accounts. Accounts
+  // with a disabled or error lifecycle status are excluded. Available when
+  // host_service_api_version >= 2.
+  repeated AccountInfo accounts = 2;
+}
+
+// AccountInfo is the host's readable, non-secret view of one account. It never
+// contains credentials (token / refresh_token / cookies); use
+// ResolveOutboundIdentity for those.
+//
+// The typed fields are a stable decision core. metadata_json contains only
+// explicitly allowed operational fields; new account fields are not exposed
+// without a host review.
+message AccountInfo {
+  int64  id = 1;
+  string platform = 2;
+  string account_type = 3;
+  string name = 4;
+  // status is the coarse lifecycle state: active / disabled / error / expired.
+  string status = 5;
+  // schedulable is the host-authoritative decision (IsSchedulable) — false when
+  // the account is active but paused for ANY reason (rate limit,
+  // temp-unschedulable, overload, expiry auto-pause, quota). This is the primary
+  // signal a plugin should use to skip an account so it stops probing paused ones.
+  bool   schedulable = 6;
+  bool   is_shadow = 7;
+  // metadata_json contains allowed capacity and cooldown fields only. It never
+  // includes credentials, extra state, proxy details, errors, or group membership.
+  bytes  metadata_json = 20;
 }
 
 message ResolveOutboundIdentityRequest {
