@@ -1203,6 +1203,32 @@ func TestBuildCodexModelsManifestUsesGPT6AstraInstructions(t *testing.T) {
 	))
 }
 
+func TestConfiguredCodexManifestPromptIdentityMatchesModelFamily(t *testing.T) {
+	for _, model := range []string{"gemini-3-flash", "claude-sonnet-4-6", "gpt-oss-120b-medium", "company-coding-model"} {
+		body, err := BuildCodexModelsManifest([]string{model})
+		require.NoError(t, err)
+		var manifest struct {
+			Models []struct {
+				ModelMessages struct {
+					InstructionsTemplate string `json:"instructions_template"`
+				} `json:"model_messages"`
+			} `json:"models"`
+		}
+		require.NoError(t, json.Unmarshal(body, &manifest))
+		require.Len(t, manifest.Models, 1)
+		prompt := manifest.Models[0].ModelMessages.InstructionsTemplate
+		require.True(t, strings.HasPrefix(prompt, "You are Codex"), model)
+		require.NotContains(t, prompt, "based on GPT-", model)
+		require.NotContains(t, prompt, "You are GPT-", model)
+		_, originalRest, _ := strings.Cut(openai.CodexBaseInstructionsForModel(model), "\n")
+		_, rewrittenRest, _ := strings.Cut(prompt, "\n")
+		require.Equal(t, originalRest, rewrittenRest, model)
+	}
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra", "gpt-5.3-codex-spark"} {
+		require.Equal(t, openai.CodexBaseInstructionsForModel(model), codexInstructionsTemplateForModel(model), model)
+	}
+}
+
 func effortsFromConfiguredCodexLevels(levels []configuredCodexReasoningLevel) []string {
 	efforts := make([]string, 0, len(levels))
 	for _, level := range levels {

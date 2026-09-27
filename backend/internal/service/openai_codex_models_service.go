@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -884,7 +885,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		Priority:                          configuredCodexModelPriority,
 		AdditionalSpeedTiers:              []string{},
 		ServiceTiers:                      []configuredCodexServiceTier{},
-		ModelMessages:                     configuredCodexModelMessages{InstructionsTemplate: openai.CodexBaseInstructionsForModel(modelID)},
+		ModelMessages:                     configuredCodexModelMessages{InstructionsTemplate: codexInstructionsTemplateForModel(modelID)},
 		SupportsReasoningSummaryParameter: true,
 		DefaultReasoningSummary:           "auto",
 		WebSearchToolType:                 "text",
@@ -1058,6 +1059,22 @@ func isOpenAICodexGPTModel(modelID string) bool {
 		return false
 	}
 	return strings.HasPrefix(normalized, "gpt-")
+}
+
+var codexBasedOnGPT = regexp.MustCompile(`,?\s*based on GPT-\d+(?:\.\d+)?(?:-[A-Za-z0-9]+)*`)
+var codexStartsAsGPT = regexp.MustCompile(`^You are GPT-\d+(?:\.\d+)?(?:-[A-Za-z0-9]+)*`)
+
+func codexInstructionsTemplateForModel(modelID string) string {
+	base := openai.CodexBaseInstructionsForModel(modelID)
+	if isOpenAICodexGPTModel(modelID) && !strings.HasPrefix(canonicalizeOpenAIModelAliasSpelling(modelID), "gpt-oss") {
+		return base
+	}
+	opening, rest, separated := strings.Cut(base, "\n")
+	opening = codexStartsAsGPT.ReplaceAllString(codexBasedOnGPT.ReplaceAllString(opening, ""), "You are Codex")
+	if separated {
+		return opening + "\n" + rest
+	}
+	return opening
 }
 
 func isOpenAICodexReasoningGPTModel(modelID string) bool {
