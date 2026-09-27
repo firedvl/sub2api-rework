@@ -2618,10 +2618,12 @@ func (s *GatewayService) isModelSupportedByAccountWithContext(ctx context.Contex
 			return true
 		}
 		// 使用与转发阶段一致的映射逻辑：自定义映射优先 → 默认映射兜底
-		mapped := mapAntigravityModel(account, requestedModel)
-		if mapped == "" {
+		if !antigravityKnownRouteAvailable(account, requestedModel) {
 			return false
 		}
+		// Variant choice is request-time provider behavior; eligibility only
+		// checks that this account has a route, not a static preference.
+		mapped := mapAntigravityModel(account, requestedModel)
 		// 应用 thinking 后缀后检查最终模型是否在账号映射中
 		if enabled, ok := ThinkingEnabledFromContext(ctx); ok {
 			finalModel := applyThinkingModelSuffix(mapped, enabled)
@@ -2641,7 +2643,7 @@ func (s *GatewayService) isModelSupportedByAccount(account *Account, requestedMo
 		if strings.TrimSpace(requestedModel) == "" {
 			return true
 		}
-		return mapAntigravityModel(account, requestedModel) != ""
+		return antigravityKnownRouteAvailable(account, requestedModel)
 	}
 	if account.IsBedrock() {
 		_, ok := ResolveBedrockModelID(account, requestedModel)

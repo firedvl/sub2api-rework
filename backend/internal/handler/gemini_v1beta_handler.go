@@ -280,6 +280,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Request body is empty")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithAntigravityGeminiThinking(c.Request.Context(), body))
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
@@ -594,6 +595,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				body,
 				hasBoundSession,
 				service.WithForwardGeminiSession(sessionGroupID, sessionKey),
+				service.WithForwardGeminiFallbackAllowed(func(model string) bool {
+					return !h.gatewayService.IsUpstreamFallbackRestricted(requestCtx, sessionGroupID, model)
+				}),
 			)
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
