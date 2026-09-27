@@ -88,6 +88,15 @@ func TestNormalizeDeepSeekResponsesRequestBodyAliasesInputImageURL(t *testing.T)
 		require.Equal(t, deepSeekInputImageDataURI, gjson.GetBytes(got, "input.0.content.1.url").String())
 	})
 
+	t.Run("tool_output_image_is_lifted_and_aliased", func(t *testing.T) {
+		body := []byte(`{"model":"deepseek-flash","input":[{"type":"function_call","call_id":"call_image","name":"view_image","arguments":"{}"},{"type":"function_call_output","call_id":"call_image","output":[{"type":"input_image","image_url":"` + deepSeekInputImageDataURI + `"}]}]}`)
+		got := normalizeDeepSeekResponsesRequestBody(mapped, body)
+		require.Equal(t, gjson.String, gjson.GetBytes(got, "input.1.output").Type)
+		require.Equal(t, "input_image", gjson.GetBytes(got, "input.2.content.1.type").String())
+		require.Equal(t, deepSeekInputImageDataURI, gjson.GetBytes(got, "input.2.content.1.image_url").String())
+		require.Equal(t, deepSeekInputImageDataURI, gjson.GetBytes(got, "input.2.content.1.url").String())
+	})
+
 	t.Run("file_id_only_does_not_gain_empty_url", func(t *testing.T) {
 		body := deepSeekUserImageBody(`{"type":"input_image","file_id":"file-abc"}`)
 		got := normalizeDeepSeekResponsesRequestBody(native, body)
