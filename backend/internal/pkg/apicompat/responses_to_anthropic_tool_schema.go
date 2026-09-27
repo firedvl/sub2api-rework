@@ -25,11 +25,7 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 	}
 
 	properties := anthropicSchemaProperties(schema)
-	rootRequired := anthropicBranchRequired(schema)
-	var (
-		intersections [][]string
-		allOfRequired []string
-	)
+	required := anthropicBranchRequired(schema)
 	for _, keyword := range present {
 		raw := schema[keyword]
 		delete(schema, keyword)
@@ -41,11 +37,11 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 		mergeAnthropicObjectBranchProperties(properties, branches)
 		if keyword == "allOf" {
 			for _, branch := range branches {
-				allOfRequired = appendAnthropicRequired(allOfRequired, anthropicBranchRequired(branch))
+				required = appendAnthropicRequired(required, anthropicBranchRequired(branch))
 			}
 			continue
 		}
-		intersections = append(intersections, intersectAnthropicRequired(branches))
+		required = appendAnthropicRequired(required, intersectAnthropicRequired(branches))
 	}
 
 	if len(properties) > 0 {
@@ -53,9 +49,6 @@ func flattenAnthropicRootUnions(schema map[string]json.RawMessage) {
 			schema["properties"] = encoded
 		}
 	}
-	required := intersectAnthropicRequiredLists(intersections)
-	required = appendAnthropicRequired(required, allOfRequired)
-	required = appendAnthropicRequired(required, rootRequired)
 	if len(required) > 0 {
 		if encoded, err := json.Marshal(required); err == nil {
 			schema["required"] = encoded

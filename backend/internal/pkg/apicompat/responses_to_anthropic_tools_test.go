@@ -210,6 +210,20 @@ func TestResponsesToAnthropic_AllOfRootKeepsUnionRequired(t *testing.T) {
 	assert.JSONEq(t, `["path","encoding"]`, string(schema["required"]))
 }
 
+func TestResponsesToAnthropic_MultipleRootUnionsKeepIndependentRequired(t *testing.T) {
+	tools := convertResponsesToAnthropicTools([]ResponsesTool{{
+		Type: "function", Name: "combined",
+		Parameters: json.RawMessage(`{
+			"oneOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","required":["a"]}],
+			"anyOf":[{"type":"object","properties":{"b":{"type":"string"}},"required":["b"]},{"type":"object","required":["b"]}]
+		}`),
+	}})
+
+	require.Len(t, tools, 1)
+	schema := requireObjectInputSchema(t, tools[0].InputSchema)
+	assert.JSONEq(t, `["a","b"]`, string(schema["required"]))
+}
+
 // 非对象分支无法用 Anthropic 的 object schema 表达，直接丢弃分支但保留属性词汇。
 func TestResponsesToAnthropic_RootUnionDropsNonObjectBranches(t *testing.T) {
 	tools := convertResponsesToAnthropicTools([]ResponsesTool{{
