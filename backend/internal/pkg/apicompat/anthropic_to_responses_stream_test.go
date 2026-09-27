@@ -2,6 +2,42 @@ package apicompat
 
 import "testing"
 
+func TestAnthropicEventToResponses_ToolCallArgumentsDoneMatchesDeltas(t *testing.T) {
+	state := NewAnthropicEventToResponsesState()
+	state.Model = "claude-sonnet-4-5"
+	var events []ResponsesStreamEvent
+	feed := func(evt *AnthropicStreamEvent) {
+		events = append(events, AnthropicEventToResponsesEvents(evt, state)...)
+	}
+	idx := 0
+	feed(&AnthropicStreamEvent{Type: "message_start", Message: &AnthropicResponse{ID: "msg_1"}})
+	feed(&AnthropicStreamEvent{Type: "content_block_start", Index: &idx, ContentBlock: &AnthropicContentBlock{
+		Type: "tool_use", ID: "toolu_1", Name: "grep_search",
+	}})
+	feed(&AnthropicStreamEvent{Type: "content_block_delta", Index: &idx, Delta: &AnthropicDelta{
+		Type: "input_json_delta", PartialJSON: `{"path":`,
+	}})
+	feed(&AnthropicStreamEvent{Type: "content_block_delta", Index: &idx, Delta: &AnthropicDelta{
+		Type: "input_json_delta", PartialJSON: `".","pattern":"TODO"}`,
+	}})
+	feed(&AnthropicStreamEvent{Type: "content_block_stop", Index: &idx})
+	var streamed, done string
+	var sawDone bool
+	for _, e := range events {
+		switch e.Type {
+		case "response.function_call_arguments.delta":
+			streamed += e.Delta
+		case "response.function_call_arguments.done":
+			sawDone = true
+			done = e.Arguments
+		}
+	}
+	const want = `{"path":".","pattern":"TODO"}`
+	if !sawDone || streamed != want || done != streamed {
+		t.Fatalf("tool arguments: done=%q streamed=%q sawDone=%t", done, streamed, sawDone)
+	}
+}
+
 // TestAnthropicEventToResponses_TextEmitsContentPart pins that a message text
 // stream emits response.content_part.added, and that it precedes the first
 // output_text.delta for that part.
