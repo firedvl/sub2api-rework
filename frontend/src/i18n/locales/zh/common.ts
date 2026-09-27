@@ -439,6 +439,8 @@ export default {
     newPassword: '新密码',
     newPasswordPlaceholder: '输入新密码',
     confirmPassword: '确认密码',
+    showPasswordLabel: '显示密码',
+    hidePasswordLabel: '隐藏密码',
     confirmPasswordPlaceholder: '再次输入新密码',
     confirmPasswordRequired: '请确认您的密码',
     passwordsDoNotMatch: '两次输入的密码不一致',
