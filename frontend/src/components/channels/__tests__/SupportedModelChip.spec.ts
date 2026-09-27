@@ -12,6 +12,48 @@ vi.mock('vue-i18n', async () => {
 })
 
 describe('SupportedModelChip', () => {
+  it.each(['availableChannels.pricing', 'admin.availableChannels.pricing'])(
+    'shows video prices per second for %s',
+    async (pricingKeyPrefix) => {
+      const wrapper = mount(SupportedModelChip, {
+        attachTo: document.body,
+        props: {
+          pricingKeyPrefix,
+          model: {
+            name: 'video-test',
+            platform: '',
+            pricing: {
+              billing_mode: 'video',
+              input_price: null,
+              output_price: null,
+              cache_write_price: null,
+              cache_read_price: null,
+              image_input_price: null,
+              image_output_price: null,
+              per_request_price: 0.05,
+              intervals: [{
+                tier_label: '720p', min_tokens: 0, max_tokens: null,
+                input_price: null, output_price: null, cache_write_price: null,
+                cache_read_price: null, per_request_price: 0.12
+              }]
+            }
+          }
+        }
+      })
+      try {
+        await wrapper.find('[tabindex="0"]').trigger('mouseenter')
+        await nextTick()
+        const text = document.body.querySelector('[role="tooltip"]')?.textContent
+        expect(text).toContain(`${pricingKeyPrefix}.billingModeVideo`)
+        expect(text).toContain(`${pricingKeyPrefix}.videoPrice`)
+        expect(text).toContain(`$0.05 ${pricingKeyPrefix}.unitPerSecond`)
+        expect(text).toContain(`$0.12 ${pricingKeyPrefix}.unitPerSecond`)
+      } finally {
+        wrapper.unmount()
+      }
+    }
+  )
+
   it('仅配置区间倍率时按基础价展示 token 档位', async () => {
     const wrapper = mount(SupportedModelChip, {
       attachTo: document.body,
