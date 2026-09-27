@@ -440,6 +440,8 @@ export default {
     newPassword: 'New Password',
     newPasswordPlaceholder: 'Enter your new password',
     confirmPassword: 'Confirm Password',
+    showPasswordLabel: 'Show password',
+    hidePasswordLabel: 'Hide password',
     confirmPasswordPlaceholder: 'Confirm your new password',
     confirmPasswordRequired: 'Please confirm your password',
     passwordsDoNotMatch: 'Passwords do not match',
