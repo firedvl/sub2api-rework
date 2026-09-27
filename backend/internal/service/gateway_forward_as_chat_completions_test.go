@@ -183,6 +183,9 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 	resp := &http.Response{
 		Header: http.Header{"x-request-id": []string{"rid_cc_stream_compact"}},
 		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event:ping`,
+			`data:{"type":"ping"}`,
+			``,
 			`event:message_start`,
 			`data:{"type":"message_start","message":{"id":"msg_c2","type":"message","role":"assistant","content":[],"model":"k3","stop_reason":"","usage":{"input_tokens":21,"cache_read_input_tokens":6,"cache_creation_input_tokens":1}}}`,
 			``,
@@ -207,6 +210,7 @@ func TestHandleCCStreamingFromAnthropic_CompactSSEFormat(t *testing.T) {
 	require.Equal(t, 6, result.Usage.CacheReadInputTokens)
 	require.Equal(t, 1, result.Usage.CacheCreationInputTokens)
 	require.Contains(t, rec.Body.String(), `[DONE]`)
+	require.NotContains(t, rec.Body.String(), `ping`)
 }
 
 func TestHandleCCStreamingFromAnthropic_PreservesMessageStartCacheUsageAndReasoning(t *testing.T) {
