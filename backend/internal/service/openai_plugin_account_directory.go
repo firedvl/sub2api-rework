@@ -53,7 +53,7 @@ func (s *OpenAIGatewayService) ListPluginAccounts(ctx context.Context, scope Plu
 				continue
 			}
 			// Defense-in-depth: the contract exposes only active accounts (paused
-		// ones stay active; disabled/error statuses are out). ListByPlatform already
+			// ones stay active; disabled/error statuses are out). ListByPlatform already
 			// filters to active at the DB, but do not silently depend on that — a
 			// paused account keeps Status=="active" and still passes here.
 			if !account.IsActive() {
