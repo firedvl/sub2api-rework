@@ -11,6 +11,7 @@ import (
 
 func TestGeminiThinkingVariantUsesDiscoveredOrExplicitRoutes(t *testing.T) {
 	svc := &AntigravityGatewayService{}
+	require.Empty(t, svc.getMappedModel(nil, "gemini-3.6-flash"))
 	account := &Account{Platform: PlatformAntigravity, Credentials: map[string]any{}}
 	account.SetUpstreamModelInventorySnapshot(UpstreamModelInventorySnapshot{
 		Source: "account", Models: []string{"gemini-3.6-flash-high"},

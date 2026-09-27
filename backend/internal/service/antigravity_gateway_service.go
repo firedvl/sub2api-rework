@@ -308,6 +308,9 @@ func (s *AntigravityGatewayService) getMappedModelForThinkingLevel(account *Acco
 }
 
 func antigravityKnownRouteAvailable(account *Account, requestedModel string) bool {
+	if account == nil {
+		return false
+	}
 	mapped := mapAntigravityModel(account, requestedModel)
 	model := strings.TrimSpace(strings.TrimPrefix(requestedModel, "models/"))
 	if !strings.HasPrefix(model, "gemini-") || hasGeminiThinkingVariantSuffix(model) {
