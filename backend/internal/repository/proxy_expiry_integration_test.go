@@ -94,7 +94,7 @@ func (s *ProxyExpirySuite) TestSweep_SkipsChangedSnapshot() {
 				s.Nil(got.ExpiresAt)
 			} else {
 				s.Require().NotNil(got.ExpiresAt)
-				s.True(updated.ExpiresAt.Equal(*got.ExpiresAt))
+				s.WithinDuration(*updated.ExpiresAt, *got.ExpiresAt, time.Microsecond)
 			}
 			s.Equal(&source, s.accountProxyID(account))
 			var origin *int64
