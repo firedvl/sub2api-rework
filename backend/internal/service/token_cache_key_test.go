@@ -87,24 +87,24 @@ func TestAntigravityTokenCacheKey(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "with_project_id",
+			name: "first_account_with_shared_project",
 			account: &Account{
 				ID: 200,
 				Credentials: map[string]any{
-					"project_id": "ag-project-456",
+					"project_id": "shared-project",
 				},
 			},
-			expected: "ag:ag-project-456",
+			expected: "ag:account:200",
 		},
 		{
-			name: "project_id_with_whitespace",
+			name: "second_account_with_shared_project",
 			account: &Account{
 				ID: 201,
 				Credentials: map[string]any{
-					"project_id": "  ag-project-spaces  ",
+					"project_id": " shared-project ",
 				},
 			},
-			expected: "ag:ag-project-spaces",
+			expected: "ag:account:201",
 		},
 		{
 			name: "empty_project_id_fallback_to_account_id",
