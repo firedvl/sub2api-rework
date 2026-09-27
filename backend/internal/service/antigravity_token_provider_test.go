@@ -9,6 +9,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type accountScopedAntigravityCache struct {
+	geminiTokenCacheStub
+	tokens map[string]string
+}
+
+func (c *accountScopedAntigravityCache) GetAccessToken(_ context.Context, key string) (string, error) {
+	return c.tokens[key], nil
+}
+
+func TestAntigravityTokenProvider_IsolatesAccountsWithSharedProject(t *testing.T) {
+	cache := &accountScopedAntigravityCache{tokens: map[string]string{
+		"ag:shared-project": "legacy-token",
+		"ag:account:200":    "token-200",
+		"ag:account:201":    "token-201",
+	}}
+	provider := NewAntigravityTokenProvider(nil, cache, nil)
+	for _, tc := range []struct {
+		id    int64
+		token string
+	}{{200, "token-200"}, {201, "token-201"}} {
+		account := &Account{ID: tc.id, Platform: PlatformAntigravity, Type: AccountTypeOAuth,
+			Credentials: map[string]any{"project_id": "shared-project"}}
+		token, err := provider.GetAccessToken(context.Background(), account)
+		require.NoError(t, err)
+		require.Equal(t, tc.token, token)
+	}
+}
+
 func TestAntigravityTokenProvider_GetAccessToken_Upstream(t *testing.T) {
 	provider := &AntigravityTokenProvider{}
 
