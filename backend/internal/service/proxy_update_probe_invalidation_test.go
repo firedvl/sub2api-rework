@@ -69,3 +69,27 @@ func TestBothProxyUpdateServicesUseRepositoryUpdateBoundary(t *testing.T) {
 		require.Equal(t, "new.example", repo.proxy.Host)
 	})
 }
+
+func TestAdminProxyUpdateCanClearCredentials(t *testing.T) {
+	for _, clear := range []bool{false, true} {
+		repo := &updatingProxyRepoStub{
+			proxyRepoStub: &proxyRepoStub{},
+			proxy: &Proxy{ID: 9, Protocol: "http", Host: "proxy.example", Port: 8080,
+				Username: "old-user", Password: "old-pass", Status: StatusActive},
+		}
+		input := &UpdateProxyInput{FallbackMode: FallbackModeNone}
+		if clear {
+			empty := ""
+			input.Username, input.Password = &empty, &empty
+		}
+		_, err := (&adminServiceImpl{proxyRepo: repo}).UpdateProxy(context.Background(), 9, input)
+		require.NoError(t, err)
+		if clear {
+			require.Empty(t, repo.proxy.Username)
+			require.Empty(t, repo.proxy.Password)
+		} else {
+			require.Equal(t, "old-user", repo.proxy.Username)
+			require.Equal(t, "old-pass", repo.proxy.Password)
+		}
+	}
+}
