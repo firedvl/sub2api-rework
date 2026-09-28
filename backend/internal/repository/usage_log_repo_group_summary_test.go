@@ -18,8 +18,11 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryUsesRollupTail(t *testing.T) {
 	todayStart := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
 	yesterdayStart := time.Date(2026, 3, 8, 5, 0, 0, 0, time.UTC)
 
-	mock.ExpectQuery(`(?s)usage_group_rollup_state.*usage_group_daily_rollups.*created_at >= state\.tail_start`).
-		WithArgs(todayStart, yesterdayStart, "America/New_York", "2026-03-09", "2026-03-08").
+	mock.ExpectQuery(`SELECT COUNT\(\*\).*MAX\(closed_before\)`).
+		WillReturnRows(sqlmock.NewRows([]string{"count", "closed_before", "retained_from", "timezone_name"}).
+			AddRow(1, "2026-03-09", yesterdayStart, "America/New_York"))
+	mock.ExpectQuery(`(?s)usage_group_daily_rollups.*ul.created_at >= \$7`).
+		WithArgs(todayStart, yesterdayStart, "2026-03-08", true, "2026-03-08", "2026-03-09", todayStart).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}).
 			AddRow(int64(7), 12.5, 1.25, 2.5))
 
@@ -30,4 +33,32 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryUsesRollupTail(t *testing.T) {
 	require.InDelta(t, 1.25, result[0].TodayCost, 0.0000001)
 	require.InDelta(t, 2.5, result[0].YesterdayCost, 0.0000001)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGroupUsageRollupWatermarkFallsBackToEpochWhenInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		count  int
+		closed string
+		zone   string
+	}{
+		{"missing", 0, "", ""},
+		{"wrong zone", 1, "2026-03-08", "UTC"},
+		{"future", 1, "2026-03-10", "America/New_York"},
+		{"malformed", 1, "bad-date", "America/New_York"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := newUsageLogRepositoryWithSQL(nil, db)
+			mock.ExpectQuery(`SELECT COUNT\(\*\).*MAX\(closed_before\)`).
+				WillReturnRows(sqlmock.NewRows([]string{"count", "closed_before", "retained_from", "timezone_name"}).
+					AddRow(tc.count, tc.closed, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), tc.zone))
+			state, err := repo.readGroupUsageRollupSnapshot(context.Background(), "America/New_York", "2026-03-09")
+			require.NoError(t, err)
+			require.False(t, state.valid)
+			require.Equal(t, time.Unix(0, 0).UTC(), state.tailStart)
+			require.Equal(t, "1970-01-01", state.closedBefore)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
