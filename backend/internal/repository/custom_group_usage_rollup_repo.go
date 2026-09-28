@@ -10,59 +10,40 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-type groupUsageRollupSnapshot struct {
-	valid        bool
-	closedBefore string
-	retainedDate string
-	tailStart    time.Time
-}
-
-func (r *usageLogRepository) readGroupUsageRollupSnapshot(ctx context.Context, timezoneName, todayDate string) (groupUsageRollupSnapshot, error) {
-	invalid := groupUsageRollupSnapshot{closedBefore: "1970-01-01", retainedDate: "1970-01-01", tailStart: time.Unix(0, 0).UTC()}
-	var count int
-	var closedBefore, stateTimezone sql.NullString
-	var retainedFrom sql.NullTime
-	if err := scanSingleRow(ctx, r.sql, `
-		SELECT COUNT(*), MAX(closed_before)::text, MAX(retained_from), MAX(timezone_name)
-		FROM usage_group_rollup_state WHERE id = 1
-	`, nil, &count, &closedBefore, &retainedFrom, &stateTimezone); err != nil {
-		return groupUsageRollupSnapshot{}, fmt.Errorf("read group usage rollup watermark: %w", err)
-	}
-	if count != 1 || !closedBefore.Valid || !retainedFrom.Valid || !stateTimezone.Valid ||
-		stateTimezone.String != timezoneName || closedBefore.String > todayDate {
-		return invalid, nil
-	}
-	tailStart, err := service.ParseGroupUsageDate(closedBefore.String)
-	if err != nil {
-		return invalid, nil
-	}
-	return groupUsageRollupSnapshot{valid: true, closedBefore: closedBefore.String,
-		retainedDate: service.GroupUsageDate(retainedFrom.Time), tailStart: tailStart.UTC()}, nil
-}
-
 func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Context, todayStart time.Time) (results []usagestats.GroupUsageSummary, err error) {
 	todayStart = service.GroupUsageTodayStart(todayStart)
 	yesterdayStart := service.GroupUsageYesterdayStart(todayStart)
 	timezoneName := service.GroupUsageTimezoneName()
 	todayDate := service.GroupUsageDate(todayStart)
 	yesterdayDate := service.GroupUsageDate(yesterdayStart)
-	state, err := r.readGroupUsageRollupSnapshot(ctx, timezoneName, todayDate)
-	if err != nil {
-		return nil, err
-	}
-
 	const query = `
-		WITH historical AS (
+		WITH state_values AS (
+			SELECT COUNT(*) = 1 AND MAX(timezone_name) = $3
+				AND MAX(closed_before) <= $4::date AS valid,
+				MAX(closed_before) AS closed_before,
+				MAX(retained_from) AS retained_from
+			FROM usage_group_rollup_state WHERE id = 1
+		),
+		state AS MATERIALIZED (
+			SELECT CASE WHEN valid THEN closed_before ELSE DATE '1970-01-01' END AS closed_before,
+				CASE WHEN valid THEN retained_from ELSE TIMESTAMPTZ '1970-01-01 00:00:00+00' END AS retained_from,
+				CASE WHEN valid THEN closed_before::timestamp AT TIME ZONE $3::text
+					ELSE TIMESTAMPTZ '1970-01-01 00:00:00+00' END AS tail_start,
+				valid
+			FROM state_values
+		),
+		historical AS (
 			SELECT
 				rollup.group_id,
 				COALESCE(SUM(rollup.actual_cost), 0) AS actual_cost,
 				COALESCE(SUM(rollup.actual_cost) FILTER (
-					WHERE rollup.bucket_date = $3::date
+					WHERE rollup.bucket_date = $5::date
 				), 0) AS yesterday_cost
 			FROM usage_group_daily_rollups rollup
-			WHERE $4::boolean
-				AND rollup.bucket_date >= $5::date
-				AND rollup.bucket_date < $6::date
+			CROSS JOIN state
+			WHERE state.valid
+				AND rollup.bucket_date >= (state.retained_from AT TIME ZONE $3::text)::date
+				AND rollup.bucket_date < state.closed_before
 			GROUP BY rollup.group_id
 		),
 		tail AS (
@@ -75,7 +56,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 						AND ul.created_at < $1
 				), 0) AS yesterday_cost
 			FROM usage_logs ul
-			WHERE ul.created_at >= $7
+			WHERE ul.created_at >= (SELECT tail_start FROM state)
 			GROUP BY ul.group_id
 		)
 		SELECT
@@ -94,11 +75,9 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 		query,
 		todayStart,
 		yesterdayStart,
+		timezoneName,
+		todayDate,
 		yesterdayDate,
-		state.valid,
-		state.retainedDate,
-		state.closedBefore,
-		state.tailStart,
 	)
 	if err != nil {
 		return nil, err
