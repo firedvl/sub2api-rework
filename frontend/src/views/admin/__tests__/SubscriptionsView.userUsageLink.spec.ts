@@ -4,21 +4,25 @@ import { defineComponent } from 'vue'
 
 import SubscriptionsView from '../SubscriptionsView.vue'
 
-const { listSubscriptions, getAllGroups } = vi.hoisted(() => ({
+const { listSubscriptions, assignSubscription, getAllGroups, searchUsageUsers, showError } = vi.hoisted(() => ({
   listSubscriptions: vi.fn(),
-  getAllGroups: vi.fn()
+  assignSubscription: vi.fn(),
+  getAllGroups: vi.fn(),
+  searchUsageUsers: vi.fn(),
+  showError: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    subscriptions: { list: listSubscriptions },
-    groups: { getAll: getAllGroups }
+    subscriptions: { list: listSubscriptions, assign: assignSubscription },
+    groups: { getAll: getAllGroups },
+    usage: { searchUsers: searchUsageUsers }
   }
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError,
     showSuccess: vi.fn()
   })
 }))
@@ -77,17 +81,19 @@ describe('admin subscription user usage link', () => {
       pages: 1
     })
     getAllGroups.mockResolvedValue([])
+    assignSubscription.mockResolvedValue({})
+    searchUsageUsers.mockResolvedValue([{ id: 42, email: 'reader@example.com' }])
   })
 
   const mountView = () => mount(SubscriptionsView, {
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
-        TablePageLayout: { template: '<div><slot name="table" /></div>' },
+        TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
         DataTable: DataTableStub,
         RouterLink: RouterLinkStub,
         Pagination: true,
-        BaseDialog: true,
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
         ConfirmDialog: true,
         EmptyState: true,
         Select: true,
@@ -96,6 +102,32 @@ describe('admin subscription user usage link', () => {
         Icon: true,
         Teleport: true
       }
+    }
+  })
+
+  it.each(['another', ''])('invalidates selected assignment user before search debounce for %j', async (keyword) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'admin.subscriptions.assignSubscription')!.trigger('click')
+      const form = wrapper.get('#assign-subscription-form')
+      form.getComponent({ name: 'Select' }).vm.$emit('update:modelValue', 3)
+      const search = wrapper.get('[data-assign-user-search] input')
+      await search.trigger('focus')
+      await search.setValue('reader')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      await wrapper.get('[data-assign-user-search] button').trigger('click')
+
+      await search.setValue(keyword)
+      await form.trigger('submit')
+      await flushPromises()
+      expect(assignSubscription).not.toHaveBeenCalled()
+      expect(showError).toHaveBeenCalledWith('admin.subscriptions.pleaseSelectUser')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
     }
   })
 
