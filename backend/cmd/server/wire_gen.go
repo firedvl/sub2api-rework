@@ -454,7 +454,9 @@ func provideCleanup(
 
 		parallelSteps := []cleanupStep{
 			{"ChannelCacheSubscriber", func() error {
-				channelService.StopCacheSubscriber()
+				if channelService != nil {
+					channelService.StopCacheSubscriber()
+				}
 				return nil
 			}},
 			{"PluginManager", func() error {

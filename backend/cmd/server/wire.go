@@ -145,7 +145,9 @@ func provideCleanup(
 		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
 		parallelSteps := []cleanupStep{
 			{"ChannelCacheSubscriber", func() error {
-				channelService.StopCacheSubscriber()
+				if channelService != nil {
+					channelService.StopCacheSubscriber()
+				}
 				return nil
 			}},
 			{"PluginManager", func() error {
