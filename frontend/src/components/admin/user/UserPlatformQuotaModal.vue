@@ -224,7 +224,7 @@ async function onSave() {
   for (const row of quotas.value) {
     for (const win of ['daily', 'weekly', 'monthly'] as const) {
       const v = row[`${win}_limit_usd` as const]
-      if (typeof v === 'number' && Number.isNaN(v)) {
+      if (typeof v === 'number' && (!Number.isFinite(v) || v < 0)) {
         invalid.push(`${row.platform}.${win}`)
       }
     }
