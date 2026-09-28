@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 // 国产供应商（kimi/zhipu/deepseek）的响应式冷却辅助。
@@ -29,10 +31,40 @@ const cnBalanceLowReasonPrefix = "cn_balance_low"
 const kimiConcurrentRequestLimitMessage = "You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again."
 
 const cnConcurrencyLimitReasonPrefix = "cn_concurrency_limit"
+const cnQuotaExhaustedReasonPrefix = "cn_quota_exhausted"
 
 func isCNProviderConcurrencyLimit403(account *Account, upstreamMsg string) bool {
 	return account != nil && account.Platform == PlatformKimi &&
 		strings.TrimSpace(upstreamMsg) == kimiConcurrentRequestLimitMessage
+}
+
+func isCNProviderQuotaExhausted403(account *Account, body []byte, upstreamMsg string) bool {
+	if account == nil || !account.IsCNProvider() || !account.IsCodingPlan() {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(upstreamMsg))
+	return strings.Contains(msg, "usage limit") || strings.Contains(msg, "quota will reset") ||
+		strings.EqualFold(gjson.GetBytes(body, "error.type").String(), "access_terminated_error")
+}
+
+func (s *RateLimitService) handleCNProviderQuotaExhausted403(ctx context.Context, account *Account, upstreamMsg string) {
+	if until := cnProviderQuotaSnapshotReset(account, time.Now()); until != nil {
+		s.notifyAccountSchedulingBlocked(account, *until, cnQuotaExhaustedReasonPrefix)
+		if err := s.accountRepo.SetRateLimited(ctx, account.ID, *until); err == nil {
+			return
+		} else {
+			slog.Warn("cn_quota_exhausted_rate_limit_set_failed", "account_id", account.ID, "error", err)
+		}
+	}
+	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
+	reason := cnQuotaExhaustedReasonPrefix
+	if msg := strings.TrimSpace(upstreamMsg); msg != "" {
+		reason += ": " + msg
+	}
+	s.notifyAccountSchedulingBlocked(account, until, cnQuotaExhaustedReasonPrefix)
+	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+		slog.Warn("cn_quota_exhausted_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+	}
 }
 
 func (s *RateLimitService) handleCNProviderConcurrencyLimit403(
