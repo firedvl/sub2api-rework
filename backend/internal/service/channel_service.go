@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -150,12 +151,21 @@ const (
 	channelCacheDBTimeout = 10 * time.Second
 )
 
+type ChannelCachePubSub interface {
+	NotifyUpdate(context.Context) error
+	SubscribeUpdates(context.Context, func()) error
+}
+
 // ChannelService 渠道管理服务
 type ChannelService struct {
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	pricingService       *PricingService // 用于「可用渠道」展示时回落到全局定价；可为 nil（测试场景）
+	cachePubSub          ChannelCachePubSub
+	cacheCancel          context.CancelFunc
+	cacheDone            chan struct{}
+	cacheMu              sync.Mutex
 
 	cache   atomic.Value // *channelCache
 	cacheSF singleflight.Group
@@ -164,14 +174,46 @@ type ChannelService struct {
 // NewChannelService 创建渠道服务实例。
 // pricingService 仅供 ListAvailable 在渠道未配置定价时回落到全局 LiteLLM 数据；
 // 计费热路径走独立的 ModelPricingResolver，与此参数无关。可传 nil。
-func NewChannelService(repo ChannelRepository, groupRepo GroupRepository, authCacheInvalidator APIKeyAuthCacheInvalidator, pricingService *PricingService) *ChannelService {
+func NewChannelService(repo ChannelRepository, groupRepo GroupRepository, authCacheInvalidator APIKeyAuthCacheInvalidator, pricingService *PricingService, cachePubSub ChannelCachePubSub) *ChannelService {
 	s := &ChannelService{
 		repo:                 repo,
 		groupRepo:            groupRepo,
 		authCacheInvalidator: authCacheInvalidator,
 		pricingService:       pricingService,
+		cachePubSub:          cachePubSub,
+	}
+	if cachePubSub != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.cacheCancel, s.cacheDone = cancel, make(chan struct{})
+		go s.subscribeCacheUpdates(ctx)
 	}
 	return s
+}
+
+func (s *ChannelService) StopCacheSubscriber() {
+	if s.cacheCancel != nil {
+		s.cacheCancel()
+		<-s.cacheDone
+	}
+}
+
+func (s *ChannelService) subscribeCacheUpdates(ctx context.Context) {
+	defer close(s.cacheDone)
+	for ctx.Err() == nil {
+		err := s.cachePubSub.SubscribeUpdates(ctx, s.clearCache)
+		if ctx.Err() != nil {
+			return
+		}
+		s.clearCache()
+		slog.Warn("channel cache subscription stopped", "error", err)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 // loadCache 加载或返回缓存的渠道数据
@@ -277,6 +319,9 @@ func (s *ChannelService) storeErrorCache() {
 // buildCache 从数据库构建渠道缓存。
 // 使用独立 context 避免请求取消导致空值被长期缓存。
 func (s *ChannelService) buildCache(ctx context.Context) (*channelCache, error) {
+	// Invalidation must finish after any older database load stores its snapshot.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), channelCacheDBTimeout)
 	defer cancel()
 
@@ -384,13 +429,26 @@ func (s *ChannelService) InvalidateCache() {
 }
 
 func (s *ChannelService) invalidateCache() {
-	s.cache.Store((*channelCache)(nil))
-	s.cacheSF.Forget("channel_cache")
+	s.clearCache()
 
 	// 主动重建缓存，确保 CRUD 后立即生效
 	if _, err := s.buildCache(context.Background()); err != nil {
 		slog.Warn("failed to rebuild channel cache after invalidation", "error", err)
 	}
+	if s.cachePubSub != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.cachePubSub.NotifyUpdate(ctx); err != nil {
+			slog.Warn("failed to publish channel cache invalidation", "error", err)
+		}
+	}
+}
+
+func (s *ChannelService) clearCache() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.cache.Store((*channelCache)(nil))
+	s.cacheSF.Forget("channel_cache")
 }
 
 // matchWildcard 在通配符定价中查找匹配项（最先匹配到优先）
