@@ -126,6 +126,45 @@ func (s *ProxyExpirySuite) TestSweep_DirectMode() {
 	s.Require().Equal(pid, *origin)
 }
 
+func (s *ProxyExpirySuite) TestSweep_RepeatedExpiryRetainsOriginalProxy() {
+	for _, direct := range []bool{false, true} {
+		s.Run(map[bool]string{false: "next backup", true: "direct"}[direct], func() {
+			now := time.Now()
+			past, soon, later := now.Add(-time.Hour), now.Add(time.Hour), now.Add(48*time.Hour)
+			last := s.mkProxy("repeated-last", service.FallbackModeNone, &later, nil)
+			mode := service.FallbackModeProxy
+			backup := &last
+			if direct {
+				mode, backup = service.FallbackModeDirect, nil
+			}
+			middle := s.mkProxy("repeated-middle", mode, &soon, backup)
+			original := s.mkProxy("repeated-original", service.FallbackModeProxy, &past, &middle)
+			account := s.mkAccountWithProxy(original)
+			changed, err := s.repo.SweepExpiredProxies(s.ctx, now)
+			s.Require().NoError(err)
+			s.Require().EqualValues(1, changed)
+			s.Require().Equal(&middle, s.accountProxyID(account))
+			changed, err = s.repo.SweepExpiredProxies(s.ctx, now.Add(2*time.Hour))
+			s.Require().NoError(err)
+			s.Require().EqualValues(1, changed)
+			if direct {
+				s.Nil(s.accountProxyID(account))
+			} else {
+				s.Equal(&last, s.accountProxyID(account))
+			}
+			var origin *int64
+			s.Require().NoError(scanSingleRow(s.ctx, s.tx, `SELECT proxy_fallback_origin_id FROM accounts WHERE id=$1`, []any{account}, &origin))
+			s.Equal(&original, origin)
+			changed, err = s.repo.SweepExpiredProxies(s.ctx, now.Add(3*time.Hour))
+			s.Require().NoError(err)
+			s.Zero(changed)
+			accounts := newAccountRepositoryWithSQL(s.tx.Client(), s.tx, nil)
+			s.Require().NoError(accounts.RevertProxyFallback(s.ctx, account))
+			s.Equal(&original, s.accountProxyID(account))
+		})
+	}
+}
+
 func (s *ProxyExpirySuite) TestSweep_EnqueuesChangedAccountIDsWithoutFullRebuild() {
 	past := time.Now().Add(-time.Hour)
 	firstProxyID := s.mkProxy("p-bulk-first", service.FallbackModeDirect, &past, nil)
