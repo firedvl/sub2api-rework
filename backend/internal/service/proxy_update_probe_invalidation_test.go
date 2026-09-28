@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -57,11 +58,12 @@ func TestBothProxyUpdateServicesUseRepositoryUpdateBoundary(t *testing.T) {
 			},
 		}
 		svc := &adminServiceImpl{proxyRepo: repo}
+		warnDays := 7
 
 		_, err := svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{
 			Host:           "new.example",
 			FallbackMode:   FallbackModeNone,
-			ExpiryWarnDays: 7,
+			ExpiryWarnDays: &warnDays,
 		})
 
 		require.NoError(t, err)
@@ -92,4 +94,27 @@ func TestAdminProxyUpdateCanClearCredentials(t *testing.T) {
 			require.Equal(t, "old-pass", repo.proxy.Password)
 		}
 	}
+}
+
+func TestAdminProxyPartialUpdatePreservesOmittedSettings(t *testing.T) {
+	expires := time.Now().Add(time.Hour)
+	backup := int64(10)
+	repo := &updatingProxyRepoStub{proxyRepoStub: &proxyRepoStub{},
+		proxy: &Proxy{ID: 9, ExpiresAt: &expires, FallbackMode: FallbackModeProxy, BackupProxyID: &backup, ExpiryWarnDays: 7}}
+	svc := &adminServiceImpl{proxyRepo: repo}
+	got, err := svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{Status: "inactive"})
+	require.NoError(t, err)
+	require.Equal(t, &expires, got.ExpiresAt)
+	require.Equal(t, FallbackModeProxy, got.FallbackMode)
+	require.Equal(t, &backup, got.BackupProxyID)
+	require.Equal(t, 7, got.ExpiryWarnDays)
+	_, err = svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{ClearBackupID: true})
+	require.Error(t, err, "cannot clear the backup while proxy fallback remains selected")
+	zero := 0
+	got, err = svc.UpdateProxy(context.Background(), 9, &UpdateProxyInput{
+		ClearExpiresAt: true, FallbackMode: FallbackModeNone, ClearBackupID: true, ExpiryWarnDays: &zero})
+	require.NoError(t, err)
+	require.Nil(t, got.ExpiresAt)
+	require.Nil(t, got.BackupProxyID)
+	require.Equal(t, 0, got.ExpiryWarnDays)
 }

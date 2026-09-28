@@ -29,3 +29,21 @@ func TestUpdateProxyRequestCredentialPresence(t *testing.T) {
 }
 
 func ptrString(s string) *string { return &s }
+
+func TestUpdateProxyRequestSettingsPresence(t *testing.T) {
+	var omitted, cleared, set UpdateProxyRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"status":"inactive"}`), &omitted))
+	require.False(t, omitted.ExpiresAt.Set)
+	require.False(t, omitted.BackupProxyID.Set)
+	require.Nil(t, omitted.ExpiryWarnDays)
+	require.NoError(t, json.Unmarshal([]byte(`{"expires_at":null,"backup_proxy_id":null,"expiry_warn_days":0}`), &cleared))
+	require.True(t, cleared.ExpiresAt.Set)
+	require.Nil(t, cleared.ExpiresAt.Value)
+	require.True(t, cleared.BackupProxyID.Set)
+	require.Nil(t, cleared.BackupProxyID.Value)
+	require.NotNil(t, cleared.ExpiryWarnDays)
+	require.Zero(t, *cleared.ExpiryWarnDays)
+	require.NoError(t, json.Unmarshal([]byte(`{"expires_at":123,"backup_proxy_id":10}`), &set))
+	require.EqualValues(t, 123, *set.ExpiresAt.Value)
+	require.EqualValues(t, 10, *set.BackupProxyID.Value)
+}
