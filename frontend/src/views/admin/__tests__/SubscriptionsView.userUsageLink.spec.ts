@@ -4,11 +4,12 @@ import { defineComponent } from 'vue'
 
 import SubscriptionsView from '../SubscriptionsView.vue'
 
-const { listSubscriptions, assignSubscription, getAllGroups, searchUsageUsers, showError } = vi.hoisted(() => ({
+const { listSubscriptions, assignSubscription, getAllGroups, searchUsageUsers, listUsers, showError } = vi.hoisted(() => ({
   listSubscriptions: vi.fn(),
   assignSubscription: vi.fn(),
   getAllGroups: vi.fn(),
   searchUsageUsers: vi.fn(),
+  listUsers: vi.fn(),
   showError: vi.fn()
 }))
 
@@ -16,7 +17,8 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     subscriptions: { list: listSubscriptions, assign: assignSubscription },
     groups: { getAll: getAllGroups },
-    usage: { searchUsers: searchUsageUsers }
+    usage: { searchUsers: searchUsageUsers },
+    users: { list: listUsers }
   }
 }))
 
@@ -83,6 +85,7 @@ describe('admin subscription user usage link', () => {
     getAllGroups.mockResolvedValue([])
     assignSubscription.mockResolvedValue({})
     searchUsageUsers.mockResolvedValue([{ id: 42, email: 'reader@example.com' }])
+    listUsers.mockResolvedValue({ items: [{ id: 42, email: 'reader@example.com' }], total: 1 })
   })
 
   const mountView = () => mount(SubscriptionsView, {
@@ -125,6 +128,32 @@ describe('admin subscription user usage link', () => {
       await flushPromises()
       expect(assignSubscription).not.toHaveBeenCalled()
       expect(showError).toHaveBeenCalledWith('admin.subscriptions.pleaseSelectUser')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('searches active users for assignment and retains historical search for filtering', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'admin.subscriptions.assignSubscription')!.trigger('click')
+      const assignSearch = wrapper.get('[data-assign-user-search] input')
+      await assignSearch.setValue('  example.com  ')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(listUsers).toHaveBeenCalledWith(1, 30, {
+        search: 'example.com', sort_by: 'email', sort_order: 'asc'
+      })
+      expect(searchUsageUsers).not.toHaveBeenCalled()
+
+      const filterSearch = wrapper.get('[data-filter-user-search] input')
+      await filterSearch.setValue('deleted')
+      await vi.advanceTimersByTimeAsync(300)
+      await flushPromises()
+      expect(searchUsageUsers).toHaveBeenCalledWith('deleted')
     } finally {
       wrapper.unmount()
       vi.useRealTimers()
