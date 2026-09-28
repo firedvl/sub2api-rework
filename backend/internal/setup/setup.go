@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -17,7 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
@@ -185,26 +186,41 @@ func buildPostgresDSN(cfg *DatabaseConfig, dbName string) string {
 	)
 }
 
-func buildDatabaseConnectionDSNs(cfg *DatabaseConfig) (bootstrapDSN, targetDSN string) {
-	return buildPostgresDSN(cfg, "postgres"), buildPostgresDSN(cfg, cfg.DBName)
+func openAndPingPostgresDatabase(cfg *DatabaseConfig, dbName string) (*sql.DB, error) {
+	db, err := sql.Open("postgres", buildPostgresDSN(cfg, dbName))
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 // TestDatabaseConnection tests the database connection and creates database if not exists
 func TestDatabaseConnection(cfg *DatabaseConfig) error {
-	// First, connect to the default 'postgres' database to check/create target database.
-	// Connecting to cfg.DBName here fails when the target database has not been
-	// created yet, so the bootstrap connection must use PostgreSQL's maintenance DB.
-	defaultDSN, targetDSN := buildDatabaseConnectionDSNs(cfg)
+	return testDatabaseConnection(cfg, openAndPingPostgresDatabase)
+}
 
-	db, err := sql.Open("postgres", defaultDSN)
+func testDatabaseConnection(cfg *DatabaseConfig, openDatabase func(*DatabaseConfig, string) (*sql.DB, error)) error {
+	targetDB, err := openDatabase(cfg, cfg.DBName)
+	if err == nil {
+		return targetDB.Close()
+	}
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) || pqErr.Code != "3D000" {
+		return fmt.Errorf("ping target database failed: %w", err)
+	}
+	// Bootstrap is needed only when PostgreSQL reports the target is missing.
+	db, err := openDatabase(cfg, "postgres")
 	if err != nil {
-		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
+		return fmt.Errorf("target database '%s' does not exist; failed to connect to bootstrap database: %w", cfg.DBName, err)
 	}
 
 	defer func() {
-		if db == nil {
-			return
-		}
 		if err := db.Close(); err != nil {
 			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
 		}
@@ -212,10 +228,6 @@ func TestDatabaseConnection(cfg *DatabaseConfig) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping failed: %w", err)
-	}
 
 	// Check if target database exists
 	var exists bool
@@ -226,23 +238,15 @@ func TestDatabaseConnection(cfg *DatabaseConfig) error {
 
 	// Create database if not exists
 	if !exists {
-		// 注意：数据库名不能参数化，依赖前置输入校验保障安全。
-		// Note: Database names cannot be parameterized, but we've already validated cfg.DBName
-		// in the handler using validateDBName() which only allows [a-zA-Z][a-zA-Z0-9_]*
-		_, err := db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %s", cfg.DBName))
+		_, err := db.ExecContext(ctx, "CREATE DATABASE "+pq.QuoteIdentifier(cfg.DBName))
 		if err != nil {
 			return fmt.Errorf("failed to create database '%s': %w", cfg.DBName, err)
 		}
 		logger.LegacyPrintf("setup", "Database '%s' created successfully", cfg.DBName)
 	}
 
-	// Now connect to the target database to verify
-	if err := db.Close(); err != nil {
-		logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
-	}
-	db = nil
-
-	targetDB, err := sql.Open("postgres", targetDSN)
+	// Verify the newly created target through the same connection path.
+	targetDB, err = openDatabase(cfg, cfg.DBName)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database '%s': %w", cfg.DBName, err)
 	}
@@ -252,13 +256,6 @@ func TestDatabaseConnection(cfg *DatabaseConfig) error {
 			logger.LegacyPrintf("setup", "failed to close postgres connection: %v", err)
 		}
 	}()
-
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel2()
-
-	if err := targetDB.PingContext(ctx2); err != nil {
-		return fmt.Errorf("ping target database failed: %w", err)
-	}
 
 	return nil
 }
