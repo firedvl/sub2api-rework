@@ -63,6 +63,20 @@ func TestNormalizeCodexAutomationBootstrapHeartbeat(t *testing.T) {
 	require.Equal(t, got, again)
 }
 
+func TestFullCodexHeartbeatEnvelopeIsStrict(t *testing.T) {
+	const full = `<heartbeat><automation_id>wiki</automation_id><current_time_iso>2026-09-28T03:00:00Z</current_time_iso><instructions>Refresh the wiki.</instructions></heartbeat>`
+	require.True(t, validCodexAutomationHeartbeat(full))
+	for _, invalid := range []string{
+		strings.Replace(full, "2026-09-28T03:00:00Z", "bad-time", 1),
+		strings.Replace(full, "Refresh the wiki.", " ", 1),
+		strings.Replace(full, "<instructions>Refresh the wiki.</instructions>", "", 1),
+		strings.Replace(full, "</heartbeat>", "<automation_id>other</automation_id></heartbeat>", 1),
+		strings.Replace(full, "</heartbeat>", "<unknown>value</unknown></heartbeat>", 1),
+	} {
+		require.False(t, validCodexAutomationHeartbeat(invalid), invalid)
+	}
+}
+
 func TestNormalizeCodexAutomationBootstrapRejectsUnsafeShapes(t *testing.T) {
 	validOutput := codexAutomationBootstrap("wiki", "never", automationBootstrapPrompt)
 	tests := []struct {
