@@ -47,9 +47,27 @@ func TestClaudeCodeValidator_MessagesWithoutProbeStillNeedStrictValidation(t *te
 
 	ok := validator.Validate(req, map[string]any{
 		"model":      "claude-haiku-4-5",
-		"max_tokens": 1,
+		"max_tokens": 2,
 	})
 	require.False(t, ok)
+}
+
+func TestClaudeCodeValidator_OneTokenProbeForAnyModelRequiresUA(t *testing.T) {
+	validator := NewClaudeCodeValidator()
+	for _, model := range []string{"claude-sonnet-4-6", "claude-opus-4-8"} {
+		for _, userAgent := range []string{"claude-cli/2.1.156 (Claude Code)", "curl/8.0.0"} {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+			req.Header.Set("User-Agent", userAgent)
+			require.Equal(t, strings.HasPrefix(userAgent, "claude-cli/"), validator.Validate(req,
+				map[string]any{"model": model, "max_tokens": float64(1)}))
+		}
+	}
+	for _, value := range []any{1, int64(1), float64(1)} {
+		require.True(t, isMaxTokensOneBody(map[string]any{"max_tokens": value}))
+	}
+	for _, value := range []any{"1", 0, float64(1.5), nil} {
+		require.False(t, isMaxTokensOneBody(map[string]any{"max_tokens": value}))
+	}
 }
 
 func TestClaudeCodeValidator_CountTokensPathUAOnly(t *testing.T) {

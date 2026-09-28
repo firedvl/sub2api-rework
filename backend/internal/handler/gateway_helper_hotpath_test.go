@@ -35,6 +35,12 @@ type helperConcurrencyCacheStub struct {
 	apiKeyTrackIDs      []int64
 }
 
+func TestClaudeCodeParsedProbeCarriesMaxTokens(t *testing.T) {
+	body := claudeCodeBodyMapFromParsedRequest(&service.ParsedRequest{Model: "claude-opus-4-8", MaxTokens: 1})
+	require.Equal(t, 1, body["max_tokens"])
+	require.NotContains(t, claudeCodeBodyMapFromParsedRequest(&service.ParsedRequest{Model: "claude-opus-4-8"}), "max_tokens")
+}
+
 func (s *helperConcurrencyCacheStub) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
