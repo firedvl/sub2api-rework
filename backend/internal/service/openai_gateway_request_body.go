@@ -1190,6 +1190,17 @@ func normalizeOpenAIOAuthResponsesCompatibilityFields(reqBody map[string]any) bo
 		delete(reqBody, "commands")
 		changed = true
 	}
+	input, _ := reqBody["input"].([]any)
+	for _, value := range input {
+		item, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, exists := item["internal_chat_message_metadata_passthrough"]; exists {
+			delete(item, "internal_chat_message_metadata_passthrough")
+			changed = true
+		}
+	}
 	return changed
 }
 
@@ -1223,6 +1234,20 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 		}
 		normalized = next
 		changed = true
+	}
+	input := gjson.GetBytes(normalized, "input")
+	if input.IsArray() {
+		for i, item := range input.Array() {
+			if !item.IsObject() || !item.Get("internal_chat_message_metadata_passthrough").Exists() {
+				continue
+			}
+			next, err := sjson.DeleteBytes(normalized, fmt.Sprintf("input.%d.internal_chat_message_metadata_passthrough", i))
+			if err != nil {
+				return body, false, fmt.Errorf("normalize oauth input metadata: %w", err)
+			}
+			normalized = next
+			changed = true
+		}
 	}
 	return normalized, changed, nil
 }
