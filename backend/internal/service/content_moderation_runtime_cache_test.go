@@ -277,9 +277,13 @@ func TestContentModerationRuntimeSnapshotRefreshFailureKeepsStaleConfig(t *testi
 	require.NoError(t, err)
 	require.True(t, decision.Blocked)
 	require.Eventually(t, func() bool {
+		_, _ = svc.Check(context.Background(), input)
 		_, calls := repo.calls()
 		return calls >= 2
 	}, time.Second, time.Millisecond)
+	decision, err = svc.Check(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, decision.Blocked)
 }
 
 func TestContentModerationRuntimeSnapshotRefreshFailureBacksOff(t *testing.T) {
