@@ -192,6 +192,7 @@ describe('UserPlatformQuotaModal', () => {
 
   it('重置按钮 confirm 取消则不调用 API', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    apiMocks.getPlatformQuotas.mockResolvedValueOnce({ platform_quotas: [{ platform: 'anthropic', daily_usage_usd: 5 }] })
     const w = await mountAndOpen()
     const resetBtns = w.findAll('button').filter((b) => b.text() === '↻')
     expect(resetBtns.length).toBeGreaterThan(0)
@@ -203,12 +204,22 @@ describe('UserPlatformQuotaModal', () => {
 
   it('重置按钮 confirm 确认则调用 API', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    apiMocks.getPlatformQuotas.mockResolvedValueOnce({ platform_quotas: [{ platform: 'anthropic', daily_usage_usd: 5 }] })
     const w = await mountAndOpen()
     const resetBtns = w.findAll('button').filter((b) => b.text() === '↻')
     await resetBtns[0].trigger('click') // 第一个是 anthropic.daily
     await flushPromises()
     expect(apiMocks.resetPlatformQuotaWindow).toHaveBeenCalledWith(99, 'anthropic', 'daily')
     confirmSpy.mockRestore()
+  })
+
+  it('disables reset for unsaved rows while retained unlimited usage rows remain resettable', async () => {
+    apiMocks.getPlatformQuotas.mockResolvedValueOnce({ platform_quotas: [{ platform: 'anthropic', daily_usage_usd: 5 }] })
+    const w = await mountAndOpen()
+    const resetBtns = w.findAll('button').filter(b => b.text() === '↻')
+    expect(resetBtns.slice(0, 3).every(button => button.attributes('disabled') === undefined)).toBe(true)
+    expect(resetBtns.slice(3).every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    w.unmount()
   })
 
   describe('subscription warning banner', () => {
