@@ -633,7 +633,9 @@ func (c *openAIWSConn) readMessage(readCtx context.Context) ([]byte, error) {
 		c.touch()
 		return payload, nil
 	case <-readCtx.Done():
-		c.abort()
+		if errors.Is(readCtx.Err(), context.DeadlineExceeded) {
+			c.abort()
+		}
 		return nil, readCtx.Err()
 	}
 }

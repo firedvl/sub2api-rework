@@ -208,6 +208,22 @@ func TestOpenAIWSConnReaderLoop_ReadTimeoutClosesConn(t *testing.T) {
 	require.True(t, fake.isClosed())
 }
 
+func TestOpenAIWSConnReaderLoop_CanceledConsumerCanDrainTerminalEvent(t *testing.T) {
+	fake := newOpenAIWSReaderLoopFakeConn()
+	conn := newOpenAIWSConn("rl_cancel_drain", 1, fake, nil)
+	t.Cleanup(conn.close)
+	require.True(t, conn.tryAcquire())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := conn.readMessageWithContextTimeout(ctx, time.Second)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, fake.isClosed())
+	fake.messages <- []byte(`{"type":"response.completed"}`)
+	payload, err := conn.readMessageWithContextTimeout(context.WithoutCancel(ctx), time.Second)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type":"response.completed"}`, string(payload))
+}
+
 func TestOpenAIWSConnReaderLoop_UpstreamCloseWhileIdleClosesConn(t *testing.T) {
 	fake := newOpenAIWSReaderLoopFakeConn()
 	conn := newOpenAIWSConn("rl_idle_close", 1, fake, nil)
