@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -186,10 +187,14 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 	if err != nil {
 		return nil, err
 	}
+	projectedBody, err := projectAccountModelsBody(response.Body, account, nil, false)
+	if err != nil {
+		return nil, fmt.Errorf("project OpenAI account models: %w", err)
+	}
 	var payload struct {
 		Data []openai.Model `json:"data"`
 	}
-	if err := json.Unmarshal(response.Body, &payload); err != nil {
+	if err := json.Unmarshal(projectedBody, &payload); err != nil {
 		return nil, fmt.Errorf("decode OpenAI account models: %w", err)
 	}
 	// Standard model catalogs do not require the fields used by the admin picker.
@@ -201,6 +206,30 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 		}
 		if strings.TrimSpace(model.Type) == "" {
 			model.Type = "model"
+		}
+	}
+	if account.IsOpenAIOAuthLike() {
+		seen := make(map[string]bool, len(payload.Data))
+		for _, model := range payload.Data {
+			seen[model.ID] = true
+		}
+		aliases := make([]string, 0, len(account.GetModelMapping()))
+		for publicID := range account.GetModelMapping() {
+			aliases = append(aliases, publicID)
+		}
+		sort.Strings(aliases)
+		for _, publicID := range aliases {
+			if strings.Contains(publicID, "*") || seen[publicID] {
+				continue
+			}
+			target := publicID
+			if !account.IsOpenAIPassthroughEnabled() {
+				target = account.GetMappedModel(publicID)
+			}
+			if !IsGPTImageGenerationModel(target) {
+				continue
+			}
+			payload.Data = append(payload.Data, openai.Model{ID: publicID, Object: "model", Type: "model", OwnedBy: "openai", DisplayName: openaiCodexDisplayName(publicID)})
 		}
 	}
 	return payload.Data, nil
@@ -742,7 +771,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// account model mapping. Native remote compaction v2 rides the ordinary
 	// /responses wire and does NOT apply the legacy compact-only mapping
 	// (post-#5641 semantics: compact_model_mapping is /responses/compact-only).
-	testModelID = account.GetMappedModel(testModelID)
+	if !account.IsOpenAIPassthroughEnabled() {
+		testModelID = account.GetMappedModel(testModelID)
+	}
 	if mode == AccountTestModeCompact {
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
