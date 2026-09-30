@@ -51,6 +51,8 @@ export default {
         retentionDaysHint: '按运维设置中启用的数据清理计划执行。',
         caller: '调用方',
         sampling: '采样',
+        persistAccessLogs: '将访问日志写入数据库',
+        persistAccessLogsHint: '默认关闭，因为每次请求的访问日志都会增加一行带索引的数据库记录。警告、错误和审计日志始终保留。',
         saveAndApply: '保存并应用',
         resetDefaults: '重置默认值',
         latestWriteError: '最近写入错误：',
