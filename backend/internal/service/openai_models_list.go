@@ -122,7 +122,14 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 		}
 		seen[id] = struct{}{}
 		if fromManifest {
+			var displayName string
+			if err := json.Unmarshal(entry["display_name"], &displayName); err == nil {
+				displayName = strings.TrimSpace(displayName)
+			}
 			entry = make(map[string]json.RawMessage)
+			if displayName != "" {
+				entry["display_name"], _ = json.Marshal(displayName)
+			}
 		}
 		entry["id"], _ = json.Marshal(id)
 		entry["object"] = json.RawMessage(`"model"`)
