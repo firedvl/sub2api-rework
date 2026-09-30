@@ -983,8 +983,81 @@ func sanitizeAnthropicBodyForBetaTokens(body []byte, anthropicBetaHeader string)
 	); deleted {
 		body, changed = b, true
 	}
+	if sanitized, deleted := stripAnthropicMessageOutputConfigUnlessBeta(body, anthropicBetaHeader); deleted {
+		body, changed = sanitized, true
+	}
 
 	return body, changed
+}
+
+func stripAnthropicMessageOutputConfigUnlessBeta(body []byte, betaHeader string) ([]byte, bool) {
+	if anthropicBetaTokensContains(betaHeader, claude.BetaMidConversationOutputConfig) {
+		return body, false
+	}
+	messageArray := gjson.GetBytes(body, "messages")
+	if !messageArray.IsArray() {
+		return body, false
+	}
+	hasOutputConfig := false
+	messageArray.ForEach(func(_, message gjson.Result) bool {
+		hasOutputConfig = message.Get("output_config").Exists()
+		return !hasOutputConfig
+	})
+	if !hasOutputConfig {
+		return body, false
+	}
+	var messages []json.RawMessage
+	if err := json.Unmarshal([]byte(messageArray.Raw), &messages); err != nil {
+		return body, false
+	}
+	changed := false
+	retained := make([]json.RawMessage, 0, len(messages))
+	for _, message := range messages {
+		if !gjson.GetBytes(message, "output_config").Exists() {
+			retained = append(retained, message)
+			continue
+		}
+		changed = true
+		if gjson.GetBytes(message, "role").String() == "system" &&
+			!anthropicMessageContentHasBody(gjson.GetBytes(message, "content")) {
+			continue
+		}
+		stripped, err := sjson.DeleteBytes(message, "output_config")
+		if err != nil {
+			return body, false
+		}
+		retained = append(retained, stripped)
+	}
+	if !changed {
+		return body, false
+	}
+	serialized, err := json.Marshal(retained)
+	if err != nil {
+		return body, false
+	}
+	updated, err := sjson.SetRawBytes(body, "messages", serialized)
+	if err != nil {
+		return body, false
+	}
+	return updated, true
+}
+
+func anthropicMessageContentHasBody(content gjson.Result) bool {
+	if !content.Exists() || content.Type == gjson.Null {
+		return false
+	}
+	if content.Type == gjson.String {
+		return content.String() != ""
+	}
+	if content.IsArray() {
+		var blocks []any
+		if err := json.Unmarshal([]byte(content.Raw), &blocks); err != nil {
+			return true
+		}
+		cleaned, _ := stripEmptyTextBlocksFromSlice(blocks)
+		return len(cleaned) > 0
+	}
+	return true
 }
 
 // stripAnthropicBodyFieldUnlessBeta 当 field 存在且 anthropic-beta header 不含
