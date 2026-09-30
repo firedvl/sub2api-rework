@@ -26,7 +26,7 @@ const (
 	// AntigravityCredentialRejectedClientMessage 是可安全返回给客户端的认证修复提示。
 	AntigravityCredentialRejectedClientMessage = "Antigravity rejected the OAuth credential after refresh; reauthorize the account and verify project_id"
 	// AntigravityMixedToolsUnsupportedClientMessage explains the observed v1internal capability limit.
-	AntigravityMixedToolsUnsupportedClientMessage = "Antigravity v1internal does not support combining server-side web search with custom function tools"
+	AntigravityMixedToolsUnsupportedClientMessage = "Antigravity v1internal does not support combining built-in web search or code execution with custom function tools"
 	// AntigravityCredentialRejectedReason 标识上游拒绝已刷新 OAuth 凭据。
 	AntigravityCredentialRejectedReason GatewayFailureReason = "antigravity_oauth_credential_rejected"
 )
