@@ -657,9 +657,9 @@ func agentMessageText(raw json.RawMessage) string {
 	for _, part := range parts {
 		switch rawString(part["type"]) {
 		case "input_text", "text":
-			builder.WriteString(rawString(part["text"]))
+			_, _ = builder.WriteString(rawString(part["text"]))
 		case "encrypted_content":
-			builder.WriteString(rawString(part["encrypted_content"]))
+			_, _ = builder.WriteString(rawString(part["encrypted_content"]))
 		}
 	}
 	return builder.String()
