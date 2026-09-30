@@ -13,6 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestContentModerationEngineDefaultsUseSharedThresholds(t *testing.T) {
+	for _, engine := range []string{"openai", "typesafe"} {
+		defaults := moderationEngineDefaults(engine)
+		require.Equal(t, ContentModerationDefaultThresholds(), defaults.Thresholds)
+		defaults.Thresholds["sexual"] = 0.91
+		require.Equal(t, 0.65, moderationEngineDefaults(engine).Thresholds["sexual"])
+	}
+}
+
 func TestContentModerationEngineProfilesPreserveLegacy(t *testing.T) {
 	repo := &contentModerationTestSettingRepo{values: map[string]string{SettingKeyContentModerationConfig: `{"enabled":true,"mode":"pre_block","api_key":"old-openai-key","base_url":"https://openai.example","model":"omni","thresholds":{"sexual":0.65},"auto_ban_enabled":true}`}}
 	s := &ContentModerationService{settingRepo: repo}
@@ -20,7 +29,7 @@ func TestContentModerationEngineProfilesPreserveLegacy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "openai", view.Engine)
 	require.Equal(t, 1, view.APIKeyCount)
-	require.Equal(t, 0.8, view.EngineConfigs["typesafe"].Thresholds["sexual"])
+	require.Equal(t, 0.65, view.EngineConfigs["typesafe"].Thresholds["sexual"])
 	engine := "typesafe"
 	base := "https://typesafe.example"
 	model := "jev-test"
