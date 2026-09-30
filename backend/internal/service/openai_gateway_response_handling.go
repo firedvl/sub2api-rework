@@ -1250,6 +1250,9 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if src.ImageInputTokens > 0 {
 		dst.ImageInputTokens = src.ImageInputTokens
 	}
+	if src.ImageCacheReadTokens > 0 {
+		dst.ImageCacheReadTokens = src.ImageCacheReadTokens
+	}
 	if src.OutputTokens > 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
@@ -1534,9 +1537,23 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("input_tokens_details.image_tokens"),
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
+	cachedDetails := value.Get("input_tokens_details.cached_tokens_details")
+	if !cachedDetails.IsObject() {
+		cachedDetails = value.Get("prompt_tokens_details.cached_tokens_details")
+	}
+	imageCachedTokens, _ := boundedJSONNonNegativeInt(cachedDetails.Get("image_tokens"))
+	if cacheReadTokens == 0 && cachedDetails.IsObject() &&
+		!value.Get("input_tokens_details.cached_tokens").Exists() && !value.Get("prompt_tokens_details.cached_tokens").Exists() &&
+		!value.Get("cache_read_input_tokens").Exists() && !value.Get("cache_read_tokens").Exists() && !value.Get("cached_tokens").Exists() {
+		textCachedTokens, _ := boundedJSONNonNegativeInt(cachedDetails.Get("text_tokens"))
+		cacheReadTokens = min(imageCachedTokens, max(int(inputTokens), 0))
+		cacheReadTokens += min(textCachedTokens, max(int(inputTokens)-cacheReadTokens, 0))
+	}
+	imageCachedTokens = min(imageCachedTokens, max(imageInputTokens, 0), max(cacheReadTokens, 0), max(int(inputTokens), 0))
 	return OpenAIUsage{
 		InputTokens:              int(inputTokens),
 		ImageInputTokens:         imageInputTokens,
+		ImageCacheReadTokens:     imageCachedTokens,
 		OutputTokens:             int(outputTokens),
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,

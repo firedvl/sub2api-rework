@@ -27,6 +27,12 @@ import (
 )
 
 var (
+	openAIImage25FallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken: 5e-6, CacheReadInputTokenCost: 1.25e-6,
+		InputCostPerImageToken: 8e-6, CacheReadInputImageTokenCost: 2e-6,
+		OutputCostPerImageToken: 30e-6,
+		LiteLLMProvider:         "openai", Mode: "image_generation", SupportsPromptCaching: true,
+	}
 	openAIModelDatePattern = regexp.MustCompile(`-\d{8}$`)
 	openAIModelBasePattern = regexp.MustCompile(`^(gpt-\d+(?:\.\d+)?)(?:-|$)`)
 	// aboveTierPricePattern 匹配 LiteLLM 长上下文绝对价字段名
@@ -152,25 +158,27 @@ var (
 // LiteLLMModelPricing LiteLLM价格数据结构
 // 只保留我们需要的字段，使用指针来处理可能缺失的值
 type LiteLLMModelPricing struct {
-	InputCostPerToken                   float64 `json:"input_cost_per_token"`
-	InputCostPerTokenPriority           float64 `json:"input_cost_per_token_priority"`
-	OutputCostPerToken                  float64 `json:"output_cost_per_token"`
-	OutputCostPerTokenPriority          float64 `json:"output_cost_per_token_priority"`
-	CacheCreationInputTokenCost         float64 `json:"cache_creation_input_token_cost"`
-	CacheCreationInputTokenCostPriority float64 `json:"cache_creation_input_token_cost_priority"`
-	CacheCreationInputTokenCostAbove1hr float64 `json:"cache_creation_input_token_cost_above_1hr"`
-	CacheReadInputTokenCost             float64 `json:"cache_read_input_token_cost"`
-	CacheReadInputTokenCostPriority     float64 `json:"cache_read_input_token_cost_priority"`
-	LongContextInputTokenThreshold      int     `json:"long_context_input_token_threshold,omitempty"`
-	LongContextInputCostMultiplier      float64 `json:"long_context_input_cost_multiplier,omitempty"`
-	LongContextOutputCostMultiplier     float64 `json:"long_context_output_cost_multiplier,omitempty"`
-	SupportsServiceTier                 bool    `json:"supports_service_tier"`
-	LiteLLMProvider                     string  `json:"litellm_provider"`
-	Mode                                string  `json:"mode"`
-	SupportsPromptCaching               bool    `json:"supports_prompt_caching"`
-	OutputCostPerImage                  float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
-	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
-	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
+	InputCostPerToken                    float64 `json:"input_cost_per_token"`
+	InputCostPerTokenPriority            float64 `json:"input_cost_per_token_priority"`
+	OutputCostPerToken                   float64 `json:"output_cost_per_token"`
+	OutputCostPerTokenPriority           float64 `json:"output_cost_per_token_priority"`
+	CacheCreationInputTokenCost          float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority  float64 `json:"cache_creation_input_token_cost_priority"`
+	CacheCreationInputTokenCostAbove1hr  float64 `json:"cache_creation_input_token_cost_above_1hr"`
+	CacheReadInputTokenCost              float64 `json:"cache_read_input_token_cost"`
+	CacheReadInputTokenCostPriority      float64 `json:"cache_read_input_token_cost_priority"`
+	LongContextInputTokenThreshold       int     `json:"long_context_input_token_threshold,omitempty"`
+	LongContextInputCostMultiplier       float64 `json:"long_context_input_cost_multiplier,omitempty"`
+	LongContextOutputCostMultiplier      float64 `json:"long_context_output_cost_multiplier,omitempty"`
+	SupportsServiceTier                  bool    `json:"supports_service_tier"`
+	LiteLLMProvider                      string  `json:"litellm_provider"`
+	Mode                                 string  `json:"mode"`
+	SupportsPromptCaching                bool    `json:"supports_prompt_caching"`
+	OutputCostPerImage                   float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
+	OutputCostPerImageToken              float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
+	InputCostPerImageToken               float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
+	CacheReadInputImageTokenCost         float64 `json:"cache_read_input_image_token_cost"`
+	CacheReadInputImageTokenCostExplicit bool    `json:"-"`
 
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
@@ -205,6 +213,7 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImage                  *float64 `json:"output_cost_per_image"`
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
+	CacheReadInputImageTokenCost        *float64 `json:"cache_read_input_image_token_cost"`
 }
 
 // PricingService 动态价格服务
@@ -620,6 +629,10 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			continue
 		}
 
+		if entry.CacheReadInputImageTokenCost != nil && *entry.CacheReadInputImageTokenCost < 0 {
+			skipped++
+			continue
+		}
 		pricing := &LiteLLMModelPricing{
 			LiteLLMProvider:       entry.LiteLLMProvider,
 			Mode:                  entry.Mode,
@@ -672,6 +685,10 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.InputCostPerImageToken != nil {
 			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
+		}
+		if entry.CacheReadInputImageTokenCost != nil {
+			pricing.CacheReadInputImageTokenCost = *entry.CacheReadInputImageTokenCost
+			pricing.CacheReadInputImageTokenCostExplicit = true
 		}
 
 		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
@@ -1550,6 +1567,10 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 	}
 
 	if isOpenAIImageGenerationModel(model) {
+		switch model {
+		case "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare-2026-09-08", "gpt-image-2.5-sunburst-2026-09-08":
+			return openAIImage25FallbackPricing
+		}
 		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
 			if pricing, ok := s.pricingData[candidate]; ok {
 				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
