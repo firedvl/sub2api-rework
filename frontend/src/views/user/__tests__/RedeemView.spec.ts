@@ -23,12 +23,50 @@ describe('RedeemView refresh after redemption', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     redeem.mockResolvedValue({ type: 'balance', value: 20, message: 'Code applied' })
-    getHistory.mockResolvedValue([])
+    getHistory.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     refreshUser.mockRejectedValue(new Error('Service unavailable'))
     fetchActiveSubscriptions.mockResolvedValue([])
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
   afterEach(() => vi.restoreAllMocks())
+
+  it('retains the last page after a failed size change and supports retry', async () => {
+    getHistory.mockResolvedValueOnce({ items: [{ id: 1, type: 'balance', code: 'HISTORY-OLD', value: 20, used_at: '2026-09-01T00:00:00Z' }], total: 105 })
+    const wrapper = mount(RedeemView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true } } })
+    await flushPromises()
+    getHistory.mockRejectedValueOnce(new Error('Current network error'))
+    await wrapper.get('select').setValue('50')
+    await flushPromises()
+    expect(getHistory).toHaveBeenLastCalledWith(1, 50)
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('20')
+    expect(wrapper.text()).toContain('HISTORY-')
+    expect(showError).toHaveBeenCalledWith('redeem.historyLoadFailed')
+    getHistory.mockResolvedValueOnce({ items: [], total: 105 })
+    await wrapper.get('select').setValue('50')
+    await flushPromises()
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('50')
+    expect(showError).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it.each(['success', 'failure'])('ignores superseded history %s responses', async (outcome) => {
+    let resolveOld!: (value: unknown) => void
+    let rejectOld!: (reason: Error) => void
+    getHistory.mockReturnValueOnce(new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject }))
+    const wrapper = mount(RedeemView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true } } })
+    await flushPromises()
+    getHistory.mockResolvedValueOnce({ items: [{ id: 2, type: 'concurrency', code: 'NEW-HISTORY', value: 30, used_at: '2026-09-02T00:00:00Z' }], total: 105 })
+    await wrapper.get('select').setValue('50')
+    await flushPromises()
+    expect(getHistory).toHaveBeenLastCalledWith(1, 50)
+    if (outcome === 'success') resolveOld({ items: [], total: 0 })
+    else rejectOld(new Error('Stale network error'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('NEW-HIST')
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('50')
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 
   it.each(['balance', 'concurrency', 'subscription'])('keeps successful %s redemption after account refresh fails', async (type) => {
     redeem.mockResolvedValue({ type, value: 20, message: 'Code applied' })
