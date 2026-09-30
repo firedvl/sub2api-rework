@@ -177,7 +177,7 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 		}
 		c := newContext(r)
 		// Match the handler-owned registration and nested forwarding call.
-		preemptCtx, cleanup, _ := svc.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, firstMessage)
+		preemptCtx, cleanup, _ := svc.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, firstMessage, conn)
 		defer cleanup()
 		hooks := &OpenAIWSIngressHooks{ClientLifecycleContext: ctx}
 		serverResults <- svc.ProxyResponsesWebSocketFromClient(preemptCtx, c, conn, account, "test-token", firstMessage, hooks)
