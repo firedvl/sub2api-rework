@@ -1437,13 +1437,17 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 		return nil, false
 	}
 	queryGroupID, includeGrouped := s.modelCatalogAccountScope(groupID)
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, []string{platform}, includeGrouped)
+	platforms := []string{platform}
+	if platform == PlatformGemini {
+		platforms = append(platforms, PlatformAntigravity)
+	}
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, platforms, includeGrouped)
 	if err != nil {
 		return nil, false
 	}
 	backed := false
 	for i := range accounts {
-		if accounts[i].Platform == platform {
+		if accounts[i].Platform == platform || (platform == PlatformGemini && accounts[i].IsMixedSchedulingEnabled()) {
 			backed = true
 			break
 		}
@@ -1532,7 +1536,8 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 	}
 	for i := range accounts {
 		account := &accounts[i]
-		if platform != "" && account.Platform != platform {
+		mixedGemini := platform == PlatformGemini && account.IsMixedSchedulingEnabled()
+		if platform != "" && account.Platform != platform && !mixedGemini {
 			continue
 		}
 		if platform == PlatformOpenAI && len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0 {
@@ -1546,6 +1551,9 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 		}
 		for model := range mapping {
 			model = publicCatalogModelID(account, model)
+			if mixedGemini && !strings.HasPrefix(model, "gemini-") {
+				continue
+			}
 			if model != "" {
 				modelSet[model] = struct{}{}
 			}
