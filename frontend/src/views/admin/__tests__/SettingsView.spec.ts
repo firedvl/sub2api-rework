@@ -1294,6 +1294,32 @@ describe("admin SettingsView payment visible method controls", () => {
     ]);
   });
 
+  it("loads and saves Claude version controls without submitting the synced value", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      claude_code_client_version: "2.1.280",
+      claude_code_client_version_synced: "2.1.281",
+      claude_code_version_auto_sync_enabled: false,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const version = wrapper.get('input[placeholder="2.1.280"]');
+    expect(version.element.value).toBe("2.1.280");
+    const autoSync = wrapper.get('[data-testid="claude-version-auto-sync"]');
+    expect(autoSync.element.checked).toBe(false);
+    await version.setValue(" 2.1.300 ");
+    await autoSync.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    const payload = updateSettings.mock.calls.at(-1)?.[0];
+    expect(payload.claude_code_client_version).toBe("2.1.300");
+    expect(payload.claude_code_version_auto_sync_enabled).toBe(true);
+    expect(payload).not.toHaveProperty("claude_code_client_version_synced");
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
   it("submits Antigravity user agent version gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

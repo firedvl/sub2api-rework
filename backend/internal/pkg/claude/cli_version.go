@@ -19,16 +19,13 @@ const CLIVersionEnv = "SUB2API_CLAUDE_CLI_VERSION"
 
 // resolvedCLIVersion 在包初始化时解析一次。
 //
-// ⚠️ 故意不做成"每次调用读一次环境变量"：伪装身份必须在一个进程的生命周期内保持恒定。
-// User-Agent 头与请求体 billing attribution 块里的 cc_version 由不同代码路径写入，
-// 若两次读到不同的值（例如进程运行中有人改了环境变量），同一个请求就会自相矛盾，
-// 被上游判为非正版客户端。
+// 环境变量回退值保持恒定；运行期面板/同步值由 EffectiveCLIVersion 解析。
+// 每次请求取一次生效的 User-Agent，供请求头和 billing attribution 共用。
 var resolvedCLIVersion = resolveCLIVersion(os.Getenv(CLIVersionEnv))
 
-// CLIVersion 返回对外伪装的 Claude Code CLI 版本号（三段 semver）。
+// CLIVersion 返回启动时环境变量/内置的回退版本号（三段 semver）。
 //
-// 所有需要该版本号的位置都必须走本函数，不要直接引用 CLICurrentVersion——
-// 后者只是"没有覆盖时的内置基线"。
+// 出站身份使用 EffectiveCLIVersion，不直接引用 CLICurrentVersion。
 func CLIVersion() string {
 	return resolvedCLIVersion
 }
