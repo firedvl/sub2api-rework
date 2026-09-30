@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,7 +41,7 @@ func requireHTTP2Configured(t *testing.T, tr *http.Transport, msg string) {
 func TestEnableOpenAIHTTP2KeepAlive_EnablesPingHealthCheck(t *testing.T) {
 	tr := &http.Transport{}
 
-	h2, err := enableOpenAIHTTP2KeepAlive(tr)
+	h2, err := enableHTTP2KeepAlive(tr, upstreamProtocolModeOpenAIH2)
 	require.NoError(t, err)
 	require.NotNil(t, h2, "必须返回已配置的 *http2.Transport")
 
@@ -48,6 +49,23 @@ func TestEnableOpenAIHTTP2KeepAlive_EnablesPingHealthCheck(t *testing.T) {
 	require.Equal(t, openAIHTTP2ReadIdleTimeout, h2.ReadIdleTimeout)
 	require.Equal(t, openAIHTTP2PingTimeout, h2.PingTimeout, "PING 无响应必须有超时判定")
 	requireHTTP2Configured(t, tr, "http2 必须已挂到底层 http.Transport 上")
+}
+
+func TestLongStreamHTTP2KeepAlive(t *testing.T) {
+	svc := &httpUpstreamService{}
+	require.Equal(t, upstreamProtocolModeLongStreamH2, svc.resolveProtocolMode(service.HTTPUpstreamProfileLongStream, "direct", nil))
+	transport := &http.Transport{}
+	h2, err := enableHTTP2KeepAlive(transport, upstreamProtocolModeLongStreamH2)
+	require.NoError(t, err)
+	require.Equal(t, 10*time.Second, h2.ReadIdleTimeout)
+	require.Equal(t, 5*time.Second, h2.PingTimeout)
+	proxyURL, err := url.Parse("http://127.0.0.1:8080")
+	require.NoError(t, err)
+	proxied, err := buildUpstreamTransport(http2KeepAliveTestPoolSettings(), proxyURL, upstreamProtocolModeLongStreamH2)
+	require.NoError(t, err)
+	require.True(t, proxied.ForceAttemptHTTP2)
+	requireHTTP2Configured(t, proxied, "long-stream proxy must retain HTTP2")
+	require.NotNil(t, proxied.Proxy)
 }
 
 // openai_h2 模式构建的 Transport 必须带上 H2 PING 健康探测，从源头剔除死连接。
@@ -77,21 +95,24 @@ func TestBuildUpstreamTransport_OpenAIH2_NegotiatesHTTP2(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	tr, err := buildUpstreamTransport(http2KeepAliveTestPoolSettings(), nil, upstreamProtocolModeOpenAIH2)
-	require.NoError(t, err)
-	defer tr.CloseIdleConnections()
-	require.NotNil(t, tr.TLSClientConfig)
-	roots := x509.NewCertPool()
-	roots.AddCert(srv.Certificate())
-	tr.TLSClientConfig.RootCAs = roots
-
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
-	require.NoError(t, err)
-	resp, err := tr.RoundTrip(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, 2, resp.ProtoMajor, "openai_h2 必须协商到 HTTP/2")
+	for _, mode := range []string{upstreamProtocolModeOpenAIH2, upstreamProtocolModeLongStreamH2} {
+		t.Run(mode, func(t *testing.T) {
+			tr, err := buildUpstreamTransport(http2KeepAliveTestPoolSettings(), nil, mode)
+			require.NoError(t, err)
+			defer tr.CloseIdleConnections()
+			require.NotNil(t, tr.TLSClientConfig)
+			roots := x509.NewCertPool()
+			roots.AddCert(srv.Certificate())
+			tr.TLSClientConfig.RootCAs = roots
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+			require.NoError(t, err)
+			resp, err := tr.RoundTrip(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Equal(t, 2, resp.ProtoMajor)
+		})
+	}
 }
 
 // 死连接在经 HTTP 代理（CONNECT 隧道）时最高发，这是带 proxy 账号的真实生产路径：
