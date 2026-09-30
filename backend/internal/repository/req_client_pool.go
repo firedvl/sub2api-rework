@@ -17,7 +17,7 @@ import (
 type reqClientOptions struct {
 	ProxyURL    string        // 代理 URL（支持 http/https/socks5）
 	Timeout     time.Duration // 请求超时时间
-	Impersonate bool          // 是否模拟 Chrome 浏览器指纹
+	Impersonate bool          // 是否模拟浏览器指纹
 	ForceHTTP2  bool          // 是否强制使用 HTTP/2
 }
 
@@ -50,7 +50,7 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 		client = client.EnableForceHTTP2()
 	}
 	if opts.Impersonate {
-		client = client.ImpersonateChrome()
+		client = client.ImpersonateFirefox()
 	}
 	trimmed, _, err := proxyurl.Parse(opts.ProxyURL)
 	if err != nil {
@@ -90,11 +90,10 @@ func buildReqClientKey(opts reqClientOptions) string {
 
 // CreatePrivacyReqClient creates an HTTP client for OpenAI privacy settings API
 // This is exported for use by OpenAIPrivacyService
-// Uses Chrome TLS fingerprint impersonation to bypass Cloudflare checks
 func CreatePrivacyReqClient(proxyURL string) (*req.Client, error) {
 	return getSharedReqClient(reqClientOptions{
 		ProxyURL:    proxyURL,
 		Timeout:     30 * time.Second,
-		Impersonate: true, // Enable Chrome TLS fingerprint impersonation
+		Impersonate: true,
 	})
 }

@@ -124,6 +124,20 @@ func TestCreateGeminiReqClient_ForceHTTP2Disabled(t *testing.T) {
 	require.Equal(t, "", forceHTTPVersion(t, client))
 }
 
+func TestPrivacyReqClientUsesFirefoxFingerprint(test *testing.T) {
+	client, err := CreatePrivacyReqClient("")
+	require.NoError(test, err)
+	require.Contains(test, client.Headers.Get("User-Agent"), "Firefox/")
+	require.NotContains(test, client.Headers.Get("User-Agent"), "Chrome/")
+	reused, err := CreatePrivacyReqClient("")
+	require.NoError(test, err)
+	require.Same(test, client, reused)
+	ordinary, err := getSharedReqClient(reqClientOptions{Timeout: 30 * time.Second})
+	require.NoError(test, err)
+	require.NotSame(test, client, ordinary)
+	require.NotContains(test, ordinary.Headers.Get("User-Agent"), "Firefox/")
+}
+
 func TestInstrumentReqClientRecordsDependency(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
