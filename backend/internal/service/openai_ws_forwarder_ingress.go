@@ -104,7 +104,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	// The handler normally owns this registration across retry attempts. Direct
 	// callers still get the same session-scoped preemption behavior here.
-	if preemptCtx, cleanupPreempt, armed := s.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, firstClientMessage); armed {
+	if preemptCtx, cleanupPreempt, armed := s.BeginOpenAIWSIngressSessionPreemption(ctx, c, account, firstClientMessage, clientConn); armed {
 		ctx = preemptCtx
 		defer cleanupPreempt()
 		defer func() {
@@ -531,6 +531,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	storeDisabled := false
 	refreshIngressRouteState := func(payload openAIWSClientPayload) {
 		sessionHash = s.GenerateSessionHash(c, payload.rawForHash)
+		if scope, _ := resolveOpenAIWSExecutionScope(c, payload.rawForHash, getAPIKeyIDFromContext(c)); scope != "" {
+			sessionHash = scope
+		}
 		preferredConnID = ""
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
 		if useHTTPBridge {
