@@ -339,7 +339,54 @@ func responsesInputToChatMessagesWithOptions(instructions string, inputRaw json.
 	if err != nil {
 		return nil, err
 	}
-	return normalizeChatMessagesWithToolOutputMedia(built, mediaByCallID), nil
+	return normalizeResponsesDerivedChatMessageRoles(normalizeChatMessagesWithToolOutputMedia(built, mediaByCallID))
+}
+
+func normalizeResponsesDerivedChatMessageRoles(messages []ChatMessage) ([]ChatMessage, error) {
+	leading := 0
+	for leading < len(messages) && (messages[leading].Role == "system" || messages[leading].Role == "developer") {
+		leading++
+	}
+	out := append([]ChatMessage(nil), messages...)
+	if leading > 1 {
+		texts := make([]string, 0, leading)
+		parts := make([]json.RawMessage, 0, leading)
+		textOnly := true
+		for _, message := range messages[:leading] {
+			if len(parts) > 0 {
+				parts = append(parts, json.RawMessage(`{"type":"text","text":"\n\n"}`))
+			}
+			var text string
+			if err := json.Unmarshal(message.Content, &text); err == nil {
+				texts = append(texts, text)
+				part, _ := json.Marshal(ChatContentPart{Type: "text", Text: text})
+				parts = append(parts, part)
+				continue
+			}
+			var contentParts []json.RawMessage
+			if err := json.Unmarshal(message.Content, &contentParts); err != nil {
+				return nil, fmt.Errorf("merge leading responses instructions: %w", err)
+			}
+			textOnly = false
+			parts = append(parts, contentParts...)
+		}
+		var content json.RawMessage
+		if textOnly {
+			content, _ = json.Marshal(strings.Join(texts, "\n\n"))
+		} else {
+			content, _ = json.Marshal(parts)
+		}
+		out = append([]ChatMessage{{Role: "system", Content: content}}, out[leading:]...)
+		leading = 1
+	}
+	for index := range out {
+		if index < leading {
+			out[index].Role = "system"
+		} else if out[index].Role == "system" || out[index].Role == "developer" {
+			out[index].Role = "user"
+		}
+	}
+	return out, nil
 }
 
 // buildChatMessagesFromItems walks the Responses input items and appends the
