@@ -1200,10 +1200,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(fallbackModels))
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   openai.DefaultModels,
-		})
+		writeModelsListResponse(c, openai.DefaultModels)
 		return
 	}
 
@@ -1212,10 +1209,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(fallbackModels))
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"object": "list",
-			"data":   geminicli.DefaultModels,
-		})
+		writeModelsListResponse(c, geminicli.DefaultModels)
 		return
 	}
 	if platform == service.PlatformGrok {
@@ -1231,7 +1225,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(fallbackModels))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"object": "list", "data": claude.DefaultModels})
+	writeModelsListResponse(c, claude.DefaultModels)
 }
 
 // CodexModels returns the effective group model list using the manifest shape
@@ -1370,10 +1364,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 			CreatedAt:   "2024-01-01T00:00:00Z",
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 type grokReasoningEffortOption struct {
@@ -1424,10 +1415,7 @@ func writeGrokModelsList(c *gin.Context, modelIDs []string) {
 		models = append(models, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 func grokModelSupportsConfigurableReasoning(modelID string) bool {
@@ -1460,10 +1448,7 @@ func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
 			DisplayName: modelID,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"object": "list",
-		"data":   models,
-	})
+	writeModelsListResponse(c, models)
 }
 
 func filterModelsByCustomList(availableModels, fallbackModels, selectedModels []string) []string {
