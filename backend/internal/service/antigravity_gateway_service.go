@@ -671,15 +671,12 @@ func antigravityV1InternalUsesMixedTools(body []byte) bool {
 	if !tools.Exists() {
 		tools = gjson.GetBytes(body, "tools")
 	}
-	var hasGoogleSearch, hasFunctions bool
+	var hasBuiltIn, hasFunctions bool
 	for _, tool := range tools.Array() {
-		hasGoogleSearch = hasGoogleSearch || tool.Get("googleSearch").Exists()
+		hasBuiltIn = hasBuiltIn || tool.Get("googleSearch").Exists() || tool.Get("codeExecution").Exists()
 		hasFunctions = hasFunctions || len(tool.Get("functionDeclarations").Array()) > 0
 	}
-	return gatewayFeatureConstraintMatches(
-		GatewayCapabilityConstraint{AllOf: []string{"functions", "web_search"}},
-		map[string]bool{"functions": hasFunctions, "web_search": hasGoogleSearch},
-	)
+	return hasFunctions && hasBuiltIn
 }
 
 // unwrapV1InternalResponse 解包 v1internal 响应
