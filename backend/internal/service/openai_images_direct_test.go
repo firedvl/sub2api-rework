@@ -211,6 +211,38 @@ func TestCodexDirectImagesEmptyResponseFails(t *testing.T) {
 	}
 }
 
+func TestCodexDirectImagesActualSizeAndObservedModel(t *testing.T) {
+	encoded := encodeOpenAIImageTestPNG(t, 1672, 941)
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":"gpt-image-2","prompt":"draw","size":"3840x2160","stream":%t}`, stream))
+			ctx, rec := newOpenAIImagesTestContext(t, body)
+			response := fmt.Sprintf(`{"model":"observed-image","size":"auto","data":[{"b64_json":%q}],"usage":{"input_tokens":10,"output_tokens":20}}`, encoded)
+			if stream {
+				response = fmt.Sprintf("data: {\"type\":\"image_generation.completed\",\"model\":\"observed-image\",\"size\":\"auto\",\"b64_json\":%q,\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}\n\n", encoded)
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response))}}
+			svc := newOpenAIImagesTestService(upstream)
+			parsed, err := svc.ParseOpenAIImagesRequest(ctx, body)
+			require.NoError(t, err)
+			result, err := svc.ForwardImages(context.Background(), ctx, directImagesTestAccount(), body, parsed, "")
+			require.NoError(t, err)
+			require.Equal(t, "observed-image", result.UpstreamResponseModel)
+			require.Equal(t, []string{"1672x941"}, result.ImageOutputSizes)
+			ApplyOpenAIImageBillingResolution(result)
+			require.Equal(t, "1672x941", result.ImageOutputSize)
+			if stream {
+				events := parseOpenAIImageTestSSEEvents(rec.Body.String())
+				completed, ok := findOpenAIImageTestSSEEvent(events, "image_generation.completed")
+				require.True(t, ok)
+				require.Equal(t, "1672x941", gjson.Get(completed.Data, "size").String())
+			} else {
+				require.Equal(t, "1672x941", gjson.GetBytes(rec.Body.Bytes(), "data.0.size").String())
+			}
+		})
+	}
+}
+
 func TestCodexDirectImagesAccountTestAndWhitelist(t *testing.T) {
 	body := []byte(`{"model":"gpt-image-2.5-sunburst","prompt":"draw"}`)
 	c, rec := newOpenAIImagesTestContext(t, body)
