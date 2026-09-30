@@ -51,6 +51,8 @@ export default {
         retentionDaysHint: 'Applied on the data-cleanup schedule when cleanup is enabled in Operations Settings.',
         caller: 'caller',
         sampling: 'sampling',
+        persistAccessLogs: 'Store access logs in database',
+        persistAccessLogsHint: 'Disabled by default because access logs add one indexed database row per request. Warning, error, and audit logs are always stored.',
         saveAndApply: 'Save and apply',
         resetDefaults: 'Reset defaults',
         latestWriteError: 'Latest write error:',
