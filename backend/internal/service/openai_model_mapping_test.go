@@ -370,6 +370,36 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 		want    string
 	}{
 		{
+			name:    "deepseek removes client context selector",
+			account: &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey},
+			model:   " deepseek-flash[1m] ",
+			want:    "deepseek-flash",
+		},
+		{
+			name:    "deepseek removes duplicated case-insensitive selectors",
+			account: &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey},
+			model:   "deepseek-future[1M][1m]",
+			want:    "deepseek-future",
+		},
+		{
+			name:    "deepseek preserves provider model identity",
+			account: &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey},
+			model:   "custom-model-2027[1m]",
+			want:    "custom-model-2027",
+		},
+		{
+			name:    "deepseek preserves other bracket suffixes",
+			account: &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey},
+			model:   "deepseek-future[2m]",
+			want:    "deepseek-future[2m]",
+		},
+		{
+			name:    "other compatible accounts retain context selectors",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+			model:   "deepseek-flash[1m]",
+			want:    "deepseek-flash[1m]",
+		},
+		{
 			name:    "oauth routes bare GPT-5.6 alias to Sol",
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "gpt-5.6",
