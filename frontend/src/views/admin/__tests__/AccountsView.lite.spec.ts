@@ -13,7 +13,8 @@ const {
   getUpstreamBillingProbeSettings,
   getAllProxies,
   getAllGroups,
-  showError
+  showError,
+  batchRefresh
 } = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
@@ -22,7 +23,8 @@ const {
   getUpstreamBillingProbeSettings: vi.fn(),
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
-  showError: vi.fn()
+  showError: vi.fn(),
+  batchRefresh: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -35,7 +37,7 @@ vi.mock('@/api/admin', () => ({
       getUpstreamBillingProbeSettings,
       delete: vi.fn(),
       batchClearError: vi.fn(),
-      batchRefresh: vi.fn(),
+      batchRefresh,
       toggleSchedulable: vi.fn()
     },
     proxies: { getAll: getAllProxies },
@@ -73,6 +75,13 @@ const AccountGroupsCellStub = defineComponent({
   template: '<span data-test="account-groups">{{ groups.map(group => group.name).join(",") }}</span>'
 })
 
+const AccountBulkActionsBarStub = defineComponent({
+  name: 'AccountBulkActionsBar',
+  props: { selectedIds: { type: Array, default: () => [] } },
+  emits: ['select-page', 'refresh-token', 'clear'],
+  template: '<div />'
+})
+
 const EditAccountModalStub = defineComponent({
   props: { show: Boolean, account: { type: Object, default: null } },
   template: '<div data-test="edit-account">{{ show ? account?.name : "" }}</div>'
@@ -97,7 +106,7 @@ function mountView() {
         DataTable: DataTableStub,
         AccountTableActions: { template: '<div><slot name="after" /></div>' },
         AccountTableFilters: true,
-        AccountBulkActionsBar: true,
+        AccountBulkActionsBar: AccountBulkActionsBarStub,
         Pagination: true,
         ConfirmDialog: true,
         AccountActionMenu: true,
@@ -161,11 +170,54 @@ describe('admin AccountsView lite account list', () => {
     getAllProxies.mockReset().mockResolvedValue([])
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     showError.mockReset()
+    batchRefresh.mockReset()
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each([
+    { result: { success: 1, failed: 1, errors: [{ account_id: 43, error: 'refresh failed' }] }, selected: [43] },
+    { result: { success: 1, failed: 1 }, selected: [42, 43] },
+    { result: { success: 2, failed: 0 }, selected: [] }
+  ])('retains only known failures or all requested ids after partial refresh: $selected', async ({ result, selected }) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    listAccounts.mockResolvedValue({ items: [listRow, { ...listRow, id: 43 }], total: 2, page: 1, page_size: 20, pages: 1 })
+    batchRefresh.mockResolvedValue(result)
+    const wrapper = mountView()
+    await flushPromises()
+    const actions = wrapper.getComponent(AccountBulkActionsBarStub)
+    actions.vm.$emit('select-page')
+    await flushPromises()
+    expect(actions.props('selectedIds')).toEqual([42, 43])
+    actions.vm.$emit('refresh-token')
+    await flushPromises()
+    expect(batchRefresh).toHaveBeenCalledWith([42, 43])
+    expect(actions.props('selectedIds')).toEqual(selected)
+    expect(showError).toHaveBeenCalledTimes(result.failed ? 1 : 0)
+    wrapper.unmount()
+  })
+
+  it('uses requested ids for partial failures even if selection changes in flight', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let resolveRefresh!: (result: unknown) => void
+    batchRefresh.mockReturnValue(new Promise(resolve => { resolveRefresh = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const actions = wrapper.getComponent(AccountBulkActionsBarStub)
+    actions.vm.$emit('select-page')
+    await flushPromises()
+    actions.vm.$emit('refresh-token')
+    actions.vm.$emit('clear')
+    await flushPromises()
+    expect(actions.props('selectedIds')).toEqual([])
+    resolveRefresh({ success: 0, failed: 1 })
+    await flushPromises()
+    expect(batchRefresh).toHaveBeenCalledWith([42])
+    expect(actions.props('selectedIds')).toEqual([42])
+    wrapper.unmount()
   })
 
   it('keeps lite=1 on the initial list request', async () => {

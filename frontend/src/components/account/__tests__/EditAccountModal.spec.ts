@@ -121,6 +121,7 @@ const SelectStub = defineComponent({
 const GroupSelectorStub = defineComponent({
   name: 'GroupSelector',
   props: {
+    groups: { type: Array, default: () => [] },
     modelValue: {
       type: Array,
       default: () => []
@@ -329,6 +330,31 @@ describe('EditAccountModal', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('keeps assigned inactive groups removable without reintroducing stale assignments', async () => {
+    authIsSimpleMode.value = false
+    const account = buildAccount()
+    account.group_ids = [7, 8]
+    account.groups = [
+      { id: 7, name: 'old active', platform: 'openai', status: 'active' },
+      { id: 8, name: 'inactive assignment', platform: 'openai', status: 'inactive' },
+      { id: 9, name: 'stale assignment', platform: 'openai', status: 'inactive' }
+    ]
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.setProps({ groups: [{ id: 7, name: 'current active', platform: 'openai', status: 'active' }] as any })
+    await flushPromises()
+    const selector = wrapper.getComponent(GroupSelectorStub)
+    expect(selector.props('groups')).toEqual([
+      expect.objectContaining({ id: 7, name: 'current active' }),
+      expect.objectContaining({ id: 8, name: 'inactive assignment' })
+    ])
+    selector.vm.$emit('update:modelValue', [7])
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ group_ids: [7] }))
+    wrapper.unmount()
+  })
 
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })

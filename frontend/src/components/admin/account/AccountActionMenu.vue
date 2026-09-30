@@ -5,7 +5,7 @@
       <div class="fixed inset-0 z-[9998]" @click="emit('close')"></div>
       <div
         ref="menuContent"
-        class="action-menu-content operator-menu fixed z-[9999] w-52 overflow-y-auto rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
+        class="action-menu-content operator-menu fixed z-[9999] w-52 overflow-y-auto overscroll-contain rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800"
         :style="menuStyle"
         @click.stop
       >
@@ -69,6 +69,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
@@ -120,15 +121,18 @@ const updatePosition = () => {
   const statusBarTop = document.querySelector<HTMLElement>('.operator-status-bar')?.getBoundingClientRect().top
   const viewportBottom = Math.min(window.innerHeight, statusBarTop ?? window.innerHeight)
   const maxHeight = Math.max(0, viewportBottom - padding * 2)
-  const menuHeight = Math.min(menuContent.value.scrollHeight, maxHeight)
+  const menuHeight = Math.min(menuContent.value.scrollHeight + menuContent.value.offsetHeight - menuContent.value.clientHeight, maxHeight)
   const menuWidth = menuContent.value.getBoundingClientRect().width
 
   menuStyle.value = {
     top: `${Math.max(padding, Math.min(props.position.top, viewportBottom - menuHeight - padding))}px`,
     left: `${Math.max(padding, Math.min(props.position.left, window.innerWidth - menuWidth - padding))}px`,
+    maxWidth: `${Math.max(0, window.innerWidth - padding * 2)}px`,
     maxHeight: `${maxHeight}px`,
   }
 }
+
+useResizeObserver([menuContent, () => props.show ? document.querySelector<HTMLElement>('.operator-shell') : null], updatePosition)
 
 watch(
   () => [props.show, props.position, props.account] as const,
