@@ -188,7 +188,7 @@
     <template #footer>
       <div class="flex justify-end gap-3">
         <button @click="$emit('close')" class="btn btn-secondary px-5">{{ t('common.cancel') }}</button>
-        <button @click="handleSave" :disabled="submitting" class="btn btn-primary px-6">
+        <button @click="handleSave" :disabled="submitting || !loaded" class="btn btn-primary px-6">
           <svg v-if="submitting" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -201,7 +201,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -228,8 +228,12 @@ const groups = ref<Group[]>([])
 const groupConfigs = ref<GroupRateConfig[]>([])
 const originalGroupRates = ref<Record<number, number>>({}) // 记录原始专属倍率，用于检测删除
 const loading = ref(false)
+const loaded = ref(false)
 const submitting = ref(false)
 const restrictPublicGroups = ref(false)
+let requestVersion = 0
+
+onUnmounted(() => { requestVersion++ })
 
 // 分离专属分组和公开分组
 const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
@@ -239,18 +243,25 @@ const exclusiveGroupConfigs = computed(() => groupConfigs.value.filter((c) => c.
 const publicGroupConfigs = computed(() => groupConfigs.value.filter((c) => !c.isExclusive))
 
 watch(
-  () => props.show,
-  (v) => {
-    if (v && props.user) {
+  () => [props.show, props.user?.id],
+  () => {
+    requestVersion++
+    loaded.value = false
+    if (props.show && props.user) {
       load()
+    } else {
+      loading.value = false
     }
   }
 )
 
 const load = async () => {
+  const version = ++requestVersion
+  loaded.value = false
   loading.value = true
   try {
     const res = await adminAPI.groups.list(1, 1000)
+    if (version !== requestVersion) return
     // 只显示标准类型且活跃的分组
     groups.value = res.items.filter((g) => g.subscription_type === 'standard' && g.status === 'active')
 
@@ -274,10 +285,12 @@ const load = async () => {
       isSelected:
         g.is_exclusive || restrictPublicGroups.value ? userAllowedGroups.includes(g.id) : true,
     }))
+    loaded.value = true
   } catch (error) {
+    if (version !== requestVersion) return
     console.error('Failed to load groups:', error)
   } finally {
-    loading.value = false
+    if (version === requestVersion) loading.value = false
   }
 }
 
@@ -318,7 +331,7 @@ const updateCustomRate = (groupId: number, value: string) => {
 }
 
 const handleSave = async () => {
-  if (!props.user) return
+  if (!props.show || !props.user || !loaded.value || submitting.value) return
   submitting.value = true
 
   try {
