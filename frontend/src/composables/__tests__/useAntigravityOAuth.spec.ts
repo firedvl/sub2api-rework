@@ -25,6 +25,14 @@ vi.mock('@/api/admin', () => ({
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 
 describe('useAntigravityOAuth.buildCredentials', () => {
+  it.each(['pro', 'ultra', 'free'])('preserves the discovered %s plan', (plan) => {
+    expect(useAntigravityOAuth().buildCredentials({ plan_type: plan }).plan_type).toBe(plan)
+  })
+
+  it('omits unknown plans instead of clearing existing metadata', () => {
+    expect(useAntigravityOAuth().buildCredentials({})).not.toHaveProperty('plan_type')
+    expect(useAntigravityOAuth().buildCredentials({ plan_type: '' })).not.toHaveProperty('plan_type')
+  })
   it('falls back to the submitted refresh token when the response omits it', () => {
     const oauth = useAntigravityOAuth()
 
