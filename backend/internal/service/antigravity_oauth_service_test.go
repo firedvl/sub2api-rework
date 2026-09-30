@@ -1,8 +1,34 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func TestAntigravityTokenInfoPreservesPlanTypeJSON(t *testing.T) {
+	for _, plan := range []string{"pro", "ultra", "free", ""} {
+		t.Run(plan, func(t *testing.T) {
+			data, err := json.Marshal(AntigravityTokenInfo{PlanType: plan, PrivacyMode: "private", ProjectIDMissing: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response map[string]any
+			if err := json.Unmarshal(data, &response); err != nil {
+				t.Fatal(err)
+			}
+			if plan == "" {
+				if _, exists := response["plan_type"]; exists {
+					t.Fatal("unknown plan must remain omitted")
+				}
+			} else if response["plan_type"] != plan {
+				t.Fatalf("plan_type = %v, want %q", response["plan_type"], plan)
+			}
+			if _, exists := response["privacy_mode"]; exists {
+				t.Fatal("private metadata exposed")
+			}
+		})
+	}
+}
 
 func TestResolveDefaultTierID(t *testing.T) {
 	t.Parallel()
