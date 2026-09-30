@@ -96,7 +96,7 @@ func TestResponsesInputToChatMessages_EmptyRoleFallsBackToUser(t *testing.T) {
 	assert.Equal(t, "user", messages[0].Role)
 }
 
-func TestResponsesInputToChatMessages_DeveloperRoleTrimAndCaseInsensitive(t *testing.T) {
+func TestResponsesInputToChatMessages_LeadingDeveloperRolesMergeIntoOneSystem(t *testing.T) {
 	input := json.RawMessage(`[
 		{"role":" Developer ","content":"one"},
 		{"role":"\tDEVELOPER\n","content":"two"}
@@ -104,9 +104,10 @@ func TestResponsesInputToChatMessages_DeveloperRoleTrimAndCaseInsensitive(t *tes
 
 	messages, err := responsesInputToChatMessages("", input)
 	require.NoError(t, err)
-	require.Len(t, messages, 2)
+	require.Len(t, messages, 1)
 
-	assert.Equal(t, []string{"system", "system"}, chatMessageRoles(messages))
+	assert.Equal(t, []string{"system"}, chatMessageRoles(messages))
+	assert.JSONEq(t, `"one\n\ntwo"`, string(messages[0].Content))
 }
 
 func TestResponsesToChatCompletionsRequest_InstructionsAndInputDeveloperRole(t *testing.T) {
@@ -121,12 +122,59 @@ func TestResponsesToChatCompletionsRequest_InstructionsAndInputDeveloperRole(t *
 
 	out, err := ResponsesToChatCompletionsRequest(req)
 	require.NoError(t, err)
-	require.Len(t, out.Messages, 3)
+	require.Len(t, out.Messages, 2)
 
-	assert.Equal(t, []string{"system", "system", "user"}, chatMessageRoles(out.Messages))
-	assert.JSONEq(t, `"Use concise answers."`, string(out.Messages[0].Content))
-	assert.JSONEq(t, `"Prefer JSON."`, string(out.Messages[1].Content))
-	assert.JSONEq(t, `"Hello"`, string(out.Messages[2].Content))
+	assert.Equal(t, []string{"system", "user"}, chatMessageRoles(out.Messages))
+	assert.JSONEq(t, `"Use concise answers.\n\nPrefer JSON."`, string(out.Messages[0].Content))
+	assert.JSONEq(t, `"Hello"`, string(out.Messages[1].Content))
+}
+
+func TestResponsesInputToChatMessages_MidConversationInstructionsKeepContent(t *testing.T) {
+	input := json.RawMessage(`[
+		{"role":"user","content":"hello"},
+		{"role":"assistant","content":"hi"},
+		{"role":"developer","content":"<model_switch> switched model"},
+		{"role":"system","content":{"type":"input_image","image_url":"data:image/png;base64,AQID"}},
+		{"role":"user","content":"continue"}
+	]`)
+	messages, err := responsesInputToChatMessages("", input)
+	require.NoError(t, err)
+	require.Len(t, messages, 5)
+	assert.Equal(t, []string{"user", "assistant", "user", "user", "user"}, chatMessageRoles(messages))
+	assert.JSONEq(t, `"<model_switch> switched model"`, string(messages[2].Content))
+	assert.Equal(t, "data:image/png;base64,AQID", chatContentParts(t, messages[3])[0].ImageURL.URL)
+}
+
+func TestResponsesInputToChatMessages_LeadingInstructionsPreserveMediaAndWhitespace(t *testing.T) {
+	messages, err := responsesInputToChatMessages("  instructions  ", json.RawMessage(`[
+		{"role":"developer","content":{"type":"input_image","image_url":"data:image/png;base64,AQID"}},
+		{"role":"user","content":"continue"}
+	]`))
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Equal(t, []string{"system", "user"}, chatMessageRoles(messages))
+	parts := chatContentParts(t, messages[0])
+	require.Len(t, parts, 3)
+	assert.Equal(t, "  instructions  ", parts[0].Text)
+	assert.Equal(t, "\n\n", parts[1].Text)
+	assert.Equal(t, "data:image/png;base64,AQID", parts[2].ImageURL.URL)
+}
+
+func TestNormalizeResponsesDerivedChatMessageRoles_SinglePromptAndInputRemainUnchanged(t *testing.T) {
+	messages := []ChatMessage{
+		{Role: "system", Content: json.RawMessage(`[{"type":"text","text":"  policy  ","prompt_cache_breakpoint":{"type":"ephemeral"}}]`)},
+		{Role: "user", Content: json.RawMessage(`"hello"`)},
+		{Role: "developer", Content: json.RawMessage(`"notice"`)},
+	}
+	before, err := json.Marshal(messages)
+	require.NoError(t, err)
+	converted, err := normalizeResponsesDerivedChatMessageRoles(messages)
+	require.NoError(t, err)
+	assert.Equal(t, messages[0], converted[0])
+	assert.Equal(t, "user", converted[2].Role)
+	after, err := json.Marshal(messages)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
 }
 
 func TestResponsesToChatCompletionsRequest_TextFormatJsonObject(t *testing.T) {
