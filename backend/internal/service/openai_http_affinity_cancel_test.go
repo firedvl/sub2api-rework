@@ -26,7 +26,8 @@ func (cache *responseBindContextProbeCache) SetSessionAccountID(ctx context.Cont
 
 func TestBindHTTPResponseAccountSurvivesClientCancel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	requestContextKey := struct{}{}
+	type affinityContextKey struct{}
+	requestContextKey := affinityContextKey{}
 	requestCtx, cancel := context.WithCancel(context.WithValue(context.Background(), requestContextKey, "caller"))
 	cancel()
 	for _, testCase := range []struct {
