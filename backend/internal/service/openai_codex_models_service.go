@@ -1582,6 +1582,9 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 				return stringSliceContains(modalities, "image")
 			}
 		}
+		if account.Platform != PlatformOpenCodeGo && strings.EqualFold(strings.TrimSpace(upstreamModel), "deepseek-v4-flash-vision-exp") {
+			return account.Type == AccountTypeAPIKey
+		}
 		if !isOpenAICodexImageInputModel(upstreamModel) {
 			return false
 		}
