@@ -726,7 +726,7 @@ export default {
         responsesStatusForcedChatCompletions: 'Forced Chat Completions',
         planType: 'Plan tier (manual override)',
         planTypeDesc:
-          "Manually correct this account's ChatGPT plan tier (Plus / Pro / Free). Note: a token refresh near expiry or a 429 rate-limit response will auto-overwrite this with the real tier.",
+          "Manually correct this account's ChatGPT plan tier (Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free). Note: a token refresh near expiry or a 429 rate-limit response will auto-overwrite this with the real tier.",
         planTypeClear: 'Clear (auto-detect)',
         codexCLIOnly: 'Codex official clients only',
         codexCLIOnlyDesc:
