@@ -150,3 +150,15 @@ func TestCodexImagesLegacyToolUsageRetainsCacheSplit(t *testing.T) {
 	_, ok = openAIImagesToolUsageFromGJSON(gjson.Parse(`{"input_tokens":100,"output_tokens":200,"output_tokens_details":{"image_tokens":1e999999}}`))
 	require.False(t, ok)
 }
+
+func TestCodexDirectImagesAccountProbeMapsOnlyOnce(t *testing.T) {
+	body := []byte(`{"model":"paint","prompt":"draw"}`)
+	ctx, _ := newOpenAIImagesTestContext(t, body)
+	upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := directImagesTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"paint": "gpt-image-1.5", "gpt-image-1.5": "gpt-image-2.5-flare"}
+	require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "paint", "draw", ""))
+	require.Equal(t, "gpt-image-1.5", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "/backend-api/codex/images/generations", upstream.lastReq.URL.Path)
+}
