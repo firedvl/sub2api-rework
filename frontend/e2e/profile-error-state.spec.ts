@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
 
 for (const width of [390, 1280]) {
-  test(`profile failures preserve inputs and permit recovery at ${width}px`, async ({ page }) => {
+  test(`profile failures preserve inputs and permit recovery at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     await seedSession(page, 'user')
     await installOperatorApiMock(page, 'user')
@@ -45,7 +45,7 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('TOTP verification rejected', { exact: true })).toBeVisible()
     await expect(modal.locator('input[type="password"]')).toHaveValue('old-password')
     await expect(modal.getByRole('button', { name: 'Next', exact: true })).toBeEnabled()
-    await page.screenshot({ path: `/Users/ryanlb/.codex/reconciliation/sub2api-v028/profile-errors-${width}.png`, animations: 'disabled' })
+    await page.screenshot({ path: testInfo.outputPath(`profile-errors-${width}.png`), animations: 'disabled' })
     await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(modal).not.toBeVisible()
   })
