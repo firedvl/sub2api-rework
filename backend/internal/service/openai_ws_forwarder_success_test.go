@@ -1403,7 +1403,8 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 
-	sessionHash := svc.GenerateSessionHash(c1, reqBody)
+	sessionHash, _ := resolveOpenAIWSExecutionScope(c1, reqBody, getAPIKeyIDFromContext(c1))
+	require.NotEmpty(t, sessionHash)
 	store := svc.getOpenAIWSStateStore()
 	turnState, ok := store.GetSessionTurnState(0, sessionHash)
 	require.True(t, ok)
