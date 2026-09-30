@@ -1,9 +1,14 @@
 import { expect, test, type Page } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
+import { operatorFixturePublicSettings } from './fixtures/operatorData'
 
 async function openPurchase(page: Page, renewal = false) {
   await seedSession(page, 'user')
   await installOperatorApiMock(page, 'user')
+  await page.route('**/api/v1/settings/public**', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ code: 0, data: { ...operatorFixturePublicSettings, payment_enabled: true } }),
+  }))
   await page.route('**/purchase**', async route => {
     if (!route.request().isNavigationRequest()) return route.fallback()
     const response = await route.fetch()
