@@ -9,7 +9,7 @@ import (
 )
 
 func TestFetchOpenAIAccountModelsOAuthPopulatesPickerFields(t *testing.T) {
-	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"new-oauth-model"},{"slug":"gpt-6-astra"}]}`)
+	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"new-oauth-model","display_name":"New OAuth Model"},{"slug":"gpt-6-astra"}]}`)
 	gateway := &OpenAIGatewayService{}
 	svc := &AccountTestService{openaiGatewayService: gateway}
 	account := newCodexModelsTestAccount()
@@ -22,13 +22,13 @@ func TestFetchOpenAIAccountModelsOAuthPopulatesPickerFields(t *testing.T) {
 	require.Len(t, models, 2)
 	for i, id := range []string{"new-oauth-model", "gpt-6-astra"} {
 		require.Equal(t, id, models[i].ID)
-		require.Equal(t, id, models[i].DisplayName)
+		require.Equal(t, []string{"New OAuth Model", "GPT-6 Astra"}[i], models[i].DisplayName)
 		require.Equal(t, "model", models[i].Type)
 	}
 	after, err := gateway.FetchOpenAIModelsList(ctx, account)
 	require.NoError(t, err)
 	require.Equal(t, before.Body, after.Body, "picker fields must not change the shared catalog")
-	require.NotContains(t, string(after.Body), "display_name")
+	require.Contains(t, string(after.Body), `"display_name":"New OAuth Model"`)
 	require.EqualValues(t, 1, calls.Load(), "picker must reuse the shared discovery cache")
 }
 
