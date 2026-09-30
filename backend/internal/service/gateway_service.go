@@ -1436,12 +1436,7 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 	if platform == "" {
 		return nil, false
 	}
-	queryGroupID, includeGrouped := s.modelCatalogAccountScope(groupID)
-	platforms := []string{platform}
-	if platform == PlatformGemini {
-		platforms = append(platforms, PlatformAntigravity)
-	}
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, platforms, includeGrouped)
+	accounts, err := s.modelCatalogAccounts(ctx, groupID, platform)
 	if err != nil {
 		return nil, false
 	}
@@ -1453,6 +1448,36 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 		}
 	}
 	return availableModelIDsFromAccounts(accounts, platform), backed
+}
+
+func (s *GatewayService) modelCatalogAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+	queryGroupID, includeGrouped := s.modelCatalogAccountScope(groupID)
+	platforms := []string{platform}
+	if platform == PlatformGemini {
+		platforms = append(platforms, PlatformAntigravity)
+	}
+	return s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, platforms, includeGrouped)
+}
+
+func (s *GatewayService) AntigravityGeminiCatalogModelIDs(ctx context.Context, groupID *int64, requireMixed bool) ([]string, error) {
+	accounts, err := s.modelCatalogAccounts(ctx, groupID, PlatformAntigravity)
+	if err != nil {
+		return nil, err
+	}
+	eligible := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.Platform == PlatformAntigravity && (!requireMixed || account.IsMixedSchedulingEnabled()) {
+			eligible = append(eligible, account)
+		}
+	}
+	models := availableModelIDsFromAccounts(eligible, PlatformAntigravity)
+	geminiModels := make([]string, 0, len(models))
+	for _, model := range models {
+		if strings.HasPrefix(model, "gemini-") {
+			geminiModels = append(geminiModels, model)
+		}
+	}
+	return geminiModels, nil
 }
 
 // GetCompositeCatalogModels returns durable, provider-backed models for a

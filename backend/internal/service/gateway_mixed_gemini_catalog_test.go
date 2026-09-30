@@ -48,7 +48,8 @@ func TestCatalogModelsMixedGeminiUsesDurableCandidatesAndOptIn(t *testing.T) {
 				{ID: 4, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-wrong-provider": "claude-provider"}}},
 			}}
 			groupID := int64(42)
-			models, backed := (&GatewayService{accountRepo: repo, cfg: &config.Config{RunMode: mode}}).GetCatalogModels(context.Background(), &groupID, PlatformGemini)
+			gateway := &GatewayService{accountRepo: repo, cfg: &config.Config{RunMode: mode}}
+			models, backed := gateway.GetCatalogModels(context.Background(), &groupID, PlatformGemini)
 			require.True(t, backed)
 			require.Contains(t, models, "gemini-custom")
 			require.Contains(t, models, "gemini-prefixed")
@@ -63,6 +64,14 @@ func TestCatalogModelsMixedGeminiUsesDurableCandidatesAndOptIn(t *testing.T) {
 				require.Equal(t, &groupID, repo.groupID)
 				require.False(t, repo.includeGrouped)
 			}
+			nativeModels, err := gateway.AntigravityGeminiCatalogModelIDs(context.Background(), &groupID, true)
+			require.NoError(t, err)
+			require.Equal(t, models, nativeModels)
+			forcedModels, err := gateway.AntigravityGeminiCatalogModelIDs(context.Background(), &groupID, false)
+			require.NoError(t, err)
+			require.Contains(t, forcedModels, "gemini-no-opt-in")
+			require.Contains(t, forcedModels, "gemini-disabled")
+			require.NotContains(t, forcedModels, "claude-custom")
 		})
 	}
 }
