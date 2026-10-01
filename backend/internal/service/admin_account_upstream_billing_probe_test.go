@@ -608,6 +608,7 @@ func TestUpdateAccountExtraDropsManagedBillingProbeFields(t *testing.T) {
 
 	err := (&adminServiceImpl{accountRepo: repo}).UpdateAccountExtra(context.Background(), accountID, map[string]any{
 		"custom":                               "value",
+		OllamaRateLimitClearGenerationExtraKey: "forged-clear",
 		UpstreamBillingProbeEnabledExtraKey:    true,
 		UpstreamBillingRateSyncEnabledExtraKey: true,
 		UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
@@ -615,6 +616,7 @@ func TestUpdateAccountExtraDropsManagedBillingProbeFields(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "value", repo.accounts[accountID].Extra["custom"])
+	require.NotContains(t, repo.accounts[accountID].Extra, OllamaRateLimitClearGenerationExtraKey)
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingProbeEnabledExtraKey)
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingRateSyncEnabledExtraKey)
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingProbeExtraKey)

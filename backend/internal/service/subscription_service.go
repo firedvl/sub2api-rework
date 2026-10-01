@@ -14,6 +14,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/dgraph-io/ristretto"
 	"golang.org/x/sync/singleflight"
 )
@@ -174,12 +175,16 @@ func (s *SubscriptionService) StartSubCacheInvalidationSubscriber(ctx context.Co
 }
 
 func (s *SubscriptionService) invalidateSubscriptionCaches(userID, groupID int64) error {
+	return s.invalidateSubscriptionCachesWithContext(context.Background(), userID, groupID)
+}
+
+func (s *SubscriptionService) invalidateSubscriptionCachesWithContext(ctx context.Context, userID, groupID int64) error {
 	s.InvalidateSubCacheSync(userID, groupID)
 	if s.billingCacheService == nil {
 		return nil
 	}
 
-	cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	cacheCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := s.billingCacheService.InvalidateSubscription(cacheCtx, userID, groupID); err != nil {
 		return fmt.Errorf("invalidate billing subscription cache: %w", err)
@@ -188,6 +193,24 @@ func (s *SubscriptionService) invalidateSubscriptionCaches(userID, groupID int64
 		return fmt.Errorf("publish subscription cache invalidation: %w", err)
 	}
 	return nil
+}
+
+func (s *SubscriptionService) invalidateSubscriptionCachesAfterCommit(ctx context.Context, userID, groupID int64) error {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(commitCtx context.Context, transaction *dbent.Tx) error {
+				if err := next.Commit(commitCtx, transaction); err != nil {
+					return err
+				}
+				if err := s.invalidateSubscriptionCachesWithContext(commitCtx, userID, groupID); err != nil {
+					log.Printf("[Subscription] committed user_id=%d group_id=%d cache_error=%s", userID, groupID, logredact.RedactText(err.Error()))
+				}
+				return nil
+			})
+		})
+		return nil
+	}
+	return s.invalidateSubscriptionCaches(userID, groupID)
 }
 
 // AssignSubscriptionInput 分配订阅输入
@@ -608,7 +631,7 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscripti
 		return err
 	}
 
-	if err := s.invalidateSubscriptionCaches(sub.UserID, sub.GroupID); err != nil {
+	if err := s.invalidateSubscriptionCachesAfterCommit(ctx, sub.UserID, sub.GroupID); err != nil {
 		return err
 	}
 
@@ -644,7 +667,7 @@ func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscript
 		return nil, err
 	}
 
-	if err := s.invalidateSubscriptionCaches(restored.UserID, restored.GroupID); err != nil {
+	if err := s.invalidateSubscriptionCachesAfterCommit(ctx, restored.UserID, restored.GroupID); err != nil {
 		return nil, err
 	}
 	return restored, nil
@@ -696,24 +719,17 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 				return err
 			}
 		}
-		return nil
+		sub, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// 失效订阅缓存
-	s.InvalidateSubCache(sub.UserID, sub.GroupID)
-	if s.billingCacheService != nil {
-		userID, groupID := sub.UserID, sub.GroupID
-		go func() {
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = s.billingCacheService.InvalidateSubscription(cacheCtx, userID, groupID)
-		}()
+	if err := s.invalidateSubscriptionCachesAfterCommit(ctx, sub.UserID, sub.GroupID); err != nil {
+		log.Printf("[Subscription] committed user_id=%d group_id=%d cache_error=%s", sub.UserID, sub.GroupID, logredact.RedactText(err.Error()))
 	}
-
-	return s.userSubRepo.GetByID(ctx, subscriptionID)
+	return sub, nil
 }
 
 // GetByID 根据ID获取订阅
@@ -870,25 +886,27 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if !resetDaily && !resetWeekly && !resetMonthly {
 		return nil, ErrInvalidInput
 	}
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	var sub *UserSubscription
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		var err error
+		sub, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		now := s.now()
+		if err := s.userSubRepo.ResetUsageWindows(txCtx, sub.ID, resetDaily, resetWeekly, resetMonthly, timezone.StartOfDay(now), now); err != nil {
+			return err
+		}
+		sub, err = s.userSubRepo.GetByID(txCtx, subscriptionID)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
-	// 日窗口锚点取当天 0 点：手动重置只清空用量，不改变“每天 0 点刷新”的节奏。
-	// 周/月窗口保持锚定重置时刻（期限对齐滚动窗口语义）。
-	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, timezone.StartOfDay(now), now); err != nil {
-		return nil, err
+	if err := s.invalidateSubscriptionCachesAfterCommit(ctx, sub.UserID, sub.GroupID); err != nil {
+		log.Printf("[Subscription] committed user_id=%d group_id=%d cache_error=%s", sub.UserID, sub.GroupID, logredact.RedactText(err.Error()))
 	}
-	// Invalidate L1 ristretto cache. Ristretto's Del() is asynchronous by design,
-	// so call Wait() immediately after to flush pending operations and guarantee
-	// the deleted key is not returned on the very next Get() call.
-	s.InvalidateSubCacheSync(sub.UserID, sub.GroupID)
-	if s.billingCacheService != nil {
-		_ = s.billingCacheService.InvalidateSubscription(ctx, sub.UserID, sub.GroupID)
-	}
-	// Return the refreshed subscription from DB
-	return s.userSubRepo.GetByID(ctx, subscriptionID)
+	return sub, nil
 }
 
 // CheckAndResetWindows 检查并重置过期的窗口

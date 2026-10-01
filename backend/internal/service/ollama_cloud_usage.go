@@ -393,6 +393,10 @@ type OllamaCloudUsageService struct {
 	lockCache    LeaderLockCache
 	db           *sql.DB
 	instanceID   string
+	probeMu      sync.Mutex
+	probeQueue   []ollamaCloudUsageProbeRequest
+	probeWake    chan struct{}
+	probeGroups  map[string]ollamaCloudUsageProbeGroupEntry
 }
 
 func NewOllamaCloudUsageService(
@@ -414,6 +418,8 @@ func NewOllamaCloudUsageService(
 		refreshSlots:            make(chan struct{}, ollamaCloudUsageConcurrency),
 		now:                     time.Now,
 		instanceID:              uuid.NewString(),
+		probeWake:               make(chan struct{}, 1),
+		probeGroups:             make(map[string]ollamaCloudUsageProbeGroupEntry),
 	}
 }
 
@@ -444,9 +450,10 @@ func (s *OllamaCloudUsageService) Start() {
 		return
 	}
 	s.started = true
-	s.wg.Add(1)
+	s.wg.Add(2)
 	s.mu.Unlock()
 	go s.runLoop()
+	go s.probeLoop()
 }
 
 func (s *OllamaCloudUsageService) Stop() {
@@ -771,6 +778,8 @@ func (s *OllamaCloudUsageService) refreshAccount(ctx context.Context, accountID 
 	if s == nil || s.accountRepo == nil {
 		return nil, ErrOllamaCloudUsageUnavailable
 	}
+	ctx, cancel := context.WithTimeout(ctx, ollamaCloudUsageProbeTimeout)
+	defer cancel()
 	if settings == nil {
 		settings = defaultOllamaCloudUsageSettings()
 	}
@@ -784,7 +793,7 @@ func (s *OllamaCloudUsageService) refreshAccount(ctx context.Context, accountID 
 	if !valid {
 		return nil, ErrOllamaCloudUsageAccountInvalid
 	}
-	value, err, _ := s.refreshGroup.Do(key, func() (any, error) {
+	resultChannel := s.refreshGroup.DoChan(key, func() (any, error) {
 		select {
 		case s.refreshSlots <- struct{}{}:
 			defer func() { <-s.refreshSlots }()
@@ -844,8 +853,15 @@ func (s *OllamaCloudUsageService) refreshAccount(ctx context.Context, accountID 
 		}
 		return s.refreshLoadedAccount(ctx, account, intervalMinutes)
 	})
-	if err != nil || value == nil {
-		return nil, err
+	var value any
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultChannel:
+		if result.Err != nil || result.Val == nil {
+			return nil, result.Err
+		}
+		value = result.Val
 	}
 	snapshot, ok := value.(*OllamaCloudUsageSnapshot)
 	if !ok {
