@@ -4,6 +4,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
 	src/api/__tests__/client.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
+	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
