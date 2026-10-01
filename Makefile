@@ -10,6 +10,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
+	src/views/user/__tests__/UsageView.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/api/__tests__/admin.subscriptions.bulk.spec.ts \
