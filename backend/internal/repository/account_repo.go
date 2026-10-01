@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"strconv"
 	"strings"
 	"time"
@@ -675,7 +676,8 @@ func lockAndMergeAccountProbeExtra(
 				false
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
-			extra -> 'opencode_go_usage_snapshot'
+			extra -> 'opencode_go_usage_snapshot',
+			extra -> 'ollama_rate_limit_clear_generation'
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -705,6 +707,7 @@ func lockAndMergeAccountProbeExtra(
 		currentOllamaSnapshot          []byte
 		currentOpenCodeAutoRefresh     []byte
 		currentOpenCodeSnapshot        []byte
+		currentOllamaClearGeneration   []byte
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -720,6 +723,7 @@ func lockAndMergeAccountProbeExtra(
 		&opencodeGroupIdentityUnchanged,
 		&currentOpenCodeAutoRefresh,
 		&currentOpenCodeSnapshot,
+		&currentOllamaClearGeneration,
 	); err != nil {
 		return nil, err
 	}
@@ -731,6 +735,14 @@ func lockAndMergeAccountProbeExtra(
 	}
 
 	extra := copyJSONMap(normalizeJSONMap(account.Extra))
+	delete(extra, service.OllamaRateLimitClearGenerationExtraKey)
+	if len(currentOllamaClearGeneration) > 0 {
+		var clearGeneration string
+		if err := json.Unmarshal(currentOllamaClearGeneration, &clearGeneration); err != nil {
+			return nil, err
+		}
+		extra[service.OllamaRateLimitClearGenerationExtraKey] = clearGeneration
+	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
@@ -2585,6 +2597,74 @@ func (r *accountRepository) ClearQuotaRateLimitIfObserved(ctx context.Context, i
 	return true, nil
 }
 
+func (repository *accountRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *service.Account, resetAt *time.Time) (*service.AccountRateLimitGeneration, error) {
+	client := clientFromContext(ctx, repository.client)
+	generation := &service.AccountRateLimitGeneration{}
+	var deadline sql.NullTime
+	err := scanSingleRow(ctx, client, `
+		UPDATE accounts
+		SET rate_limited_at = GREATEST(clock_timestamp(), rate_limited_at + INTERVAL '1 microsecond'),
+			rate_limit_reset_at = GREATEST(rate_limit_reset_at, $3::timestamptz),
+			updated_at = clock_timestamp()
+		WHERE id = $1 AND updated_at = $2 AND deleted_at IS NULL
+		RETURNING rate_limited_at, rate_limit_reset_at
+	`, []any{observed.ID, observed.UpdatedAt, resetAt}, &generation.LimitedAt, &deadline)
+	if errors.Is(err, sql.ErrNoRows) {
+		repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if deadline.Valid {
+		generation.ResetAt = &deadline.Time
+	}
+	if err := enqueueSchedulerOutbox(ctx, repository.sql, service.SchedulerOutboxEventAccountChanged, &observed.ID, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue Ollama 429 failed: account=%d err=%v", observed.ID, err)
+	}
+	repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
+	return generation, nil
+}
+
+func (repository *accountRepository) SetRateLimitedIfUnchanged(
+	ctx context.Context,
+	id int64,
+	expectedUpdatedAt time.Time,
+	expectedLimitedAt, expectedResetAt *time.Time,
+	newResetAt time.Time,
+) (bool, error) {
+	preds := []dbpredicate.Account{dbaccount.IDEQ(id), dbaccount.UpdatedAtEQ(expectedUpdatedAt)}
+	if expectedLimitedAt == nil {
+		preds = append(preds, dbaccount.RateLimitedAtIsNil())
+	} else {
+		preds = append(preds, dbaccount.RateLimitedAtEQ(*expectedLimitedAt))
+	}
+	if expectedResetAt == nil {
+		preds = append(preds, dbaccount.RateLimitResetAtIsNil())
+	} else {
+		preds = append(preds, dbaccount.RateLimitResetAtEQ(*expectedResetAt))
+	}
+
+	now := time.Now()
+	updated, err := repository.client.Account.Update().
+		Where(preds...).
+		SetRateLimitedAt(now).
+		SetRateLimitResetAt(newResetAt).
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		repository.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, repository.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue rate limit failed: account=%d err=%v", id, err)
+	}
+	repository.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error {
 	if scope == "" {
 		return nil
@@ -2785,10 +2865,10 @@ func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error 
 		SET rate_limited_at = NULL,
 			rate_limit_reset_at = NULL,
 			overload_until = NULL,
-			extra = COALESCE(extra, '{}'::jsonb) - $2::text,
+			extra = (COALESCE(extra, '{}'::jsonb) - $2::text) || jsonb_build_object($3::text, $4::text),
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
-	`, id, service.QuotaRateLimitBlockExtraKey)
+	`, id, service.QuotaRateLimitBlockExtraKey, service.OllamaRateLimitClearGenerationExtraKey, uuid.NewString())
 	if err != nil {
 		return err
 	}
@@ -4280,13 +4360,13 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 // account-level cooldown in one statement. Other scheduler blocking state is preserved.
 func (r *accountRepository) ResetQuotaUsedAndClearRateLimitCooldown(ctx context.Context, id int64) error {
 	result, err := r.sql.ExecContext(ctx,
-		`UPDATE accounts SET extra = (
+		`UPDATE accounts SET extra = ((
 			COALESCE(extra, '{}'::jsonb)
 			|| '{"quota_used": 0, "quota_daily_used": 0, "quota_weekly_used": 0}'::jsonb
-		) - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at',
+		) - 'quota_daily_start' - 'quota_weekly_start' - 'quota_daily_reset_at' - 'quota_weekly_reset_at') || jsonb_build_object($2::text, $3::text),
 		rate_limited_at = NULL, rate_limit_reset_at = NULL, updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`,
-		id)
+		id, service.OllamaRateLimitClearGenerationExtraKey, uuid.NewString())
 	if err != nil {
 		return err
 	}
