@@ -21,6 +21,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/features/channel-monitor-v2/__tests__/MetricCell.spec.ts \
 	src/__tests__/App.subscriptionSync.spec.ts \
 	src/utils/__tests__/siteBillingMode.spec.ts \
 	src/utils/__tests__/featureFlags.spec.ts \
