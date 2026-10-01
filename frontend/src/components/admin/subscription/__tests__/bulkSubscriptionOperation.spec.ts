@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { completeBulkSubscriptionOperation, prepareBulkSubscriptionOperation } from '../bulkSubscriptionOperation'
+import { completeBulkSubscriptionOperation, listPendingBulkSubscriptionOperations, prepareBulkSubscriptionOperation } from '../bulkSubscriptionOperation'
 
 let adminId = 1000
 
@@ -9,6 +9,22 @@ beforeEach(() => {
 })
 
 describe('bulk subscription operation identity', () => {
+  it('recovers the original request from the existing storage format without row eligibility', () => {
+    const operation = prepareBulkSubscriptionOperation({ action: 'revoke', subscription_ids: [3, 1] })
+    const recovered = listPendingBulkSubscriptionOperations()
+    expect(recovered).toEqual([{ ...operation, outcomeUncertain: true }])
+    expect(recovered[0]?.request.subscription_ids).toEqual([1, 3])
+    localStorage.setItem('auth_user', JSON.stringify({ id: ++adminId }))
+    expect(listPendingBulkSubscriptionOperations()).toEqual([])
+    expect(sessionStorage.getItem(operation.storageKey)).toBe(operation.key)
+  })
+
+  it('surfaces malformed saved requests without deleting them or inventing an empty success', () => {
+    const storageKey = `sub2api:admin:subscription-bulk:${adminId}:not-json`
+    sessionStorage.setItem(storageKey, 'original-key')
+    expect(() => listPendingBulkSubscriptionOperations()).toThrow()
+    expect(sessionStorage.getItem(storageKey)).toBe('original-key')
+  })
   it('canonicalizes duplicate and reordered IDs for storage and the sent request', () => {
     const first = prepareBulkSubscriptionOperation({ action: 'extend', subscription_ids: [3, 1, 3], days: 7 })
     const retry = prepareBulkSubscriptionOperation({ subscription_ids: [1, 3], days: 7, action: 'extend' })
