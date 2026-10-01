@@ -89,3 +89,82 @@ func TestBulkSubscriptionAction_CachesChangeOnlyAfterConfirmedCommit(t *testing.
 		})
 	}
 }
+
+type failingSecondBulkItemRepository struct {
+	*transactionalBulkSubscriptionRepo
+}
+
+func (repo *failingSecondBulkItemRepository) GetByIDForUpdate(ctx context.Context, id int64) (*UserSubscription, error) {
+	if id == 2 {
+		return nil, ErrSubscriptionNotFound
+	}
+	return repo.transactionalBulkSubscriptionRepo.GetByIDForUpdate(ctx, id)
+}
+
+func TestBulkSubscriptionAction_SavepointControlFailureRollsBackEarlierSuccess(t *testing.T) {
+	for _, failedCommand := range []string{"SAVEPOINT", "ROLLBACK TO SAVEPOINT", "RELEASE SAVEPOINT"} {
+		t.Run(failedCommand, func(t *testing.T) {
+			database, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = database.Close() }()
+			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, database)))
+			expiry := time.Now().AddDate(0, 0, 30)
+			storage := &transactionalBulkSubscriptionRepo{
+				committed: UserSubscription{ID: 1, UserID: 7, GroupID: 9, Status: SubscriptionStatusActive, ExpiresAt: expiry},
+				pending:   make(map[*dbent.Tx]*UserSubscription), reads: make(map[*dbent.Tx]int),
+			}
+			repository := &failingSecondBulkItemRepository{transactionalBulkSubscriptionRepo: storage}
+			subscriptions := &SubscriptionService{userSubRepo: repository, entClient: client}
+			resultRepository := newInMemoryIdempotencyRepo()
+			coordinator := NewIdempotencyCoordinator(resultRepository, DefaultIdempotencyConfig())
+			mock.ExpectBegin()
+			mock.ExpectExec("SAVEPOINT subscription_bulk_item").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectExec("RELEASE SAVEPOINT subscription_bulk_item").WillReturnResult(sqlmock.NewResult(0, 0))
+			for _, command := range []string{"SAVEPOINT", "ROLLBACK TO SAVEPOINT", "RELEASE SAVEPOINT"} {
+				expectation := mock.ExpectExec(command + " subscription_bulk_item")
+				if command == failedCommand {
+					expectation.WillReturnError(errors.New("savepoint control unavailable"))
+					break
+				}
+				expectation.WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			mock.ExpectRollback()
+			_, err = coordinator.Execute(context.Background(), IdempotencyExecuteOptions{
+				Scope: "bulk-control", Method: "POST", Route: "/bulk-action", IdempotencyKey: "original-request",
+				Payload: failedCommand, RequireKey: true, ExecutionTimeout: time.Second, RunInTransaction: subscriptions.RunBulkSubscriptionTransaction,
+			}, func(ctx context.Context) (any, error) {
+				return subscriptions.BulkSubscriptionAction(ctx, &BulkSubscriptionActionInput{SubscriptionIDs: []int64{1, 2}, Action: "extend", Days: 7})
+			})
+			require.ErrorContains(t, err, "savepoint control unavailable")
+			require.Equal(t, expiry, storage.committed.ExpiresAt)
+			for _, record := range resultRepository.data {
+				require.Equal(t, IdempotencyStatusProcessing, record.Status)
+				require.Nil(t, record.ResponseBody)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestBulkSubscriptionAction_CommitBoundaryErrorRetainsCacheAndUncertainOutcome(t *testing.T) {
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = database.Close() }()
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, database)))
+	cache, err := ristretto.NewCache(&ristretto.Config{NumCounters: 1000, MaxCost: 100, BufferItems: 64})
+	require.NoError(t, err)
+	defer cache.Close()
+	key := subCacheKey(7, 9)
+	require.True(t, cache.Set(key, &UserSubscription{ID: 1}, 1))
+	cache.Wait()
+	subscriptions := &SubscriptionService{entClient: client, subCacheL1: cache}
+	mock.ExpectBegin()
+	mock.ExpectCommit().WillReturnError(errors.New("commit acknowledgment unavailable"))
+	err = subscriptions.RunBulkSubscriptionTransaction(context.Background(), func(ctx context.Context) error {
+		return subscriptions.invalidateSubscriptionCachesAfterCommit(ctx, 7, 9)
+	})
+	require.ErrorContains(t, err, "commit acknowledgment unavailable")
+	_, cached := cache.Get(key)
+	require.True(t, cached)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

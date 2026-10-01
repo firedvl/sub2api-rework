@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SubscriptionsView from '../SubscriptionsView.vue'
+import { prepareBulkSubscriptionOperation } from '@/components/admin/subscription/bulkSubscriptionOperation'
 
 const { list, bulkAction, bulkAssign, listUsers, showError } = vi.hoisted(() => ({
   list: vi.fn(), bulkAction: vi.fn(), bulkAssign: vi.fn(), listUsers: vi.fn(), showError: vi.fn()
@@ -62,6 +63,22 @@ async function select(ids: number[]) {
 }
 
 describe('subscription bulk operations', () => {
+  it('recovers an uncertain restore after a page reload without its original rows', async () => {
+    const operation = prepareBulkSubscriptionOperation({ action: 'restore', subscription_ids: [3, 9] })
+    wrapper.unmount()
+    list.mockResolvedValue({ items: [rows[0]], total: 1, pages: 1 })
+    wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="subscription-pending-retry"]').trigger('click')
+    expect(wrapper.get('#bulk-subscription-action-form').text()).toContain('#3')
+    expect(wrapper.get('#bulk-subscription-action-form').text()).toContain('#9')
+    bulkAction.mockResolvedValueOnce({ success_count: 2, failed_count: 0, results: [{ subscription_id: 3, success: true }, { subscription_id: 9, success: true }] })
+    await wrapper.get('#bulk-subscription-action-form').trigger('submit')
+    await flushPromises()
+    expect(bulkAction).toHaveBeenCalledWith(operation.request, operation.key, true)
+    expect(sessionStorage.getItem(operation.storageKey)).toBeNull()
+  })
+
   it('reopens the original uncertain revoke after server status changes', async () => {
     bulkAction.mockRejectedValueOnce({ status: 503, message: 'Response outcome unknown' })
     await select([1])

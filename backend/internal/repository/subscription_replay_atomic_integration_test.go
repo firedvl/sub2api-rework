@@ -203,6 +203,54 @@ func TestSubscriptionReplayAtomic_UnreplayableOversizedResponseRollsBack(t *test
 	require.Equal(t, expiry, subscription.ExpiresAt)
 }
 
+type expiredBulkItemRepository struct {
+	service.UserSubscriptionRepository
+	expiredID int64
+}
+
+func (repo *expiredBulkItemRepository) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	if id == repo.expiredID {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return repo.UserSubscriptionRepository.GetByIDForUpdate(ctx, id)
+}
+
+func TestSubscriptionReplayAtomic_ItemDeadlinePreservesEarlierSuccessAndDurableResult(t *testing.T) {
+	ids, expiry, scope := subscriptionReplayFixture(t, 2)
+	subscriptionRepo := NewUserSubscriptionRepository(integrationEntClient)
+	subscriptions := service.NewSubscriptionService(nil, &expiredBulkItemRepository{UserSubscriptionRepository: subscriptionRepo, expiredID: ids[1]}, nil, integrationEntClient, nil)
+	t.Cleanup(subscriptions.Stop)
+	coordinator := service.NewIdempotencyCoordinator(NewIdempotencyRepository(integrationEntClient, integrationDB), service.DefaultIdempotencyConfig())
+	input := &service.BulkSubscriptionActionInput{SubscriptionIDs: ids, Action: "extend", Days: 7}
+	opts := service.IdempotencyExecuteOptions{Scope: scope, Method: "POST", Route: "/bulk-action", IdempotencyKey: "item-deadline", Payload: input,
+		RequireKey: true, ExecutionTimeout: time.Second, RunInTransaction: subscriptions.RunBulkSubscriptionTransaction}
+	executions := 0
+	execute := func(ctx context.Context) (any, error) {
+		executions++
+		return subscriptions.BulkSubscriptionAction(ctx, input)
+	}
+	result, err := coordinator.Execute(context.Background(), opts, execute)
+	require.NoError(t, err)
+	outcome := result.Data.(*service.BulkSubscriptionActionResult)
+	require.Equal(t, 1, outcome.SuccessCount)
+	require.Equal(t, 1, outcome.FailedCount)
+	for index, id := range ids {
+		subscription, err := subscriptionRepo.GetByID(context.Background(), id)
+		require.NoError(t, err)
+		expected := expiry
+		if index == 0 {
+			expected = expiry.AddDate(0, 0, 7)
+		}
+		require.Equal(t, expected, subscription.ExpiresAt)
+	}
+	opts.ReplayOnly = true
+	replay, err := coordinator.Execute(context.Background(), opts, execute)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	require.Equal(t, 1, executions)
+}
+
 func TestSubscriptionReplayAtomic_ExpiredLeaseCannotOvertakeLiveTransaction(t *testing.T) {
 	ids, expiry, scope := subscriptionReplayFixture(t, 1)
 	subscriptionRepo := NewUserSubscriptionRepository(integrationEntClient)
