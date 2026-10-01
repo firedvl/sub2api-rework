@@ -127,7 +127,10 @@ type grokMediaSlotBindings struct {
 	pending map[string][]byte
 }
 
-func (s *grokMediaSlotBindings) SetGrokVideoPendingBilling(_ context.Context, key string, body []byte, _ time.Duration) error {
+func (s *grokMediaSlotBindings) SetGrokVideoPendingBilling(ctx context.Context, key string, body []byte, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.pending == nil {
 		s.pending = make(map[string][]byte)
 	}
@@ -144,7 +147,10 @@ func (s *grokMediaSlotBindings) GetSessionAccountID(_ context.Context, groupID i
 	}
 	return s.owner, nil
 }
-func (s *grokMediaSlotBindings) SetSessionAccountID(_ context.Context, _ int64, key string, owner int64, _ time.Duration) error {
+func (s *grokMediaSlotBindings) SetSessionAccountID(ctx context.Context, _ int64, key string, owner int64, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.key, s.owner = key, owner
 	s.writes++
 	return nil

@@ -151,3 +151,21 @@ func TestSeedanceLookupRequiresCreateTimeModelSnapshot(t *testing.T) {
 	require.Zero(t, upstream.calls)
 	slots.assertReleased(t)
 }
+
+func TestSeedanceAcceptedTaskMetadataSurvivesCallerCancellation(t *testing.T) {
+	handler, slots, bindings, upstream := newGrokMediaSlotHandler(t, false, false, service.PlatformOpenAI)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	upstream.call = func(*http.Request, int64) (*http.Response, error) {
+		cancel()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"accepted-task"}`))}, nil
+	}
+	request, recorder := grokMediaSlotContext(ctx, true)
+	request.Request = httptest.NewRequest(http.MethodPost, "/api/v3/contents/generations/tasks", strings.NewReader(`{"model":"configured-video","content":[{"type":"text","text":"waves"}]}`)).WithContext(ctx)
+	handler.SeedanceTasks(request)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Len(t, bindings.pending, 1)
+	require.Equal(t, 1, bindings.writes)
+	require.Equal(t, 1, upstream.calls)
+	slots.assertReleased(t)
+}
