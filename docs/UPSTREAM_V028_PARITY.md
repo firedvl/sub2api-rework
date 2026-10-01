@@ -1,9 +1,9 @@
 # Upstream v0.2.8 Development Reconciliation
 
-Status: IN_PROGRESS. The implementation inventory and source review are closed,
-but historical credential confirmation and the final metadata PR remain open.
-This is not a parity declaration. The accepted machine-readable baseline remains
-v0.2.3, and the Rework version remains `0.2.3-rework.6`.
+Status: DEVELOPMENT QUALIFICATION PASS. The implementation inventory, independent
+source review and acceptance checks are closed. The machine-readable development
+baseline records v0.2.8 and schema 249. Rework version `0.2.3-rework.6` remains
+unchanged; adopting this baseline does not publish or deploy a release.
 
 - Source range: `8fa67d477d6651a744754392a8982ea589c26ae6..fd80b08c90b55edcad5b00171b53f08721d30da1`.
 - Validated implementation main: `f74d0126c814d1302dafcebc94481894ad33a87a`.
@@ -85,17 +85,22 @@ govulncheck reports zero affected or imported-package vulnerabilities and 11
 noncalled required-module advisories. All 52 current-tree gitleaks occurrences
 were individually triaged as non-secret; the final repair patch has zero matches.
 The all-ref history scan has 98 occurrences: 93 non-secret, public or synthetic
-dispositions and five deferred plausible old credentials representing four
-distinct values. Three occurrences predate reconciliation; two are outside main
-ancestry. No live credential check ran. Offline owner confirmation of synthetic
-origin or completed revocation remains required. The raw history scan is not green.
+dispositions and five historical credential occurrences representing four
+distinct values. On October 1, 2026, the owner confirmed each value is synthetic
+and never valid, or revoked or rotated and no longer usable. Three occurrences
+predate reconciliation; two are outside main ancestry. The historical-secret
+gate is closed by that offline confirmation, not a live credential check or a
+zero-match scanner result. Only redacted triage is retained. Raw counts remain
+visible; no credential values are reproduced.
 
-## Remaining Gate And Release Boundary
+## Release Boundary
 
-After the historical credential gate closes, the final metadata change must
-record the accepted v0.2.8 baseline and development schema 249 without changing
-the Rework version. Fresh exact-head CI and review must precede the protected
-merge, followed by a clean main equal to origin/main.
+The authoritative metadata change records the development baseline without
+changing the Rework version. It requires fresh exact-head CI and independent
+review before the protected merge, followed by a clean main equal to origin/main.
+The final reconciliation checkpoint records closure only after those gates pass.
+`next_release_required=true`: installations need a separately authorized and
+qualified Rework release to receive these development changes.
 
 Development reconciliation does not authorize a version bump, tag, publication,
 deployment, production migration, real Reset Credit, referral, payment or video
