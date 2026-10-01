@@ -7,6 +7,8 @@ const {
   probeUpstreamBillingMock,
   syncUpstreamModelsMock,
   showWarningMock,
+  showErrorMock,
+  getDefaultMappingMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
   validateOpenAIRefreshTokenMock,
@@ -16,6 +18,8 @@ const {
   probeUpstreamBillingMock: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
   showWarningMock: vi.fn(),
+  showErrorMock: vi.fn(),
+  getDefaultMappingMock: vi.fn().mockResolvedValue({}),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   validateOpenAIRefreshTokenMock: vi.fn(),
@@ -24,7 +28,7 @@ const {
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError: showErrorMock,
     showSuccess: vi.fn(),
     showWarning: showWarningMock,
   }),
@@ -59,7 +63,7 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/api/admin/accounts', () => ({
-  getAntigravityDefaultModelMapping: vi.fn().mockResolvedValue([]),
+  getAntigravityDefaultModelMapping: getDefaultMappingMock,
 }))
 
 vi.mock('@/composables/useOpenAIOAuth', async () => {
@@ -236,6 +240,32 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('surfaces mapping failures, retries on returning to Antigravity, and does not fetch on close', async () => {
+    let resolveMapping!: (mapping: Record<string, string>) => void
+    getDefaultMappingMock.mockReset().mockRejectedValueOnce(new Error('mapping service unavailable'))
+      .mockImplementationOnce(() => new Promise<Record<string, string>>(resolve => { resolveMapping = resolve }))
+    showErrorMock.mockClear()
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Antigravity')
+    await flushPromises()
+    expect(showErrorMock).toHaveBeenCalledWith('mapping service unavailable')
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'Antigravity')
+    await flushPromises()
+    expect(getDefaultMappingMock).toHaveBeenCalledTimes(2)
+    await wrapper.setProps({ show: false })
+    resolveMapping({ 'gemini-custom': 'gemini-provider' })
+    await flushPromises()
+    expect(getDefaultMappingMock).toHaveBeenCalledTimes(2)
+    expect((wrapper.vm as unknown as { antigravityModelMappings: unknown[] }).antigravityModelMappings).toEqual([])
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'Antigravity')
+    await flushPromises()
+    expect(wrapper.findAll('input').some(input => input.element.value === 'gemini-custom')).toBe(true)
+    expect(getDefaultMappingMock).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
