@@ -24,9 +24,9 @@ for (const width of [390, 1280]) {
       return fulfill(route, { items: rows, total: rows.length, page: 1, page_size: 20, pages: 1 })
     })
     await page.route('**/api/v1/admin/groups*', route => fulfill(route, { items: [rows[0].group], total: 1, pages: 1 }))
-    const attempts: { body: unknown; key: string | undefined }[] = []
+    const attempts: { body: unknown; key: string | undefined; replayOnly: string | undefined }[] = []
     await page.route('**/api/v1/admin/subscriptions/bulk-action', route => {
-      attempts.push({ body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] })
+      attempts.push({ body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'], replayOnly: route.request().headers()['idempotency-retry-only'] })
       if (attempts.length === 1) return route.fulfill({ status: 503, json: { code: 503, message: 'Temporary operation failure' } })
       return fulfill(route, { success_count: 1, failed_count: 1, results: [
         { subscription_id: 1, success: true },
@@ -53,8 +53,10 @@ for (const width of [390, 1280]) {
     await dialog.getByRole('button', { name: 'Retry Original Action', exact: true }).click()
     await expect(dialog).toContainText('Subscription adjustment rejected')
     expect(attempts).toHaveLength(2)
+    expect(attempts[0].replayOnly).toBeUndefined()
+    expect(attempts[1].replayOnly).toBe('true')
     expect(attempts[0].key).toBeTruthy()
-    expect(attempts[1]).toEqual(attempts[0])
+    expect(attempts[1]).toEqual({ ...attempts[0], replayOnly: 'true' })
     expect(attempts[0].body).toEqual({ subscription_ids: [1, 2], action: 'extend', days: 7 })
     await expect(page.getByRole('checkbox', { name: 'Select subscription #1', exact: true })).not.toBeChecked()
     await expect(page.getByRole('checkbox', { name: 'Select subscription #2', exact: true })).toBeChecked()
