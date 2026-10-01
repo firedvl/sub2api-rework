@@ -92,7 +92,7 @@ describe('BulkSubscriptionActionDialog', () => {
     await wrapper.get('input[type="number"]').setValue(days)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action: 'extend', days }, expect.any(String))
+    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action: 'extend', days }, expect.any(String), false)
     expect(wrapper.emitted('completed')).toEqual([[successResult]])
     expect(wrapper.find('button[type="submit"]').exists()).toBe(false)
   })
@@ -120,7 +120,7 @@ describe('BulkSubscriptionActionDialog', () => {
     await flushPromises()
     expect(bulkAction).toHaveBeenCalledWith({
       subscription_ids: [1, 2], action: 'reset_quota', daily: false, weekly: true, monthly: false
-    }, expect.any(String))
+    }, expect.any(String), false)
   })
 
   it.each(['revoke', 'restore'] as const)('submits %s without unrelated parameters', async action => {
@@ -128,7 +128,7 @@ describe('BulkSubscriptionActionDialog', () => {
     expect(wrapper.text()).toContain(`admin.subscriptions.bulk.${action}Hint`)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action }, expect.any(String))
+    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action }, expect.any(String), false)
   })
 
   it.each([0, 101])('rejects a selection of %s subscriptions', async count => {
@@ -190,7 +190,7 @@ describe('BulkSubscriptionActionDialog', () => {
     await wrapper.setProps({ action: 'revoke', subscriptions: [subscription(3)] })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(bulkAction.mock.calls[1]).toEqual(bulkAction.mock.calls[0])
+    expect(bulkAction.mock.calls[1]).toEqual([...bulkAction.mock.calls[0]!.slice(0, 2), true])
     expect(bulkAction.mock.calls[1]![0]).toEqual({ subscription_ids: [1, 2], action: 'extend', days: -7 })
     expect(wrapper.emitted('completed')).toEqual([[successResult]])
   })
@@ -207,7 +207,7 @@ describe('BulkSubscriptionActionDialog', () => {
     const retry = mountDialog('extend', [subscription(2), subscription(1)])
     await retry.get('form').trigger('submit')
     await flushPromises()
-    expect(bulkAction.mock.calls[1]).toEqual(bulkAction.mock.calls[0])
+    expect(bulkAction.mock.calls[1]).toEqual([...bulkAction.mock.calls[0]!.slice(0, 2), true])
     retry.unmount()
 
     const next = mountDialog()
@@ -236,7 +236,21 @@ describe('BulkSubscriptionActionDialog', () => {
       await wrapper.get('form').trigger('submit')
       await flushPromises()
     }
-    expect(bulkAction.mock.calls[1]).toEqual(bulkAction.mock.calls[0])
-    expect(bulkAction.mock.calls[2]).toEqual(bulkAction.mock.calls[0])
+    expect(bulkAction.mock.calls[1]).toEqual([...bulkAction.mock.calls[0]!.slice(0, 2), true])
+    expect(bulkAction.mock.calls[2]).toEqual([...bulkAction.mock.calls[0]!.slice(0, 2), true])
+  })
+
+  it('keeps an expired uncertain operation and refuses another replay in the same dialog', async () => {
+    bulkAction.mockRejectedValueOnce({ status: 0 }).mockRejectedValueOnce({ status: 410, message: 'Replay unavailable' })
+    const wrapper = mountDialog()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.subscriptions.bulk.replayUnavailable')
+    expect(wrapper.get('footer button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(sessionStorage.length).toBe(1)
+    await wrapper.get('form').trigger('submit')
+    expect(bulkAction).toHaveBeenCalledTimes(2)
   })
 })
