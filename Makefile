@@ -20,6 +20,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsRequestDetailsModal.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
 	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
 	src/components/account/__tests__/CreateAccountModal.spec.ts \
 	src/components/account/__tests__/EditAccountModal.spec.ts \
