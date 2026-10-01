@@ -4,7 +4,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 
 import RiskControlView from '../RiskControlView.vue'
+import enChannels from '@/i18n/locales/en/admin/channels'
+import zhChannels from '@/i18n/locales/zh/admin/channels'
 import type { ContentModerationAPIKeyStatus, ContentModerationConfig, UpdateContentModerationConfig } from '@/api/admin/riskControl'
+
+it('names the asynchronous worker counter separately from synchronous checks', () => {
+  expect(enChannels.riskControl.processed).toBe('Async processed')
+  expect(zhChannels.riskControl.processed).toBe('异步已处理')
+})
 
 const {
   getConfig,

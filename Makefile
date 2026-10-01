@@ -51,6 +51,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/common/__tests__/ProxySelector.testing.spec.ts \
 	src/utils/__tests__/proxyExpiry.boundary.spec.ts \
 	src/views/admin/__tests__/ProxiesView.filters.spec.ts \
+	src/views/admin/__tests__/RiskControlView.spec.ts \
 	src/__tests__/integration/proxy-data-import.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
