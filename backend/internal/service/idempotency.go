@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
@@ -24,13 +26,14 @@ const (
 )
 
 var (
-	ErrIdempotencyKeyRequired    = infraerrors.BadRequest("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
-	ErrIdempotencyKeyInvalid     = infraerrors.BadRequest("IDEMPOTENCY_KEY_INVALID", "idempotency key is invalid")
-	ErrIdempotencyKeyConflict    = infraerrors.Conflict("IDEMPOTENCY_KEY_CONFLICT", "idempotency key reused with different payload")
-	ErrIdempotencyInProgress     = infraerrors.Conflict("IDEMPOTENCY_IN_PROGRESS", "idempotent request is still processing")
-	ErrIdempotencyRetryBackoff   = infraerrors.Conflict("IDEMPOTENCY_RETRY_BACKOFF", "idempotent request is in retry backoff window")
-	ErrIdempotencyStoreUnavail   = infraerrors.ServiceUnavailable("IDEMPOTENCY_STORE_UNAVAILABLE", "idempotency store unavailable")
-	ErrIdempotencyInvalidPayload = infraerrors.BadRequest("IDEMPOTENCY_PAYLOAD_INVALID", "failed to normalize request payload")
+	ErrIdempotencyKeyRequired       = infraerrors.BadRequest("IDEMPOTENCY_KEY_REQUIRED", "idempotency key is required")
+	ErrIdempotencyKeyInvalid        = infraerrors.BadRequest("IDEMPOTENCY_KEY_INVALID", "idempotency key is invalid")
+	ErrIdempotencyKeyConflict       = infraerrors.Conflict("IDEMPOTENCY_KEY_CONFLICT", "idempotency key reused with different payload")
+	ErrIdempotencyInProgress        = infraerrors.Conflict("IDEMPOTENCY_IN_PROGRESS", "idempotent request is still processing")
+	ErrIdempotencyRetryBackoff      = infraerrors.Conflict("IDEMPOTENCY_RETRY_BACKOFF", "idempotent request is in retry backoff window")
+	ErrIdempotencyStoreUnavail      = infraerrors.ServiceUnavailable("IDEMPOTENCY_STORE_UNAVAILABLE", "idempotency store unavailable")
+	ErrIdempotencyReplayUnavailable = infraerrors.New(http.StatusGone, "IDEMPOTENCY_REPLAY_UNAVAILABLE", "the original operation can no longer be replayed")
+	ErrIdempotencyInvalidPayload    = infraerrors.BadRequest("IDEMPOTENCY_PAYLOAD_INVALID", "failed to normalize request payload")
 )
 
 type IdempotencyRecord struct {
@@ -88,6 +91,8 @@ type IdempotencyExecuteOptions struct {
 	TTL              time.Duration
 	RequireKey       bool
 	ExecutionTimeout time.Duration
+	ReplayOnly       bool
+	RunInTransaction func(context.Context, func(context.Context) error) error
 }
 
 type IdempotencyExecuteResult struct {
@@ -203,9 +208,13 @@ func (c *IdempotencyCoordinator) Execute(
 	opts IdempotencyExecuteOptions,
 	execute func(context.Context) (any, error),
 ) (*IdempotencyExecuteResult, error) {
+	transactionCtx := ctx
 	var executionCancel context.CancelFunc
 	if opts.ExecutionTimeout > 0 {
-		ctx, executionCancel = context.WithTimeout(context.WithoutCancel(ctx), opts.ExecutionTimeout)
+		var transactionCancel context.CancelFunc
+		transactionCtx, transactionCancel = context.WithTimeout(context.WithoutCancel(ctx), opts.ExecutionTimeout+5*time.Second)
+		defer transactionCancel()
+		ctx, executionCancel = context.WithTimeout(transactionCtx, opts.ExecutionTimeout)
 		defer executionCancel()
 	}
 	if execute == nil {
@@ -217,7 +226,7 @@ func (c *IdempotencyCoordinator) Execute(
 		return nil, err
 	}
 	if key == "" {
-		if opts.ExecutionTimeout > 0 || (opts.RequireKey && !c.cfg.ObserveOnly) {
+		if opts.ReplayOnly || opts.RunInTransaction != nil || opts.ExecutionTimeout > 0 || (opts.RequireKey && !c.cfg.ObserveOnly) {
 			return nil, ErrIdempotencyKeyRequired
 		}
 		data, execErr := execute(ctx)
@@ -246,7 +255,7 @@ func (c *IdempotencyCoordinator) Execute(
 	}
 	now := time.Now()
 	expiresAt := now.Add(ttl)
-	lockedUntil := now.Add(c.cfg.ProcessingTimeout)
+	lockedUntil := now.Add(c.cfg.ProcessingTimeout).Truncate(time.Microsecond)
 	keyHash := HashIdempotencyKey(key)
 
 	record := &IdempotencyRecord{
@@ -258,13 +267,16 @@ func (c *IdempotencyCoordinator) Execute(
 		ExpiresAt:          expiresAt,
 	}
 
-	owner, err := c.repo.CreateProcessing(ctx, record)
-	if err != nil {
-		RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "create_processing_error")
-		logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "unknown->store_unavailable", false, map[string]string{
-			"operation": "create_processing",
-		})
-		return nil, ErrIdempotencyStoreUnavail.WithCause(err)
+	owner := false
+	if !opts.ReplayOnly {
+		owner, err = c.repo.CreateProcessing(ctx, record)
+		if err != nil {
+			RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "create_processing_error")
+			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "unknown->store_unavailable", false, map[string]string{
+				"operation": "create_processing",
+			})
+			return nil, ErrIdempotencyStoreUnavail.WithCause(err)
+		}
 	}
 	if owner {
 		recordIdempotencyClaim(opts.Route, opts.Scope, map[string]string{"mode": "new_claim"})
@@ -282,6 +294,9 @@ func (c *IdempotencyCoordinator) Execute(
 			return nil, ErrIdempotencyStoreUnavail.WithCause(getErr)
 		}
 		if existing == nil {
+			if opts.ReplayOnly {
+				return nil, ErrIdempotencyReplayUnavailable
+			}
 			RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "missing_existing")
 			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "unknown->store_unavailable", false, map[string]string{
 				"operation": "missing_existing",
@@ -295,6 +310,9 @@ func (c *IdempotencyCoordinator) Execute(
 		}
 		reclaimedByExpired := false
 		if !existing.ExpiresAt.After(now) {
+			if opts.ReplayOnly {
+				return nil, ErrIdempotencyReplayUnavailable
+			}
 			taken, reclaimErr := c.repo.TryReclaim(ctx, existing.ID, existing.Status, now, lockedUntil, expiresAt)
 			if reclaimErr != nil {
 				RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "try_reclaim_expired_error")
@@ -350,6 +368,16 @@ func (c *IdempotencyCoordinator) Execute(
 				logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "succeeded->replayed", true, nil)
 				return &IdempotencyExecuteResult{Data: data, Replayed: true}, nil
 			case IdempotencyStatusProcessing:
+				if opts.RunInTransaction != nil && existing.LockedUntil != nil && !existing.LockedUntil.After(now) {
+					taken, reclaimErr := c.repo.TryReclaim(ctx, existing.ID, IdempotencyStatusProcessing, now, lockedUntil, expiresAt)
+					if reclaimErr != nil {
+						return nil, ErrIdempotencyStoreUnavail.WithCause(reclaimErr)
+					}
+					if taken {
+						record.ID = existing.ID
+						break
+					}
+				}
 				recordIdempotencyConflict(opts.Route, opts.Scope, map[string]string{"reason": "in_progress"})
 				logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->conflict", false, nil)
 				return nil, c.conflictWithRetryAfter(ErrIdempotencyInProgress, existing.LockedUntil, now)
@@ -398,7 +426,7 @@ func (c *IdempotencyCoordinator) Execute(
 		return nil, ErrIdempotencyStoreUnavail
 	}
 
-	if opts.ExecutionTimeout > 0 {
+	if opts.ExecutionTimeout > 0 && opts.RunInTransaction == nil {
 		stopRenewal := c.renewProcessingLease(ctx, executionCancel, record, ttl)
 		defer stopRenewal()
 	}
@@ -408,50 +436,91 @@ func (c *IdempotencyCoordinator) Execute(
 		recordIdempotencyProcessingDuration(opts.Route, opts.Scope, time.Since(execStart), nil)
 	}()
 
-	data, execErr := execute(ctx)
-	persistCtx := ctx
-	if opts.ExecutionTimeout > 0 {
-		var cancel context.CancelFunc
-		persistCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		expiresAt = time.Now().Add(ttl)
-	}
-	if execErr != nil {
-		backoffUntil := time.Now().Add(c.cfg.FailedRetryBackoff)
-		reason := infraerrors.Reason(execErr)
-		if reason == "" {
-			reason = "EXECUTION_FAILED"
+	var data any
+	executeAndStore := func(executionCtx, persistCtx context.Context) error {
+		var execErr error
+		data, execErr = execute(executionCtx)
+		if persistCtx == nil {
+			persistCtx = executionCtx
+			if opts.ExecutionTimeout > 0 {
+				var cancel context.CancelFunc
+				persistCtx, cancel = context.WithTimeout(context.WithoutCancel(executionCtx), 5*time.Second)
+				defer cancel()
+			}
 		}
-		recordIdempotencyRetryBackoff(opts.Route, opts.Scope, nil)
-		logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->failed_retryable", false, map[string]string{
-			"reason": reason,
-		})
-		if markErr := c.repo.MarkFailedRetryable(persistCtx, record.ID, reason, backoffUntil, expiresAt); markErr != nil {
-			RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "mark_failed_retryable_error")
-			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
-				"operation": "mark_failed_retryable",
+		if opts.ExecutionTimeout > 0 {
+			expiresAt = time.Now().Add(ttl)
+		}
+		if execErr != nil {
+			if opts.RunInTransaction != nil {
+				return execErr
+			}
+			backoffUntil := time.Now().Add(c.cfg.FailedRetryBackoff)
+			reason := infraerrors.Reason(execErr)
+			if reason == "" {
+				reason = "EXECUTION_FAILED"
+			}
+			recordIdempotencyRetryBackoff(opts.Route, opts.Scope, nil)
+			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->failed_retryable", false, map[string]string{
+				"reason": reason,
 			})
+			if markErr := c.repo.MarkFailedRetryable(persistCtx, record.ID, reason, backoffUntil, expiresAt); markErr != nil {
+				RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "mark_failed_retryable_error")
+				logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
+					"operation": "mark_failed_retryable",
+				})
+			}
+			return execErr
 		}
-		return nil, execErr
-	}
 
-	storedBody, marshalErr := c.marshalStoredResponse(data)
-	if marshalErr != nil {
-		RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "marshal_response_error")
-		logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
-			"operation": "marshal_response",
-		})
-		return nil, ErrIdempotencyStoreUnavail.WithCause(marshalErr)
+		storedBody, marshalErr := c.marshalStoredResponse(data)
+		if marshalErr == nil && opts.RunInTransaction != nil && !json.Valid([]byte(storedBody)) {
+			marshalErr = errors.New("aggregate response cannot be stored as replayable JSON")
+		}
+		if marshalErr != nil {
+			RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "marshal_response_error")
+			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
+				"operation": "marshal_response",
+			})
+			return ErrIdempotencyStoreUnavail.WithCause(marshalErr)
+		}
+		if markErr := c.repo.MarkSucceeded(persistCtx, record.ID, 200, storedBody, expiresAt); markErr != nil {
+			RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "mark_succeeded_error")
+			logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
+				"operation": "mark_succeeded",
+			})
+			return ErrIdempotencyStoreUnavail.WithCause(markErr)
+		}
+		return nil
 	}
-	if markErr := c.repo.MarkSucceeded(persistCtx, record.ID, 200, storedBody, expiresAt); markErr != nil {
-		RecordIdempotencyStoreUnavailable(opts.Route, opts.Scope, "mark_succeeded_error")
-		logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->store_unavailable", false, map[string]string{
-			"operation": "mark_succeeded",
+	if opts.RunInTransaction != nil {
+		err = opts.RunInTransaction(transactionCtx, func(txCtx context.Context) error {
+			if dbent.TxFromContext(txCtx) == nil {
+				return ErrIdempotencyStoreUnavail.WithCause(errors.New("mutation transaction context is required"))
+			}
+			current, lookupErr := c.repo.GetByScopeAndKeyHash(txCtx, opts.Scope, keyHash)
+			if lookupErr != nil {
+				return ErrIdempotencyStoreUnavail.WithCause(lookupErr)
+			}
+			if current == nil || current.Status != IdempotencyStatusProcessing || current.RequestFingerprint != fingerprint ||
+				current.LockedUntil == nil || !current.LockedUntil.Equal(*record.LockedUntil) || !current.LockedUntil.After(time.Now()) {
+				return ErrIdempotencyInProgress
+			}
+			mutationCtx := txCtx
+			if deadline, bounded := ctx.Deadline(); bounded {
+				var cancel context.CancelFunc
+				mutationCtx, cancel = context.WithDeadline(txCtx, deadline)
+				defer cancel()
+			}
+			return executeAndStore(mutationCtx, txCtx)
 		})
-		return nil, ErrIdempotencyStoreUnavail.WithCause(markErr)
+	} else {
+		err = executeAndStore(ctx, nil)
+	}
+	if err != nil {
+		return nil, err
 	}
 	logIdempotencyAudit(opts.Route, opts.Scope, keyHash, "processing->succeeded", false, nil)
-
 	return &IdempotencyExecuteResult{Data: data}, nil
 }
 

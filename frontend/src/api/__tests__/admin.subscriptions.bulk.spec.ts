@@ -26,4 +26,13 @@ describe('admin subscription batch APIs', () => {
     expect(await subscriptionsAPI.bulkAssign(request)).toEqual(result)
     expect(post).toHaveBeenCalledWith('/admin/subscriptions/bulk-assign', request)
   })
+
+  it('marks uncertain retries as replay-only rather than new mutations', async () => {
+    const request = { subscription_ids: [3], action: 'revoke' as const }
+    post.mockResolvedValue({ data: { success_count: 1, failed_count: 0, results: [] } })
+    await subscriptionsAPI.bulkAction(request, 'original-operation-key', true)
+    expect(post).toHaveBeenCalledWith('/admin/subscriptions/bulk-action', request, {
+      headers: { 'Idempotency-Key': 'original-operation-key', 'Idempotency-Retry-Only': 'true' }
+    })
+  })
 })

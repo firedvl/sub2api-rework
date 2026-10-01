@@ -703,7 +703,12 @@ export default {
         restoreHint: '恢复后将重新启用这些订阅。原有效期已结束的订阅将显示为已过期。',
         confirm: '确认执行',
         retry: '重试原操作',
-        retryHint: '暂未确认操作结果。重试会继续原操作，避免重复处理。也可关闭后重新选择相同订阅和参数重试。',
+        retryHint: '原操作结果尚未确认。',
+        pendingTitle: '未确认的操作',
+        pendingLoadFailed: '无法读取已保存的订阅操作。',
+        replayUnavailable: '无法重放操作，原订阅操作结果尚未确认。',
+        dismissSaved: '移除已保存的操作',
+        dismissUnconfirmed: '原订阅操作结果仍未确认。',
         requestFailed: '批量操作请求失败，请重试',
         result: '处理完成：成功 {success} 条，失败 {failed} 条',
         itemFailed: '操作失败'
