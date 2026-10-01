@@ -105,9 +105,12 @@ func TestCORS_AllowedOrigin_HasAllowHeaders(t *testing.T) {
 				"允许的 origin 应收到 Allow-Headers")
 			assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "X-Admin-UI-Request")
 			assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "X-User-UI-Request")
+			assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key")
+			assert.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Retry-Only")
 			assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Methods"),
 				"允许的 origin 应收到 Allow-Methods")
 			assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "Server-Timing")
+			assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "X-Idempotency-Replayed")
 			assert.Equal(t, "86400", w.Header().Get("Access-Control-Max-Age"),
 				"允许的 origin 应收到 Max-Age=86400")
 			assert.Equal(t, "https://allowed.example.com", w.Header().Get("Access-Control-Allow-Origin"),
