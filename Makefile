@@ -23,6 +23,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.subscriptions.bulk.spec.ts \
 	src/components/admin/subscription/__tests__/BulkSubscriptionActionDialog.spec.ts \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
+	src/views/admin/__tests__/UsersView.status.spec.ts \
+	src/views/admin/__tests__/UsersView.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/stores/__tests__/adminSettings.retry.spec.ts \
