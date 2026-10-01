@@ -27,6 +27,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
 	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
+	src/components/account/__tests__/CreateAccountModal.spec.ts \
+	src/components/account/__tests__/EditAccountModal.spec.ts \
+	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
 	src/api/__tests__/admin.proxies.spec.ts \
 	src/components/common/__tests__/ProxySelector.testing.spec.ts \
 	src/utils/__tests__/proxyExpiry.boundary.spec.ts \
