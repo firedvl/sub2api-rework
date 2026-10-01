@@ -12,6 +12,18 @@ function paramsFromDeeplink(deeplink: string): URLSearchParams {
 }
 
 describe('ccswitchImport utils', () => {
+  it.each(['https://api.example.com/', 'https://api.example.com///'])('trims trailing slashes before the Antigravity path for %s', (baseUrl) => {
+    for (const clientType of ['claude', 'gemini'] as const) {
+      const params = paramsFromDeeplink(buildCcSwitchImportDeeplink({
+        ...baseInput,
+        baseUrl,
+        platform: 'antigravity',
+        clientType
+      }))
+      expect(params.get('endpoint')).toBe('https://api.example.com/antigravity')
+      expect(params.get('app')).toBe(clientType)
+    }
+  })
   it('defaults OpenAI CC Switch imports to the current Codex model', () => {
     expect(OPENAI_CC_SWITCH_CODEX_MODEL).toBe('gpt-5.5')
   })
@@ -38,9 +50,27 @@ describe('ccswitchImport utils', () => {
 
     expect(params.get('resource')).toBe('provider')
     expect(params.get('app')).toBe('codex')
-    expect(params.get('endpoint')).toBe(baseInput.baseUrl)
+    expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/v1`)
     expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
     expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
+  })
+
+  it.each([
+    'https://api.example.com',
+    'https://api.example.com/',
+    'https://api.example.com/v1',
+    'https://api.example.com/v1/'
+  ])('imports Codex with exactly one /v1 suffix for base URL %s', (baseUrl) => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        baseUrl,
+        platform: 'openai',
+        clientType: 'claude'
+      })
+    )
+
+    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
   })
 
   it.each([
