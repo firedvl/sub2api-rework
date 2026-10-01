@@ -1149,6 +1149,7 @@ export default {
       accountCreated: 'Account created successfully',
       accountUpdated: 'Account updated successfully',
       failedToCreate: 'Failed to create account',
+      defaultMappingsLoadFailed: 'Failed to load default model mappings. Select Antigravity again to retry.',
       failedToUpdate: 'Failed to update account',
       pleaseSelectStatus: 'Please select a valid account status',
       mixedChannelWarningTitle: 'Mixed Channel Warning',
