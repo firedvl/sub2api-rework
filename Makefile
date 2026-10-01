@@ -17,6 +17,12 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
+	src/api/__tests__/admin.proxies.spec.ts \
+	src/components/common/__tests__/ProxySelector.testing.spec.ts \
+	src/utils/__tests__/proxyExpiry.boundary.spec.ts \
+	src/views/admin/__tests__/ProxiesView.filters.spec.ts \
+	src/__tests__/integration/proxy-data-import.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts

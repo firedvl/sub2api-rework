@@ -941,6 +941,26 @@ export default {
         title: 'Client Tool Cache (May Change Automatic Tool Selection)',
         hint: 'For detected Grok Free OAuth accounts, this is enabled by default for client function tools such as Codex and Trae. Turn it off to opt out if the automatic tool-selection behavior is not acceptable.'
       },
+      grokMediaEligibility: {
+        title: 'Media Generation Eligibility',
+        current: 'Current decision:',
+        auto: 'Automatic detection',
+        enabled: 'Force enable',
+        disabled: 'Force disable',
+        eligible: 'Eligible',
+        ineligible: 'Not eligible',
+        loadFailed: 'Unable to load media eligibility',
+        forceEnableWarning: 'Force enable bypasses automatic eligibility checks. Use only for accounts confirmed to support image/video generation.',
+        reasons: {
+          eligible: 'Paid entitlement confirmed',
+          billing_inconclusive: 'Billing information inconclusive',
+          billing_forbidden: 'Billing endpoint forbidden',
+          billing_free_tier: 'Free tier account',
+          billing_unobserved: 'Billing not observed yet',
+          override_enabled: 'Manually forced enabled',
+          override_disabled: 'Manually forced disabled'
+        }
+      },
       autoPauseOnExpired: 'Auto Pause On Expired',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
 	  autoPause5hThreshold: '5h Usage Threshold (%)',

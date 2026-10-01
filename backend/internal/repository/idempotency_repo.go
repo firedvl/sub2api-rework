@@ -58,12 +58,21 @@ func (r *idempotencyRepository) GetByScopeAndKeyHash(ctx context.Context, scope,
 		FROM idempotency_records
 		WHERE scope = $1 AND idempotency_key_hash = $2
 	`
+	executor := r.sql
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		var supported bool
+		executor, supported = tx.Client().Driver().(sqlExecutor)
+		if !supported {
+			return nil, errors.New("transaction driver does not support SQL execution")
+		}
+		query += " FOR UPDATE"
+	}
 	record := &service.IdempotencyRecord{}
 	var responseStatus sql.NullInt64
 	var responseBody sql.NullString
 	var errorReason sql.NullString
 	var lockedUntil sql.NullTime
-	err := scanSingleRow(ctx, r.sql, query, []any{scope, keyHash},
+	err := scanSingleRow(ctx, executor, query, []any{scope, keyHash},
 		&record.ID,
 		&record.Scope,
 		&record.IdempotencyKeyHash,
@@ -184,14 +193,35 @@ func (r *idempotencyRepository) MarkSucceeded(ctx context.Context, id int64, res
 			updated_at = NOW()
 		WHERE id = $1
 	`
-	_, err := r.sql.ExecContext(ctx, query,
+	executor := r.sql
+	arguments := []any{
 		id,
 		service.IdempotencyStatusSucceeded,
 		responseStatus,
 		responseBody,
 		expiresAt,
-	)
-	return err
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		var supported bool
+		executor, supported = tx.Client().Driver().(sqlExecutor)
+		if !supported {
+			return errors.New("transaction driver does not support SQL execution")
+		}
+		query += " AND status = $6"
+		arguments = append(arguments, service.IdempotencyStatusProcessing)
+	}
+	result, err := executor.ExecContext(ctx, query, arguments...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return service.ErrIdempotencyInProgress
+	}
+	return nil
 }
 
 func (r *idempotencyRepository) MarkFailedRetryable(ctx context.Context, id int64, errorReason string, lockedUntil, expiresAt time.Time) error {

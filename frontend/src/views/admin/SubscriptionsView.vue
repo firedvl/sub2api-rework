@@ -165,6 +165,24 @@
             </button>
           </div>
         </div>
+        <div v-if="pendingOperations.length > 0 || pendingLoadError" class="mt-3 border-t border-gray-200 py-3 dark:border-dark-700">
+          <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.subscriptions.bulk.pendingTitle') }}</h3>
+          <p v-if="pendingLoadError" role="alert" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ pendingLoadError }}</p>
+          <div v-for="operation in pendingOperations" :key="operation.storageKey" class="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span class="min-w-0 flex-1 break-words text-sm text-gray-600 dark:text-gray-400">
+              {{ t(`admin.subscriptions.bulk.${operation.request.action}`) }}:
+              {{ operation.request.subscription_ids.map(id => `#${id}`).join(', ') }}
+            </span>
+            <div class="flex shrink-0 gap-2">
+              <button type="button" class="btn btn-secondary btn-sm" data-test="subscription-pending-retry" :disabled="loading" @click="resumeBulkOperation(operation)">
+                <Icon name="refresh" size="sm" class="mr-2" />{{ t('admin.subscriptions.bulk.retry') }}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" :title="t('admin.subscriptions.bulk.dismissSaved')" :aria-label="t('admin.subscriptions.bulk.dismissSaved')" @click="pendingToDismiss = operation">
+                <Icon name="x" size="sm" />
+              </button>
+            </div>
+          </div>
+        </div>
         <div
           v-if="selectedCount > 0"
           class="mt-3 space-y-2 rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20"
@@ -180,7 +198,7 @@
               type="button"
               :class="action === 'revoke' ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'"
               :data-test="`bulk-${action}`"
-              :disabled="loading || bulkTargets[action].length === 0"
+              :disabled="loading || !!pendingLoadError || bulkTargets[action].length === 0"
               @click="openBulkAction(action)"
             >
               {{ t(`admin.subscriptions.bulk.${action}`) }} ({{ bulkTargets[action].length }})
@@ -483,7 +501,8 @@
       :show="true"
       :action="bulkAction"
       :subscriptions="bulkSubscriptions"
-      @close="bulkAction = null"
+      :operation-to-resume="resumedOperation"
+      @close="closeBulkAction"
       @completed="handleBulkCompleted"
     />
 
@@ -724,6 +743,16 @@
       </template>
     </BaseDialog>
 
+    <ConfirmDialog
+      :show="pendingToDismiss !== null"
+      :title="t('admin.subscriptions.bulk.dismissSaved')"
+      :message="t('admin.subscriptions.bulk.dismissUnconfirmed')"
+      :confirm-text="t('admin.subscriptions.bulk.dismissSaved')"
+      :danger="true"
+      @confirm="dismissPendingOperation"
+      @cancel="pendingToDismiss = null"
+    />
+
     <!-- Revoke Confirmation Dialog -->
     <ConfirmDialog
       :show="showRevokeDialog"
@@ -863,6 +892,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { completeBulkSubscriptionOperation, listPendingBulkSubscriptionOperations, type BulkSubscriptionOperation } from '@/components/admin/subscription/bulkSubscriptionOperation'
 import {
   getRemainingDurationParts,
   getRemainingExpiryDuration,
@@ -1017,6 +1047,36 @@ const { selectedIds, selectedCount, setSelectedIds, clear: clearSelection, remov
 const bulkActions: SubscriptionBulkAction[] = ['extend', 'reset_quota', 'revoke', 'restore']
 const bulkAction = ref<SubscriptionBulkAction | null>(null)
 const bulkSubscriptions = ref<UserSubscription[]>([])
+const pendingOperations = ref<BulkSubscriptionOperation[]>([])
+const pendingLoadError = ref('')
+const resumedOperation = ref<BulkSubscriptionOperation | null>(null)
+const pendingToDismiss = ref<BulkSubscriptionOperation | null>(null)
+const refreshPendingOperations = () => {
+  try {
+    pendingOperations.value = listPendingBulkSubscriptionOperations()
+    pendingLoadError.value = ''
+  } catch (error) {
+    pendingOperations.value = []
+    pendingLoadError.value = t('admin.subscriptions.bulk.pendingLoadFailed')
+    console.error('Failed to read pending subscription actions:', error)
+  }
+}
+const resumeBulkOperation = (operation: BulkSubscriptionOperation) => {
+  resumedOperation.value = operation
+  bulkSubscriptions.value = subscriptions.value.filter(subscription => operation.request.subscription_ids.includes(subscription.id))
+  bulkAction.value = operation.request.action
+}
+const closeBulkAction = () => {
+  bulkAction.value = null
+  resumedOperation.value = null
+  refreshPendingOperations()
+}
+const dismissPendingOperation = () => {
+  if (!pendingToDismiss.value) return
+  completeBulkSubscriptionOperation(pendingToDismiss.value)
+  pendingToDismiss.value = null
+  refreshPendingOperations()
+}
 const bulkTargets = computed(() => {
   const selected = subscriptions.value.filter((subscription) => selectedIds.value.includes(subscription.id))
   return {
@@ -1033,11 +1093,13 @@ const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
   setSelectedIds(keys.filter((key): key is number => typeof key === 'number' && visibleIds.has(key)))
 }
 const openBulkAction = (action: SubscriptionBulkAction) => {
-  if (loading.value || bulkTargets.value[action].length === 0) return
+  if (loading.value || pendingLoadError.value || bulkTargets.value[action].length === 0) return
+  resumedOperation.value = null
   bulkSubscriptions.value = [...bulkTargets.value[action]]
   bulkAction.value = action
 }
 const handleBulkCompleted = async (result: SubscriptionBulkActionResult) => {
+  refreshPendingOperations()
   removeSelectedIds(result.results.filter((item) => item.success).map((item) => item.subscription_id))
   await loadSubscriptions()
 }
@@ -1606,6 +1668,7 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(() => {
+  refreshPendingOperations()
   loadUserColumnMode()
   loadSavedColumns()
   loadSubscriptions()

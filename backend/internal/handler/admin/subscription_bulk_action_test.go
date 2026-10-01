@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	"github.com/DATA-DOG/go-sqlmock"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -84,6 +88,26 @@ func bulkActionHandlerRequest(router *gin.Engine, path, body, key string) *httpt
 	return rec
 }
 
+func bulkActionTransactionClient(t *testing.T, itemSuccesses ...bool) *dbent.Client {
+	t.Helper()
+	database, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	mock.ExpectBegin()
+	for _, success := range itemSuccesses {
+		mock.ExpectExec("SAVEPOINT subscription_bulk_item").WillReturnResult(sqlmock.NewResult(0, 0))
+		if !success {
+			mock.ExpectExec("ROLLBACK TO SAVEPOINT subscription_bulk_item").WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+		mock.ExpectExec("RELEASE SAVEPOINT subscription_bulk_item").WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+	mock.ExpectCommit()
+	t.Cleanup(func() {
+		require.NoError(t, mock.ExpectationsWereMet())
+		_ = database.Close()
+	})
+	return dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, database)))
+}
+
 func TestSubscriptionBulkAction_RequiresIdempotencyCoordinator(t *testing.T) {
 	service.SetDefaultIdempotencyCoordinator(nil)
 	repo := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: time.Now().AddDate(0, 0, 30)}}
@@ -105,7 +129,7 @@ func TestSubscriptionBulkAction_ReplaysPartialResultWithoutRepeatingExtension(t 
 	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
 	expiresAt := time.Now().AddDate(0, 0, 30)
 	repo := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: expiresAt}}
-	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
+	svc := service.NewSubscriptionService(nil, repo, nil, bulkActionTransactionClient(t, true, false), nil)
 	t.Cleanup(svc.Stop)
 	h := NewSubscriptionHandler(svc)
 	router := gin.New()
@@ -151,7 +175,7 @@ func TestSubscriptionBulkAction_ClientCancellationStillPersistsReplay(t *testing
 		bulkActionHandlerSubscriptionRepo: &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: expiresAt}},
 		cancelRequest:                     cancel,
 	}
-	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
+	svc := service.NewSubscriptionService(nil, repo, nil, bulkActionTransactionClient(t, true), nil)
 	t.Cleanup(svc.Stop)
 	router := gin.New()
 	path := "/api/v1/admin/subscriptions/bulk-action"
@@ -206,6 +230,30 @@ func TestSubscriptionBulkAction_ValidatesBeforeIdempotencyAndExecution(t *testin
 
 	response := bulkActionHandlerRequest(router, path, `{"subscription_ids":[1],"action":"revoke"}`, "bulk-valid")
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+}
+
+func TestSubscriptionBulkAction_ReplayOnlyMissingRecordDoesNotExecute(t *testing.T) {
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), service.DefaultIdempotencyConfig()))
+	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
+	repository := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: time.Now().AddDate(0, 0, 30)}}
+	subscriptions := service.NewSubscriptionService(nil, repository, nil, nil, nil)
+	t.Cleanup(subscriptions.Stop)
+	router := gin.New()
+	path := "/api/v1/admin/subscriptions/bulk-action"
+	router.POST(path, NewSubscriptionHandler(subscriptions).BulkAction)
+	for _, scenario := range []struct {
+		header string
+		status int
+	}{{"true", http.StatusGone}, {"false", http.StatusBadRequest}, {"yes", http.StatusBadRequest}} {
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"subscription_ids":[1],"action":"extend","days":7}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "original-uncertain-operation")
+		request.Header.Set("Idempotency-Retry-Only", scenario.header)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Equal(t, scenario.status, response.Code, response.Body.String())
+	}
+	require.Zero(t, repository.extendCalls)
 }
 
 func TestSubscriptionBulkAssign_RejectsInvalidUserIDsBeforeExecution(t *testing.T) {
