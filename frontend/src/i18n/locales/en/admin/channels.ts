@@ -703,7 +703,12 @@ export default {
         restoreHint: 'These subscriptions will be enabled again. Subscriptions whose original validity has ended will be restored as expired.',
         confirm: 'Confirm Action',
         retry: 'Retry Original Action',
-        retryHint: 'The outcome is not yet confirmed. Retrying continues the original operation to avoid duplicate changes. You can also close this dialog, then select the same subscriptions and settings to retry.',
+        retryHint: 'The original outcome is unconfirmed.',
+        pendingTitle: 'Unconfirmed Actions',
+        pendingLoadFailed: 'Saved subscription actions could not be read.',
+        replayUnavailable: 'Replay is unavailable. The original subscription outcome is unconfirmed.',
+        dismissSaved: 'Dismiss Saved Action',
+        dismissUnconfirmed: 'The original subscription outcome remains unconfirmed.',
         requestFailed: 'The bulk request failed. Please retry.',
         result: 'Completed: {success} succeeded, {failed} failed',
         itemFailed: 'Action failed'
