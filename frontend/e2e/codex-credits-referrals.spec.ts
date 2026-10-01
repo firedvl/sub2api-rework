@@ -9,7 +9,7 @@ for (const width of [390, 1280]) {
     await installOperatorApiMock(page, 'admin')
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(error.message))
-    const account = { ...operatorFixtureAccounts[0], credentials: { plan_type: 'plus' } }
+    const account = { ...operatorFixtureAccounts[0], name: width < 768 ? 'W'.repeat(80) : operatorFixtureAccounts[0].name, credentials: { plan_type: 'plus' } }
     const balance = '12345678901234567890.0123'
     let sends = 0
     let resets = 0
@@ -19,7 +19,7 @@ for (const width of [390, 1280]) {
       should_show: true, available_invites: 2, remaining_send_capacity: 2,
       remaining_reward_capacity: 2, requires_explicit_confirmation: true,
       program_id: 'codex_referral_consumer', fetched_at: 1770000000,
-      title: 'Fixture invitation offer', rules: ['Fixture offer rule'],
+      title: 'Fixture invitation offer', rules: ['Fixture offer rule', 'R'.repeat(120)],
     }
     await page.route('**/api/v1/admin/accounts*', route => {
       if (new URL(route.request().url()).pathname !== '/api/v1/admin/accounts') return route.fallback()
@@ -59,15 +59,19 @@ for (const width of [390, 1280]) {
     await page.getByTestId('referral-open').first().click()
     const dialog = page.getByRole('dialog', { name: 'Invite user', exact: true })
     await expect(dialog.getByText('Fixture invitation offer')).toBeVisible()
+    expect(await dialog.locator('form').evaluate(form => form.scrollWidth <= form.clientWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`referral-long-content-${width}.png`), animations: 'disabled' })
     const email = dialog.getByTestId('referral-email')
     const consent = dialog.getByTestId('referral-consent')
     const submit = dialog.getByTestId('referral-send')
     await email.fill('friend@example.com')
     await expect(submit).toBeDisabled()
     await consent.check()
-    await submit.click()
+    await email.press('Enter')
     await expect.poll(() => sends).toBe(1)
     await expect(submit).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeVisible()
     releaseSend()
     await expect(dialog.getByRole('status').filter({ hasText: 'Invitation sent to friend@example.com' })).toBeVisible()
     await expect(dialog.getByText('The invitation was sent, but remaining capacity could not be refreshed. Query again.')).toBeVisible()

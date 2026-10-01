@@ -30,7 +30,7 @@
       :close-on-escape="!sending"
       @close="closeDialog"
     >
-      <form :id="formID" class="space-y-4" @submit.prevent="sendInvite">
+      <form :id="formID" class="space-y-4 break-words" @submit.prevent="sendInvite">
         <p class="text-sm text-gray-600 dark:text-gray-300">
           {{ t('admin.accounts.openaiReferral.fromAccount') }} <strong>{{ account.name }}</strong>
         </p>
