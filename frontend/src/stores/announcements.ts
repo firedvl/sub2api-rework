@@ -15,6 +15,7 @@ export const useAnnouncementStore = defineStore('announcements', () => {
 
   // Session-scoped dedup set — not reactive, used as plain lookup only
   let shownPopupIds = new Set<number>()
+  let fetchGeneration = 0
 
   // Getters
   const unreadCount = computed(() =>
@@ -30,18 +31,21 @@ export const useAnnouncementStore = defineStore('announcements', () => {
 
     // Set immediately to prevent concurrent duplicate requests
     lastFetchTime.value = now
+    const generation = ++fetchGeneration
 
     try {
       loading.value = true
       const all = await announcementsAPI.list(false)
+      if (generation !== fetchGeneration) return
       announcements.value = all.slice(0, 20)
       enqueueNewPopups()
     } catch (err: any) {
+      if (generation !== fetchGeneration) return
       // Revert throttle timestamp on failure so retry is allowed
       lastFetchTime.value = 0
       console.error('Failed to fetch announcements:', err)
     } finally {
-      loading.value = false
+      if (generation === fetchGeneration) loading.value = false
     }
   }
 
@@ -100,24 +104,26 @@ export const useAnnouncementStore = defineStore('announcements', () => {
   async function markAllAsRead() {
     const unread = announcements.value.filter((a) => !a.read_at)
     if (unread.length === 0) return
+    const generation = fetchGeneration
 
     try {
       loading.value = true
-      await Promise.all(unread.map((a) => announcementsAPI.markRead(a.id)))
-      announcements.value.forEach((a) => {
-        if (!a.read_at) {
-          a.read_at = new Date().toISOString()
-        }
-      })
+      const results = await Promise.allSettled(unread.map(async (announcement) => {
+        await announcementsAPI.markRead(announcement.id)
+        announcement.read_at = new Date().toISOString()
+      }))
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure) throw failure.reason
     } catch (err: any) {
       console.error('Failed to mark all as read:', err)
       throw err
     } finally {
-      loading.value = false
+      if (generation === fetchGeneration) loading.value = false
     }
   }
 
   function reset() {
+    fetchGeneration++
     announcements.value = []
     lastFetchTime.value = 0
     shownPopupIds = new Set()

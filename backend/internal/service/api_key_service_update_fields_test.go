@@ -93,6 +93,18 @@ func TestAPIKeyUpdate_OnlyDeclaresRequestedColumns(t *testing.T) {
 	}
 }
 
+func TestAPIKeyUpdate_RejectsOtherOwnerWithoutMutation(t *testing.T) {
+	key := &APIKey{ID: 1, UserID: 7, Key: "sk-test", Name: "before", Status: StatusActive, Quota: 100, QuotaUsed: 30, Usage5h: 12}
+	svc, repo := newUpdateFieldsAPIKeyService(key)
+	quota := 0.0
+	_, err := svc.Update(context.Background(), 1, 8, UpdateAPIKeyRequest{Quota: &quota})
+	require.ErrorIs(t, err, ErrInsufficientPerms)
+	require.Empty(t, repo.updateFields)
+	require.Equal(t, 100.0, key.Quota)
+	require.Equal(t, 30.0, key.QuotaUsed)
+	require.Equal(t, 12.0, key.Usage5h)
+}
+
 // 显式重置仍需声明对应的列，避免收窄写入列时把功能改坏。
 func TestAPIKeyUpdate_DeclaresUsageColumnsOnExplicitReset(t *testing.T) {
 	reset := true
