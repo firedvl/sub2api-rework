@@ -2585,6 +2585,72 @@ func (r *accountRepository) ClearQuotaRateLimitIfObserved(ctx context.Context, i
 	return true, nil
 }
 
+func (repository *accountRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *service.Account, resetAt *time.Time) (bool, error) {
+	client := clientFromContext(ctx, repository.client)
+	result, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET rate_limited_at = GREATEST(clock_timestamp(), rate_limited_at + INTERVAL '1 microsecond'),
+			rate_limit_reset_at = GREATEST(rate_limit_reset_at, $3::timestamptz),
+			updated_at = clock_timestamp()
+		WHERE id = $1 AND updated_at = $2 AND deleted_at IS NULL
+	`, observed.ID, observed.UpdatedAt, resetAt)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, repository.sql, service.SchedulerOutboxEventAccountChanged, &observed.ID, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue Ollama 429 failed: account=%d err=%v", observed.ID, err)
+	}
+	repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
+	return true, nil
+}
+
+func (repository *accountRepository) SetRateLimitedIfUnchanged(
+	ctx context.Context,
+	id int64,
+	expectedUpdatedAt time.Time,
+	expectedLimitedAt, expectedResetAt *time.Time,
+	newResetAt time.Time,
+) (bool, error) {
+	preds := []dbpredicate.Account{dbaccount.IDEQ(id), dbaccount.UpdatedAtEQ(expectedUpdatedAt)}
+	if expectedLimitedAt == nil {
+		preds = append(preds, dbaccount.RateLimitedAtIsNil())
+	} else {
+		preds = append(preds, dbaccount.RateLimitedAtEQ(*expectedLimitedAt))
+	}
+	if expectedResetAt == nil {
+		preds = append(preds, dbaccount.RateLimitResetAtIsNil())
+	} else {
+		preds = append(preds, dbaccount.RateLimitResetAtEQ(*expectedResetAt))
+	}
+
+	now := time.Now()
+	updated, err := repository.client.Account.Update().
+		Where(preds...).
+		SetRateLimitedAt(now).
+		SetRateLimitResetAt(newResetAt).
+		Save(ctx)
+	if err != nil {
+		return false, err
+	}
+	if updated == 0 {
+		repository.syncSchedulerAccountSnapshot(ctx, id)
+		return false, nil
+	}
+	if err := enqueueSchedulerOutbox(ctx, repository.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue rate limit failed: account=%d err=%v", id, err)
+	}
+	repository.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 func (r *accountRepository) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, reason ...string) error {
 	if scope == "" {
 		return nil
