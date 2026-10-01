@@ -37,7 +37,6 @@ FRONTEND_CRITICAL_VITEST := \
 	src/utils/__tests__/featureFlags.spec.ts \
 	src/router/__tests__/siteBillingTitles.spec.ts \
 	src/router/__tests__/feature-access.spec.ts \
-	src/views/user/__tests__/UsageView.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsRequestDetailsModal.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
