@@ -17,6 +17,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/stores/__tests__/adminSettings.retry.spec.ts \
 	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
 	src/api/__tests__/admin.proxies.spec.ts \
 	src/components/common/__tests__/ProxySelector.testing.spec.ts \
