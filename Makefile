@@ -12,6 +12,10 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
+	src/api/__tests__/admin.subscriptions.bulk.spec.ts \
+	src/components/admin/subscription/__tests__/BulkSubscriptionActionDialog.spec.ts \
+	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
+	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
