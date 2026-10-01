@@ -21,6 +21,7 @@ type reviewOllamaRepository struct {
 	clearOnConflict   bool
 	swapOnConflict    bool
 	afterCAS          func()
+	afterConflict     func()
 }
 
 func (repository *reviewOllamaRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *Account, resetAt *time.Time) (*AccountRateLimitGeneration, error) {
@@ -30,6 +31,10 @@ func (repository *reviewOllamaRepository) RecordOllamaCloudUsage429(ctx context.
 		repository.mutate(observed.ID, func(account *Account) {
 			if repository.clearOnConflict {
 				account.RateLimitedAt, account.RateLimitResetAt = nil, nil
+				if account.Extra == nil {
+					account.Extra = make(map[string]any)
+				}
+				account.Extra[OllamaRateLimitClearGenerationExtraKey] = "fixture-clear"
 			}
 			if repository.swapOnConflict {
 				account.Credentials["api_key"] = "replacement-fixture"
@@ -41,6 +46,9 @@ func (repository *reviewOllamaRepository) RecordOllamaCloudUsage429(ctx context.
 		repository.conflictOnce = false
 		short := time.Now().Add(5 * time.Second)
 		_, err := repository.ollama429Repo.RecordOllamaCloudUsage429(ctx, observed, &short)
+		if repository.afterConflict != nil {
+			repository.afterConflict()
+		}
 		return nil, err
 	}
 	updated, err := repository.ollama429Repo.RecordOllamaCloudUsage429(ctx, observed, resetAt)
@@ -48,6 +56,38 @@ func (repository *reviewOllamaRepository) RecordOllamaCloudUsage429(ctx context.
 		repository.mutate(observed.ID, func(account *Account) { account.RateLimitedAt, account.RateLimitResetAt = nil, nil })
 	}
 	return updated, err
+}
+
+func TestOllama429InitiallyNilConflictRejectsExplicitAdministrativeClear(t *testing.T) {
+	account := ollama429Account(998, PlatformOpenAI)
+	repository := &reviewOllamaRepository{ollama429Repo: newOllama429Repo(account), conflicts: 1, clearOnConflict: true}
+	scheduler := newOllama429SchedulerStub(true)
+	limiter := NewRateLimitService(repository, nil, nil, nil, nil)
+	limiter.SetOllamaCloudUsageProbeScheduler(scheduler)
+	limiter.handle429(context.Background(), account, http.Header{}, nil)
+	require.Equal(t, 1, repository.recordCalls)
+	require.Zero(t, scheduler.count())
+	require.Nil(t, repository.currentReset(account.ID))
+}
+
+func TestOllama429NormalRuntimePublicationDoesNotSuppressNewerProbe(t *testing.T) {
+	account := ollama429Account(999, PlatformOpenAI)
+	repository := &reviewOllamaRepository{ollama429Repo: newOllama429Repo(account), conflictOnce: true}
+	scheduler := newOllama429SchedulerStub(true)
+	gateway := &OpenAIGatewayService{}
+	repository.afterConflict = func() { gateway.BlockAccountScheduling(account, time.Now().Add(5*time.Second), "other429") }
+	limiter := NewRateLimitService(repository, nil, nil, nil, nil)
+	limiter.SetAccountRuntimeBlocker(gateway)
+	limiter.SetOllamaCloudUsageProbeScheduler(scheduler)
+	limiter.handle429(context.Background(), account, http.Header{"Retry-After": {"60"}}, nil)
+	require.Equal(t, 1, scheduler.count())
+	scheduler.fire(account.ID, time.Now().Add(time.Hour))
+	require.Equal(t, 1, repository.casUpdated)
+	value, blocked := gateway.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, blocked)
+	deadline, valid := value.(time.Time)
+	require.True(t, valid)
+	require.True(t, deadline.After(time.Now().Add(50*time.Minute)))
 }
 
 func TestOllama429ConflictRetriesAreBoundedAndRejectClearOrIdentityChange(t *testing.T) {

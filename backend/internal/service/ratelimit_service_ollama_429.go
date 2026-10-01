@@ -11,6 +11,7 @@ import (
 )
 
 const ollamaCloudUsageProbeWritebackTimeout = 10 * time.Second
+const OllamaRateLimitClearGenerationExtraKey = "ollama_rate_limit_clear_generation"
 
 type ollamaCloudUsageProbeScheduler interface {
 	ScheduleOllamaCloudUsageRateLimitProbe(accountID int64, onExhausted OllamaCloudUsageRateLimitProbeCallback) bool
@@ -27,7 +28,7 @@ type AccountRateLimitGeneration struct {
 }
 
 type accountRuntimeGenerationBlocker interface {
-	AccountSchedulingBlockGeneration(accountID int64) uint64
+	AccountSchedulingClearGeneration(accountID int64) uint64
 	BlockAccountSchedulingIfGeneration(account *Account, until time.Time, reason string, expected uint64) (uint64, bool)
 }
 
@@ -52,7 +53,7 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 			slog.Error("ollama_runtime_generation_unavailable", "account_id", account.ID)
 			return
 		}
-		runtimeGeneration = runtime.AccountSchedulingBlockGeneration(account.ID)
+		runtimeGeneration = runtime.AccountSchedulingClearGeneration(account.ID)
 	}
 	observed, err := service.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || observed == nil {
@@ -64,6 +65,7 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 		slog.Debug("ollama_cloud_usage_trigger_identity_changed", "account_id", account.ID)
 		return
 	}
+	clearGeneration, _ := observed.Extra[OllamaRateLimitClearGenerationExtraKey].(string)
 
 	var shortReset time.Time
 	now := time.Now()
@@ -103,8 +105,9 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 			return
 		}
 		fingerprint, matches := ollamaCloudUsageRateLimitFingerprint(latest)
+		latestClearGeneration, _ := latest.Extra[OllamaRateLimitClearGenerationExtraKey].(string)
 		if !matches || fingerprint != originFingerprint || !latest.IsActive() || !latest.Schedulable ||
-			(observed.RateLimitedAt != nil && latest.RateLimitedAt == nil) {
+			latestClearGeneration != clearGeneration || (observed.RateLimitedAt != nil && latest.RateLimitedAt == nil) {
 			slog.Debug("ollama_rate_limit_trigger_retry_rejected", "account_id", account.ID)
 			return
 		}

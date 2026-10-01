@@ -92,7 +92,7 @@ func (blocker *ollama429BlockerStub) ClearAccountSchedulingBlock(id int64) {
 	blocker.generations[id]++
 }
 
-func (blocker *ollama429BlockerStub) AccountSchedulingBlockGeneration(id int64) uint64 {
+func (blocker *ollama429BlockerStub) AccountSchedulingClearGeneration(id int64) uint64 {
 	blocker.mu.Lock()
 	defer blocker.mu.Unlock()
 	return blocker.generations[id]
@@ -107,7 +107,6 @@ func (blocker *ollama429BlockerStub) BlockAccountSchedulingIfGeneration(account 
 	if blocker.generations == nil {
 		blocker.generations = make(map[int64]uint64)
 	}
-	blocker.generations[account.ID]++
 	blocker.blocks = append(blocker.blocks, ollama429BlockRec{accountID: account.ID, until: until, reason: reason})
 	return blocker.generations[account.ID], true
 }

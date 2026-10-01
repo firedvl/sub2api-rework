@@ -345,13 +345,11 @@ func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until ti
 	s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
 }
 
-func (service *OpenAIGatewayService) AccountSchedulingBlockGeneration(accountID int64) uint64 {
+func (service *OpenAIGatewayService) AccountSchedulingClearGeneration(accountID int64) uint64 {
 	lock := service.openAIAccountRuntimeBlockLock(accountID)
 	lock.Lock()
 	defer lock.Unlock()
-	value, _ := service.openaiAccountRuntimeBlockGeneration.Load(accountID)
-	generation, _ := value.(uint64)
-	return generation
+	return lock.clearGeneration
 }
 
 func (service *OpenAIGatewayService) BlockAccountSchedulingIfGeneration(account *Account, until time.Time, reason string, expected uint64) (uint64, bool) {
@@ -361,14 +359,12 @@ func (service *OpenAIGatewayService) BlockAccountSchedulingIfGeneration(account 
 	lock := service.openAIAccountRuntimeBlockLock(account.ID)
 	lock.Lock()
 	defer lock.Unlock()
-	value, _ := service.openaiAccountRuntimeBlockGeneration.Load(account.ID)
-	generation, _ := value.(uint64)
-	if generation != expected {
-		return generation, false
+	if lock.clearGeneration != expected {
+		return lock.clearGeneration, false
 	}
-	next, _ := service.blockAccountSchedulingLocked(account, until, reason)
+	_, _ = service.blockAccountSchedulingLocked(account, until, reason)
 	service.openaiAccountQuotaBlockGeneration.Delete(account.ID)
-	return next, true
+	return expected, true
 }
 
 func (s *OpenAIGatewayService) BlockQuotaAccountScheduling(account *Account, until time.Time) uint64 {
@@ -397,11 +393,16 @@ func (s *OpenAIGatewayService) BlockQuotaAccountScheduling(account *Account, unt
 	return generation
 }
 
-func (s *OpenAIGatewayService) openAIAccountRuntimeBlockLock(accountID int64) *sync.Mutex {
-	actual, _ := s.openaiAccountRuntimeBlockLocks.LoadOrStore(accountID, &sync.Mutex{})
-	mu, ok := actual.(*sync.Mutex)
+type accountRuntimeBlockLock struct {
+	sync.Mutex
+	clearGeneration uint64
+}
+
+func (s *OpenAIGatewayService) openAIAccountRuntimeBlockLock(accountID int64) *accountRuntimeBlockLock {
+	actual, _ := s.openaiAccountRuntimeBlockLocks.LoadOrStore(accountID, &accountRuntimeBlockLock{})
+	mu, ok := actual.(*accountRuntimeBlockLock)
 	if !ok {
-		mu = &sync.Mutex{}
+		mu = &accountRuntimeBlockLock{}
 		s.openaiAccountRuntimeBlockLocks.Store(accountID, mu)
 	}
 	return mu
@@ -449,6 +450,7 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 	mu := s.openAIAccountRuntimeBlockLock(accountID)
 	mu.Lock()
 	defer mu.Unlock()
+	mu.clearGeneration++
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
 	s.openaiOAuth429RetryStartedAt.Delete(accountID)
 	s.openaiAccountQuotaBlockGeneration.Delete(accountID)
@@ -491,6 +493,7 @@ func (s *OpenAIGatewayService) clearQuotaAccountSchedulingBlockLocked(accountID 
 	if !ok || !quotaOK || !validGeneration || !validQuotaGeneration || generation != expected || quotaGeneration != expected {
 		return
 	}
+	s.openAIAccountRuntimeBlockLock(accountID).clearGeneration++
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
 	s.openaiOAuth429RetryStartedAt.Delete(accountID)
 	s.openaiAccountQuotaBlockGeneration.Delete(accountID)
