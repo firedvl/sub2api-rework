@@ -20,6 +20,20 @@ type modelNotFoundRateLimitCall struct {
 	reason    string
 }
 
+func TestDeepSeekProviderModelFailureRemainsAccountModelScoped(t *testing.T) {
+	repository := &modelNotFoundAccountRepoStub{}
+	limiter := &RateLimitService{accountRepo: repository}
+	account := &Account{ID: 887, Platform: PlatformDeepseek, Type: AccountTypeAPIKey}
+	handled := limiter.HandleUpstreamError(context.Background(), account, http.StatusNotFound, http.Header{},
+		[]byte(`{"error":{"code":"model_not_found","message":"provider rejected model"}}`), "deepseek-provider-fixture")
+	require.True(t, handled)
+	require.Zero(t, repository.tempCalls)
+	require.Len(t, repository.modelRateLimitCalls, 1)
+	require.Equal(t, account.ID, repository.modelRateLimitCalls[0].accountID)
+	require.Equal(t, "deepseek-provider-fixture", repository.modelRateLimitCalls[0].scope)
+	require.Equal(t, upstreamModelNotFoundReason, repository.modelRateLimitCalls[0].reason)
+}
+
 type modelNotFoundAccountRepoStub struct {
 	mockAccountRepoForGemini
 	tempCalls           int
