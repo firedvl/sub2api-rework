@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -693,6 +694,27 @@ func TestBillingService_Gemini36FlashThinkingTierFallbacksAreBillable(t *testing
 			require.InDelta(t, 0.15, cost.CacheReadCost, 1e-12)
 			require.InDelta(t, 9.15, cost.TotalCost, 1e-12)
 		})
+	}
+}
+
+func TestBillingService_Gemini37And38FlashFallbacks(t *testing.T) {
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+	for _, pricingService := range []*PricingService{nil, {pricingData: map[string]*LiteLLMModelPricing{}}} {
+		svc := NewBillingService(&config.Config{}, pricingService)
+		for _, baseModel := range []string{"gemini-3.7-flash", "gemini-3.8-flash"} {
+			for _, suffix := range []string{"", "-high", "-low", "-medium", "-tiered"} {
+				for _, model := range []string{baseModel + suffix, "models/" + baseModel + suffix, strings.ReplaceAll(baseModel, ".", "-") + suffix} {
+					t.Run(model, func(t *testing.T) {
+						cost, err := svc.CalculateCost(model, tokens, 1)
+						require.NoError(t, err)
+						require.InDelta(t, 0.75, cost.InputCost, 1e-12)
+						require.InDelta(t, 3.75, cost.OutputCost, 1e-12)
+						require.InDelta(t, 0.075, cost.CacheReadCost, 1e-12)
+						require.InDelta(t, 4.575, cost.TotalCost, 1e-12)
+					})
+				}
+			}
+		}
 	}
 }
 

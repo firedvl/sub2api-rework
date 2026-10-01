@@ -599,6 +599,32 @@
         </div>
       </div>
 
+      <div v-if="isGrokOAuthAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="grok-media-eligibility-card">
+        <label for="grok-media-eligibility-mode" class="input-label">{{ t('admin.accounts.grokMediaEligibility.title') }}</label>
+        <Select
+          id="grok-media-eligibility-mode"
+          v-model="grokMediaEligibilityMode"
+          :aria-label="t('admin.accounts.grokMediaEligibility.title')"
+          :options="grokMediaEligibilityOptions"
+          :disabled="grokMediaEligibilityLoading || !grokMediaEligibilityState || submitting"
+          data-testid="grok-media-eligibility-mode"
+        />
+        <div v-if="grokMediaEligibilityError" class="mt-2 flex items-center justify-between gap-3 text-sm text-red-600 dark:text-red-400" role="alert">
+          <span>{{ grokMediaEligibilityError }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" data-testid="grok-media-eligibility-retry" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="loadGrokMediaEligibility">
+            <Icon name="refresh" size="sm" />
+          </button>
+        </div>
+        <p v-else-if="grokMediaEligibilityState" class="mt-2 text-sm text-gray-600 dark:text-gray-400" data-testid="grok-media-eligibility-status">
+          {{ t('admin.accounts.grokMediaEligibility.current') }}
+          {{ grokMediaEligibilityState.eligible ? t('admin.accounts.grokMediaEligibility.eligible') : t('admin.accounts.grokMediaEligibility.ineligible') }}:
+          {{ t(`admin.accounts.grokMediaEligibility.reasons.${grokMediaEligibilityState.reason}`) }}
+        </p>
+        <p v-if="grokMediaEligibilityMode === 'enabled'" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+          {{ t('admin.accounts.grokMediaEligibility.forceEnableWarning') }}
+        </p>
+      </div>
+
       <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
       <div
         v-if="account.platform === 'grok' && account.type === 'oauth'"
@@ -3134,7 +3160,9 @@ import type {
   OpenAIEndpointCapability,
   OllamaCloudUsageState,
   OpenCodeGoUsageState,
-  OpenCodeGoUsageWindow
+  OpenCodeGoUsageWindow,
+  GrokMediaEligibilityMode,
+  GrokMediaEligibilityState
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -3584,6 +3612,36 @@ const grokOAuthBaseUrl = ref('')
 // Grok Free OAuth accounts use client-tool prompt caching by default. Keep an
 // explicit false in the account extra as the opt-out signal.
 const grokClientToolCacheEnabled = ref(true)
+const isGrokOAuthAccount = computed(() => props.account?.platform === 'grok' && props.account?.type === 'oauth')
+const grokMediaEligibilityMode = ref<GrokMediaEligibilityMode>('auto')
+const grokMediaEligibilityInitialMode = ref<GrokMediaEligibilityMode>('auto')
+const grokMediaEligibilityState = ref<GrokMediaEligibilityState | null>(null)
+const grokMediaEligibilityLoading = ref(false)
+const grokMediaEligibilityError = ref('')
+let grokMediaEligibilityGeneration = 0
+const grokMediaEligibilityOptions = computed(() => (['auto', 'enabled', 'disabled'] as const).map(mode => ({
+  value: mode, label: t(`admin.accounts.grokMediaEligibility.${mode}`)
+})))
+const loadGrokMediaEligibility = async () => {
+  if (!props.show || !props.account || !isGrokOAuthAccount.value) return
+  const accountID = props.account.id
+  const generation = ++grokMediaEligibilityGeneration
+  grokMediaEligibilityLoading.value = true
+  grokMediaEligibilityError.value = ''
+  grokMediaEligibilityState.value = null
+  try {
+    const state = await adminAPI.accounts.getGrokMediaEligibility(accountID)
+    if (generation !== grokMediaEligibilityGeneration) return
+    grokMediaEligibilityState.value = state
+    grokMediaEligibilityMode.value = state.mode
+    grokMediaEligibilityInitialMode.value = state.mode
+  } catch (error: unknown) {
+    if (generation !== grokMediaEligibilityGeneration) return
+    grokMediaEligibilityError.value = extractApiErrorMessage(error, t('admin.accounts.grokMediaEligibility.loadFailed'))
+  } finally {
+    if (generation === grokMediaEligibilityGeneration) grokMediaEligibilityLoading.value = false
+  }
+}
 
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
@@ -4570,6 +4628,18 @@ watch(
 )
 
 // Model mapping helpers
+watch([() => props.show, () => props.account], (_value, _previous, onCleanup) => {
+  onCleanup(() => { grokMediaEligibilityGeneration++ })
+  grokMediaEligibilityGeneration++
+  grokMediaEligibilityState.value = null
+  grokMediaEligibilityError.value = ''
+  grokMediaEligibilityLoading.value = false
+  const current = props.account?.extra?.grok_media_eligible
+  grokMediaEligibilityMode.value = current === true ? 'enabled' : current === false ? 'disabled' : 'auto'
+  grokMediaEligibilityInitialMode.value = grokMediaEligibilityMode.value
+  void loadGrokMediaEligibility()
+}, { immediate: true })
+
 const addModelMapping = () => {
   modelMappings.value.push({ from: '', to: '' })
 }
@@ -5054,6 +5124,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
+  grokMediaEligibilityGeneration++
   antigravityMixedChannelConfirmed.value = false
   handleAutoResetCreditReviewCancel()
   clearMixedChannelDialog()
@@ -5063,6 +5134,14 @@ const handleClose = () => {
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
+    if (isGrokOAuthAccount.value) {
+      const extra = { ...(updatePayload.extra as Record<string, unknown> | undefined) }
+      delete extra.grok_media_eligible
+      if (grokMediaEligibilityState.value && grokMediaEligibilityMode.value !== grokMediaEligibilityInitialMode.value) {
+        extra.grok_media_eligible = grokMediaEligibilityMode.value === 'auto' ? null : grokMediaEligibilityMode.value === 'enabled'
+      }
+      updatePayload = { ...updatePayload, extra }
+    }
     const updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
     emit('updated', updatedAccount)
