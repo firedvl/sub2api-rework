@@ -3,7 +3,7 @@
  * - `subscription_enabled`（opt-out，缺省视为开启）：用户端订阅面（侧边栏、购买页订阅 tab、顶栏徽章、/subscriptions）
  * - `payment_balance_disabled`（strict true）：支付配置里的 BALANCE_PAYMENT_DISABLED，关闭余额充值下单
  *
- * 两者都关闭是接口层可表达但 UI 不提供的组合，这里归为「仅充值」；后台选择器保存时会把余额充值重新打开。
+ * API-only both-disabled settings use the recharge label; selecting a mode writes both flags.
  */
 export type SiteBillingMode = 'recharge_and_subscription' | 'recharge_only' | 'subscription_only'
 
@@ -13,7 +13,6 @@ export const SITE_BILLING_MODES: readonly SiteBillingMode[] = [
   'subscription_only',
 ]
 
-/** i18n 子键（admin.settings.features.siteBillingMode.options / hints）。 */
 export const SITE_BILLING_MODE_I18N_KEYS: Record<SiteBillingMode, string> = {
   recharge_and_subscription: 'rechargeAndSubscription',
   recharge_only: 'rechargeOnly',
