@@ -9,6 +9,7 @@ import type {
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
+  GrokMediaEligibilityState,
   PaginatedResponse,
   AccountUsageInfo,
   WindowStats,
@@ -243,6 +244,11 @@ export async function duplicate(id: number): Promise<Account> {
  */
 export async function update(id: number, updates: UpdateAccountRequest): Promise<Account> {
   const { data } = await apiClient.put<Account>(`/admin/accounts/${id}`, updates)
+  return data
+}
+
+export async function getGrokMediaEligibility(id: number): Promise<GrokMediaEligibilityState> {
+  const { data } = await apiClient.get<GrokMediaEligibilityState>(`/admin/accounts/${id}/grok-media-eligibility`)
   return data
 }
 
@@ -1129,6 +1135,7 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
 }
 
 export const accountsAPI = {
+  getGrokMediaEligibility,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
