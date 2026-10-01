@@ -120,10 +120,25 @@ func (s *grokMediaSlotsCache) assertReleased(t *testing.T) {
 
 type grokMediaSlotBindings struct {
 	testutil.StubGatewayCache
-	owner  int64
-	writes int
-	key    string
-	billed map[string]bool
+	owner   int64
+	writes  int
+	key     string
+	billed  map[string]bool
+	pending map[string][]byte
+}
+
+func (s *grokMediaSlotBindings) SetGrokVideoPendingBilling(ctx context.Context, key string, body []byte, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.pending == nil {
+		s.pending = make(map[string][]byte)
+	}
+	s.pending[key] = append([]byte(nil), body...)
+	return nil
+}
+func (s *grokMediaSlotBindings) GetGrokVideoPendingBilling(_ context.Context, key string) ([]byte, error) {
+	return s.pending[key], nil
 }
 
 func (s *grokMediaSlotBindings) GetSessionAccountID(_ context.Context, groupID int64, key string) (int64, error) {
@@ -132,7 +147,10 @@ func (s *grokMediaSlotBindings) GetSessionAccountID(_ context.Context, groupID i
 	}
 	return s.owner, nil
 }
-func (s *grokMediaSlotBindings) SetSessionAccountID(_ context.Context, _ int64, key string, owner int64, _ time.Duration) error {
+func (s *grokMediaSlotBindings) SetSessionAccountID(ctx context.Context, _ int64, key string, owner int64, _ time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.key, s.owner = key, owner
 	s.writes++
 	return nil
@@ -186,7 +204,7 @@ func (p grokMediaSlotProber) ProbeMediaEligibility(ctx context.Context, id int64
 	return p(ctx, id)
 }
 
-func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool) (*OpenAIGatewayHandler, *grokMediaSlotsCache, *grokMediaSlotBindings, *grokMediaSlotUpstream) {
+func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool, platforms ...string) (*OpenAIGatewayHandler, *grokMediaSlotsCache, *grokMediaSlotBindings, *grokMediaSlotUpstream) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	accounts := make([]service.Account, 3)
@@ -194,6 +212,11 @@ func newGrokMediaSlotHandler(t *testing.T, oauth, mismatch bool) (*OpenAIGateway
 		accounts[i] = service.Account{ID: int64(i + 1), Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
 			Status: service.StatusActive, Schedulable: true, Concurrency: 50, Priority: i,
 			GroupIDs: []int64{24}, Credentials: map[string]any{"api_key": "test-key", "access_token": "test-token"}}
+		if len(platforms) > 0 {
+			accounts[i].Platform = platforms[0]
+			accounts[i].Credentials["base_url"] = "https://ark.cn-beijing.volces.com/api/v3"
+			accounts[i].Credentials["openai_capabilities"] = []string{"seedance"}
+		}
 		if oauth {
 			accounts[i].Type = service.AccountTypeOAuth
 			accounts[i].Credentials["refresh_token"] = "test-refresh"

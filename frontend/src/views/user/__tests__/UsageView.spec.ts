@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
 
 import UsageView from '../UsageView.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -89,10 +90,16 @@ vi.mock('@/api', () => ({
   },
 }))
 
+const appStoreState = vi.hoisted(() => ({
+  cachedPublicSettings: { allow_user_view_error_requests: true } as Record<string, unknown>,
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError, showWarning, showSuccess, showInfo,
-    cachedPublicSettings: { allow_user_view_error_requests: true },
+    get cachedPublicSettings() {
+      return appStoreState.cachedPublicSettings
+    },
   }),
 }))
 
@@ -491,5 +498,57 @@ describe('user UsageView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
     vi.unstubAllGlobals()
     clickSpy.mockRestore()
+  })
+})
+
+describe('UsageView subscription feature flag', () => {
+  afterEach(() => {
+    appStoreState.cachedPublicSettings = { allow_user_view_error_requests: true }
+  })
+
+  function billingTypeSelect(wrapper: ReturnType<typeof mountUsageView>) {
+    return wrapper.findAllComponents(Select).find((select) =>
+      select.props('options').some((option: SelectOption) => option.label === 'Subscription')
+    )
+  }
+
+  it('offers the balance / subscription billing-type filter by default', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    expect(billingTypeSelect(wrapper)).toBeDefined()
+    expect(wrapper.text()).toContain('Billing type')
+    wrapper.unmount()
+  })
+
+  it('hides the billing-type filter entirely when subscriptions are disabled', async () => {
+    appStoreState.cachedPublicSettings = { allow_user_view_error_requests: true, subscription_enabled: false }
+
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    expect(billingTypeSelect(wrapper)).toBeUndefined()
+    expect(wrapper.text()).not.toContain('Billing type')
+    wrapper.unmount()
+  })
+
+  it('clears a selected billing filter when subscriptions become hidden', async () => {
+    const settings = reactive({ allow_user_view_error_requests: true, subscription_enabled: true })
+    appStoreState.cachedPublicSettings = settings
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const select = billingTypeSelect(wrapper)
+    expect(select).toBeDefined()
+    select!.vm.$emit('update:modelValue', 1)
+    select!.vm.$emit('change', 1)
+    await flushPromises()
+    expect(query.mock.calls.at(-1)?.[0]?.billing_type).toBe(1)
+    const previousQueries = query.mock.calls.length
+    settings.subscription_enabled = false
+    await flushPromises()
+    expect(billingTypeSelect(wrapper)).toBeUndefined()
+    expect(query).toHaveBeenCalledTimes(previousQueries + 1)
+    expect(query.mock.calls.at(-1)?.[0]?.billing_type).toBeNull()
+    wrapper.unmount()
   })
 })
