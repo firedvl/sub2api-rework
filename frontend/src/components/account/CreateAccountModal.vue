@@ -3885,6 +3885,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
 
 import {
   claudeModels,
@@ -4772,6 +4773,21 @@ const canExchangeCode = computed(() => {
 
 // Watchers
 watch(
+  [() => props.show, () => form.platform],
+  async ([show, platform], _previous, onCleanup) => {
+    if (!show || platform !== 'antigravity') return
+    let active = true
+    onCleanup(() => { active = false })
+    try {
+      const mappings = await fetchAntigravityDefaultMappings()
+      if (active) antigravityModelMappings.value = mappings.map(mapping => ({ ...mapping }))
+    } catch (error) {
+      if (active) appStore.showError(extractApiErrorMessage(error, t('admin.accounts.defaultMappingsLoadFailed')))
+    }
+  }
+)
+
+watch(
   () => props.show,
   (newVal) => {
     if (newVal) {
@@ -4784,9 +4800,6 @@ watch(
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
-        fetchAntigravityDefaultMappings().then(mappings => {
-          antigravityModelMappings.value = [...mappings]
-        })
         antigravityWhitelistModels.value = []
       } else {
         antigravityWhitelistModels.value = []
@@ -4849,9 +4862,6 @@ watch(
     // Antigravity: 默认使用映射模式并填充默认映射
     if (newPlatform === 'antigravity') {
       antigravityModelRestrictionMode.value = 'mapping'
-      fetchAntigravityDefaultMappings().then(mappings => {
-        antigravityModelMappings.value = [...mappings]
-      })
       antigravityWhitelistModels.value = []
       accountCategory.value = 'oauth-based'
       antigravityAccountType.value = 'oauth'
@@ -5331,9 +5341,7 @@ const resetForm = () => {
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []
-  fetchAntigravityDefaultMappings().then(mappings => {
-    antigravityModelMappings.value = [...mappings]
-  })
+  antigravityModelMappings.value = []
   poolModeEnabled.value = false
   poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
   poolModeRetryStatusCodesInput.value = ''
