@@ -2,6 +2,23 @@ package service
 
 import "testing"
 
+func TestDeepSeekEgressRetainsExplicitAliasesAndDynamicProviderNames(t *testing.T) {
+	account := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"model_mapping": map[string]any{"operator-alias": "deepseek-provider-fixture[1m]"},
+	}}
+	if !account.IsModelSupported("operator-alias") || account.IsModelSupported("unconfigured-alias") {
+		t.Fatal("explicit model mapping must remain the account routability boundary")
+	}
+	mapped := resolveOpenAIForwardModel(account, "operator-alias", "")
+	if got := normalizeOpenAIModelForUpstream(account, mapped); got != "deepseek-provider-fixture" {
+		t.Fatalf("mapped model identity changed or context selector leaked: %q", got)
+	}
+	unmapped := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey}
+	if got := normalizeOpenAIModelForUpstream(unmapped, "deepseek-provider-fixture[1m]"); got != "deepseek-provider-fixture" {
+		t.Fatalf("unmapped provider model substituted: %q", got)
+	}
+}
+
 func TestResolveOpenAIForwardModel(t *testing.T) {
 	tests := []struct {
 		name                        string
