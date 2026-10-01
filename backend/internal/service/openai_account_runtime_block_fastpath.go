@@ -345,6 +345,32 @@ func (s *OpenAIGatewayService) BlockAccountScheduling(account *Account, until ti
 	s.openaiAccountQuotaBlockGeneration.Delete(account.ID)
 }
 
+func (service *OpenAIGatewayService) AccountSchedulingBlockGeneration(accountID int64) uint64 {
+	lock := service.openAIAccountRuntimeBlockLock(accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	value, _ := service.openaiAccountRuntimeBlockGeneration.Load(accountID)
+	generation, _ := value.(uint64)
+	return generation
+}
+
+func (service *OpenAIGatewayService) BlockAccountSchedulingIfGeneration(account *Account, until time.Time, reason string, expected uint64) (uint64, bool) {
+	if !isOpenAIAccount(account) {
+		return expected, false
+	}
+	lock := service.openAIAccountRuntimeBlockLock(account.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	value, _ := service.openaiAccountRuntimeBlockGeneration.Load(account.ID)
+	generation, _ := value.(uint64)
+	if generation != expected {
+		return generation, false
+	}
+	next, _ := service.blockAccountSchedulingLocked(account, until, reason)
+	service.openaiAccountQuotaBlockGeneration.Delete(account.ID)
+	return next, true
+}
+
 func (s *OpenAIGatewayService) BlockQuotaAccountScheduling(account *Account, until time.Time) uint64 {
 	if s == nil || !isOpenAIOAuthAccount(account) {
 		return 0

@@ -4,9 +4,13 @@ package repository
 
 import (
 	"context"
+	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -92,36 +96,91 @@ func TestRecordOllama429PreservesFloorAndSupersedesEveryGeneration(t *testing.T)
 	require.NoError(t, err)
 	updated, err := repository.RecordOllamaCloudUsage429(ctx, observed, nil)
 	require.NoError(t, err)
-	require.True(t, updated)
+	require.NotNil(t, updated)
 	first, err := repository.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.NotNil(t, first.RateLimitedAt)
 	require.Nil(t, first.RateLimitResetAt, "a disabled fallback must not invent a recovery deadline")
 	updated, err = repository.RecordOllamaCloudUsage429(ctx, observed, nil)
 	require.NoError(t, err)
-	require.False(t, updated, "a stale trigger must not replace the row version")
+	require.Nil(t, updated, "a stale trigger must not replace the row version")
 	longFloor := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
 	updated, err = repository.RecordOllamaCloudUsage429(ctx, first, &longFloor)
 	require.NoError(t, err)
-	require.True(t, updated)
+	require.NotNil(t, updated)
 	long, err := repository.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.True(t, long.RateLimitedAt.After(*first.RateLimitedAt))
 	shortFloor := time.Now().Add(time.Minute)
 	updated, err = repository.RecordOllamaCloudUsage429(ctx, long, &shortFloor)
 	require.NoError(t, err)
-	require.True(t, updated)
+	require.NotNil(t, updated)
 	latest, err := repository.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.Equal(t, longFloor, *latest.RateLimitResetAt)
 	require.True(t, latest.RateLimitedAt.After(*long.RateLimitedAt))
-	updated, err = repository.SetRateLimitedIfUnchanged(ctx, latest.ID, latest.UpdatedAt, long.RateLimitedAt, long.RateLimitResetAt, longFloor.Add(time.Hour))
+	applied, err := repository.SetRateLimitedIfUnchanged(ctx, latest.ID, latest.UpdatedAt, long.RateLimitedAt, long.RateLimitResetAt, longFloor.Add(time.Hour))
 	require.NoError(t, err)
-	require.False(t, updated, "the old event must remain stale even when its deadline floor did not move")
+	require.False(t, applied, "the old event must remain stale even when its deadline floor did not move")
 	require.NoError(t, repository.ClearRateLimit(ctx, latest.ID))
 	cleared, err := repository.GetByID(ctx, latest.ID)
 	require.NoError(t, err)
-	updated, err = repository.SetRateLimitedIfUnchanged(ctx, latest.ID, cleared.UpdatedAt, first.RateLimitedAt, nil, longFloor)
+	applied, err = repository.SetRateLimitedIfUnchanged(ctx, latest.ID, cleared.UpdatedAt, first.RateLimitedAt, nil, longFloor)
 	require.NoError(t, err)
-	require.False(t, updated, "an administratively cleared unknown-deadline generation must stay cleared")
+	require.False(t, applied, "an administratively cleared unknown-deadline generation must stay cleared")
+}
+
+type concurrentOllamaTriggerRepository struct {
+	service.AccountRepository
+	store   *accountRepository
+	reads   atomic.Int64
+	arrived sync.WaitGroup
+}
+
+func (repository *concurrentOllamaTriggerRepository) GetByID(ctx context.Context, id int64) (*service.Account, error) {
+	account, err := repository.store.GetByID(ctx, id)
+	if repository.reads.Add(1) <= 2 {
+		repository.arrived.Done()
+		repository.arrived.Wait()
+	}
+	return account, err
+}
+
+func (repository *concurrentOllamaTriggerRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *service.Account, resetAt *time.Time) (*service.AccountRateLimitGeneration, error) {
+	return repository.store.RecordOllamaCloudUsage429(ctx, observed, resetAt)
+}
+
+func (repository *concurrentOllamaTriggerRepository) SetRateLimitedIfUnchanged(ctx context.Context, id int64, version time.Time, limitedAt, resetAt *time.Time, next time.Time) (bool, error) {
+	return repository.store.SetRateLimitedIfUnchanged(ctx, id, version, limitedAt, resetAt, next)
+}
+
+func TestConcurrentOllama429RetainsMaximumFloorWithSharedObservedVersion(t *testing.T) {
+	ctx := context.Background()
+	store := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil)
+	account := mustCreateAccount(t, integrationEntClient, &service.Account{
+		Name: "ollama-concurrent-floor", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "fixture"},
+	})
+	t.Cleanup(func() {
+		require.NoError(t, integrationEntClient.Account.DeleteOneID(account.ID).Exec(mixins.SkipSoftDelete(context.Background())))
+	})
+	caller, err := store.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	repository := &concurrentOllamaTriggerRepository{AccountRepository: store, store: store}
+	repository.arrived.Add(2)
+	limiter := service.NewRateLimitService(repository, nil, nil, nil, nil)
+	var finished sync.WaitGroup
+	finished.Add(2)
+	before := time.Now()
+	for _, duration := range []string{"5", "60"} {
+		go func(seconds string) {
+			defer finished.Done()
+			limiter.HandleUpstreamError(ctx, caller, http.StatusTooManyRequests, http.Header{"Retry-After": {seconds}}, nil)
+		}(duration)
+	}
+	finished.Wait()
+	latest, err := store.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latest.RateLimitResetAt)
+	require.False(t, latest.RateLimitResetAt.Before(before.Add(time.Minute)))
 }

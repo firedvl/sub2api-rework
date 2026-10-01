@@ -21,7 +21,7 @@ func (repository *ollamaBoundaryRepository) SetRateLimited(_ context.Context, _ 
 	return nil
 }
 
-func (repository *ollamaBoundaryRepository) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (bool, error) {
+func (repository *ollamaBoundaryRepository) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (*AccountRateLimitGeneration, error) {
 	if resetAt != nil && resetAt.After(repository.resetAt) {
 		repository.resetAt = *resetAt
 		account := repository.accountsByID[observed.ID]
@@ -29,7 +29,8 @@ func (repository *ollamaBoundaryRepository) RecordOllamaCloudUsage429(_ context.
 		limitedAt := time.Now()
 		account.RateLimitedAt = &limitedAt
 	}
-	return true, nil
+	account := repository.accountsByID[observed.ID]
+	return &AccountRateLimitGeneration{LimitedAt: *account.RateLimitedAt, ResetAt: cloneTimePtr(account.RateLimitResetAt)}, nil
 }
 
 func (*ollamaBoundaryRepository) SetRateLimitedIfUnchanged(context.Context, int64, time.Time, *time.Time, *time.Time, time.Time) (bool, error) {

@@ -70,8 +70,9 @@ type ollama429BlockRec struct {
 }
 
 type ollama429BlockerStub struct {
-	mu     sync.Mutex
-	blocks []ollama429BlockRec
+	mu          sync.Mutex
+	blocks      []ollama429BlockRec
+	generations map[int64]uint64
 }
 
 func (b *ollama429BlockerStub) BlockAccountScheduling(account *Account, until time.Time, reason string) {
@@ -82,7 +83,34 @@ func (b *ollama429BlockerStub) BlockAccountScheduling(account *Account, until ti
 	}
 }
 
-func (b *ollama429BlockerStub) ClearAccountSchedulingBlock(int64) {}
+func (blocker *ollama429BlockerStub) ClearAccountSchedulingBlock(id int64) {
+	blocker.mu.Lock()
+	defer blocker.mu.Unlock()
+	if blocker.generations == nil {
+		blocker.generations = make(map[int64]uint64)
+	}
+	blocker.generations[id]++
+}
+
+func (blocker *ollama429BlockerStub) AccountSchedulingBlockGeneration(id int64) uint64 {
+	blocker.mu.Lock()
+	defer blocker.mu.Unlock()
+	return blocker.generations[id]
+}
+
+func (blocker *ollama429BlockerStub) BlockAccountSchedulingIfGeneration(account *Account, until time.Time, reason string, expected uint64) (uint64, bool) {
+	blocker.mu.Lock()
+	defer blocker.mu.Unlock()
+	if blocker.generations[account.ID] != expected {
+		return blocker.generations[account.ID], false
+	}
+	if blocker.generations == nil {
+		blocker.generations = make(map[int64]uint64)
+	}
+	blocker.generations[account.ID]++
+	blocker.blocks = append(blocker.blocks, ollama429BlockRec{accountID: account.ID, until: until, reason: reason})
+	return blocker.generations[account.ID], true
+}
 
 func (b *ollama429BlockerStub) last() (ollama429BlockRec, bool) {
 	b.mu.Lock()
@@ -126,12 +154,12 @@ func (r *ollama429Repo) GetByID(_ context.Context, id int64) (*Account, error) {
 	return &copy, nil
 }
 
-func (repository *ollama429Repo) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (bool, error) {
+func (repository *ollama429Repo) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (*AccountRateLimitGeneration, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	account := repository.accounts[observed.ID]
 	if account == nil || !account.UpdatedAt.Equal(observed.UpdatedAt) {
-		return false, nil
+		return nil, nil
 	}
 	if resetAt != nil && (account.RateLimitResetAt == nil || resetAt.After(*account.RateLimitResetAt)) {
 		account.RateLimitResetAt = cloneTimePtr(resetAt)
@@ -143,7 +171,7 @@ func (repository *ollama429Repo) RecordOllamaCloudUsage429(_ context.Context, ob
 	}
 	account.RateLimitedAt = &limitedAt
 	repository.bump(account)
-	return true, nil
+	return &AccountRateLimitGeneration{LimitedAt: limitedAt, ResetAt: cloneTimePtr(account.RateLimitResetAt)}, nil
 }
 
 func (r *ollama429Repo) currentReset(id int64) *time.Time {
@@ -599,12 +627,12 @@ type ollama429LinkRepo struct {
 	linkIfLater    []time.Time
 }
 
-func (repository *ollama429LinkRepo) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (bool, error) {
+func (repository *ollama429LinkRepo) RecordOllamaCloudUsage429(_ context.Context, observed *Account, resetAt *time.Time) (*AccountRateLimitGeneration, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
 	account := repository.accounts[observed.ID]
 	if account == nil || !account.UpdatedAt.Equal(observed.UpdatedAt) {
-		return false, nil
+		return nil, nil
 	}
 	if resetAt != nil && (account.RateLimitResetAt == nil || resetAt.After(*account.RateLimitResetAt)) {
 		account.RateLimitResetAt = cloneTimePtr(resetAt)
@@ -616,7 +644,7 @@ func (repository *ollama429LinkRepo) RecordOllamaCloudUsage429(_ context.Context
 	}
 	account.RateLimitedAt = &limitedAt
 	repository.bump(account)
-	return true, nil
+	return &AccountRateLimitGeneration{LimitedAt: limitedAt, ResetAt: cloneTimePtr(account.RateLimitResetAt)}, nil
 }
 
 func (r *ollama429LinkRepo) bump(a *Account) {

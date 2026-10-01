@@ -17,8 +17,18 @@ type ollamaCloudUsageProbeScheduler interface {
 }
 
 type ollamaCloudUsageRateLimitSetterIfGeneration interface {
-	RecordOllamaCloudUsage429(ctx context.Context, observed *Account, resetAt *time.Time) (bool, error)
+	RecordOllamaCloudUsage429(ctx context.Context, observed *Account, resetAt *time.Time) (*AccountRateLimitGeneration, error)
 	SetRateLimitedIfUnchanged(ctx context.Context, id int64, expectedUpdatedAt time.Time, expectedLimitedAt, expectedResetAt *time.Time, newResetAt time.Time) (bool, error)
+}
+
+type AccountRateLimitGeneration struct {
+	LimitedAt time.Time
+	ResetAt   *time.Time
+}
+
+type accountRuntimeGenerationBlocker interface {
+	AccountSchedulingBlockGeneration(accountID int64) uint64
+	BlockAccountSchedulingIfGeneration(account *Account, until time.Time, reason string, expected uint64) (uint64, bool)
 }
 
 func (service *RateLimitService) SetOllamaCloudUsageProbeScheduler(scheduler ollamaCloudUsageProbeScheduler) {
@@ -32,6 +42,17 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 	originFingerprint, valid := ollamaCloudUsageRateLimitFingerprint(account)
 	if !valid {
 		return
+	}
+	var runtime accountRuntimeGenerationBlocker
+	var runtimeGeneration uint64
+	if service.runtimeBlocker != nil {
+		var supported bool
+		runtime, supported = service.runtimeBlocker.(accountRuntimeGenerationBlocker)
+		if !supported {
+			slog.Error("ollama_runtime_generation_unavailable", "account_id", account.ID)
+			return
+		}
+		runtimeGeneration = runtime.AccountSchedulingBlockGeneration(account.ID)
 	}
 	observed, err := service.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || observed == nil {
@@ -63,13 +84,34 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 		slog.Error("ollama_rate_limit_generation_persistence_unavailable", "account_id", account.ID)
 		return
 	}
-	updated, err := repository.RecordOllamaCloudUsage429(ctx, observed, resetAt)
-	if err != nil {
-		slog.Warn("ollama_rate_limit_trigger_persistence_failed", "account_id", account.ID, "error", err)
-		return
+	var generation *AccountRateLimitGeneration
+	for attempt := 0; attempt < 3; attempt++ {
+		generation, err = repository.RecordOllamaCloudUsage429(ctx, observed, resetAt)
+		if err != nil {
+			slog.Warn("ollama_rate_limit_trigger_persistence_failed", "account_id", account.ID, "error", err)
+			return
+		}
+		if generation != nil {
+			break
+		}
+		if attempt == 2 {
+			break
+		}
+		latest, loadErr := service.accountRepo.GetByID(ctx, account.ID)
+		if loadErr != nil || latest == nil {
+			slog.Warn("ollama_rate_limit_trigger_retry_load_failed", "account_id", account.ID, "error", loadErr)
+			return
+		}
+		fingerprint, matches := ollamaCloudUsageRateLimitFingerprint(latest)
+		if !matches || fingerprint != originFingerprint || !latest.IsActive() || !latest.Schedulable ||
+			(observed.RateLimitedAt != nil && latest.RateLimitedAt == nil) {
+			slog.Debug("ollama_rate_limit_trigger_retry_rejected", "account_id", account.ID)
+			return
+		}
+		observed = latest
 	}
-	if !updated {
-		slog.Debug("ollama_rate_limit_trigger_skipped_stale", "account_id", account.ID)
+	if generation == nil {
+		slog.Warn("ollama_rate_limit_trigger_contention_exhausted", "account_id", account.ID, "attempts", 3)
 		return
 	}
 
@@ -78,15 +120,36 @@ func (service *RateLimitService) handleOllamaCloudUsage429(ctx context.Context, 
 		slog.Warn("ollama_cloud_usage_authoritative_load_failed", "account_id", account.ID, "error", err)
 		return
 	}
+	authoritativeFingerprint, matches := ollamaCloudUsageRateLimitFingerprint(authoritative)
+	if !matches || authoritativeFingerprint != originFingerprint || !authoritative.IsActive() || !authoritative.Schedulable ||
+		authoritative.RateLimitedAt == nil || !authoritative.RateLimitedAt.Equal(generation.LimitedAt) ||
+		!equalRateLimitReset(authoritative.RateLimitResetAt, generation.ResetAt) {
+		slog.Debug("ollama_rate_limit_recorded_generation_superseded", "account_id", account.ID)
+		return
+	}
 	if authoritative.RateLimitResetAt != nil && authoritative.RateLimitResetAt.After(now) {
-		service.notifyAccountSchedulingBlocked(authoritative, *authoritative.RateLimitResetAt, "ollama_429")
+		if runtime != nil {
+			var published bool
+			runtimeGeneration, published = runtime.BlockAccountSchedulingIfGeneration(authoritative, *authoritative.RateLimitResetAt, "ollama_429", runtimeGeneration)
+			if !published && isOpenAIAccount(authoritative) {
+				slog.Debug("ollama_runtime_trigger_publication_superseded", "account_id", account.ID)
+				return
+			}
+		}
 	}
 
 	if service.ollamaCloudUsageProbe == nil {
 		slog.Warn("ollama_rate_limit_probe_unavailable", "account_id", account.ID)
 		return
 	}
-	service.scheduleOllamaCloudUsageProbe(authoritative)
+	service.scheduleOllamaCloudUsageProbe(authoritative, runtimeGeneration)
+}
+
+func equalRateLimitReset(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 func ollamaCloudUsageRateLimitFingerprint(account *Account) (string, bool) {
@@ -107,7 +170,7 @@ func ollamaCloudUsageRateLimitFingerprint(account *Account) (string, bool) {
 	return hex.EncodeToString(hash[:]), true
 }
 
-func (service *RateLimitService) scheduleOllamaCloudUsageProbe(account *Account) {
+func (service *RateLimitService) scheduleOllamaCloudUsageProbe(account *Account, runtimeGeneration uint64) {
 	if service == nil || account == nil || service.ollamaCloudUsageProbe == nil {
 		return
 	}
@@ -123,7 +186,7 @@ func (service *RateLimitService) scheduleOllamaCloudUsageProbe(account *Account)
 	accepted := service.ollamaCloudUsageProbe.ScheduleOllamaCloudUsageRateLimitProbe(
 		account.ID,
 		func(accountID int64, resetAt time.Time) {
-			service.applyOllamaCloudUsageProbeReset(accountID, fingerprint, expectedLimitedAt, expectedResetAt, resetAt)
+			service.applyOllamaCloudUsageProbeReset(accountID, fingerprint, expectedLimitedAt, expectedResetAt, resetAt, runtimeGeneration)
 		},
 	)
 	if !accepted {
@@ -136,6 +199,7 @@ func (service *RateLimitService) applyOllamaCloudUsageProbeReset(
 	expectedFingerprint string,
 	expectedLimitedAt, expectedResetAt *time.Time,
 	resetAt time.Time,
+	runtimeGeneration uint64,
 ) {
 	now := time.Now()
 	if service == nil || accountID <= 0 || service.accountRepo == nil || !resetAt.After(now) {
@@ -179,7 +243,18 @@ func (service *RateLimitService) applyOllamaCloudUsageProbeReset(
 		return
 	}
 
-	service.notifyAccountSchedulingBlocked(account, resetAt, "ollama_cloud_usage_429_probe")
+	if service.runtimeBlocker != nil {
+		runtime, supported := service.runtimeBlocker.(accountRuntimeGenerationBlocker)
+		if !supported {
+			slog.Error("ollama_runtime_generation_unavailable", "account_id", accountID)
+			return
+		}
+		_, published := runtime.BlockAccountSchedulingIfGeneration(account, resetAt, "ollama_cloud_usage_429_probe", runtimeGeneration)
+		if !published && isOpenAIAccount(account) {
+			slog.Debug("ollama_runtime_probe_publication_superseded", "account_id", accountID)
+			return
+		}
+	}
 	slog.Info("ollama_cloud_account_rate_limited_probe",
 		"account_id", accountID,
 		"reset_at", resetAt.UTC(),

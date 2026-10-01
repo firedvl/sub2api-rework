@@ -2585,31 +2585,33 @@ func (r *accountRepository) ClearQuotaRateLimitIfObserved(ctx context.Context, i
 	return true, nil
 }
 
-func (repository *accountRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *service.Account, resetAt *time.Time) (bool, error) {
+func (repository *accountRepository) RecordOllamaCloudUsage429(ctx context.Context, observed *service.Account, resetAt *time.Time) (*service.AccountRateLimitGeneration, error) {
 	client := clientFromContext(ctx, repository.client)
-	result, err := client.ExecContext(ctx, `
+	generation := &service.AccountRateLimitGeneration{}
+	var deadline sql.NullTime
+	err := scanSingleRow(ctx, client, `
 		UPDATE accounts
 		SET rate_limited_at = GREATEST(clock_timestamp(), rate_limited_at + INTERVAL '1 microsecond'),
 			rate_limit_reset_at = GREATEST(rate_limit_reset_at, $3::timestamptz),
 			updated_at = clock_timestamp()
 		WHERE id = $1 AND updated_at = $2 AND deleted_at IS NULL
-	`, observed.ID, observed.UpdatedAt, resetAt)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if changed == 0 {
+		RETURNING rate_limited_at, rate_limit_reset_at
+	`, []any{observed.ID, observed.UpdatedAt, resetAt}, &generation.LimitedAt, &deadline)
+	if errors.Is(err, sql.ErrNoRows) {
 		repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
-		return false, nil
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if deadline.Valid {
+		generation.ResetAt = &deadline.Time
 	}
 	if err := enqueueSchedulerOutbox(ctx, repository.sql, service.SchedulerOutboxEventAccountChanged, &observed.ID, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue Ollama 429 failed: account=%d err=%v", observed.ID, err)
 	}
 	repository.syncSchedulerAccountSnapshot(ctx, observed.ID)
-	return true, nil
+	return generation, nil
 }
 
 func (repository *accountRepository) SetRateLimitedIfUnchanged(
