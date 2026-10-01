@@ -786,6 +786,22 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.get("form").classes()).not.toContain("settings-form-dirty");
   });
 
+  it.each([
+    ["recharge_and_subscription", true, false],
+    ["recharge_only", false, false],
+    ["subscription_only", true, true],
+  ])("saves both site billing switches for %s", async (mode, subscriptionEnabled, balanceDisabled) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="site-billing-mode"]').setValue(mode);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      subscription_enabled: subscriptionEnabled,
+      payment_balance_disabled: balanceDisabled,
+    }));
+  });
+
   it("clears dirty state only after both settings saves succeed", async () => {
     const wrapper = mountView();
     await flushPromises();

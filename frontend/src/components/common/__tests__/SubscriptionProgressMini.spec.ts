@@ -9,6 +9,7 @@ const store = vi.hoisted(() => ({
 }))
 
 vi.mock('@/stores', () => ({ useSubscriptionStore: () => store }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ cachedPublicSettings: { subscription_enabled: true } }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 enableAutoUnmount(afterEach)
