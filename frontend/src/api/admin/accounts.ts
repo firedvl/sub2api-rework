@@ -324,9 +324,15 @@ export async function promoteVisionQualification(id: number): Promise<OpenAIVisi
  * @param id - Account ID
  * @returns Updated account
  */
-export async function refreshCredentials(id: number): Promise<Account> {
-  const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/refresh`)
-  return data
+export type RefreshCredentialsResult =
+  | { account: Account; message: string; warning: 'missing_project_id_temporary' }
+  | { account: Account; message?: never; warning?: never }
+
+export async function refreshCredentials(id: number): Promise<RefreshCredentialsResult> {
+  const { data } = await apiClient.post<Account | RefreshCredentialsResult>(`/admin/accounts/${id}/refresh`)
+  const result = data && typeof data === 'object' && 'account' in data ? data : { account: data }
+  if (!result.account || result.account.id !== id) throw new Error('Invalid account refresh response')
+  return result
 }
 
 /**

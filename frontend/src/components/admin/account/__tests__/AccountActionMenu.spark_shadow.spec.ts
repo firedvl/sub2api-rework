@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import AccountActionMenu from '../AccountActionMenu.vue'
 import type { Account } from '@/types'
+
+enableAutoUnmount(afterEach)
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -43,6 +45,87 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 const position = { top: 100, left: 100 }
+
+describe('account action menu viewport bounds', () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('includes borders and reclamps when menu content grows without a prop change', async () => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(400)
+    const menuHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(100)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(102)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 208, 102))
+    let notifyResize!: () => void
+    const disconnect = vi.fn()
+    vi.stubGlobal('ResizeObserver', vi.fn().mockImplementation((callback: () => void) => {
+      notifyResize = callback
+      return { observe: vi.fn(), disconnect }
+    }))
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account: makeAccount({}), position: { top: 390, left: 100 } }, attachTo: document.body
+    })
+    await flushPromises()
+    const menu = document.querySelector<HTMLElement>('.action-menu-content')!
+    expect(menu.style.top).toBe('290px')
+    menuHeight.mockReturnValue(200)
+    notifyResize()
+    await flushPromises()
+    expect(menu.style.top).toBe('190px')
+    wrapper.unmount()
+    expect(disconnect).toHaveBeenCalled()
+  })
+
+  it.each([390, 1280])('clamps long menus at every viewport corner and follows resize at %ipx', async width => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width)
+    const viewportHeight = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(400)
+    const menuHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 208, 600))
+    const onClose = vi.fn()
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account: makeAccount({}), position: { top: 390, left: width - 1 }, onClose },
+      attachTo: document.body
+    })
+    await flushPromises()
+    const menu = document.querySelector<HTMLElement>('.action-menu-content')!
+    expect(menu.style.top).toBe('8px')
+    expect(menu.style.left).toBe(`${width - 216}px`)
+    expect(menu.style.maxHeight).toBe('384px')
+    await wrapper.setProps({ position: { top: -50, left: -50 } })
+    await flushPromises()
+    expect(menu.style.top).toBe('8px')
+    expect(menu.style.left).toBe('8px')
+    viewportHeight.mockReturnValue(250)
+    menuHeight.mockReturnValue(100)
+    await wrapper.setProps({ position: { top: 240, left: width - 1 }, account: makeAccount({ type: 'apikey' }) })
+    window.dispatchEvent(new Event('resize'))
+    await flushPromises()
+    expect(menu.style.top).toBe('142px')
+    expect(menu.style.maxHeight).toBe('234px')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the menu above the persistent operator status bar', async () => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900)
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('operator-status-bar') ? new DOMRect(0, 300, 1280, 24) : new DOMRect(0, 0, 208, 600)
+    })
+    const statusBar = document.createElement('div')
+    statusBar.className = 'operator-status-bar'
+    document.body.appendChild(statusBar)
+    const wrapper = mount(AccountActionMenu, { props: { show: true, account: makeAccount({}), position }, attachTo: document.body })
+    await flushPromises()
+    const menu = document.querySelector<HTMLElement>('.action-menu-content')!
+    expect(menu.style.top).toBe('8px')
+    expect(menu.style.maxHeight).toBe('284px')
+    wrapper.unmount()
+    statusBar.remove()
+  })
+})
 
 // AccountActionMenu uses <Teleport to="body">; content is rendered in document.body, not in wrapper.
 const getBodyText = () => document.body.textContent ?? ''
