@@ -6,6 +6,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
+	src/components/account/__tests__/AccountUsageCell.spec.ts \
+	src/components/account/__tests__/UsageProgressBar.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
@@ -31,8 +33,6 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
 	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
-	src/components/account/__tests__/AccountUsageCell.spec.ts \
-	src/components/account/__tests__/UsageProgressBar.spec.ts \
 	src/components/account/__tests__/CreateAccountModal.spec.ts \
 	src/components/account/__tests__/EditAccountModal.spec.ts \
 	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
