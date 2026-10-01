@@ -7193,6 +7193,16 @@
 
 	        <!-- Tab: Features (功能开关) -->
         <div id="settings-panel-features" v-show="activeTab === 'features'" role="tabpanel" aria-labelledby="settings-tab-features" tabindex="0" class="space-y-6">
+        <div class="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-dark-700">
+          <label id="site-billing-mode-label" class="text-sm font-medium">{{ t('admin.settings.features.siteBillingMode.title') }}</label>
+          <Select
+            v-model="siteBillingMode"
+            class="w-full sm:w-64"
+            :options="siteBillingModeOptions"
+            aria-labelledby="site-billing-mode-label"
+            data-testid="site-billing-mode"
+          />
+        </div>
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -9030,6 +9040,7 @@ import type { ProviderInstance } from "@/types/payment";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
+import { SITE_BILLING_MODES, SITE_BILLING_MODE_I18N_KEYS, billingModeToSettings, resolveSiteBillingMode, type SiteBillingMode } from "@/utils/siteBillingMode";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
@@ -10057,6 +10068,7 @@ const form = reactive<SettingsForm>({
   channel_monitor_hide_user_ranking: false,
   // Available Channels feature switch
   available_channels_enabled: false,
+  subscription_enabled: true,
   // Model Plaza feature switches + description
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
@@ -11432,6 +11444,15 @@ function findDuplicateDefaultSubscription(
   });
 }
 
+const siteBillingModeOptions = computed(() => SITE_BILLING_MODES.map(mode => ({
+  value: mode,
+  label: t(`admin.settings.features.siteBillingMode.options.${SITE_BILLING_MODE_I18N_KEYS[mode]}`),
+})));
+const siteBillingMode = computed<SiteBillingMode>({
+  get: () => resolveSiteBillingMode(form),
+  set: mode => Object.assign(form, billingModeToSettings(mode)),
+});
+
 async function saveSettings() {
   saving.value = true;
   try {
@@ -11903,6 +11924,7 @@ async function saveSettings() {
       channel_monitor_hide_user_ranking: Boolean(form.channel_monitor_hide_user_ranking),
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
+      subscription_enabled: form.subscription_enabled,
       // Model Plaza feature switches + description
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,

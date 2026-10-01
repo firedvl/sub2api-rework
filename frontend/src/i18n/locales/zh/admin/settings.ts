@@ -45,6 +45,14 @@ export default {
           enabled: '启用可用渠道',
           enabledHint: '关闭后用户端侧边栏入口隐藏，接口返回空数组。',
         },
+        siteBillingMode: {
+          title: '站点类型',
+          options: {
+            rechargeAndSubscription: '充值 & 订阅',
+            rechargeOnly: '仅充值',
+            subscriptionOnly: '仅订阅',
+          },
+        },
         modelPlaza: {
           title: '模型广场',
           description: '以分组为单位向访客展示可用模型与价格的公开页面。默认关闭。',
