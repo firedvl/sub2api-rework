@@ -23,6 +23,7 @@ func TestQueryUsageCodexCredits(t *testing.T) {
 		{"hidden balance", `{"credits":{"has_credits":true,"unlimited":false}}`, `{"has_credits":true,"unlimited":false,"balance":null}`},
 		{"absent", `{}`, `null`},
 		{"null", `{"credits":null}`, `null`},
+		{"missing flags preserve quota", `{"credits":{},"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":37,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":0}}`, `null`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{ID: 100, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
@@ -48,6 +49,11 @@ func TestQueryUsageCodexCredits(t *testing.T) {
 			usage, err := svc.QueryUsage(context.Background(), 100)
 			require.NoError(t, err)
 			require.Positive(t, usage.FetchedAt)
+			if tc.name == "missing flags preserve quota" {
+				require.NotNil(t, usage.RateLimit)
+				require.Equal(t, 37.0, usage.RateLimit.PrimaryWindow.UsedPercent)
+				require.NotNil(t, usage.RateLimitResetCredits)
+			}
 			encoded, err := json.Marshal(usage.Credits)
 			require.NoError(t, err)
 			require.JSONEq(t, tc.want, string(encoded))
@@ -84,9 +90,10 @@ func TestCacheCodexCreditsSnapshot(t *testing.T) {
 	require.ErrorContains(t, svc.CacheCreditsSnapshot(ctx, 200, usage), "database unavailable")
 }
 
-func TestCodexCreditsRejectMalformedFlagsWithoutFabricatingZero(t *testing.T) {
+func TestCodexCreditsMissingFlagsAreUnknown(t *testing.T) {
 	for _, payload := range []string{`{}`, `{"has_credits":true}`, `{"unlimited":false}`, `{"has_credits":null,"unlimited":false}`} {
 		var credits OpenAICredits
-		require.Error(t, json.Unmarshal([]byte(payload), &credits), payload)
+		require.NoError(t, json.Unmarshal([]byte(payload), &credits), payload)
+		require.False(t, credits.flagsPresent, payload)
 	}
 }

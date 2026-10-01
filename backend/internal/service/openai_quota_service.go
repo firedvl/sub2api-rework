@@ -128,9 +128,10 @@ type OpenAIRateLimitResetCredits struct {
 }
 
 type OpenAICredits struct {
-	HasCredits bool    `json:"has_credits"`
-	Unlimited  bool    `json:"unlimited"`
-	Balance    *string `json:"balance"`
+	HasCredits   bool    `json:"has_credits"`
+	Unlimited    bool    `json:"unlimited"`
+	Balance      *string `json:"balance"`
+	flagsPresent bool
 }
 
 func (credits *OpenAICredits) UnmarshalJSON(data []byte) error {
@@ -142,10 +143,13 @@ func (credits *OpenAICredits) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	if decoded.HasCredits == nil || decoded.Unlimited == nil {
-		return fmt.Errorf("invalid Codex credit flags")
+	*credits = OpenAICredits{Balance: decoded.Balance, flagsPresent: decoded.HasCredits != nil && decoded.Unlimited != nil}
+	if decoded.HasCredits != nil {
+		credits.HasCredits = *decoded.HasCredits
 	}
-	*credits = OpenAICredits{HasCredits: *decoded.HasCredits, Unlimited: *decoded.Unlimited, Balance: decoded.Balance}
+	if decoded.Unlimited != nil {
+		credits.Unlimited = *decoded.Unlimited
+	}
 	return nil
 }
 
@@ -274,6 +278,9 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 	}
 
 	payload.FetchedAt = time.Now().Unix()
+	if payload.Credits != nil && !payload.Credits.flagsPresent {
+		payload.Credits = nil
+	}
 	details := s.queryResetCreditDetails(callCtx, client, accessToken, chatGPTAccountID, fedRAMP, accountID)
 	if details != nil {
 		payload.autoResetCandidates = details.AutoResetCandidates
