@@ -359,11 +359,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 	}
 
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
-		usage, err := s.getOpenAIUsage(ctx, account, forceProbe)
-		if err == nil {
-			s.tryClearRecoverableAccountError(ctx, account)
-		}
-		return usage, err
+		return s.getOpenAIUsage(ctx, account, forceProbe)
 	}
 
 	if account.Platform == PlatformGemini {
