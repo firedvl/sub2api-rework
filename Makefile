@@ -13,6 +13,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsRequestDetailsModal.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts
