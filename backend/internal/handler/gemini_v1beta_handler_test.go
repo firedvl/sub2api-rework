@@ -39,7 +39,14 @@ func TestGeminiV1BetaListModels_ForcedAntigravityAppliesAllowlist(t *testing.T) 
 	})
 	c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
 
-	(&GatewayHandler{}).GeminiV1BetaListModels(c)
+	groupID := int64(41)
+	apiKey, _ := middleware.GetAPIKeyFromContext(c)
+	apiKey.GroupID = &groupID
+	apiKey.Group.ID = groupID
+	handler := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{
+		catalogByGroup: map[int64][]service.Account{groupID: {{ID: 1, Platform: service.PlatformAntigravity}}},
+	})
+	handler.GeminiV1BetaListModels(c)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var got antigravity.GeminiModelsListResponse
