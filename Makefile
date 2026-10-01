@@ -7,6 +7,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/keys.bulkUpdate.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
+	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
+	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
@@ -20,6 +23,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsRequestDetailsModal.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsOpenAITokenStatsCard.spec.ts \
 	src/components/account/__tests__/EditAccountModal.grokMediaEligibility.spec.ts \
 	src/api/__tests__/admin.proxies.spec.ts \
 	src/components/common/__tests__/ProxySelector.testing.spec.ts \
