@@ -266,6 +266,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
+		chatReq.Model = upstreamModel
 		responsesReq, err = apicompat.ChatCompletionsToResponses(&chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -347,6 +348,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
+	if isOpenAIGPT6Model(upstreamModel) {
+		responsesBody, _, err = normalizeOpenAIResponsesReasoningMode(responsesBody, upstreamModel)
+		if err != nil {
+			return nil, err
+		}
+	}
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
