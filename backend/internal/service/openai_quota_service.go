@@ -133,6 +133,22 @@ type OpenAICredits struct {
 	Balance    *string `json:"balance"`
 }
 
+func (credits *OpenAICredits) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		HasCredits *bool   `json:"has_credits"`
+		Unlimited  *bool   `json:"unlimited"`
+		Balance    *string `json:"balance"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.HasCredits == nil || decoded.Unlimited == nil {
+		return fmt.Errorf("invalid Codex credit flags")
+	}
+	*credits = OpenAICredits{HasCredits: *decoded.HasCredits, Unlimited: *decoded.Unlimited, Balance: decoded.Balance}
+	return nil
+}
+
 type openAICreditsSnapshot struct {
 	Credits   *OpenAICredits `json:"credits"`
 	FetchedAt int64          `json:"fetched_at"`

@@ -104,7 +104,7 @@ func TestOpenAIReferralClientSanitizesErrorsWithoutRetry(t *testing.T) {
 }
 
 func TestOpenAIReferralClientInvalidResponses(t *testing.T) {
-	for _, body := range []string{"null", "invalid json", `{"invites":[]}`, `{"invites":[null]}`, `{"invites":[{},{}]}`} {
+	for _, body := range []string{"null", "invalid json", `{"invites":[]}`, `{"invites":[null]}`, `{"invites":[{},{}]}`, `{"invites":[{}]}`, `{"invites":[false]}`, `{"invites":["not an invitation"]}`, `{"invites":[[]]}`, `{"invites":[{"error":"rejected"}]}`, `{"invites":[{"referral_id":""}]}`, `{"invites":[{"referral_id":10}]}`} {
 		t.Run(body, func(t *testing.T) {
 			var requests atomic.Int32
 			client := referralTestClient(t, func(w http.ResponseWriter, _ *http.Request) {

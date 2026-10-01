@@ -142,6 +142,7 @@ function errorMessage(value: unknown, duringSend = false): string {
     OPENAI_REFERRAL_ALREADY_EXISTS: 'alreadyInvited', OPENAI_REFERRAL_RATE_LIMITED: 'rateLimited',
     OPENAI_REFERRAL_SEND_UNKNOWN: 'sendUnknown',
     OPENAI_REFERRAL_PROGRAM_CHANGED: 'programChanged', OPENAI_REFERRAL_CONFIRMATION_REQUIRED: 'consentRequired',
+    OPENAI_REFERRAL_ACCOUNT_CHANGED: 'accountChanged',
   }
   return keys[key] ? t(`admin.accounts.openaiReferral.${keys[key]}`) : err.message || t('common.error')
 }

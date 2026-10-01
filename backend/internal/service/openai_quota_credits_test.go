@@ -83,3 +83,10 @@ func TestCacheCodexCreditsSnapshot(t *testing.T) {
 	repo.extraUpdateErr = errors.New("database unavailable")
 	require.ErrorContains(t, svc.CacheCreditsSnapshot(ctx, 200, usage), "database unavailable")
 }
+
+func TestCodexCreditsRejectMalformedFlagsWithoutFabricatingZero(t *testing.T) {
+	for _, payload := range []string{`{}`, `{"has_credits":true}`, `{"unlimited":false}`, `{"has_credits":null,"unlimited":false}`} {
+		var credits OpenAICredits
+		require.Error(t, json.Unmarshal([]byte(payload), &credits), payload)
+	}
+}

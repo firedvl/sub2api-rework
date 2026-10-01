@@ -1749,6 +1749,7 @@ export default {
         rateLimited: 'The invitation rate or capacity limit has been reached. Try again later.',
         sendUnknown: 'The invitation outcome is unknown. Check its status in Codex before deciding whether to retry.',
         programChanged: 'The account’s referral program changed. Refresh eligibility before sending.',
+        accountChanged: 'The account identity changed. Refresh eligibility before sending.',
         consentRequired: 'Confirm that you have the recipient’s consent first.',
         shadowHint: 'Send invitations from the parent account.',
         cacheFailed: 'Live capacity was fetched, but the cache could not be saved. Query again.',

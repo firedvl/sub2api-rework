@@ -587,6 +587,7 @@ export default {
         rateLimited: '邀请频率或次数已达上限，请稍后再试。',
         sendUnknown: '暂时无法确认邀请是否已发送，请先在 Codex 中核对邀请状态，再决定是否重试。',
         programChanged: '账号的邀请计划已变化，请刷新邀请资格后再发送。',
+        accountChanged: '账号身份已变化，请刷新邀请资格后再发送。',
         consentRequired: '请先确认已取得受邀人的同意。',
         shadowHint: '请在母账号上发送邀请。',
         cacheFailed: '实时次数已获取，但缓存保存失败，请重新查询。',

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -78,6 +79,12 @@ func (c *openAIReferralClient) SendInvite(ctx context.Context, call service.Open
 		Invites []json.RawMessage `json:"invites"`
 	}
 	if err := json.Unmarshal(resp.Bytes(), &payload); err != nil || len(payload.Invites) != 1 || string(payload.Invites[0]) == "null" {
+		return referralSendUnknown()
+	}
+	var invite struct {
+		ReferralID string `json:"referral_id"`
+	}
+	if err := json.Unmarshal(payload.Invites[0], &invite); err != nil || strings.TrimSpace(invite.ReferralID) == "" {
 		return referralSendUnknown()
 	}
 	return nil
