@@ -335,6 +335,23 @@
               {{ t('redeem.historyWillAppear') }}
             </p>
           </div>
+          <fieldset :disabled="loadingHistory || submitting" class="mt-4">
+            <label class="flex items-center gap-2 text-sm">
+              {{ t('pagination.perPage') }}
+              <select v-model="historyPageSize" class="input w-20" @change="fetchHistory(1)">
+                <option v-for="size in [20, 50, 100]" :key="size" :value="size">{{ size }}</option>
+              </select>
+            </label>
+            <Pagination
+              v-if="historyTotal > 0"
+              :page="historyPage"
+              :total="historyTotal"
+              :page-size="historyPageSize"
+              :show-page-size-selector="false"
+              :show-jump="true"
+              @update:page="fetchHistory"
+            />
+          </fieldset>
         </div>
       </div>
     </div>
@@ -350,6 +367,7 @@ import { useSubscriptionStore } from '@/stores/subscriptions'
 import { redeemAPI, authAPI, type RedeemHistoryItem } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Pagination from '@/components/common/Pagination.vue'
 import { formatDateTime } from '@/utils/format'
 
 const { t } = useI18n()
@@ -375,6 +393,11 @@ const errorMessage = ref('')
 // History data
 const history = ref<RedeemHistoryItem[]>([])
 const loadingHistory = ref(false)
+const historyPage = ref(1)
+const historyPageSize = ref(20)
+const historyTotal = ref(0)
+let historyRequest = 0
+let loadedHistoryPageSize = 20
 const contactInfo = ref('')
 
 // Helper functions for history display
@@ -420,14 +443,25 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
   }
 }
 
-const fetchHistory = async () => {
+const fetchHistory = async (page = 1) => {
+  const request = ++historyRequest
+  const pageSize = historyPageSize.value
   loadingHistory.value = true
   try {
-    history.value = await redeemAPI.getHistory()
+    const result = await redeemAPI.getHistory(page, pageSize)
+    if (request !== historyRequest) return
+    history.value = result.items
+    historyTotal.value = result.total
+    historyPage.value = page
+    historyPageSize.value = pageSize
+    loadedHistoryPageSize = pageSize
   } catch (error) {
+    if (request !== historyRequest) return
+    historyPageSize.value = loadedHistoryPageSize
+    appStore.showError(t('redeem.historyLoadFailed'))
     console.error('Failed to fetch history:', error)
   } finally {
-    loadingHistory.value = false
+    if (request === historyRequest) loadingHistory.value = false
   }
 }
 
