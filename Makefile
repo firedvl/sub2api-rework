@@ -3,12 +3,15 @@
 FRONTEND_CRITICAL_VITEST := \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
 	src/api/__tests__/client.spec.ts \
+	src/components/admin/usage/__tests__/UsageTable.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \
 	src/api/__tests__/keys.bulkUpdate.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
+	src/components/account/__tests__/AccountUsageCell.spec.ts \
+	src/components/account/__tests__/UsageProgressBar.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
@@ -23,6 +26,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.subscriptions.bulk.spec.ts \
 	src/components/admin/subscription/__tests__/BulkSubscriptionActionDialog.spec.ts \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
+	src/views/admin/__tests__/UsersView.status.spec.ts \
+	src/views/admin/__tests__/UsersView.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/stores/__tests__/adminSettings.retry.spec.ts \
