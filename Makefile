@@ -12,6 +12,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
 	src/views/user/__tests__/PaymentView.spec.ts \
 	src/views/user/__tests__/PaymentResultView.spec.ts \
+	src/views/user/__tests__/CustomPageView.spec.ts \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
@@ -20,7 +21,6 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/subscription/__tests__/bulkSubscriptionOperation.spec.ts \
 	src/views/admin/__tests__/SubscriptionsView.bulkActions.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
-	src/views/user/__tests__/CustomPageView.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MetricCell.spec.ts \
 	src/__tests__/App.subscriptionSync.spec.ts \
 	src/utils/__tests__/siteBillingMode.spec.ts \
