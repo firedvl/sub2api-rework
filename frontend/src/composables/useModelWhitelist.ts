@@ -406,13 +406,8 @@ export async function fetchAntigravityDefaultMappings(): Promise<{ from: string;
   if (_antigravityDefaultMappingsCache !== null) {
     return _antigravityDefaultMappingsCache
   }
-  try {
-    const mapping = await getAntigravityDefaultModelMapping()
-    _antigravityDefaultMappingsCache = Object.entries(mapping).map(([from, to]) => ({ from, to }))
-  } catch (e) {
-    console.warn('[fetchAntigravityDefaultMappings] API failed, using empty fallback', e)
-    _antigravityDefaultMappingsCache = []
-  }
+  const mapping = await getAntigravityDefaultModelMapping()
+  _antigravityDefaultMappingsCache = Object.entries(mapping).map(([from, to]) => ({ from, to }))
   return _antigravityDefaultMappingsCache
 }
 

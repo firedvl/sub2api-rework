@@ -1250,6 +1250,7 @@ export default {
       accountCreated: '账号创建成功',
       accountUpdated: '账号更新成功',
       failedToCreate: '创建账号失败',
+      defaultMappingsLoadFailed: '加载默认模型映射失败，请重新选择 Antigravity 重试。',
       failedToUpdate: '更新账号失败',
       pleaseSelectStatus: '请选择有效的账号状态',
       mixedChannelWarningTitle: '混合渠道警告',
