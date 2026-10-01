@@ -66,6 +66,8 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
 	"codex_usage_updated_at":                    {},
+	"codex_credits_snapshot":                    {},
+	"codex_referral_snapshot":                   {},
 	service.OpenAICodexManifestSnapshotExtraKey: {},
 	service.OpenAIVisionQualificationExtraKey:   {},
 	service.OpenAIAutoWarmupEvaluationExtraKey:  {},

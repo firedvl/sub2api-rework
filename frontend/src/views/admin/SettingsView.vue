@@ -7193,6 +7193,16 @@
 
 	        <!-- Tab: Features (功能开关) -->
         <div id="settings-panel-features" v-show="activeTab === 'features'" role="tabpanel" aria-labelledby="settings-tab-features" tabindex="0" class="space-y-6">
+        <div class="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-dark-700">
+          <label id="site-billing-mode-label" class="text-sm font-medium">{{ t('admin.settings.features.siteBillingMode.title') }}</label>
+          <Select
+            v-model="siteBillingMode"
+            class="w-full sm:w-64"
+            :options="siteBillingModeOptions"
+            aria-labelledby="site-billing-mode-label"
+            data-testid="site-billing-mode"
+          />
+        </div>
 
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -7285,16 +7295,29 @@
                 </p>
               </div>
 
-              <div v-if="form.channel_monitor_mode === 'v2'" class="flex items-start justify-between gap-4">
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-gray-900 dark:text-white">
-                    {{ t('admin.settings.features.channelMonitor.hideThroughput') }}
-                  </p>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {{ t('admin.settings.features.channelMonitor.hideThroughputHint') }}
-                  </p>
+              <div v-if="form.channel_monitor_mode === 'v2'" class="space-y-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ t('admin.settings.features.channelMonitor.hideThroughput') }}
+                    </p>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t('admin.settings.features.channelMonitor.hideThroughputHint') }}
+                    </p>
+                  </div>
+                  <Toggle v-model="form.channel_monitor_hide_throughput" />
                 </div>
-                <Toggle v-model="form.channel_monitor_hide_throughput" />
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">
+                      {{ t('admin.settings.features.channelMonitor.hideUserRanking') }}
+                    </p>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t('admin.settings.features.channelMonitor.hideUserRankingHint') }}
+                    </p>
+                  </div>
+                  <Toggle v-model="form.channel_monitor_hide_user_ranking" />
+                </div>
               </div>
 
               <div v-if="form.channel_monitor_mode === 'v1'" class="flex items-start justify-between gap-4">
@@ -9017,6 +9040,7 @@ import type { ProviderInstance } from "@/types/payment";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
+import { SITE_BILLING_MODES, SITE_BILLING_MODE_I18N_KEYS, billingModeToSettings, resolveSiteBillingMode, type SiteBillingMode } from "@/utils/siteBillingMode";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
@@ -9721,6 +9745,7 @@ type SettingsForm = Omit<
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
+  channel_monitor_hide_user_ranking: boolean;
   smtp_password: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
@@ -10040,8 +10065,10 @@ const form = reactive<SettingsForm>({
   channel_monitor_default_interval_seconds: 60,
   channel_monitor_hide_throughput: false,
   channel_monitor_show_quota: false,
+  channel_monitor_hide_user_ranking: false,
   // Available Channels feature switch
   available_channels_enabled: false,
+  subscription_enabled: true,
   // Model Plaza feature switches + description
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
@@ -11202,6 +11229,9 @@ async function loadSettings() {
     form.channel_monitor_show_quota = Boolean(
       settings.channel_monitor_show_quota
     );
+    form.channel_monitor_hide_user_ranking = Boolean(
+      settings.channel_monitor_hide_user_ranking
+    );
     form.login_agreement_updated_at =
       settings.login_agreement_updated_at || "2026-03-31";
     form.login_agreement_documents =
@@ -11413,6 +11443,15 @@ function findDuplicateDefaultSubscription(
     return false;
   });
 }
+
+const siteBillingModeOptions = computed(() => SITE_BILLING_MODES.map(mode => ({
+  value: mode,
+  label: t(`admin.settings.features.siteBillingMode.options.${SITE_BILLING_MODE_I18N_KEYS[mode]}`),
+})));
+const siteBillingMode = computed<SiteBillingMode>({
+  get: () => resolveSiteBillingMode(form),
+  set: mode => Object.assign(form, billingModeToSettings(mode)),
+});
 
 async function saveSettings() {
   saving.value = true;
@@ -11882,8 +11921,10 @@ async function saveSettings() {
         Number(form.channel_monitor_default_interval_seconds) || 60,
       channel_monitor_hide_throughput: Boolean(form.channel_monitor_hide_throughput),
       channel_monitor_show_quota: Boolean(form.channel_monitor_show_quota),
+      channel_monitor_hide_user_ranking: Boolean(form.channel_monitor_hide_user_ranking),
       // Available Channels feature switch
       available_channels_enabled: form.available_channels_enabled,
+      subscription_enabled: form.subscription_enabled,
       // Model Plaza feature switches + description
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,
