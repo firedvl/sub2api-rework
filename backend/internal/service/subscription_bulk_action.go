@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
@@ -60,6 +63,35 @@ type BulkSubscriptionActionResult struct {
 	Results      []BulkSubscriptionActionItemResult `json:"results"`
 }
 
+func (s *SubscriptionService) RunBulkSubscriptionTransaction(ctx context.Context, execute func(context.Context) error) error {
+	return s.withSubscriptionUpdateTx(ctx, execute)
+}
+
+func (s *SubscriptionService) withBulkSubscriptionItemTx(ctx context.Context, execute func(context.Context) error) (error, error) {
+	transaction := dbent.TxFromContext(ctx)
+	if transaction == nil {
+		return s.withSubscriptionUpdateTx(ctx, execute), nil
+	}
+	driver := transaction.Client().Driver()
+	if err := driver.Exec(ctx, "SAVEPOINT subscription_bulk_item", []any{}, nil); err != nil {
+		return nil, fmt.Errorf("begin bulk item savepoint: %w", err)
+	}
+	mutationErr := execute(ctx)
+	controlCtx := ctx
+	if mutationErr != nil {
+		var cancel context.CancelFunc
+		controlCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if err := driver.Exec(controlCtx, "ROLLBACK TO SAVEPOINT subscription_bulk_item", []any{}, nil); err != nil {
+			return nil, fmt.Errorf("rollback bulk item savepoint: %w", errors.Join(mutationErr, err))
+		}
+	}
+	if err := driver.Exec(controlCtx, "RELEASE SAVEPOINT subscription_bulk_item", []any{}, nil); err != nil {
+		return nil, fmt.Errorf("release bulk item savepoint: %w", err)
+	}
+	return mutationErr, nil
+}
+
 func (s *SubscriptionService) BulkSubscriptionAction(ctx context.Context, input *BulkSubscriptionActionInput) (*BulkSubscriptionActionResult, error) {
 	if err := input.Validate(); err != nil {
 		return nil, err
@@ -75,28 +107,23 @@ func (s *SubscriptionService) BulkSubscriptionAction(ctx context.Context, input 
 		seen[id] = struct{}{}
 		err := ctx.Err()
 		if err == nil {
-			var changed *UserSubscription
-			err = s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+			var transactionErr error
+			err, transactionErr = s.withBulkSubscriptionItemTx(ctx, func(txCtx context.Context) error {
 				var mutationErr error
 				switch input.Action {
 				case "extend":
-					changed, mutationErr = s.ExtendSubscription(txCtx, id, input.Days)
+					_, mutationErr = s.ExtendSubscription(txCtx, id, input.Days)
 				case "reset_quota":
-					changed, mutationErr = s.AdminResetQuota(txCtx, id, input.Daily, input.Weekly, input.Monthly)
+					_, mutationErr = s.AdminResetQuota(txCtx, id, input.Daily, input.Weekly, input.Monthly)
 				case "revoke":
-					changed, mutationErr = s.userSubRepo.GetByID(txCtx, id)
-					if mutationErr == nil {
-						mutationErr = s.RevokeSubscription(txCtx, id)
-					}
+					mutationErr = s.RevokeSubscription(txCtx, id)
 				case "restore":
-					changed, mutationErr = s.RestoreSubscription(txCtx, id)
+					_, mutationErr = s.RestoreSubscription(txCtx, id)
 				}
 				return mutationErr
 			})
-			if err == nil && changed != nil {
-				if cacheErr := s.invalidateSubscriptionCaches(changed.UserID, changed.GroupID); cacheErr != nil {
-					log.Printf("[SubscriptionBulkAction] committed action=%s subscription_id=%d cache_error=%s", input.Action, id, logredact.RedactText(cacheErr.Error()))
-				}
+			if transactionErr != nil {
+				return nil, transactionErr
 			}
 		}
 		item := BulkSubscriptionActionItemResult{SubscriptionID: id, Success: err == nil}

@@ -42,12 +42,15 @@ export interface BulkAssignSubscriptionResult {
 
 export async function bulkAction(
   request: SubscriptionBulkActionRequest,
-  idempotencyKey: string
+  idempotencyKey: string,
+  replayOnly = false
 ): Promise<SubscriptionBulkActionResult> {
+  const headers: Record<string, string> = { 'Idempotency-Key': idempotencyKey }
+  if (replayOnly) headers['Idempotency-Retry-Only'] = 'true'
   const { data } = await apiClient.post<SubscriptionBulkActionResult>(
     '/admin/subscriptions/bulk-action',
     request,
-    { headers: { 'Idempotency-Key': idempotencyKey } }
+    { headers }
   )
   return data
 }

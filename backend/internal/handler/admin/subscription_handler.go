@@ -188,6 +188,10 @@ func (h *SubscriptionHandler) BulkAssign(c *gin.Context) {
 }
 
 func (h *SubscriptionHandler) BulkAction(c *gin.Context) {
+	if replayOnly := c.GetHeader("Idempotency-Retry-Only"); replayOnly != "" && replayOnly != "true" {
+		response.BadRequest(c, "Idempotency-Retry-Only must be true when provided")
+		return
+	}
 	var req service.BulkSubscriptionActionInput
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -197,7 +201,7 @@ func (h *SubscriptionHandler) BulkAction(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	executeAdminIdempotentJSONWithTimeout(c, "admin.subscriptions.bulk-action", req, service.DefaultWriteIdempotencyTTL(), 2*time.Minute, func(ctx context.Context) (any, error) {
+	executeAdminIdempotentJSONWithTimeout(c, "admin.subscriptions.bulk-action", req, service.DefaultWriteIdempotencyTTL(), 2*time.Minute, h.subscriptionService.RunBulkSubscriptionTransaction, func(ctx context.Context) (any, error) {
 		return h.subscriptionService.BulkSubscriptionAction(ctx, &req)
 	})
 }

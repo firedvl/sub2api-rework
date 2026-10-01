@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SubscriptionsView from '../SubscriptionsView.vue'
+import { prepareBulkSubscriptionOperation } from '@/components/admin/subscription/bulkSubscriptionOperation'
 
 const { list, bulkAction, bulkAssign, listUsers, showError } = vi.hoisted(() => ({
   list: vi.fn(), bulkAction: vi.fn(), bulkAssign: vi.fn(), listUsers: vi.fn(), showError: vi.fn()
@@ -62,6 +63,44 @@ async function select(ids: number[]) {
 }
 
 describe('subscription bulk operations', () => {
+  it('recovers an uncertain restore after a page reload without its original rows', async () => {
+    const operation = prepareBulkSubscriptionOperation({ action: 'restore', subscription_ids: [3, 9] })
+    wrapper.unmount()
+    list.mockResolvedValue({ items: [rows[0]], total: 1, pages: 1 })
+    wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="subscription-pending-retry"]').trigger('click')
+    expect(wrapper.get('#bulk-subscription-action-form').text()).toContain('#3')
+    expect(wrapper.get('#bulk-subscription-action-form').text()).toContain('#9')
+    bulkAction.mockResolvedValueOnce({ success_count: 2, failed_count: 0, results: [{ subscription_id: 3, success: true }, { subscription_id: 9, success: true }] })
+    await wrapper.get('#bulk-subscription-action-form').trigger('submit')
+    await flushPromises()
+    expect(bulkAction).toHaveBeenCalledWith(operation.request, operation.key, true)
+    expect(sessionStorage.getItem(operation.storageKey)).toBeNull()
+  })
+
+  it('reopens the original uncertain revoke after server status changes', async () => {
+    bulkAction.mockRejectedValueOnce({ status: 503, message: 'Response outcome unknown' })
+    await select([1])
+    await wrapper.get('[data-test="bulk-revoke"]').trigger('click')
+    await wrapper.get('#bulk-subscription-action-form').trigger('submit')
+    await flushPromises()
+    const originalRequest = bulkAction.mock.calls[0]
+    wrapper.getComponent({ name: 'BulkSubscriptionActionDialog' }).vm.$emit('close')
+    await flushPromises()
+    list.mockResolvedValue({ items: rows.map(row => row.id === 1 ? { ...row, status: 'revoked' } : row), total: 60, pages: 3 })
+    await wrapper.get('button[title="common.refresh"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="bulk-revoke"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="subscription-pending-retry"]').exists()).toBe(true)
+    await wrapper.get('[data-test="subscription-pending-retry"]').trigger('click')
+    bulkAction.mockResolvedValueOnce({ success_count: 1, failed_count: 0, results: [{ subscription_id: 1, success: true }] })
+    await wrapper.get('#bulk-subscription-action-form').trigger('submit')
+    await flushPromises()
+    expect(bulkAction.mock.calls[1]?.slice(0, 2)).toEqual(originalRequest?.slice(0, 2))
+    expect(bulkAction.mock.calls[1]?.[2]).toBe(true)
+  })
+
   it('uses eligible selected rows and retains failures and untouched selections after a partial result', async () => {
     bulkAction.mockResolvedValue({ success_count: 1, failed_count: 1, results: [
       { subscription_id: 1, success: true },
@@ -76,7 +115,7 @@ describe('subscription bulk operations', () => {
     await form.trigger('submit')
     await flushPromises()
 
-    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action: 'extend', days: 30 }, expect.any(String))
+    expect(bulkAction).toHaveBeenCalledWith({ subscription_ids: [1, 2], action: 'extend', days: 30 }, expect.any(String), false)
     expect(wrapper.getComponent({ name: 'DataTable' }).props('selectedKeys')).toEqual([2, 3])
     expect(form.text()).toContain('Cannot adjust this subscription')
     expect(list).toHaveBeenCalledTimes(2)

@@ -17,7 +17,7 @@
             <div class="break-all text-gray-900 dark:text-gray-100">
               {{ subscription.email || `#${subscription.id}` }}
             </div>
-            <div class="break-words text-xs text-gray-500 dark:text-gray-400">
+            <div v-if="subscription.group || subscription.groupId > 0" class="break-words text-xs text-gray-500 dark:text-gray-400">
               {{ subscription.group || t('admin.subscriptions.bulk.groupFallback', { id: subscription.groupId }) }}
               <span v-if="subscription.email" class="ml-2">#{{ subscription.id }}</span>
             </div>
@@ -79,7 +79,7 @@
 
       <div v-if="requestError" role="alert" class="space-y-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
         <p>{{ requestError }}</p>
-        <p v-if="pendingOperation">{{ t('admin.subscriptions.bulk.retryHint') }}</p>
+        <p v-if="pendingOperation">{{ t(replayUnavailable ? 'admin.subscriptions.bulk.replayUnavailable' : 'admin.subscriptions.bulk.retryHint') }}</p>
       </div>
 
       <div v-if="result" aria-live="polite" class="space-y-3">
@@ -105,7 +105,7 @@
           type="submit"
           form="bulk-subscription-action-form"
           :class="['btn', currentAction === 'revoke' ? 'btn-danger' : 'btn-primary']"
-          :disabled="submitting || (!pendingOperation && !!validationError)"
+          :disabled="submitting || replayUnavailable || (!pendingOperation && !!validationError)"
         >
           {{ submitting ? t('common.processing') : pendingOperation ? t('admin.subscriptions.bulk.retry') : t('admin.subscriptions.bulk.confirm') }}
         </button>
@@ -128,6 +128,7 @@ const props = defineProps<{
   show: boolean
   action: SubscriptionBulkAction
   subscriptions: UserSubscription[]
+  operationToResume?: BulkSubscriptionOperation | null
 }>()
 
 const emit = defineEmits<{
@@ -141,6 +142,7 @@ const days = ref<number | string>(30)
 const windows = reactive({ daily: true, weekly: true, monthly: true })
 const submitting = ref(false)
 const requestError = ref('')
+const replayUnavailable = ref(false)
 const result = shallowRef<SubscriptionBulkActionResult | null>(null)
 const pendingOperation = shallowRef<BulkSubscriptionOperation | null>(null)
 const targets = ref<{ id: number; email?: string; group?: string; groupId: number }[]>([])
@@ -165,7 +167,7 @@ const validationError = computed(() => {
   return ''
 })
 
-watch(() => props.subscriptions, subscriptions => {
+watch(() => [props.subscriptions, props.operationToResume] as const, ([subscriptions, operation]) => {
   if (parametersLocked.value) return
   targets.value = subscriptions.map(subscription => ({
     id: subscription.id,
@@ -173,6 +175,15 @@ watch(() => props.subscriptions, subscriptions => {
     group: subscription.group?.name,
     groupId: subscription.group_id
   }))
+  if (operation) {
+    pendingOperation.value = { ...operation, outcomeUncertain: true }
+    submittedAction.value = operation.request.action
+    days.value = operation.request.days ?? 30
+    for (const window of quotaWindows) windows[window] = !!operation.request[window]
+    targets.value = operation.request.subscription_ids.map(id =>
+      targets.value.find(target => target.id === id) ?? { id, groupId: 0 }
+    )
+  }
 }, { immediate: true })
 
 function handleClose() {
@@ -185,7 +196,7 @@ function failedTargetLabel(id: number) {
 }
 
 async function submit() {
-  if (submitting.value || result.value) return
+  if (submitting.value || result.value || replayUnavailable.value) return
   submitting.value = true
   requestError.value = ''
   try {
@@ -201,7 +212,7 @@ async function submit() {
       submittedAction.value = request.action
     }
     const operation = pendingOperation.value
-    result.value = await adminAPI.subscriptions.bulkAction(operation.request, operation.key)
+    result.value = await adminAPI.subscriptions.bulkAction(operation.request, operation.key, operation.outcomeUncertain)
     completeBulkSubscriptionOperation(operation)
     pendingOperation.value = null
     emit('completed', result.value)
@@ -211,6 +222,7 @@ async function submit() {
     requestError.value = extractApiErrorMessage(error, t('admin.subscriptions.bulk.requestFailed'))
     if (!operation) return
     const status = failure?.status ?? failure?.response?.status
+    if (operation.outcomeUncertain && status === 410) replayUnavailable.value = true
     if (!operation.outcomeUncertain && status && status >= 400 && status < 500 && status !== 408 && status !== 409) {
       completeBulkSubscriptionOperation(operation)
       pendingOperation.value = null
