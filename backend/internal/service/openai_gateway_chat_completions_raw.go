@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -81,6 +82,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		grokCacheIdentity = resolveGrokCacheIdentity(c, body, "", upstreamModel)
 	}
 	// 3. Rewrite model in body (no protocol conversion)
+	if openai.IsGPT6SolOrLunaModelSpelling(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) && gjson.GetBytes(body, "reasoning_effort").String() != "none" {
+		err := fmt.Errorf("%s requires Responses for tool calls with reasoning; this account only supports Chat Completions. Use reasoning_effort=none or a Responses-capable account", upstreamModel)
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 	upstreamBody := body
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)

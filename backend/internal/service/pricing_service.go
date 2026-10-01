@@ -158,6 +158,7 @@ var (
 // LiteLLMModelPricing LiteLLM价格数据结构
 // 只保留我们需要的字段，使用指针来处理可能缺失的值
 type LiteLLMModelPricing struct {
+	CacheCreationInputTokenCostExplicit  bool    `json:"-"`
 	InputCostPerToken                    float64 `json:"input_cost_per_token"`
 	InputCostPerTokenPriority            float64 `json:"input_cost_per_token_priority"`
 	OutputCostPerToken                   float64 `json:"output_cost_per_token"`
@@ -655,6 +656,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.CacheCreationInputTokenCost != nil {
 			pricing.CacheCreationInputTokenCost = *entry.CacheCreationInputTokenCost
+			pricing.CacheCreationInputTokenCostExplicit = true
 		}
 		if entry.CacheCreationInputTokenCostPriority != nil {
 			pricing.CacheCreationInputTokenCostPriority = *entry.CacheCreationInputTokenCostPriority
@@ -1462,6 +1464,9 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 	for _, pattern := range lookups {
 		for key, pricing := range s.pricingData {
 			keyLower := strings.ToLower(key)
+			if matched.name == "opus-5" && claude.IsOpus55(keyLower) {
+				continue
+			}
 			if strings.Contains(keyLower, pattern) {
 				logger.LegacyPrintf("service.pricing", "[Pricing] Fuzzy matched %s -> %s", model, key)
 				return pricing

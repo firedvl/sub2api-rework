@@ -1591,9 +1591,12 @@ func (a *Account) GetCodingPlanProvider() string {
 		return PlatformKimi
 	case strings.Contains(baseURL, "bigmodel.cn"), strings.Contains(baseURL, "api.z.ai"):
 		return PlatformZhipu
-	case strings.Contains(baseURL, "minimax.io"),
-		strings.Contains(baseURL, "minimaxi.com"),
-		strings.Contains(baseURL, "minimax.com"):
+	case minimaxQuotaURL(baseURL) != "":
+		if a.IsAdaptiveAPIProtocol() &&
+			(minimaxQuotaURL(a.GetCNProtocolBaseURL(APIProtocolAnthropic)) == "" ||
+				minimaxQuotaURL(a.GetCNProtocolBaseURL(APIProtocolResponses)) == "") {
+			return ""
+		}
 		return PlatformMiniMax
 	default:
 		return ""

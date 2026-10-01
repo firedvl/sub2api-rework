@@ -23,6 +23,34 @@ for compose_file in \
   deploy/docker-compose.standalone.yml \
   deploy/docker-compose.dev.yml
 do
+  key=SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS
+  expected=$(printf '      - %s=${%s:-}' "$key" "$key")
+  expected_count=$(grep -Fxc "$expected" "$compose_file" || true)
+  key_count=$(grep -Ec "^[[:space:]]*-[[:space:]]*${key}([[:space:]]*=.*)?[[:space:]]*$" "$compose_file" || true)
+  if [ "$expected_count" -ne 1 ] || [ "$key_count" -ne 1 ]; then
+    printf '%s must pass %s with a blank fallback exactly once\n' "$compose_file" "$key" >&2
+    exit 1
+  fi
+  expression=${expected#*=}
+  for state in unset blank false true; do
+    actual=$(
+      unset SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS
+      case "$state" in
+        (blank) export SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS= ;;
+        (false|true) export SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS=$state ;;
+      esac
+      sh -c "printf '%s' \"$expression\""
+    )
+    case "$state" in
+      unset|blank) value= ;;
+      false|true) value=$state ;;
+    esac
+    if [ "$actual" != "$value" ]; then
+      printf '%s must preserve %s for %s\n' "$compose_file" "$state" "$key" >&2
+      exit 1
+    fi
+  done
+
   tab=$(printf '\t')
   while IFS="$tab" read -r key value; do
     # .env.example intentionally includes high-capacity tuning examples for

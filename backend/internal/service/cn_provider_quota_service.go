@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
 )
@@ -335,12 +337,24 @@ func kimiQuotaURL(baseURL string) string {
 
 // minimaxQuotaURL 根据推理域名选择 Token Plan / Coding Plan 额度主机。
 // 官方 FAQ 写 www.minimax.io / www.minimaxi.com，实际以 Bearer Key 打 api.*。
-// 国际站 api.minimax.io；国内站 api.minimaxi.com（含 api.minimax.com 与自定义回落）。
+// 国际站 api.minimax.io；国内站 api.minimaxi.com（含 api.minimax.com）。
 func minimaxQuotaURL(baseURL string) string {
-	if strings.Contains(strings.ToLower(baseURL), "minimax.io") {
-		return "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+	validatedURL, err := urlvalidator.ValidateURLFormat(baseURL, true)
+	if err != nil {
+		return ""
 	}
-	return "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"
+	parsed, err := url.Parse(validatedURL)
+	if err != nil || parsed.User != nil {
+		return ""
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "api.minimax.io":
+		return "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+	case "api.minimaxi.com", "api.minimax.com":
+		return "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"
+	default:
+		return ""
+	}
 }
 
 func zhipuQuotaHost(baseURL string) string {

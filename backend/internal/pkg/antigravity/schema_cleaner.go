@@ -264,42 +264,6 @@ func cleanJSONSchemaRecursive(value any) any {
 			}
 		}
 
-		// 6. [SAFETY] 处理空 Object
-		if t, _ := schemaMap["type"].(string); t == "object" {
-			hasProps := false
-			if props, ok := schemaMap["properties"].(map[string]any); ok && len(props) > 0 {
-				hasProps = true
-			}
-			if !hasProps {
-				schemaMap["properties"] = map[string]any{
-					"reason": map[string]any{
-						"type":        "string",
-						"description": "Reason for calling this tool",
-					},
-				}
-				schemaMap["required"] = []any{"reason"}
-			}
-		}
-
-		// 7. [SAFETY] Required 字段对齐
-		if props, ok := schemaMap["properties"].(map[string]any); ok {
-			if req, ok := schemaMap["required"].([]any); ok {
-				var validReq []any
-				for _, r := range req {
-					if rStr, ok := r.(string); ok {
-						if _, exists := props[rStr]; exists {
-							validReq = append(validReq, r)
-						}
-					}
-				}
-				if len(validReq) > 0 {
-					schemaMap["required"] = validReq
-				} else {
-					delete(schemaMap, "required")
-				}
-			}
-		}
-
 		// 8. 处理 type 字段 (Lowercase + Nullable 提取)
 		isEffectivelyNullable := false
 		if typeVal, exists := schemaMap["type"]; exists {
@@ -348,9 +312,39 @@ func cleanJSONSchemaRecursive(value any) any {
 				default:
 					schemaMap["type"] = "string"
 				}
+			} else if hasKey(schemaMap, "enum") {
+				schemaMap["type"] = "string"
 			} else {
 				// 默认为 string ? or object? Gemini 通常需要明确 type
 				schemaMap["type"] = "object"
+			}
+		}
+		if schemaMap["type"] == "object" {
+			properties, ok := schemaMap["properties"].(map[string]any)
+			if !ok || len(properties) == 0 {
+				schemaMap["properties"] = map[string]any{
+					"reason": map[string]any{
+						"type": "string", "description": "Reason for calling this tool",
+					},
+				}
+				schemaMap["required"] = []any{"reason"}
+			}
+		}
+		if properties, ok := schemaMap["properties"].(map[string]any); ok {
+			if required, ok := schemaMap["required"].([]any); ok {
+				var validRequired []any
+				for _, field := range required {
+					if name, ok := field.(string); ok {
+						if _, exists := properties[name]; exists {
+							validRequired = append(validRequired, field)
+						}
+					}
+				}
+				if len(validRequired) > 0 {
+					schemaMap["required"] = validRequired
+				} else {
+					delete(schemaMap, "required")
+				}
 			}
 		}
 		if schemaMap["type"] == "array" {
@@ -535,6 +529,9 @@ func scoreSchemaOption(val any) int {
 	}
 	if hasKey(m, "items") || typeStr == "array" {
 		return 2
+	}
+	if hasKey(m, "enum") || hasKey(m, "const") {
+		return 1
 	}
 	if typeStr != "" && typeStr != "null" {
 		return 1
