@@ -13,8 +13,8 @@ The accepted rework baseline is defined once in
 `backend/internal/releaseinfo/metadata.json`:
 
 ```text
-"upstream_baseline": "v0.2.3"
-"upstream_baseline_sha": "8fa67d477d6651a744754392a8982ea589c26ae6"
+"upstream_baseline": "v0.2.8"
+"upstream_baseline_sha": "fd80b08c90b55edcad5b00171b53f08721d30da1"
 ```
 
 This document explains the baseline; scripts and builds consume the JSON record.
@@ -32,7 +32,7 @@ deploy anything.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.2.3..main v0.2.3..upstream/main
+git range-diff v0.2.8..main v0.2.8..upstream/main
 ./scripts/upstream-status.sh
 ```
 
@@ -106,6 +106,22 @@ against the changed backend, API, provider, authentication, account, routing,
 configuration, migration, and frontend surfaces. Keep this a reviewed inventory;
 a diff parser cannot reliably infer feature semantics or applicability.
 
+## v0.2.8 Change Audit
+
+The development reconciliation accounts for all 575 commits from v0.2.3 to the
+pinned v0.2.8 target in 250 semantic clusters, with zero unresolved dispositions.
+[The reconciliation record](UPSTREAM_V028_PARITY.md) includes the commit
+inventory, independent source review, preserved contracts, intentional
+differences, migration audit and executed acceptance evidence.
+
+The machine-readable baseline now records v0.2.8 and development schema 249.
+Historical SQL through 244 remains unchanged; disposable fresh and 244-to-249
+upgrade checks pass. The updater source floor stays 239. Rework version
+`0.2.3-rework.6`, manual update policy and release identity remain unchanged.
+This is development-only: no new release, publication, deployment or production
+migration is authorized. A separately qualified new Rework release is required
+to deliver these changes to installations.
+
 ## v0.2.3 Change Audit
 
 The integration adopts 193 upstream commits and 465 changed files from v0.2.0.
@@ -138,8 +154,8 @@ The accepted range is `v0.1.184..v0.2.0` (86 commits, 182 changed files).
 
 ## v0.2.1 Qualification Notes (Not Synced)
 
-The latest stable upstream release is `v0.2.1`, published September 5, 2026.
-This PR does not sync it. A later dedicated qualification should review:
+This historical checkpoint recorded `v0.2.1`, published September 5, 2026, before
+the later v0.2.3 and v0.2.8 reconciliations. It identified these review boundaries:
 
 - OpenAI GPT-6 Astra support, capability persistence, and capability retention when live model listing is unavailable;
 - pinned-account Codex manifests and their interaction with Rework's provider-backed Composite publication rules;
