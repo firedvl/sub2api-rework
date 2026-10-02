@@ -48,6 +48,7 @@ func installedRecoveryFixture(t *testing.T) (*Service, *fakeRunner, persistedSta
 	_, err := svc.Start(updatecontract.OperationInstall, installRequest())
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, svc, 5*time.Second).State)
+	prepareRecovery(t, svc)
 	state, err := svc.store.load(svc.policy.InitialInstalledVersion, svc.policy.InitialMigration, Version)
 	require.NoError(t, err)
 	return svc, runner, state
@@ -57,7 +58,7 @@ func TestRecoveryRejectsInvalidRecordsAndConfirmation(t *testing.T) {
 	for _, scenario := range []string{"missing dump", "metadata mismatch", "environment checksum", "live compose drift", "live environment drift", "wrong version", "ordinary confirmation"} {
 		t.Run(scenario, func(t *testing.T) {
 			svc, runner, state := installedRecoveryFixture(t)
-			request := recoverRequest()
+			request := recoverRequest(svc)
 			switch scenario {
 			case "missing dump":
 				require.NoError(t, os.Remove(state.Backup.DatabaseBackup))
@@ -79,7 +80,7 @@ func TestRecoveryRejectsInvalidRecordsAndConfirmation(t *testing.T) {
 			}
 			_, err := svc.Start(updatecontract.OperationRecover, request)
 			require.Error(t, err)
-			require.False(t, runner.hasCall(" pg_restore "))
+			require.False(t, runner.hasCall(" pg_restore -U"))
 			current, err := svc.store.load(svc.policy.InitialInstalledVersion, svc.policy.InitialMigration, Version)
 			require.NoError(t, err)
 			require.Equal(t, state, current, "rejected recovery must not rewrite recorded state")
@@ -88,11 +89,11 @@ func TestRecoveryRejectsInvalidRecordsAndConfirmation(t *testing.T) {
 }
 
 func TestRecoveryCommandFailuresRetainTargetAndPermitRetry(t *testing.T) {
-	for _, command := range []string{" pg_restore ", " up -d --no-deps sub2api", "inspect --format {{.Config.Image}}"} {
+	for _, command := range []string{"DROP DATABASE IF EXISTS", " pg_restore -U", " up -d --no-deps --force-recreate sub2api", "inspect --format {{.Config.Image}}"} {
 		t.Run(command, func(t *testing.T) {
 			svc, runner, before := installedRecoveryFixture(t)
 			svc.runner = &recoveryFailureRunner{fakeRunner: runner, failCommand: command}
-			_, err := svc.Start(updatecontract.OperationRecover, recoverRequest())
+			_, err := svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 			require.NoError(t, err)
 			status := waitForUpdater(t, svc, 5*time.Second)
 			require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
@@ -102,7 +103,8 @@ func TestRecoveryCommandFailuresRetainTargetAndPermitRetry(t *testing.T) {
 			_, err = svc.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: installRequest().Version, Actor: "admin:1"})
 			require.Error(t, err)
 			svc.runner = runner
-			_, err = svc.Start(updatecontract.OperationRecover, recoverRequest())
+			prepareRecovery(t, svc)
+			_, err = svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 			require.NoError(t, err)
 			require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, svc, 5*time.Second).State)
 		})
@@ -112,8 +114,9 @@ func TestRecoveryCommandFailuresRetainTargetAndPermitRetry(t *testing.T) {
 func TestRecoveryRejectsConcurrentOperation(t *testing.T) {
 	svc, runner, _ := installedRecoveryFixture(t)
 	entered, resume := make(chan struct{}), make(chan struct{})
-	svc.runner = &recoveryFailureRunner{fakeRunner: runner, failCommand: " pg_restore ", entered: entered, resume: resume}
-	_, err := svc.Start(updatecontract.OperationRecover, recoverRequest())
+	svc.runner = &recoveryFailureRunner{fakeRunner: runner, failCommand: " pg_restore -U", entered: entered, resume: resume}
+	request := recoverRequest(svc)
+	_, err := svc.Start(updatecontract.OperationRecover, request)
 	require.NoError(t, err)
 	select {
 	case <-entered:
@@ -121,9 +124,22 @@ func TestRecoveryRejectsConcurrentOperation(t *testing.T) {
 		close(resume)
 		t.Fatal("recovery did not enter restore")
 	}
-	_, busyErr := svc.Start(updatecontract.OperationRecover, recoverRequest())
+	for _, action := range []updatecontract.Operation{updatecontract.OperationPrepare, updatecontract.OperationInstall, updatecontract.OperationRollback, updatecontract.OperationRecover, updatecontract.OperationPrepareRecovery} {
+		concurrent := request
+		switch action {
+		case updatecontract.OperationPrepare:
+			concurrent = updatecontract.OperationRequest{Version: installRequest().Version, Actor: "admin:1"}
+		case updatecontract.OperationInstall:
+			concurrent = installRequest()
+		case updatecontract.OperationRollback:
+			concurrent.Confirmation = "ROLLBACK " + concurrent.Version
+		case updatecontract.OperationPrepareRecovery:
+			concurrent.Confirmation = "PREPARE RECOVERY " + concurrent.Version
+		}
+		_, busyErr := svc.Start(action, concurrent)
+		require.ErrorIs(t, busyErr, ErrOperationBusy)
+	}
 	close(resume)
-	require.ErrorIs(t, busyErr, ErrOperationBusy)
 	require.Equal(t, updatecontract.UpdaterStateCritical, waitForUpdater(t, svc, 5*time.Second).State)
 }
 
@@ -141,7 +157,7 @@ func TestRecoveryInterruptedStateCanResumeRecordedBackup(t *testing.T) {
 	require.False(t, status.Busy)
 	_, err = restarted.Start(updatecontract.OperationInstall, installRequest())
 	require.Error(t, err)
-	_, err = restarted.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err = restarted.Start(updatecontract.OperationRecover, recoverRequest(restarted))
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, restarted, 5*time.Second).State)
 }
@@ -154,7 +170,7 @@ func TestRecoveryHealthFailureRemainsCritical(t *testing.T) {
 	defer server.Close()
 	svc.policy.HealthBaseURL = server.URL
 	svc.policy.HealthTimeoutSeconds = 1
-	_, err := svc.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err := svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 	require.NoError(t, err)
 	status := waitForUpdater(t, svc, 5*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
@@ -167,7 +183,7 @@ func TestRecoveryAuditFailurePreservesRetryTarget(t *testing.T) {
 	svc, _, before := installedRecoveryFixture(t)
 	require.NoError(t, os.Remove(svc.store.auditPath))
 	require.NoError(t, os.Mkdir(svc.store.auditPath, 0700))
-	_, err := svc.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err := svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 	require.NoError(t, err)
 	status := waitForUpdater(t, svc, 5*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
@@ -177,7 +193,7 @@ func TestRecoveryAuditFailurePreservesRetryTarget(t *testing.T) {
 	_, err = svc.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: installRequest().Version, Actor: "admin:1"})
 	require.Error(t, err)
 	require.NoError(t, os.Remove(svc.store.auditPath))
-	_, err = svc.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err = svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, svc, 5*time.Second).State)
 }
@@ -193,7 +209,7 @@ func TestIncompleteRecoveryAtSourceSchemaCannotUseOrdinaryRollback(t *testing.T)
 		Version: recoverRequest().Version, Actor: "admin:1", Confirmation: "ROLLBACK " + recoverRequest().Version,
 	})
 	require.Error(t, err, "schema number alone does not prove a complete restored database")
-	_, err = svc.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err = svc.Start(updatecontract.OperationRecover, recoverRequest(svc))
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, svc, 5*time.Second).State)
 }

@@ -31,7 +31,7 @@ export interface ReleaseNotes {
 
 export interface OperationSummary {
   operation_id: string
-  action: 'prepare' | 'install' | 'rollback' | 'recover'
+  action: 'prepare' | 'install' | 'rollback' | 'recover' | 'prepare_recovery'
   actor: string
   source_version: string
   target_version: string
@@ -87,6 +87,19 @@ export interface UpdateInfo {
 
 export interface UpdateStatus extends UpdateInfo {
   updater: UpdaterStatus
+  recovery?: RecoveryStatus | null
+}
+
+export interface RecoveryStatus {
+  operation_id: string
+  source_update_id: string
+  source_version: string
+  current_version: string
+  current_schema: number
+  source_schema: number
+  rescue_sha256: string
+  phase: string
+  confirmation: string
 }
 
 export interface VersionInfo {
@@ -102,7 +115,7 @@ export interface VersionInfo {
 
 export interface OperationAccepted {
   operation_id: string
-  action: 'prepare' | 'install' | 'rollback' | 'recover'
+  action: 'prepare' | 'install' | 'rollback' | 'recover' | 'prepare_recovery'
   state: string
 }
 
@@ -138,6 +151,11 @@ export async function recoverUpdate(version: string, confirmation: string): Prom
   return data
 }
 
-export const systemAPI = { getVersion, checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate }
+export async function prepareRecovery(version: string, confirmation: string): Promise<OperationAccepted> {
+  const { data } = await apiClient.post<OperationAccepted>('/admin/system/prepare-recovery', { version, confirmation })
+  return data
+}
+
+export const systemAPI = { getVersion, checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate, prepareRecovery }
 
 export default systemAPI

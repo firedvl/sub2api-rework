@@ -689,6 +689,7 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers, strictSte
 		system.POST("/install", gin.HandlerFunc(strictStepUpAuth), h.Admin.System.Install)
 		system.POST("/rollback", gin.HandlerFunc(strictStepUpAuth), h.Admin.System.Rollback)
 		system.POST("/recover", gin.HandlerFunc(strictStepUpAuth), h.Admin.System.Recover)
+		system.POST("/prepare-recovery", gin.HandlerFunc(strictStepUpAuth), h.Admin.System.PrepareRecovery)
 	}
 }
 

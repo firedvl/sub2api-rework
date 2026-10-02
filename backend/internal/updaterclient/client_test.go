@@ -69,3 +69,25 @@ func TestClientReportsMissingOrInvalidSocketAsUnavailable(t *testing.T) {
 	_, err = NewForSocket("relative.sock").Status(context.Background())
 	require.ErrorIs(t, err, ErrUnavailable)
 }
+
+func TestClientRecoveryUsesSeparateRoutes(t *testing.T) {
+	var paths []string
+	socket := startUnixUpdater(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(updatecontract.RecoveryStatus{SourceVersion: "0.1.183-rework.1", Confirmation: "operation-bound-consent"})
+			return
+		}
+		var request updatecontract.OperationRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		require.Equal(t, "PREPARE RECOVERY 0.1.183-rework.1", request.Confirmation)
+		_ = json.NewEncoder(w).Encode(updatecontract.OperationAccepted{Action: updatecontract.OperationPrepareRecovery})
+	}))
+	client := NewForSocket(socket)
+	status, err := client.RecoveryStatus(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "operation-bound-consent", status.Confirmation)
+	_, err = client.PrepareRecovery(context.Background(), updatecontract.OperationRequest{Version: status.SourceVersion, Confirmation: "PREPARE RECOVERY 0.1.183-rework.1"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"GET /v1/recovery", "POST /v1/prepare_recovery"}, paths)
+}

@@ -552,7 +552,7 @@ func TestEveryOperationalComposeCommandUsesCompleteFileSet(t *testing.T) {
 	required := []string{
 		"config --no-interpolate --format json", "config --format json", "config --services", "pg_isready",
 		"env -u REDISCLI_AUTH redis-cli --raw ping",
-		" psql ", " pg_dump ", " stop sub2api", "/app/sub2api --migrate", " up -d --no-deps sub2api",
+		" psql ", " pg_dump ", "stop " + testContainerID, "/app/sub2api --migrate", " up -d --no-deps sub2api",
 	}
 	for _, fragment := range required {
 		require.True(t, runner.hasCall(fragment), fragment)

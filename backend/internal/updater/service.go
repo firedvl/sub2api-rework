@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,9 +15,10 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const Version = "1.1.4"
+const Version = "1.1.5"
 
 var actorPattern = regexp.MustCompile(`^admin:[1-9][0-9]*$`)
+var operationIDPattern = regexp.MustCompile(`^upd-[0-9a-f]{24}$`)
 
 type Service struct {
 	policy     Policy
@@ -36,6 +38,11 @@ func NewService(policy Policy, runner CommandRunner, fetcher ManifestFetcher) (*
 	if err := validateManagedPaths(policy); err != nil {
 		return nil, fmt.Errorf("validate updater paths: %w", err)
 	}
+	lock, err := tryOperationLock(policy.LockPath)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
 	if runner == nil {
 		runner = ExecRunner{Directory: policy.DeploymentDirectory}
 	}
@@ -53,11 +60,6 @@ func NewService(policy Policy, runner CommandRunner, fetcher ManifestFetcher) (*
 	if err != nil {
 		return nil, fmt.Errorf("load updater state: %w", err)
 	}
-	if state.Backup != nil {
-		if err := service.validateBackupMetadata(state.Backup); err != nil {
-			return nil, fmt.Errorf("validate updater backup: %w", err)
-		}
-	}
 	if state.Status.Busy {
 		state.Status.Busy = false
 		switch state.Status.State {
@@ -68,7 +70,20 @@ func NewService(policy Policy, runner CommandRunner, fetcher ManifestFetcher) (*
 		}
 		state.Status.LastError = "The previous updater operation was interrupted. Review the deployment before retrying."
 	}
+	if state.Status.State == updatecontract.UpdaterStateCritical {
+		ctx, cancel := context.WithTimeout(context.Background(), policy.operationTimeout())
+		err := service.quiesceApplication(ctx)
+		cancel()
+		if err != nil {
+			state.Status.LastError = "Recovery required; application quiescence could not be verified."
+		}
+	}
 	state.Status.UpdaterVersion = Version
+	if state.Backup != nil {
+		if err := service.validateBackupMetadata(state.Backup); err != nil {
+			return nil, fmt.Errorf("validate updater backup: %w", err)
+		}
+	}
 	state.Status.Healthy = true
 	if err := service.store.save(state); err != nil {
 		return nil, fmt.Errorf("initialize updater state: %w", err)
@@ -110,12 +125,11 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 		return nil, ErrOperationBusy
 	}
 	if state.Status.State == updatecontract.UpdaterStateCritical &&
-		(action != updatecontract.OperationRecover &&
-			(action != updatecontract.OperationRollback || recoveryWasInterruptedOrFailed(state.Status.LastAttempt))) {
+		action != updatecontract.OperationRecover && action != updatecontract.OperationPrepareRecovery {
 		lock.release()
 		return nil, fmt.Errorf("updater requires recovery before another prepare or install")
 	}
-	if action == updatecontract.OperationRollback || action == updatecontract.OperationRecover {
+	if action == updatecontract.OperationRollback || action == updatecontract.OperationRecover || action == updatecontract.OperationPrepareRecovery {
 		if state.Backup == nil || state.Backup.SourceVersion != request.Version || state.Status.RollbackVersion != request.Version {
 			lock.release()
 			return nil, fmt.Errorf("requested version is not the recorded rollback target")
@@ -127,10 +141,21 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 			}
 			return nil, fmt.Errorf("recorded rollback backup is invalid")
 		}
-		if action == updatecontract.OperationRecover {
+		if action == updatecontract.OperationRecover || action == updatecontract.OperationPrepareRecovery {
 			if err := s.validateRecoveryBackup(state.Backup); err != nil {
 				lock.release()
 				return nil, fmt.Errorf("recorded recovery backup is invalid")
+			}
+		}
+		if action == updatecontract.OperationRecover {
+			if state.Recovery == nil || state.Recovery.Phase == recoveryPreparing || state.Recovery.Phase == recoveryCompleted || state.Recovery.Phase == recoverySourceStarting ||
+				request.Confirmation != recoveryConfirmation(state) {
+				lock.release()
+				return nil, fmt.Errorf("prepared rescue and operation-bound recovery confirmation required")
+			}
+			if err := s.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
+				lock.release()
+				return nil, fmt.Errorf("recorded rescue backup is invalid")
 			}
 		}
 	} else if updatecontract.CompareRework(request.Version, state.Status.InstalledVersion) <= 0 {
@@ -152,11 +177,21 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 	state.Status.Busy = true
 	state.Status.LastError = ""
 	state.Status.LastAttempt = &summary
-	if action == updatecontract.OperationRecover {
+	if action == updatecontract.OperationRecover || action == updatecontract.OperationPrepareRecovery {
 		// An accepted database restore must survive interruption as critical.
 		state.Status.State = updatecontract.UpdaterStateCritical
 	} else if state.Status.State != updatecontract.UpdaterStateCritical {
 		state.Status.State = operationState(action)
+	}
+	if action == updatecontract.OperationRecover {
+		// Consume consent durably before commands; retries require fresh consent.
+		state.Recovery.AuthorizationID = operationID
+	}
+	if action == updatecontract.OperationPrepareRecovery && state.Recovery != nil {
+		state.Recovery.AuthorizationID = operationID
+		if state.Recovery.Phase != recoveryRestoring && state.Recovery.Phase != recoveryDatabaseRestored {
+			state.Recovery.Phase = recoveryPreparing
+		}
 	}
 	if err := s.store.save(state); err != nil {
 		lock.release()
@@ -165,10 +200,6 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 
 	go s.runOperation(action, request, summary, state, lock)
 	return &updatecontract.OperationAccepted{OperationID: operationID, Action: action, State: "accepted"}, nil
-}
-
-func recoveryWasInterruptedOrFailed(summary *updatecontract.OperationSummary) bool {
-	return summary != nil && summary.Action == updatecontract.OperationRecover
 }
 
 func validateOperationRequest(action updatecontract.Operation, request updatecontract.OperationRequest) error {
@@ -189,8 +220,12 @@ func validateOperationRequest(action updatecontract.Operation, request updatecon
 			return fmt.Errorf("rollback confirmation mismatch")
 		}
 	case updatecontract.OperationRecover:
-		if request.Confirmation != "RESTORE DATABASE AND ROLLBACK "+request.Version {
+		if !strings.HasPrefix(request.Confirmation, "RESTORE PREUPDATE DATABASE "+request.Version+" USING RESCUE ") || len(request.Confirmation) > 512 {
 			return fmt.Errorf("recovery confirmation mismatch")
+		}
+	case updatecontract.OperationPrepareRecovery:
+		if request.Confirmation != "PREPARE RECOVERY "+request.Version {
+			return fmt.Errorf("recovery preparation confirmation mismatch")
 		}
 	default:
 		return fmt.Errorf("unsupported updater operation")
@@ -208,6 +243,8 @@ func operationState(action updatecontract.Operation) updatecontract.UpdaterState
 		return updatecontract.UpdaterStateRollingBack
 	case updatecontract.OperationRecover:
 		return updatecontract.UpdaterStateRollingBack
+	case updatecontract.OperationPrepareRecovery:
+		return updatecontract.UpdaterStateCritical
 	default:
 		return updatecontract.UpdaterStateFailed
 	}
@@ -233,6 +270,8 @@ func (s *Service) runOperation(
 		operationErr = s.rollback(ctx, request.Version, &state)
 	case updatecontract.OperationRecover:
 		operationErr = s.recover(ctx, request.Version, &state)
+	case updatecontract.OperationPrepareRecovery:
+		operationErr = s.prepareRecovery(ctx, &summary, &state)
 	}
 	s.finish(summary, operationErr, &state)
 	lock.release()
@@ -268,11 +307,13 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	if err != nil {
 		return err
 	}
-	backup, err := s.createBackup(ctx, summary.OperationID, state.Status.InstalledVersion, version, currentMigration)
+	backup, err := s.createBackup(ctx, summary.OperationID, state.Status.InstalledVersion, version, currentMigration, "")
 	if err != nil {
 		return fmt.Errorf("backup failed")
 	}
 	state.Backup = backup
+	state.Exposure = preExposure
+	state.Recovery = nil
 	state.Status.RollbackVersion = backup.SourceVersion
 	if err := s.store.save(*state); err != nil {
 		return fmt.Errorf("persist backup metadata: %w", err)
@@ -294,14 +335,38 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 		err = s.runMigrations(ctx)
 	}
 	if err == nil {
-		err = s.startApplication(ctx)
+		state.Status.CurrentMigration, err = s.currentMigration(ctx)
+		if err == nil && state.Status.CurrentMigration != manifest.MigrationMax {
+			err = fmt.Errorf("migration target validation failed")
+		}
+	}
+	if err == nil {
+		state.Exposure = exposurePossible
+		err = s.store.save(*state)
+		if err == nil {
+			err = s.auditEvent(state, "candidate_exposure_possible")
+		}
+		if err == nil {
+			err = s.startApplication(ctx)
+		}
 	}
 	if err == nil {
 		err = s.validateDeployment(ctx, manifest.MigrationMax)
 	}
 	if err != nil {
 		recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), s.policy.operationTimeout())
-		rollbackErr := s.restoreImmediate(recoveryCtx, backup, migrationAttempted)
+		if state.Exposure != preExposure {
+			state.Status.State = updatecontract.UpdaterStateCritical
+			summary.RollbackResult = "suppressed"
+			quiesceErr := s.quiesceApplication(recoveryCtx)
+			cancelRecovery()
+			_ = s.auditEvent(state, "automatic_restore_suppressed_after_exposure")
+			if quiesceErr != nil {
+				return fmt.Errorf("recovery required; application quiescence could not be verified")
+			}
+			return fmt.Errorf("recovery required; candidate exposure was possible; current database and pre-update backup preserved")
+		}
+		rollbackErr := s.restoreImmediate(recoveryCtx, backup, migrationAttempted, state)
 		cancelRecovery()
 		if rollbackErr != nil {
 			summary.RollbackResult = "failed"
@@ -311,6 +376,7 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 		summary.RollbackResult = "succeeded"
 		state.Status.InstalledVersion = backup.SourceVersion
 		state.Status.CurrentMigration = backup.SourceMigration
+		_ = s.auditEvent(state, "automatic_pre_exposure_rollback_completed")
 		return fmt.Errorf("installation failed; automatic rollback succeeded")
 	}
 	state.Prepared = nil
@@ -333,6 +399,9 @@ func (s *Service) rollback(ctx context.Context, version string, state *persisted
 	if currentMigration != backup.SourceMigration {
 		return fmt.Errorf("manual rollback blocked because database migrations changed")
 	}
+	if state.Status.State == updatecontract.UpdaterStateCritical || state.Recovery != nil && state.Recovery.Phase != recoveryCompleted {
+		return fmt.Errorf("manual rollback blocked because database recovery is incomplete")
+	}
 	if err := s.restoreApplication(ctx, backup); err != nil {
 		state.Status.State = updatecontract.UpdaterStateCritical
 		return fmt.Errorf("manual rollback failed")
@@ -352,6 +421,12 @@ func (s *Service) recover(ctx context.Context, version string, state *persistedS
 		return fmt.Errorf("recorded recovery backup is unavailable")
 	}
 	state.Status.State = updatecontract.UpdaterStateCritical
+	if state.Recovery == nil || state.Recovery.Phase == recoveryPreparing || state.Recovery.Phase == recoveryCompleted || state.Recovery.Phase == recoverySourceStarting {
+		return fmt.Errorf("verified prepared rescue required")
+	}
+	if err := s.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
+		return fmt.Errorf("recorded rescue backup is invalid")
+	}
 	if err := s.validateRecoveryBackup(backup); err != nil {
 		return fmt.Errorf("recorded recovery backup is invalid")
 	}
@@ -361,7 +436,10 @@ func (s *Service) recover(ctx context.Context, version string, state *persistedS
 	if err := s.pullAndVerifyRecordedImage(ctx, backup.SourceDigest); err != nil {
 		return err
 	}
-	if err := s.restoreImmediate(ctx, backup, true); err != nil {
+	if err := s.auditEvent(state, "destructive_recovery_authorized"); err != nil {
+		return fmt.Errorf("recovery audit failed")
+	}
+	if err := s.restoreImmediate(ctx, backup, true, state); err != nil {
 		return fmt.Errorf("database recovery failed")
 	}
 	if err := s.validateRunningApplicationImage(ctx, backup.SourceDigest); err != nil {
@@ -371,6 +449,7 @@ func (s *Service) recover(ctx context.Context, version string, state *persistedS
 	state.Status.PreparedVersion = ""
 	state.Status.InstalledVersion = backup.SourceVersion
 	state.Status.CurrentMigration = backup.SourceMigration
+	state.Recovery.Phase = recoveryCompleted
 	state.Status.State = updatecontract.UpdaterStateSucceeded
 	return nil
 }
@@ -409,9 +488,12 @@ func (s *Service) finish(summary updatecontract.OperationSummary, operationErr e
 	} else {
 		summary.Result = "succeeded"
 		state.Status.LastError = ""
-		if summary.Action == updatecontract.OperationPrepare {
+		switch summary.Action {
+		case updatecontract.OperationPrepareRecovery:
+			state.Status.State = updatecontract.UpdaterStateCritical
+		case updatecontract.OperationPrepare:
 			state.Status.State = updatecontract.UpdaterStatePrepared
-		} else {
+		default:
 			state.Status.State = updatecontract.UpdaterStateSucceeded
 		}
 	}
@@ -421,11 +503,21 @@ func (s *Service) finish(summary updatecontract.OperationSummary, operationErr e
 		state.Status.State = updatecontract.UpdaterStateCritical
 		state.Status.LastError = summary.Error
 	}
+	if state.Status.State == updatecontract.UpdaterStateCritical {
+		ctx, cancel := context.WithTimeout(context.Background(), s.policy.operationTimeout())
+		if err := s.quiesceApplication(ctx); err != nil {
+			state.Status.LastError = "Recovery required; application quiescence could not be verified."
+		}
+		cancel()
+	}
 	state.Status.LastAttempt = &summary
 	if summary.Action == updatecontract.OperationRollback || summary.Action == updatecontract.OperationRecover {
 		state.Status.LastRollback = &summary
 	}
 	if err := s.store.save(*state); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), s.policy.operationTimeout())
+		_ = s.quiesceApplication(ctx)
+		cancel()
 		failed := state.Status
 		failed.Healthy = false
 		failed.Busy = false

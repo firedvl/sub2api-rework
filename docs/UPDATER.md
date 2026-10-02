@@ -7,10 +7,10 @@ The update system has three independent layers:
 1. The application release watcher reads public GitHub release metadata and
    manifests. An upstream tag is informational, not installable.
 2. The admin API and Settings UI expose status and fixed prepare, install, and
-   rollback actions. Writes require an administrator JWT, enabled TOTP, a recent
-   step-up grant, and exact confirmation text for install or rollback.
+   rollback and recovery actions. Writes require an administrator JWT, enabled
+   TOTP, a recent step-up grant, and exact confirmation text for mutations.
 3. `sub2api-rework-updater` runs on the host and accepts only `status`,
-   `prepare`, `install`, and `rollback` over a Unix socket. It independently
+   `prepare`, `install`, `rollback`, `prepare_recovery`, and `recover` over a Unix socket. It independently
    downloads and validates the approved manifest and image digest.
 
 The application container must never mount `/var/run/docker.sock`. The updater
@@ -237,6 +237,17 @@ or recreate the application. Do not retry `0.1.183-rework.7` after `.8` exists.
 
 ### Replace An Active Updater
 
+Updater `1.1.5` replaces unsafe post-exposure restore in `1.1.4`. It reads
+legitimate schema-v2 state from `1.1.4`, keeps `/v1/status` compatible with the
+immutable `.6` application's strict client, and adds `/v1/recovery` for rescue
+identity and consent. Replace it only while the deployment is healthy and idle.
+An interrupted operation starts in `critical` and quiesces the application;
+restarting the updater does not resume an install or infer recovery from schema.
+
+Production remains `.6` at schema244 until a separately authorized production
+updater installation and qualification. This source change does not authorize
+production installation or `.7` release preparation.
+
 Release `0.2.3-rework.1` requires updater `1.1.4` before preparing or installing
 the release. Follow this replacement procedure while `.13` remains healthy and
 idle. Version `1.1.4` accepts the existing `1.1.3` policy/state and keeps the
@@ -362,10 +373,11 @@ compatible migration state, and the approved image digest. It then:
    path, order, and SHA-256 checksum, plus the environment file, source
    image/digest, migration state, and a PostgreSQL custom-format dump under a
    timestamped update ID;
-2. stops the application service;
+2. disables restart and stops all application-service containers, including
+   migration one-offs, then verifies their stopped state;
 3. pins `SUB2API_IMAGE` to the approved digest;
 4. runs `/app/sub2api --migrate` in a one-shot application container;
-5. starts the application service;
+5. durably records `EXPOSURE_POSSIBLE` before starting the candidate application;
 6. checks `/health`, `/`, public frontend settings, PostgreSQL, Redis, and the
    exact migration state;
 7. records the bounded audit result.
@@ -376,53 +388,89 @@ The checks send no provider credentials and no paid model traffic.
 
 There are three distinct paths:
 
-1. A failed install uses automatic snapshot restore within that installation.
+1. A failed install before candidate exposure may restore its pre-update snapshot.
 2. Ordinary manual rollback is application-only and allowed only with an
-   unchanged migration.
-3. A successful schema-advancing installation uses **Restore database and roll
-   back**, which restores the recorded pre-update database snapshot and loses
-   later writes.
+   unchanged migration and no incomplete recovery.
+3. Recovery after exposure requires **Prepare recovery**, then a separate
+   **Restore pre-update database and roll back** acknowledgement bound to the
+   verified rescue snapshot.
 
-If migration or health validation fails after deployment mutation, the updater
-uses a fresh bounded recovery timeout and stops the application. Whenever
-migration execution was attempted, it forcibly disconnects remaining clients,
-recreates the target PostgreSQL database, and restores the pre-update dump. It
-then restores the previous image and environment, restarts the service with the
-complete ordered Compose set, and reruns all health checks. The updater does not
-modify Compose files, so their private backup copies remain recovery and audit
-evidence. Backup validation rejects missing, reordered, renamed, or
-checksum-mismatched Compose copies. A stop or rollback failure leaves the updater in `critical` state.
-Prepare and install remain blocked in that state. A matching recorded rollback
-may be retried, but a failed or interrupted recovery attempt remains `critical`
-and preserves the recorded backup.
+The updater persists `PRE_EXPOSURE` with each new pre-update backup. Migration
+execution uses the application's migration-only command, which does not serve
+traffic. Before any candidate service launch attempt, it saves and syncs
+`EXPOSURE_POSSIBLE`, including the state directory. Failed health or an unsuccessful
+launch command never clears this record. Missing exposure metadata in old state
+means unknown exposure, not proof of safety.
+
+Before exposure, a failed migration may restore the verified pre-update dump,
+environment, and immutable source image, then require source-schema and health
+checks. After exposure becomes possible, every install failure suppresses
+automatic database restore and source startup. It uses a fresh bounded timeout
+to quiesce the candidate, preserves the current database and pre-update backup,
+and enters durable `critical` state. It disables Docker restart and verifies all
+containers carrying the deployment's application-service labels are stopped,
+including one-offs. Prepare, install, and ordinary rollback are blocked in that
+state. A failure to verify shutdown remains critical and reports a fixed reason.
 
 Manual rollback is allowed only to the updater's recorded previous version and
 only while the database migration number still equals the backup's source
 migration. It is blocked after schema advancement because substituting an older
 application without restoring the database is not generally safe.
 
-For a successful schema-advancing installation, use the separate **Restore
-database and roll back** operation. It accepts only the updater-recorded source
-version and requires typing `RESTORE DATABASE AND ROLLBACK <version>`. The
-updater verifies the recorded Compose, environment, and PostgreSQL dump
-checksums, restores that exact pre-update dump, pins and verifies the recorded
-immutable source image, then validates PostgreSQL, Redis, HTTP, and the source
-migration. Writes made after the backup will be lost. It never accepts a backup
-path, image, command, or SQL from the application request.
+Exact `.6` at `2d61454ebfd43f36baee38bf55bf01a4b6ffd2c3` is **not compatible
+with schema249**: migrated group reasoning-effort multipliers can disappear
+through its pricing read/update behavior. `dot6_forward_compatible_with_schema249=false`.
+The accepted `.6` artifacts are immutable. No recovery path may start `.6` until
+the database has been restored to its recorded source schema244. Future
+schema-advancing releases from `.7` require `minimum_updater_version >= 1.1.5`.
+Historical manifests retain their original minimum-version semantics.
 
-This recovery path is available only for backups created by updater `1.1.4` or
-later, which record the required dump and environment checksums. Existing
-backups remain valid for failed-install recovery and same-schema rollback, but
-do not silently qualify for destructive post-success recovery. An accepted
-recovery enters `critical` before any destructive work. A failed or interrupted
-recovery retains its backup evidence, blocks prepare/install, and may be
-retried only against that recorded target.
+### Two-Stage Destructive Recovery
 
-Database recreation is destructive and discards writes made after the backup,
-including objects created by the failed migration. Use automatic restore only
-during the bounded failed-install window. After a successful schema-advancing
-installation, use the confirmed recovery operation above; do not claim
-application rollback alone reverses database changes.
+Stage 1 accepts only the recorded source version and `PREPARE RECOVERY <version>`.
+Under the operation lock it validates the pre-update backup, quiesces the
+application and verifies shutdown, then creates a new custom-format dump of the
+current database with current schema, version, environment and Compose metadata.
+It syncs the files, verifies their checksums and `pg_restore --list`, and persists
+the rescue identity. The application remains stopped with restart disabled.
+
+Stage 2 accepts only the exact `confirmation` returned by `GET /v1/recovery`.
+That acknowledgement names the source version, rescue operation ID, rescue
+checksum, and current authorization generation. It states that the active
+database will revert to the pre-update snapshot. The updater consumes the
+generation durably before commands, revalidates both backups and the stopped
+container identities/start timestamps, restores the old snapshot, then pins and
+starts the source image only at its source schema. It validates source image,
+schema, Redis and HTTP before recording completion. The current-data rescue
+remains under the private backup tree after success, failure, or restart; the
+updater never deletes or overwrites a completed rescue.
+
+`RESTORE DATABASE AND ROLLBACK <version>` is rejected before any commands. Old
+`1.1.4` successful state without exposure/rescue metadata must explicitly prepare
+a current rescue first. Older dumps without checksums do not qualify for this
+destructive path. Requests never carry filesystem paths, images, SQL, or commands.
+
+The gateway stops during Stage 1, so its admin page cannot poll or execute Stage 2.
+Use an independent host session to inspect and finish recovery. The UI stops
+polling after repeated connection failures and points to this host workflow:
+
+```bash
+sudo curl --fail --unix-socket /run/sub2api-rework-updater/updater.sock \
+  http://updater/v1/recovery
+```
+
+Read the recorded source version and rescue identity. Submit a JSON request to
+`http://updater/v1/recover` over the same socket containing `version`,
+`actor: "admin:<operator-id>"`, and the **exact returned confirmation**. Stage 2
+is never submitted automatically. Socket access is a privileged host boundary;
+the actor is an audit label, not independent host authentication.
+
+If recovery stops during database recreation or restore, it preserves the
+original rescue and rotates consent for retry. A schema number alone does not
+prove that restore completed. If source startup was attempted, a retry first
+prepares a new rescue of the current database and retains the earlier rescue.
+Completed or stale consent cannot be replayed. A container restarted or replaced
+after rescue preparation invalidates that rescue generation for destructive use.
 
 ## Staging Qualification
 
@@ -432,7 +480,7 @@ Before any production installation:
    a deployment directory other than `/opt/sub2api-rework/deploy`.
 2. Start the application with a base file plus the updater socket override.
 3. Model a root-owned, non-root-group `/var/log` ancestor with mode `0775`.
-   Confirm a custom audit path below it fails, then start updater `1.1.4` with
+   Confirm a custom audit path below it fails, then start updater `1.1.5` with
    state, audit, and backups under its private state tree, the same ordered set,
    staging-only paths, and a loopback health URL. Verify its systemd drop-in
    permits the configured deployment directory and no broader tree.
@@ -453,12 +501,21 @@ Before any production installation:
    endpoints. Verify the Docker socket is absent.
 8. Query updater status from the recreated application, then run another
    prepare/status operation.
-9. Force application health failure and confirm automatic image/database
-   recovery, removal of schema objects created only by the failed migration, and
-   a healthy prior version. Recheck the updater socket mount, supplemental GID,
-   Docker socket absence, and updater status after rollback.
+9. Force failure before candidate launch and require automatic snapshot restore
+   and healthy source schema. Separately fail candidate launch and health: require
+   current database preservation, verified shutdown, critical state, no automatic
+   restore, and no `.6` launch against schema249.
 10. Force restore failure and confirm the visible `critical` state and audit.
 11. Send concurrent operations and confirm only one acquires the lock.
+12. After success write a sentinel, reject the old one-stage confirmation, prepare
+    a rescue, restart the updater, and execute the exact new acknowledgement.
+    Restore the retained rescue into a separate disposable database and verify
+    the sentinel and schema249. Tampered backups and failed dump, disk, checksum,
+    metadata, or audit writes must never fall through to destructive restore.
+13. Exercise interrupted recreation, restore, source startup and validation.
+    Preserve both backups and require fresh consent for retry. Run exact `.6`
+    only against a separate disposable compatibility database to retain its
+    expected negative multiplier qualification.
 
 ## Emergency Recovery
 
@@ -469,8 +526,7 @@ updater audit and Docker service state locally; service logs remain in the
 systemd journal and are not exposed in the UI.
 
 Do not prepare or install another release while state is `critical`. Use the
-recorded same-schema rollback or the recorded **Restore database and roll back**
-operation above; a new install would replace the recovery metadata needed for
+two-stage recovery operation above; a new install would replace the metadata needed for
 the current incident. Do not edit updater state, migration records, images, or
 database contents by hand to simulate recovery.
 

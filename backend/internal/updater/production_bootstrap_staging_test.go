@@ -68,12 +68,24 @@ type stagingRunner struct {
 	targetImage  string
 	targetDigest string
 	targetID     string
+	failCommand  string
+	failAfter    bool
+	commands     []string
 	mu           sync.Mutex
 	failNextUp   bool
 	healthFailed bool
 }
 
 func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error {
+	command := strings.Join(args, " ")
+	runner.mu.Lock()
+	runner.commands = append(runner.commands, command)
+	fail := runner.failCommand != "" && strings.Contains(command, runner.failCommand)
+	after := runner.failAfter
+	runner.mu.Unlock()
+	if fail && !after {
+		return fmt.Errorf("synthetic staging command failure")
+	}
 	if len(args) == 2 && args[0] == "pull" && (args[1] == runner.targetImage || args[1] == stagingFailedImage) {
 		return nil // The candidate is already verified by Docker's native RepoDigest.
 	}
@@ -81,7 +93,10 @@ func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io
 	if commandErr != nil {
 		return commandErr
 	}
-	if strings.Contains(strings.Join(args, " "), " up -d --no-deps sub2api") {
+	if fail {
+		return fmt.Errorf("synthetic staging failure after command")
+	}
+	if strings.Contains(strings.Join(args, " "), " up -d --no-deps") {
 		runner.mu.Lock()
 		if runner.failNextUp {
 			runner.failNextUp = false
@@ -341,9 +356,31 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	if stagingApplicationImageID(t, docker, compose) != runner.targetID {
 		t.Fatal("candidate container does not use the locally built candidate image")
 	}
-	stagingSQL(t, docker, compose, "CREATE TABLE recovery_post_success_sentinel (value text NOT NULL); INSERT INTO recovery_post_success_sentinel VALUES ('must-be-lost')")
+	stagingSQL(t, docker, compose, "CREATE TABLE recovery_post_success_sentinel (value text NOT NULL); INSERT INTO recovery_post_success_sentinel VALUES ('must-be-rescued')")
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
-	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationRecover, stagingSourceVersion)
+	if _, err := service.Start(updatecontract.OperationRecover, updatecontract.OperationRequest{Version: stagingSourceVersion, Actor: "admin:1", Confirmation: "RESTORE DATABASE AND ROLLBACK " + stagingSourceVersion}); err == nil {
+		t.Fatal("old one-stage recovery was accepted")
+	}
+	if got := stagingQuery(t, docker, compose, "SELECT value FROM recovery_post_success_sentinel"); got != "must-be-rescued" {
+		t.Fatal("old rejected request changed current database")
+	}
+	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingSourceVersion)
+	waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
+	state, err := service.store.load(policy.InitialInstalledVersion, policy.InitialMigration, Version)
+	if err != nil || state.Recovery == nil {
+		t.Fatalf("rescue was not persisted: %v", err)
+	}
+	if err := service.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
+		t.Fatal(err)
+	}
+	stopUpdater()
+	service, err = NewService(policy, runner, fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.healthHTTP.Transport = stagingHealthTransport{runner: runner}
+	startUpdater()
+	requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingSourceVersion)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
 	if status.InstalledVersion != stagingSourceVersion || status.CurrentMigration != 239 || stagingMigration(t, docker, compose) != 239 {
 		t.Fatalf("post-success recovery did not restore source identity: %+v", status)
@@ -354,6 +391,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	if got := stagingQuery(t, docker, compose, "SELECT to_regclass('recovery_post_success_sentinel') IS NULL"); got != "t" {
 		t.Fatalf("post-success write survived destructive recovery: %q", got)
 	}
+	verifyStagingRescue(t, docker, compose, service, state.Recovery.Rescue)
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationPrepare, stagingTargetVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
@@ -365,13 +403,87 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	runner.failNextApplicationHealth()
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingFailedVersion)
-	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, 5*time.Minute)
-	if status.InstalledVersion != stagingSourceVersion || status.LastAttempt == nil || status.LastAttempt.RollbackResult != "succeeded" {
-		t.Fatalf("automatic rollback did not restore %s: %+v", stagingSourceVersion, status)
+	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 5*time.Minute)
+	if status.LastAttempt == nil || status.LastAttempt.RollbackResult != "suppressed" || stagingMigration(t, docker, compose) != 249 {
+		t.Fatalf("post-exposure failure did not preserve migrated database: %+v", status)
 	}
+	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingSourceVersion)
+	waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
+	requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingSourceVersion)
+	waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
+	qualifyStagingDot6Recovery(t, docker, compose, service, runner, targetImage)
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
 		t.Fatalf("deployment-specific systemd drop-in is invalid: %q, %v", dropIn, err)
+	}
+}
+
+func requestHostStagingOperation(t *testing.T, service *Service, action updatecontract.Operation, version string) {
+	t.Helper()
+	request := updatecontract.OperationRequest{Version: version, Actor: "admin:1"}
+	switch action {
+	case updatecontract.OperationPrepareRecovery:
+		request.Confirmation = "PREPARE RECOVERY " + version
+	case updatecontract.OperationInstall:
+		request.Confirmation = "INSTALL " + version
+	case updatecontract.OperationRecover:
+		status, err := service.RecoveryStatus()
+		if err != nil || status == nil || status.Confirmation == "" {
+			t.Fatalf("prepared recovery consent unavailable: %v", err)
+		}
+		request.Confirmation = status.Confirmation
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", service.policy.SocketPath)
+		},
+	}}
+	response, err := client.Post("http://updater/v1/"+string(action), "application/json", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("host recovery %s rejected: %d", action, response.StatusCode)
+	}
+}
+
+func verifyStagingRescue(t *testing.T, docker string, compose []string, service *Service, rescue *backupMetadata) {
+	t.Helper()
+	if err := service.validateRecoveryBackup(rescue); err != nil {
+		t.Fatal(err)
+	}
+	args := append(append([]string(nil), compose...), "exec", "-T", "postgres", "createdb", "-U", "sub2api", "rescue_verification")
+	if out, err := runStagingCommand(docker, args...); err != nil {
+		t.Fatalf("create rescue verification database: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		_, _ = runStagingCommand(docker, append(append([]string(nil), compose...), "exec", "-T", "postgres", "dropdb", "-U", "sub2api", "--if-exists", "rescue_verification")...)
+	})
+	dump, err := openManagedFile(rescue.DatabaseBackup, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args = append(append([]string(nil), compose...), "exec", "-T", "postgres", "pg_restore", "-U", "sub2api", "-d", "rescue_verification", "--no-owner", "--no-privileges", "--exit-on-error")
+	command := exec.Command(docker, args...)
+	command.Stdin = dump
+	err = command.Run()
+	_ = dump.Close()
+	if err != nil {
+		t.Fatal("rescue restore into separate database failed")
+	}
+	query := "SELECT value FROM recovery_post_success_sentinel; " + migrationQuery
+	args = append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", "rescue_verification", "-Atc", query)
+	output, err := runStagingCommand(docker, args...)
+	if err != nil || strings.TrimSpace(output) != "must-be-rescued\n249" {
+		t.Fatalf("rescue lost sentinel/schema249: %v: %s", err, output)
+	}
+	if out, err := runStagingCommand(docker, append(append([]string(nil), compose...), "exec", "-T", "postgres", "dropdb", "-U", "sub2api", "rescue_verification")...); err != nil {
+		t.Fatalf("remove rescue verification DB: %v: %s", err, out)
 	}
 }
 
