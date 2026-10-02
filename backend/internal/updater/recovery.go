@@ -31,7 +31,13 @@ func (s *Service) RecoveryStatus() (*updatecontract.RecoveryStatus, error) {
 		SourceSchema: state.Backup.SourceMigration,
 	}
 	if state.Exposure == exposurePossible && state.Prepared != nil {
-		status.CurrentVersion = state.Prepared.ReworkVersion
+		image, err := deploymentImageFromEnvironment(s.policy.EnvironmentFile)
+		if err != nil {
+			return nil, fmt.Errorf("current deployment identity unavailable")
+		}
+		if image == state.Prepared.ImmutableImage() {
+			status.CurrentVersion = state.Prepared.ReworkVersion
+		}
 	}
 	if r := state.Recovery; r != nil {
 		status.OperationID, status.Phase, status.RescueSHA256 = r.OperationID, r.Phase, r.Rescue.DatabaseSHA256
@@ -107,7 +113,7 @@ func (s *Service) prepareRecovery(ctx context.Context, summary *updatecontract.O
 	}
 	if image == state.Backup.SourceDigest || image == state.Backup.SourceImage {
 		currentVersion = state.Backup.SourceVersion
-	} else if state.Exposure == exposurePossible && state.Prepared != nil {
+	} else if state.Exposure == exposurePossible && state.Prepared != nil && image == state.Prepared.ImmutableImage() {
 		currentVersion = state.Prepared.ReworkVersion
 	}
 	rescue, err := s.createBackup(ctx, summary.OperationID, currentVersion, state.Backup.SourceVersion, migration, state.Backup.UpdateID)

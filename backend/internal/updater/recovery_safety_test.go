@@ -252,3 +252,24 @@ func TestSourceDot6CannotStartAgainstSchema249EvenWithMisrecordedBackup(t *testi
 	require.Error(t, svc.restoreApplication(context.Background(), &backupMetadata{SourceVersion: "0.2.3-rework.6", SourceMigration: 249}))
 	require.Equal(t, 1, runner.upCount)
 }
+
+func TestRescueVersionUsesActiveImageInsteadOfFuturePreparedRelease(t *testing.T) {
+	svc, _ := installSafetyFixture(t)
+	var manifest updatecontract.Manifest
+	require.NoError(t, json.Unmarshal(validUpdaterManifest(t), &manifest))
+	manifest.ReworkVersion = "0.1.185-rework.1"
+	manifest.Image = "ghcr.io/firedvl/sub2api-rework:" + manifest.ReworkVersion
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	svc.fetcher = &fakeManifestFetcher{data: data}
+	_, err = svc.Start(updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: manifest.ReworkVersion, Actor: "admin:1"})
+	require.NoError(t, err)
+	require.Equal(t, updatecontract.UpdaterStatePrepared, waitForUpdater(t, svc, 5*time.Second).State)
+	status, err := svc.RecoveryStatus()
+	require.NoError(t, err)
+	require.Equal(t, installRequest().Version, status.CurrentVersion)
+	prepareRecovery(t, svc)
+	status, err = svc.RecoveryStatus()
+	require.NoError(t, err)
+	require.Equal(t, installRequest().Version, status.CurrentVersion)
+}
