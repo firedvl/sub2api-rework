@@ -76,7 +76,7 @@ func TestGatewayCapabilitiesContractShape(t *testing.T) {
 		"generated_at": "<generated_at>",
 		"gateway": {
 			"version": "<gateway_version>",
-			"upstream_version": "v0.2.3"
+			"upstream_version": "v0.2.8"
 		},
 		"transport": {
 			"http": true,

@@ -242,6 +242,8 @@ func TestUpdateWatcherDot4PrefersQualifiedDot5(t *testing.T) {
 		manifest: data,
 	}
 	svc := NewUpdateService(&updateServiceCacheStub{}, client, BuildInfo{Version: "0.2.3-rework.4", BuildType: "release"})
+	svc.metadata.UpstreamBaseline = "v0.2.3"
+	svc.metadata.MigrationMax = 244
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateReady, info.State)
@@ -267,6 +269,8 @@ func TestUpdateWatcherDot5PrefersQualifiedDot6(t *testing.T) {
 		manifest: data,
 	}
 	svc := NewUpdateService(&updateServiceCacheStub{}, client, BuildInfo{Version: "0.2.3-rework.5", BuildType: "release"})
+	svc.metadata.UpstreamBaseline = "v0.2.3"
+	svc.metadata.MigrationMax = 244
 	info, err := svc.CheckUpdate(context.Background(), true)
 	require.NoError(t, err)
 	require.Equal(t, ReleaseStateUpdateReady, info.State)
