@@ -648,6 +648,25 @@ func verifyStagingDot6PricingIncompatibility(t *testing.T, docker string, compos
 		t.Fatal("restore rescue to isolated negative compatibility DB")
 	}
 	assertStagingMigratedMultiplier(t, docker, compose, database)
+	// Synthetic acknowledgement fixture exists only in this disposable rescue copy.
+	query := `INSERT INTO settings (key, value, updated_at)
+		SELECT 'admin_compliance_acknowledgement:' || id,
+			jsonb_build_object('version', 'v2026.06.10', 'admin_user_id', id,
+				'document_zh', 'docs/legal/admin-compliance.zh.md',
+				'document_en', 'docs/legal/admin-compliance.en.md',
+				'user_agent', 'synthetic-disposable-compatibility-fixture',
+				'accepted_at', '2026-10-02T00:00:00Z')::text, NOW()
+		FROM users WHERE email='admin@sub2api.local' AND role='admin' AND deleted_at IS NULL
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at
+		RETURNING value::jsonb->>'admin_user_id'`
+	adminID, err := runStagingCommand(docker, append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", database, "-Atq", "-v", "ON_ERROR_STOP=1", "-c", query)...)
+	if err != nil {
+		t.Fatal("seed isolated synthetic admin compliance fixture")
+	}
+	syntheticAdminID, err := strconv.ParseInt(strings.TrimSpace(adminID), 10, 64)
+	if err != nil || syntheticAdminID < 1 {
+		t.Fatal("isolated synthetic admin compliance fixture did not identify exactly one admin")
+	}
 	postgres, err := runStagingCommand(docker, append(append([]string(nil), compose...), "ps", "-q", "postgres")...)
 	if err != nil || strings.TrimSpace(postgres) == "" {
 		t.Fatal("isolated compatibility postgres unavailable")
@@ -702,6 +721,18 @@ func verifyStagingDot6PricingIncompatibility(t *testing.T, docker string, compos
 	if json.Unmarshal(login, &auth) != nil || auth.AccessToken == "" {
 		t.Fatal("isolated .6 admin login missing token")
 	}
+	compliance := stagingCompatibilityHTTP(t, client, http.MethodGet, base+"/api/v1/admin/compliance", auth.AccessToken, nil)
+	var acknowledgement struct {
+		Required        bool `json:"required"`
+		Acknowledgement struct {
+			Version     string    `json:"version"`
+			AdminUserID int64     `json:"admin_user_id"`
+			AcceptedAt  time.Time `json:"accepted_at"`
+		} `json:"acknowledgement"`
+	}
+	if json.Unmarshal(compliance, &acknowledgement) != nil || acknowledgement.Required || acknowledgement.Acknowledgement.Version != "v2026.06.10" || acknowledgement.Acknowledgement.AdminUserID != syntheticAdminID || acknowledgement.Acknowledgement.AcceptedAt.IsZero() {
+		t.Fatal("immutable .6 did not recognize isolated synthetic compliance fixture")
+	}
 	version := stagingCompatibilityHTTP(t, client, http.MethodGet, base+"/api/v1/admin/system/version", auth.AccessToken, nil)
 	var identity struct {
 		Version string `json:"version"`
@@ -710,7 +741,7 @@ func verifyStagingDot6PricingIncompatibility(t *testing.T, docker string, compos
 	if json.Unmarshal(version, &identity) != nil || identity.Version != stagingDot6Version || !strings.HasPrefix(stagingDot6Revision, identity.Commit) || len(identity.Commit) < 7 {
 		t.Fatal("isolated .6 API returned incorrect version/revision")
 	}
-	query := "SELECT id FROM groups WHERE name='" + stagingLegacyPricingGroup + "'"
+	query = "SELECT id FROM groups WHERE name='" + stagingLegacyPricingGroup + "'"
 	groupID, err := runStagingCommand(docker, append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", database, "-Atc", query)...)
 	if err != nil {
 		t.Fatal("isolated pricing group unavailable")

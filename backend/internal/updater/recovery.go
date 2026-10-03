@@ -100,7 +100,10 @@ func (s *Service) prepareRecovery(ctx context.Context, summary *updatecontract.O
 			return fmt.Errorf("recorded rescue backup is invalid")
 		}
 		r.AuthorizationID = summary.OperationID
-		return s.store.save(*state)
+		if err := s.store.save(*state); err != nil {
+			return fmt.Errorf("recovery state persistence failed")
+		}
+		return nil
 	}
 	migration, err := s.currentMigration(ctx)
 	if err != nil {
@@ -134,5 +137,8 @@ func (s *Service) prepareRecovery(ctx context.Context, summary *updatecontract.O
 		AuthorizationID: summary.OperationID, Phase: recoveryPrepared, Rescue: rescue,
 		Quiesced: fence,
 	}
-	return s.store.save(*state)
+	if err := s.store.save(*state); err != nil {
+		return fmt.Errorf("recovery state persistence failed")
+	}
+	return nil
 }

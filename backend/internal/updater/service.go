@@ -316,7 +316,7 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	state.Recovery = nil
 	state.Status.RollbackVersion = backup.SourceVersion
 	if err := s.store.save(*state); err != nil {
-		return fmt.Errorf("persist backup metadata: %w", err)
+		return fmt.Errorf("backup state persistence failed")
 	}
 	if err := s.pullAndVerify(ctx, manifest); err != nil {
 		return err
@@ -327,7 +327,7 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	if err == nil {
 		err = rewriteEnvironmentImage(s.policy.EnvironmentFile, manifest.ImmutableImage())
 		if err != nil {
-			err = fmt.Errorf("activate approved image: %w", err)
+			err = fmt.Errorf("activate approved image failed")
 		}
 	}
 	if err == nil {
@@ -343,8 +343,14 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	if err == nil {
 		state.Exposure = exposurePossible
 		err = s.store.save(*state)
+		if err != nil {
+			err = fmt.Errorf("candidate exposure state persistence failed")
+		}
 		if err == nil {
 			err = s.auditEvent(state, "candidate_exposure_possible")
+			if err != nil {
+				err = fmt.Errorf("candidate exposure audit persistence failed")
+			}
 		}
 		if err == nil {
 			err = s.startApplication(ctx)
