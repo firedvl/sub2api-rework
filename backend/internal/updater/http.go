@@ -24,6 +24,15 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/install", s.handleOperation(updatecontract.OperationInstall))
 	mux.HandleFunc("POST /v1/rollback", s.handleOperation(updatecontract.OperationRollback))
 	mux.HandleFunc("POST /v1/recover", s.handleOperation(updatecontract.OperationRecover))
+	mux.HandleFunc("POST /v1/prepare_recovery", s.handleOperation(updatecontract.OperationPrepareRecovery))
+	mux.HandleFunc("GET /v1/recovery", func(w http.ResponseWriter, _ *http.Request) {
+		status, err := s.RecoveryStatus()
+		if err != nil {
+			writeUpdaterError(w, http.StatusInternalServerError, "recovery state is unavailable")
+			return
+		}
+		writeUpdaterJSON(w, http.StatusOK, status)
+	})
 	return http.MaxBytesHandler(mux, maxOperationRequestBytes)
 }
 

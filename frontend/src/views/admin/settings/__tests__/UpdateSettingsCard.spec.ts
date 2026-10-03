@@ -3,12 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import UpdateSettingsCard from '../UpdateSettingsCard.vue'
 
-const { checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate, run } = vi.hoisted(() => ({
-  checkUpdates: vi.fn(), prepareUpdate: vi.fn(), installUpdate: vi.fn(), rollbackUpdate: vi.fn(), recoverUpdate: vi.fn(), run: vi.fn()
+const { checkUpdates, prepareUpdate, prepareRecovery, installUpdate, rollbackUpdate, recoverUpdate, run } = vi.hoisted(() => ({
+  checkUpdates: vi.fn(), prepareUpdate: vi.fn(), prepareRecovery: vi.fn(), installUpdate: vi.fn(), rollbackUpdate: vi.fn(), recoverUpdate: vi.fn(), run: vi.fn()
 }))
 
 vi.mock('@/api/admin/system', () => ({
-  checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate,
+  checkUpdates, prepareUpdate, prepareRecovery, installUpdate, rollbackUpdate, recoverUpdate,
   default: { checkUpdates, prepareUpdate, installUpdate, rollbackUpdate, recoverUpdate }
 }))
 vi.mock('@/composables/useStepUp', () => ({
@@ -24,7 +24,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 const ConfirmDialogStub = { name: 'ConfirmDialog', props: ['show', 'title'], template: '<div v-if="show"><slot /><button type="button" @click="$emit(\'confirm\')">confirm</button></div>' }
 
-function updateStatus(state: string, updaterState = 'idle', prepared = '', updaterVersion = '1.1.4') {
+function updateStatus(state: string, updaterState = 'idle', prepared = '', updaterVersion = '1.1.5') {
   return {
     current_version: '1.2.3-rework.1', current_git_commit: 'running-sha', upstream_baseline: 'v1.2.2', upstream_baseline_sha: 'baseline-sha', latest_rework_version: '1.2.3-rework.4', latest_upstream: 'v1.2.3', update_channel: 'stable', checked_at: '2026-08-28T00:00:00Z',
     latest_compatible_rework: '1.2.3-rework.4', state, installable: state === 'update_ready', release_notes: { upstream: '<b>safe text</b>', rework: '', compatibility: 'Review pending.', migrations: '', rollback: '' },
@@ -39,7 +39,7 @@ function mountCard() {
 
 describe('UpdateSettingsCard', () => {
   beforeEach(() => {
-    checkUpdates.mockReset(); prepareUpdate.mockReset(); installUpdate.mockReset(); rollbackUpdate.mockReset(); recoverUpdate.mockReset(); run.mockReset()
+    checkUpdates.mockReset(); prepareUpdate.mockReset(); prepareRecovery.mockReset(); installUpdate.mockReset(); rollbackUpdate.mockReset(); recoverUpdate.mockReset(); run.mockReset()
     run.mockImplementation((operation: () => unknown) => operation())
   })
 
@@ -129,7 +129,8 @@ describe('UpdateSettingsCard', () => {
   })
 
   it('requires the destructive recovery confirmation through step-up', async () => {
-    checkUpdates.mockResolvedValue(updateStatus('update_ready', 'succeeded'))
+    const consent = `RESTORE PREUPDATE DATABASE 1.2.3-rework.0 USING RESCUE upd-${'1'.repeat(24)} sha256:${'a'.repeat(64)} ACK upd-${'2'.repeat(24)}`
+    checkUpdates.mockResolvedValue({ ...updateStatus('update_ready', 'succeeded'), recovery: { source_version: '1.2.3-rework.0', source_schema: 1, current_schema: 2, confirmation: consent, rescue_sha256: 'rescue-1' } })
     recoverUpdate.mockResolvedValue({ operation_id: 'recover-1' })
     const wrapper = mountCard()
     await flushPromises()
@@ -138,15 +139,52 @@ describe('UpdateSettingsCard', () => {
     await wrapper.get('#update-confirmation').setValue('RESTORE DATABASE AND ROLLBACK 1.2.3-rework.0')
     await wrapper.findAll('button').find(button => button.text() === 'confirm')!.trigger('click')
     await flushPromises()
-    expect(recoverUpdate).toHaveBeenCalledWith('1.2.3-rework.0', 'RESTORE DATABASE AND ROLLBACK 1.2.3-rework.0')
+    expect(recoverUpdate).not.toHaveBeenCalled()
+    await wrapper.get('#update-confirmation').setValue(consent)
+    await wrapper.findAll('button').find(button => button.text() === 'confirm')!.trigger('click')
+    await flushPromises()
+    expect(recoverUpdate).toHaveBeenCalledWith('1.2.3-rework.0', consent)
   })
 
-  it('does not offer recovery to an updater older than 1.1.4', async () => {
-    checkUpdates.mockResolvedValue(updateStatus('update_ready', 'succeeded', '', '1.1.3'))
+  it('does not offer recovery to an updater older than 1.1.5', async () => {
+    checkUpdates.mockResolvedValue(updateStatus('update_ready', 'succeeded', '', '1.1.4'))
     const wrapper = mountCard()
     await flushPromises()
     const recoverButton = wrapper.findAll('button').find(button => button.text().includes('admin.settings.updates.recover'))
-    expect(recoverButton!.attributes('disabled')).toBeDefined()
+    expect(recoverButton).toBeUndefined()
+  })
+
+  it('prepares recovery without executing it and stops polling while the gateway is down', async () => {
+    vi.useFakeTimers()
+    checkUpdates.mockResolvedValueOnce(updateStatus('update_ready', 'succeeded')).mockRejectedValue(new Error('gateway stopped'))
+    prepareRecovery.mockResolvedValue({ operation_id: 'recovery-1' })
+    const wrapper = mountCard()
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'admin.settings.updates.prepareRecovery')!.trigger('click')
+      await wrapper.get('#update-confirmation').setValue('PREPARE RECOVERY 1.2.3-rework.0')
+      await wrapper.findAll('button').find(button => button.text() === 'confirm')!.trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(prepareRecovery).toHaveBeenCalledWith('1.2.3-rework.0', 'PREPARE RECOVERY 1.2.3-rework.0')
+      expect(recoverUpdate).not.toHaveBeenCalled()
+      expect(checkUpdates).toHaveBeenCalledTimes(4)
+      expect(wrapper.text()).toContain('admin.settings.updates.recoveryHostFollowup')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('disables image-only rollback for critical state, schema mismatch, or missing recovery metadata', async () => {
+    for (const value of [updateStatus('update_failed', 'critical'), updateStatus('update_ready'), { ...updateStatus('update_ready'), recovery: { source_schema: 1, current_schema: 2 } }]) {
+      checkUpdates.mockResolvedValue(value)
+      const wrapper = mountCard()
+      await flushPromises()
+      expect(wrapper.findAll('button').find(button => button.text() === 'admin.settings.updates.rollback')!.attributes('disabled')).toBeDefined()
+      wrapper.unmount()
+    }
   })
 
   it('keeps operations unavailable when the updater socket is unavailable', async () => {

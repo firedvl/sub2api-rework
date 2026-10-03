@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	testContainerID  = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	testTargetDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	testSourceDigest = "weishaw/sub2api@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
@@ -59,13 +60,16 @@ type fakeRunner struct {
 	healthFail           bool
 	upCount              int
 	stopCount            int
+	applicationStopped   bool
+	applicationStartedAt string
+	databaseContents     string
 	cancelOnMigration    context.CancelFunc
 	forwardCanceled      bool
 	recoveryLive         bool
 	recoveryBounded      bool
 }
 
-func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ string, args ...string) error {
+func (f *fakeRunner) Run(ctx context.Context, stdin io.Reader, stdout io.Writer, _ string, args ...string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -124,6 +128,14 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 		}
 	case strings.Contains(joined, "rolsuper OR rolcreatedb"):
 		_, _ = io.WriteString(stdout, "t\n")
+	case strings.HasPrefix(joined, "ps -a -q --no-trunc"):
+		_, _ = io.WriteString(stdout, testContainerID+"\n")
+	case strings.Contains(joined, `inspect --format {"State":`):
+		startedAt := f.applicationStartedAt
+		if startedAt == "" {
+			startedAt = "2026-10-01T00:00:00Z"
+		}
+		_, _ = fmt.Fprintf(stdout, `{"State":{"Running":%t,"Status":"exited","StartedAt":%q},"HostConfig":{"RestartPolicy":{"Name":"no"}}}`, !f.applicationStopped, startedAt)
 	case strings.Contains(joined, " psql "):
 		_, _ = fmt.Fprintf(stdout, "%d\n", f.migration)
 	case strings.Contains(joined, "image inspect"):
@@ -148,7 +160,11 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 		if f.failBackup {
 			return fmt.Errorf("backup failed")
 		}
-		_, _ = io.WriteString(stdout, "synthetic-database-backup")
+		contents := f.databaseContents
+		if contents == "" {
+			contents = "synthetic-database-backup"
+		}
+		_, _ = io.WriteString(stdout, contents)
 	case strings.Contains(joined, "/app/sub2api --migrate"):
 		if f.cancelOnMigration != nil {
 			f.forwardCanceled = true
@@ -159,18 +175,30 @@ func (f *fakeRunner) Run(ctx context.Context, _ io.Reader, stdout io.Writer, _ s
 			return fmt.Errorf("migration failed")
 		}
 		f.migration = 233
-	case strings.Contains(joined, " stop sub2api"):
+	case joined == "stop "+testContainerID:
 		f.stopCount++
 		if f.failStopAt == f.stopCount {
 			return fmt.Errorf("stop failed")
 		}
+		f.applicationStopped = true
+	case strings.Contains(joined, " pg_restore --list"):
+		return nil
 	case strings.Contains(joined, " pg_restore "):
 		if f.failRestore {
 			return fmt.Errorf("restore failed")
 		}
 		f.migration = 232
-	case strings.Contains(joined, " up -d --no-deps sub2api"):
+		if stdin != nil {
+			data, err := io.ReadAll(stdin)
+			if err != nil {
+				return err
+			}
+			f.databaseContents = string(data)
+		}
+	case strings.Contains(joined, " up -d --no-deps"):
 		f.upCount++
+		f.applicationStopped = false
+		f.applicationStartedAt = fmt.Sprintf("2026-10-01T00:00:%02dZ", f.upCount)
 		if f.upCount == 1 && f.failHealthOnTarget {
 			f.healthFail = true
 		} else if f.upCount > 1 {
@@ -307,7 +335,7 @@ func writeUpdaterTestDeployment(t *testing.T, policy Policy) {
 }
 
 func validRenderedComposeConfig(policy Policy) string {
-	data, _ := json.Marshal(map[string]any{"services": map[string]any{
+	data, _ := json.Marshal(map[string]any{"name": "synthetic", "services": map[string]any{
 		policy.ApplicationService: map[string]any{
 			"image": "${SUB2API_IMAGE:-weishaw/sub2api:latest}",
 			"environment": map[string]string{
@@ -385,10 +413,29 @@ func installRequest() updatecontract.OperationRequest {
 	}
 }
 
-func recoverRequest() updatecontract.OperationRequest {
-	return updatecontract.OperationRequest{
-		Version: "0.1.183-rework.1", Confirmation: "RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1", Actor: "admin:1",
+func recoverRequest(services ...*Service) updatecontract.OperationRequest {
+	confirmation := "RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1"
+	if len(services) != 0 {
+		state, err := services[0].store.load(services[0].policy.InitialInstalledVersion, services[0].policy.InitialMigration, Version)
+		if err != nil {
+			panic(err)
+		}
+		confirmation = recoveryConfirmation(state)
 	}
+	return updatecontract.OperationRequest{
+		Version: "0.1.183-rework.1", Confirmation: confirmation, Actor: "admin:1",
+	}
+}
+
+func prepareRecovery(t *testing.T, svc *Service) {
+	t.Helper()
+	_, err := svc.Start(updatecontract.OperationPrepareRecovery, updatecontract.OperationRequest{
+		Version: "0.1.183-rework.1", Actor: "admin:1", Confirmation: "PREPARE RECOVERY 0.1.183-rework.1",
+	})
+	require.NoError(t, err)
+	status := waitForUpdater(t, svc, 5*time.Second)
+	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
+	require.Equal(t, "succeeded", status.LastAttempt.Result, status.LastError)
 }
 
 func TestCheckRedisClearsStaleClientAuthForNoAuthServer(t *testing.T) {
@@ -557,7 +604,7 @@ func TestInstallSuccessPinsDigestAndRecordsRollback(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, backups, 1)
 	require.FileExists(t, filepath.Join(policy.BackupDirectory, backups[0].Name(), "postgres.dump"))
-	require.Less(t, runner.callIndex(" stop sub2api"), runner.callIndex("/app/sub2api --migrate"))
+	require.Less(t, runner.callIndex("stop "+testContainerID), runner.callIndex("/app/sub2api --migrate"))
 }
 
 func TestAutomaticRollbackUsesFreshBoundedContext(t *testing.T) {
@@ -601,7 +648,7 @@ func TestRestoreStopFailureSkipsDatabaseRestore(t *testing.T) {
 	require.False(t, runner.hasCall(" pg_restore "))
 }
 
-func TestHealthFailureRestoresDatabaseAndPreviousImage(t *testing.T) {
+func TestHealthFailurePreservesDatabaseWithoutSourceStart(t *testing.T) {
 	runner := &fakeRunner{failHealthOnTarget: true}
 	service, policy := newUpdaterTestServiceWithPolicy(t, runner, func(policy *Policy) {
 		policy.ComposeFiles = append(policy.ComposeFiles, filepath.Join(policy.DeploymentDirectory, "docker-compose.updater.yml"))
@@ -610,18 +657,17 @@ func TestHealthFailureRestoresDatabaseAndPreviousImage(t *testing.T) {
 	_, err := service.Start(updatecontract.OperationInstall, installRequest())
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 10*time.Second)
-	require.Equal(t, updatecontract.UpdaterStateFailed, status.State)
-	require.Equal(t, "succeeded", status.LastAttempt.RollbackResult)
+	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
+	require.Equal(t, "suppressed", status.LastAttempt.RollbackResult)
 	require.Equal(t, "0.1.183-rework.1", status.InstalledVersion)
-	require.Equal(t, 232, status.CurrentMigration)
-	require.True(t, runner.hasCall(" pg_restore "))
-	databaseReset := runner.callIndex("DROP DATABASE IF EXISTS")
-	require.NotEqual(t, -1, databaseReset)
-	require.Equal(t, databaseReset, runner.callIndex("CREATE DATABASE"))
-	require.Less(t, databaseReset, runner.callIndex(" pg_restore "))
+	require.Equal(t, 233, status.CurrentMigration)
+	require.Equal(t, 233, runner.migration)
+	require.False(t, runner.hasCall(" pg_restore "))
+	require.False(t, runner.hasCall("DROP DATABASE IF EXISTS"))
+	require.True(t, runner.applicationStopped)
 	environment, err := os.ReadFile(policy.EnvironmentFile)
 	require.NoError(t, err)
-	require.Contains(t, string(environment), "SUB2API_IMAGE="+testSourceDigest)
+	require.Contains(t, string(environment), "SUB2API_IMAGE=ghcr.io/firedvl/sub2api-rework:")
 	prefix := strings.Join((&Service{policy: policy}).composeArgs(), " ")
 	upCalls := 0
 	for _, call := range runner.callsSnapshot() {
@@ -630,7 +676,7 @@ func TestHealthFailureRestoresDatabaseAndPreviousImage(t *testing.T) {
 			require.True(t, strings.HasPrefix(call, prefix), call)
 		}
 	}
-	require.Equal(t, 2, upCalls)
+	require.Equal(t, 1, upCalls)
 }
 
 func TestRollbackFailureLeavesCriticalState(t *testing.T) {
@@ -641,7 +687,7 @@ func TestRollbackFailureLeavesCriticalState(t *testing.T) {
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 10*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
-	require.Equal(t, "failed", status.LastAttempt.RollbackResult)
+	require.Equal(t, "suppressed", status.LastAttempt.RollbackResult)
 }
 
 func TestCriticalStateRejectsPrepareAndInstallWithoutChangingRecoveryMetadata(t *testing.T) {
@@ -668,7 +714,7 @@ func TestCriticalStateRejectsPrepareAndInstallWithoutChangingRecoveryMetadata(t 
 	require.Equal(t, "0.1.182-rework.1", stored.Status.RollbackVersion)
 }
 
-func TestCriticalStateAllowsRecordedRollback(t *testing.T) {
+func TestCriticalStateBlocksRecordedRollback(t *testing.T) {
 	runner := &fakeRunner{}
 	service, policy := newUpdaterTestService(t, runner)
 	seedCriticalRollbackState(t, service, policy)
@@ -676,10 +722,8 @@ func TestCriticalStateAllowsRecordedRollback(t *testing.T) {
 	_, err := service.Start(updatecontract.OperationRollback, updatecontract.OperationRequest{
 		Version: "0.1.183-rework.1", Confirmation: "ROLLBACK 0.1.183-rework.1", Actor: "admin:1",
 	})
-	require.NoError(t, err)
-	status := waitForUpdater(t, service, 3*time.Second)
-	require.Equal(t, updatecontract.UpdaterStateSucceeded, status.State)
-	require.Equal(t, "0.1.183-rework.1", status.InstalledVersion)
+	require.ErrorContains(t, err, "requires recovery")
+	require.Zero(t, runner.upCount)
 }
 
 func TestFailedCriticalRollbackKeepsRecoveryState(t *testing.T) {
@@ -690,7 +734,7 @@ func TestFailedCriticalRollbackKeepsRecoveryState(t *testing.T) {
 	_, err := service.Start(updatecontract.OperationRollback, updatecontract.OperationRequest{
 		Version: "0.1.183-rework.1", Confirmation: "ROLLBACK 0.1.183-rework.1", Actor: "admin:1",
 	})
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "requires recovery")
 	status := waitForUpdater(t, service, 3*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
 
@@ -788,7 +832,8 @@ func TestPostSuccessRecoveryRestoresRecordedDatabaseAndIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
 
-	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	prepareRecovery(t, service)
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest(service))
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 5*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, status.State)
@@ -830,7 +875,7 @@ func TestRecoveryRejectsLegacyOrTamperedBackupWithoutMutation(t *testing.T) {
 			mutate(t, state.Backup)
 			require.NoError(t, service.store.save(state))
 
-			_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+			_, err = service.Start(updatecontract.OperationPrepareRecovery, updatecontract.OperationRequest{Version: recoverRequest().Version, Actor: "admin:1", Confirmation: "PREPARE RECOVERY " + recoverRequest().Version})
 			require.ErrorContains(t, err, "recorded recovery backup is invalid")
 			require.False(t, runner.hasCall(" pg_restore "))
 		})
@@ -844,9 +889,10 @@ func TestRecoveryFailureStaysCriticalAndPreservesRecordedBackup(t *testing.T) {
 	_, err := service.Start(updatecontract.OperationInstall, installRequest())
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+	prepareRecovery(t, service)
 	runner.failRestore = true
 
-	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest(service))
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 5*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
@@ -871,17 +917,18 @@ func TestAcceptedRecoveryPreflightFailureStaysCriticalWithoutRestore(t *testing.
 	_, err := service.Start(updatecontract.OperationInstall, installRequest())
 	require.NoError(t, err)
 	require.Equal(t, updatecontract.UpdaterStateSucceeded, waitForUpdater(t, service, 5*time.Second).State)
+	prepareRecovery(t, service)
 	runner.failRedis = true
 
-	_, err = service.Start(updatecontract.OperationRecover, recoverRequest())
+	_, err = service.Start(updatecontract.OperationRecover, recoverRequest(service))
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 5*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
 	require.Equal(t, "0.1.183-rework.1", status.RollbackVersion)
-	require.False(t, runner.hasCall(" pg_restore "))
+	require.False(t, runner.hasCall(" pg_restore -U"))
 }
 
-func TestUpdater114LoadsLegacyStateButRejectsDestructiveRecovery(t *testing.T) {
+func TestUpdater115LoadsLegacyStateButRejectsDestructiveRecovery(t *testing.T) {
 	runner := &fakeRunner{}
 	service, policy := newUpdaterTestService(t, runner)
 	prepareUpdater(t, service)
@@ -903,7 +950,7 @@ func TestUpdater114LoadsLegacyStateButRejectsDestructiveRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, Version, status.UpdaterVersion)
 	_, err = replacement.Start(updatecontract.OperationRecover, recoverRequest())
-	require.ErrorContains(t, err, "recorded recovery backup is invalid")
+	require.Error(t, err)
 }
 
 func TestFinalStateSaveFailureIsVisibleAsCritical(t *testing.T) {

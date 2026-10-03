@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -45,6 +47,7 @@ const (
 func (e deploymentValidationError) Error() string { return string(e) }
 
 type composeDocument struct {
+	Name     string                     `json:"name"`
 	Services map[string]json.RawMessage `json:"services"`
 	Volumes  map[string]json.RawMessage `json:"volumes"`
 }
@@ -349,6 +352,7 @@ func (s *Service) createBackup(
 	ctx context.Context,
 	updateID, sourceVersion, targetVersion string,
 	sourceMigration int,
+	sourceUpdateID string,
 ) (_ *backupMetadata, resultErr error) {
 	if err := ensureManagedDirectory(s.policy.BackupDirectory, 0700, true); err != nil {
 		return nil, err
@@ -401,8 +405,9 @@ func (s *Service) createBackup(
 		"exec", "-T", s.policy.DatabaseService, "pg_dump", "-U", s.policy.DatabaseUser,
 		"-d", s.policy.DatabaseName, "--format=custom", "--no-owner", "--no-privileges",
 	)...)
+	syncErr := dump.Sync()
 	closeErr := dump.Close()
-	if dumpErr != nil || closeErr != nil {
+	if dumpErr != nil || syncErr != nil || closeErr != nil {
 		return nil, fmt.Errorf("postgresql backup failed")
 	}
 	databaseSHA256, err := managedFileChecksum(databaseBackup)
@@ -416,6 +421,7 @@ func (s *Service) createBackup(
 
 	metadata := &backupMetadata{
 		UpdateID: updateID, Directory: directory, DatabaseBackup: databaseBackup,
+		SourceUpdateID:  sourceUpdateID,
 		EnvironmentCopy: environmentCopy, ComposeFiles: composeFiles,
 		SourceVersion: sourceVersion, TargetVersion: targetVersion,
 		SourceImage: sourceImage, SourceDigest: sourceDigest, SourceMigration: sourceMigration,
@@ -430,6 +436,9 @@ func (s *Service) createBackup(
 		return nil, err
 	}
 	complete = true
+	if err := syncDirectory(s.policy.BackupDirectory); err != nil {
+		return nil, err
+	}
 	return metadata, nil
 }
 
@@ -440,8 +449,76 @@ func (s *Service) runMigrations(ctx context.Context) error {
 }
 
 func (s *Service) stopApplication(ctx context.Context) error {
-	return s.runDocker(ctx, nil, io.Discard, s.composeArgs("stop", s.policy.ApplicationService)...)
+	return s.quiesceApplication(ctx)
 }
+
+// Inventory by Compose labels includes migration one-offs as well as service
+// containers. Disable daemon restart before stopping, including across reboot.
+func (s *Service) quiesceApplication(ctx context.Context) error {
+	ids, err := s.applicationContainers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := s.runDocker(ctx, nil, io.Discard, "update", "--restart=no", id); err != nil {
+			return fmt.Errorf("disable application restart failed")
+		}
+		if err := s.runDocker(ctx, nil, io.Discard, "stop", id); err != nil {
+			return fmt.Errorf("stop application failed")
+		}
+	}
+	_, err = s.applicationFence(ctx)
+	return err
+}
+
+func (s *Service) applicationContainers(ctx context.Context) ([]string, error) {
+	config, err := s.commandOutput(ctx, s.composeArgs("config", "--format", "json")...)
+	var compose composeDocument
+	if err != nil || json.Unmarshal([]byte(config), &compose) != nil || compose.Name == "" {
+		return nil, fmt.Errorf("application container inventory unavailable")
+	}
+	output, err := s.commandOutput(ctx, "ps", "-a", "-q", "--no-trunc",
+		"--filter", "label=com.docker.compose.project="+compose.Name,
+		"--filter", "label=com.docker.compose.service="+s.policy.ApplicationService)
+	if err != nil {
+		return nil, fmt.Errorf("application container inventory unavailable")
+	}
+	ids := strings.Fields(output)
+	sort.Strings(ids)
+	for _, id := range ids {
+		if !containerIDPattern.MatchString(id) {
+			return nil, fmt.Errorf("invalid application container identity")
+		}
+	}
+	return ids, nil
+}
+
+func (s *Service) applicationFence(ctx context.Context) ([]quiescedContainer, error) {
+	ids, err := s.applicationContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fence := make([]quiescedContainer, 0, len(ids))
+	for _, id := range ids {
+		status, err := s.commandOutput(ctx, "inspect", "--format", `{"State":{{json .State}},"HostConfig":{"RestartPolicy":{{json .HostConfig.RestartPolicy}}}}`, id)
+		var container struct {
+			State struct {
+				Running, Restarting, Paused bool
+				Status, StartedAt           string
+			}
+			HostConfig struct{ RestartPolicy struct{ Name string } }
+		}
+		if err != nil || json.Unmarshal([]byte(status), &container) != nil || container.State.Running || container.State.Restarting || container.State.Paused ||
+			(container.State.Status != "exited" && container.State.Status != "created" && container.State.Status != "dead") ||
+			container.State.StartedAt == "" || container.HostConfig.RestartPolicy.Name != "no" {
+			return nil, fmt.Errorf("application quiescence could not be verified")
+		}
+		fence = append(fence, quiescedContainer{ID: id, StartedAt: container.State.StartedAt})
+	}
+	return fence, nil
+}
+
+var containerIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func (s *Service) startApplication(ctx context.Context) error {
 	return s.runDocker(ctx, nil, io.Discard, s.composeArgs("up", "-d", "--no-deps", s.policy.ApplicationService)...)
@@ -485,7 +562,30 @@ func (s *Service) validateDeploymentOnce(ctx context.Context, expectedMigration 
 	return nil
 }
 
-func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, forceDatabaseRestore bool) error {
+func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, forceDatabaseRestore bool, state *persistedState) error {
+	if state == nil || backup == nil || state.Backup == nil || state.Backup.UpdateID != backup.UpdateID {
+		return fmt.Errorf("restore requires recorded update state")
+	}
+	if state.Exposure != preExposure || state.Recovery != nil {
+		if state.Recovery == nil || state.Recovery.SourceUpdateID != backup.UpdateID ||
+			state.Recovery.Phase == recoveryPreparing || state.Recovery.Phase == recoveryCompleted || state.Recovery.Phase == recoverySourceStarting {
+			return fmt.Errorf("restore requires a verified rescue backup")
+		}
+		if err := s.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
+			return fmt.Errorf("rescue validation failed")
+		}
+		if err := s.validateArchive(ctx, state.Recovery.Rescue); err != nil {
+			return err
+		}
+		if state.Status.LastAttempt == nil || state.Status.LastAttempt.Action != updatecontract.OperationRecover ||
+			state.Status.LastAttempt.OperationID != state.Recovery.AuthorizationID {
+			return fmt.Errorf("restore requires operation-bound authorization")
+		}
+		fence, err := s.applicationFence(ctx)
+		if err != nil || !reflect.DeepEqual(fence, state.Recovery.Quiesced) {
+			return fmt.Errorf("application changed since rescue; prepare recovery again")
+		}
+	}
 	if err := s.validateBackupMetadata(backup); err != nil {
 		return fmt.Errorf("rollback backup validation failed")
 	}
@@ -505,6 +605,18 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 		}
 	}
 	if restoreDatabase {
+		if err := s.validateRecoveryBackup(backup); err != nil {
+			return fmt.Errorf("rollback backup checksum validation failed")
+		}
+		if err := s.validateArchive(ctx, backup); err != nil {
+			return err
+		}
+		if state.Recovery != nil {
+			state.Recovery.Phase = recoveryRestoring
+			if err := s.store.save(*state); err != nil {
+				return fmt.Errorf("recovery state persistence failed")
+			}
+		}
 		dump, err := openManagedFile(backup.DatabaseBackup, 0, true)
 		if err != nil {
 			return err
@@ -522,9 +634,29 @@ func (s *Service) restoreImmediate(ctx context.Context, backup *backupMetadata, 
 		if restoreErr != nil {
 			return fmt.Errorf("database restore failed")
 		}
+		if state.Recovery != nil {
+			state.Recovery.Phase = recoveryDatabaseRestored
+			if err := s.store.save(*state); err != nil {
+				return fmt.Errorf("recovery state persistence failed")
+			}
+			if err := s.auditEvent(state, "original_backup_restored"); err != nil {
+				return fmt.Errorf("recovery audit failed")
+			}
+		}
+	}
+	if state.Recovery != nil {
+		state.Recovery.Phase = recoverySourceStarting
+		if err := s.store.save(*state); err != nil {
+			return fmt.Errorf("recovery state persistence failed")
+		}
 	}
 	if err := s.restoreApplication(ctx, backup); err != nil {
 		return err
+	}
+	if state.Recovery != nil {
+		if err := s.auditEvent(state, "source_image_restored"); err != nil {
+			return fmt.Errorf("recovery audit failed")
+		}
 	}
 	return s.validateDeployment(ctx, backup.SourceMigration)
 }
@@ -575,6 +707,13 @@ func (s *Service) maintenanceDatabase() string {
 }
 
 func (s *Service) restoreApplication(ctx context.Context, backup *backupMetadata) error {
+	migration, err := s.currentMigration(ctx)
+	if err != nil || migration != backup.SourceMigration {
+		return fmt.Errorf("source image startup blocked because database schema differs")
+	}
+	if backup.SourceVersion == "0.2.3-rework.6" && migration > 244 {
+		return fmt.Errorf("source image startup blocked: .6 is incompatible with schema249")
+	}
 	if err := s.runDocker(ctx, nil, io.Discard, "pull", backup.SourceDigest); err != nil {
 		return fmt.Errorf("previous image pull failed")
 	}
@@ -584,7 +723,7 @@ func (s *Service) restoreApplication(ctx context.Context, backup *backupMetadata
 	if err := rewriteEnvironmentImage(s.policy.EnvironmentFile, backup.SourceDigest); err != nil {
 		return fmt.Errorf("pin previous image failed")
 	}
-	return s.startApplication(ctx)
+	return s.runDocker(ctx, nil, io.Discard, s.composeArgs("up", "-d", "--no-deps", "--force-recreate", s.policy.ApplicationService)...)
 }
 
 func (s *Service) checkHTTP(ctx context.Context, path string) error {
@@ -804,14 +943,10 @@ func (s *Service) validateBackupMetadata(backup *backupMetadata) error {
 	if err := validateManagedDirectory(backup.Directory, true); err != nil {
 		return err
 	}
-	expected := map[string]string{
-		backup.DatabaseBackup:  filepath.Join(backup.Directory, "postgres.dump"),
-		backup.EnvironmentCopy: filepath.Join(backup.Directory, "deployment.env"),
+	if backup.DatabaseBackup != filepath.Join(backup.Directory, "postgres.dump") || backup.EnvironmentCopy != filepath.Join(backup.Directory, "deployment.env") {
+		return fmt.Errorf("invalid backup path")
 	}
-	for path, wanted := range expected {
-		if path != wanted {
-			return fmt.Errorf("invalid backup path")
-		}
+	for _, path := range []string{backup.DatabaseBackup, backup.EnvironmentCopy} {
 		if _, err := validateManagedRegularFile(path, 0, true); err != nil {
 			return err
 		}

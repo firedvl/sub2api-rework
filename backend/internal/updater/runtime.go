@@ -66,6 +66,7 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 
 type backupMetadata struct {
 	UpdateID          string              `json:"update_id"`
+	SourceUpdateID    string              `json:"source_update_id,omitempty"`
 	Directory         string              `json:"directory"`
 	DatabaseBackup    string              `json:"database_backup"`
 	EnvironmentCopy   string              `json:"environment_copy"`
@@ -91,6 +92,33 @@ type persistedState struct {
 	Status        updatecontract.UpdaterStatus `json:"status"`
 	Prepared      *updatecontract.Manifest     `json:"prepared,omitempty"`
 	Backup        *backupMetadata              `json:"backup,omitempty"`
+	Exposure      string                       `json:"exposure,omitempty"`
+	Recovery      *recoveryMetadata            `json:"recovery,omitempty"`
+}
+
+const (
+	preExposure              = "PRE_EXPOSURE"
+	exposurePossible         = "EXPOSURE_POSSIBLE"
+	recoveryPreparing        = "preparing"
+	recoveryPrepared         = "prepared"
+	recoveryRestoring        = "restoring_database"
+	recoveryDatabaseRestored = "database_restored"
+	recoverySourceStarting   = "source_start_attempted"
+	recoveryCompleted        = "completed"
+)
+
+type recoveryMetadata struct {
+	OperationID     string              `json:"operation_id"`
+	SourceUpdateID  string              `json:"source_update_id"`
+	AuthorizationID string              `json:"authorization_id"`
+	Phase           string              `json:"phase"`
+	Rescue          *backupMetadata     `json:"rescue"`
+	Quiesced        []quiescedContainer `json:"quiesced"`
+}
+
+type quiescedContainer struct {
+	ID        string `json:"id"`
+	StartedAt string `json:"started_at"`
 }
 
 type stateStore struct {
@@ -164,6 +192,29 @@ func (s *stateStore) load(initialVersion string, initialMigration int, updaterVe
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return persistedState{}, fmt.Errorf("invalid updater state")
 	}
+	if state.Exposure != "" && state.Exposure != preExposure && state.Exposure != exposurePossible {
+		return persistedState{}, fmt.Errorf("invalid updater exposure state")
+	}
+	if state.Recovery != nil {
+		r := state.Recovery
+		if state.Backup == nil || !operationIDPattern.MatchString(r.OperationID) ||
+			!operationIDPattern.MatchString(r.AuthorizationID) || r.SourceUpdateID != state.Backup.UpdateID ||
+			r.Rescue == nil || r.Rescue.UpdateID != r.OperationID || r.Rescue.UpdateID == state.Backup.UpdateID ||
+			r.Rescue.SourceUpdateID != r.SourceUpdateID ||
+			!updatecontract.IsReworkVersion(r.Rescue.SourceVersion) || r.Rescue.SourceMigration < 0 || r.Quiesced == nil {
+			return persistedState{}, fmt.Errorf("invalid updater recovery state")
+		}
+		switch r.Phase {
+		case recoveryPreparing, recoveryPrepared, recoveryRestoring, recoveryDatabaseRestored, recoverySourceStarting, recoveryCompleted:
+		default:
+			return persistedState{}, fmt.Errorf("invalid updater recovery phase")
+		}
+		for _, container := range r.Quiesced {
+			if !containerIDPattern.MatchString(container.ID) || container.StartedAt == "" {
+				return persistedState{}, fmt.Errorf("invalid updater quiescence record")
+			}
+		}
+	}
 	return state, nil
 }
 
@@ -214,8 +265,13 @@ func (s *stateStore) audit(summary updatecontract.OperationSummary) error {
 	if err := validateManagedFileInfo(info, true); err != nil {
 		return err
 	}
-	_, err = file.Write(append(data, '\n'))
-	return err
+	if _, err = file.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(s.auditPath))
 }
 
 func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
@@ -247,7 +303,19 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryPath, path)
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return err
+	}
+	return syncDirectory(directory)
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = directory.Close() }()
+	return directory.Sync()
 }
 
 type operationLock struct{ file *os.File }

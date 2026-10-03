@@ -24,13 +24,20 @@ func (s *systemWatcherStub) CheckUpdate(context.Context, bool) (*service.UpdateI
 }
 
 type systemUpdaterStub struct {
-	status  *updatecontract.UpdaterStatus
-	request updatecontract.OperationRequest
-	action  updatecontract.Operation
+	status   *updatecontract.UpdaterStatus
+	request  updatecontract.OperationRequest
+	action   updatecontract.Operation
+	recovery *updatecontract.RecoveryStatus
 }
 
 func (s *systemUpdaterStub) Status(context.Context) (*updatecontract.UpdaterStatus, error) {
 	return s.status, nil
+}
+func (s *systemUpdaterStub) RecoveryStatus(context.Context) (*updatecontract.RecoveryStatus, error) {
+	return s.recovery, nil
+}
+func (s *systemUpdaterStub) PrepareRecovery(_ context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+	return s.accepted(updatecontract.OperationPrepareRecovery, request)
 }
 func (s *systemUpdaterStub) accepted(action updatecontract.Operation, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
 	s.action, s.request = action, request
@@ -68,6 +75,7 @@ func systemTestRouter(handler *SystemHandler) *gin.Engine {
 	router.POST("/api/v1/admin/system/install", handler.Install)
 	router.POST("/api/v1/admin/system/rollback", handler.Rollback)
 	router.POST("/api/v1/admin/system/recover", handler.Recover)
+	router.POST("/api/v1/admin/system/prepare-recovery", handler.PrepareRecovery)
 	return router
 }
 
@@ -77,6 +85,7 @@ func TestSystemHandlerCheckUpdatesIncludesUnavailableUpdater(t *testing.T) {
 	systemTestRouter(handler).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/check-updates", nil))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"state":"update_ready"`)
+	require.Contains(t, recorder.Body.String(), `"recovery":null`)
 }
 
 func TestSystemHandlerSurfacesFailedUpdaterAsUpdateFailed(t *testing.T) {
@@ -156,13 +165,20 @@ func TestSystemHandlerRollbackOnlyAllowsRecordedTarget(t *testing.T) {
 }
 
 func TestSystemHandlerRecoveryRequiresRecordedTargetAndExactConfirmation(t *testing.T) {
-	updater := &systemUpdaterStub{status: &updatecontract.UpdaterStatus{RollbackVersion: "0.1.183-rework.1"}}
+	updater := &systemUpdaterStub{status: &updatecontract.UpdaterStatus{RollbackVersion: "0.1.183-rework.1"}, recovery: &updatecontract.RecoveryStatus{SourceVersion: "0.1.183-rework.1", Confirmation: "RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1 RECOVERY recovery-1 SHA256 rescue-1"}}
 	handler := NewSystemHandler(&systemWatcherStub{info: readyUpdateInfo()}, updater)
 	router := systemTestRouter(handler)
 
+	wrongTarget, err := json.Marshal(updaterWebRequest{Version: "0.1.182-rework.1", Confirmation: updater.recovery.Confirmation})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/recover", strings.NewReader(string(wrongTarget))))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, updater.action)
+
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/recover", strings.NewReader(`{"version":"0.1.183-rework.1","confirmation":"ROLLBACK 0.1.183-rework.1"}`))
 	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Empty(t, updater.action)
@@ -171,6 +187,32 @@ func TestSystemHandlerRecoveryRequiresRecordedTargetAndExactConfirmation(t *test
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, updater.action)
+
+	body, err := json.Marshal(updaterWebRequest{Version: updater.recovery.SourceVersion, Confirmation: updater.recovery.Confirmation})
+	require.NoError(t, err)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/recover", strings.NewReader(string(body)))
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusAccepted, recorder.Code)
 	require.Equal(t, updatecontract.OperationRecover, updater.action)
+}
+
+func TestSystemHandlerPreparesRecoverySeparately(t *testing.T) {
+	updater := &systemUpdaterStub{status: &updatecontract.UpdaterStatus{RollbackVersion: "0.1.183-rework.1"}}
+	router := systemTestRouter(NewSystemHandler(&systemWatcherStub{info: readyUpdateInfo()}, updater))
+	for _, consent := range []string{"RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1", "PREPARE RECOVERY 0.1.183-rework.1"} {
+		body, err := json.Marshal(updaterWebRequest{Version: "0.1.183-rework.1", Confirmation: consent})
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/system/prepare-recovery", strings.NewReader(string(body))))
+		if strings.HasPrefix(consent, "PREPARE") {
+			require.Equal(t, http.StatusAccepted, recorder.Code)
+			require.Equal(t, updatecontract.OperationPrepareRecovery, updater.action)
+		} else {
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Empty(t, updater.action)
+		}
+	}
 }

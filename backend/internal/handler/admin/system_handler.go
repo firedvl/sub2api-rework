@@ -27,6 +27,8 @@ type systemReleaseWatcher interface {
 
 type systemUpdater interface {
 	Status(ctx context.Context) (*updatecontract.UpdaterStatus, error)
+	RecoveryStatus(ctx context.Context) (*updatecontract.RecoveryStatus, error)
+	PrepareRecovery(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 	Prepare(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 	Install(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
 	Rollback(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error)
@@ -63,6 +65,7 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 		return
 	}
 	updaterStatus := h.updaterStatus(c.Request.Context())
+	recovery, _ := h.updater.RecoveryStatus(c.Request.Context())
 	combined := *info
 	if updaterStatus.State == updatecontract.UpdaterStateFailed || updaterStatus.State == updatecontract.UpdaterStateCritical {
 		combined.State = service.ReleaseStateUpdateFailed
@@ -70,8 +73,9 @@ func (h *SystemHandler) CheckUpdates(c *gin.Context) {
 	}
 	response.Success(c, struct {
 		*service.UpdateInfo
-		Updater updatecontract.UpdaterStatus `json:"updater"`
-	}{UpdateInfo: &combined, Updater: updaterStatus})
+		Updater  updatecontract.UpdaterStatus   `json:"updater"`
+		Recovery *updatecontract.RecoveryStatus `json:"recovery"`
+	}{UpdateInfo: &combined, Updater: updaterStatus, Recovery: recovery})
 }
 
 func (h *SystemHandler) Prepare(c *gin.Context) {
@@ -124,7 +128,7 @@ func (h *SystemHandler) Rollback(c *gin.Context) {
 	})
 }
 
-func (h *SystemHandler) Recover(c *gin.Context) {
+func (h *SystemHandler) PrepareRecovery(c *gin.Context) {
 	req, ok := decodeUpdaterRequest(c)
 	if !ok {
 		return
@@ -138,7 +142,29 @@ func (h *SystemHandler) Recover(c *gin.Context) {
 		response.BadRequest(c, "Requested version is not the updater's recorded rollback target")
 		return
 	}
-	if req.Confirmation != "RESTORE DATABASE AND ROLLBACK "+req.Version {
+	if req.Confirmation != "PREPARE RECOVERY "+req.Version {
+		response.BadRequest(c, "Explicit recovery preparation confirmation does not match the recorded target")
+		return
+	}
+	middleware2.SetAuditAction(c, "admin.system.update.prepare_recovery")
+	h.start(c, updatecontract.OperationPrepareRecovery, req, h.updater.PrepareRecovery)
+}
+
+func (h *SystemHandler) Recover(c *gin.Context) {
+	req, ok := decodeUpdaterRequest(c)
+	if !ok {
+		return
+	}
+	status, err := h.updater.RecoveryStatus(c.Request.Context())
+	if err != nil {
+		h.updaterError(c, err)
+		return
+	}
+	if status == nil || status.SourceVersion == "" || req.Version != status.SourceVersion {
+		response.BadRequest(c, "Requested version is not the prepared recovery target")
+		return
+	}
+	if status.Confirmation == "" || req.Confirmation != status.Confirmation {
 		response.BadRequest(c, "Explicit database recovery confirmation does not match the recorded target")
 		return
 	}

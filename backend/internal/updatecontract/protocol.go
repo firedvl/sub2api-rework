@@ -5,10 +5,11 @@ import "time"
 type Operation string
 
 const (
-	OperationPrepare  Operation = "prepare"
-	OperationInstall  Operation = "install"
-	OperationRollback Operation = "rollback"
-	OperationRecover  Operation = "recover"
+	OperationPrepare         Operation = "prepare"
+	OperationInstall         Operation = "install"
+	OperationRollback        Operation = "rollback"
+	OperationRecover         Operation = "recover"
+	OperationPrepareRecovery Operation = "prepare_recovery"
 )
 
 type UpdaterState string
@@ -39,6 +40,7 @@ type OperationAccepted struct {
 }
 
 type OperationSummary struct {
+	Event          string    `json:"event,omitempty"`
 	OperationID    string    `json:"operation_id"`
 	Action         Operation `json:"action"`
 	Actor          string    `json:"actor"`
@@ -49,6 +51,20 @@ type OperationSummary struct {
 	Result         string    `json:"result"`
 	RollbackResult string    `json:"rollback_result,omitempty"`
 	Error          string    `json:"error,omitempty"`
+}
+
+// RecoveryStatus exposes identities and consent without host paths or credentials.
+// It has its own endpoint because historical clients strictly decode UpdaterStatus.
+type RecoveryStatus struct {
+	OperationID    string `json:"operation_id"`
+	SourceUpdateID string `json:"source_update_id"`
+	SourceVersion  string `json:"source_version"`
+	CurrentVersion string `json:"current_version"`
+	CurrentSchema  int    `json:"current_schema"`
+	SourceSchema   int    `json:"source_schema"`
+	RescueSHA256   string `json:"rescue_sha256"`
+	Phase          string `json:"phase"`
+	Confirmation   string `json:"confirmation"`
 }
 
 type UpdaterStatus struct {

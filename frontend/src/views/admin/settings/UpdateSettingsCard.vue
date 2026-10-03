@@ -21,10 +21,13 @@
       <p v-if="loading && !status" class="text-sm text-gray-500 dark:text-gray-400" role="status">
         {{ t('admin.settings.updates.loading') }}
       </p>
+      <p v-if="recoveryPending" class="whitespace-pre-wrap break-words rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200" role="status">
+        {{ t('admin.settings.updates.recoveryHostFollowup') }}
+      </p>
       <p v-else-if="error" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300" role="alert">
         {{ error }}
       </p>
-      <template v-else-if="status">
+      <template v-if="status">
         <div class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 px-4 py-3 dark:border-dark-600">
           <div>
             <p class="text-sm font-medium text-gray-900 dark:text-white">{{ stateLabel }}</p>
@@ -73,10 +76,16 @@
           <button type="button" class="btn btn-danger btn-sm" :disabled="!canRollback || operating" @click="openConfirmation('rollback')">
             {{ t('admin.settings.updates.rollback') }}
           </button>
-          <button type="button" class="btn btn-danger btn-sm" :disabled="!canRecover || operating" @click="openConfirmation('recover')">
+          <button v-if="recoverySupported" type="button" class="btn btn-danger btn-sm" :disabled="!canPrepareRecovery || operating" @click="openConfirmation('prepareRecovery')">
+            {{ t('admin.settings.updates.prepareRecovery') }}
+          </button>
+          <button v-if="recoverySupported" type="button" class="btn btn-danger btn-sm" :disabled="!canRecover || operating" @click="openConfirmation('recover')">
             {{ t('admin.settings.updates.recover') }}
           </button>
         </div>
+        <p v-if="status.recovery?.confirmation" class="break-words text-sm text-amber-800 dark:text-amber-200" role="status">
+          {{ t('admin.settings.updates.recoveryPrepared', { sha: status.recovery.rescue_sha256 }) }}
+        </p>
       </template>
     </div>
 
@@ -85,11 +94,11 @@
       :title="confirmation ? t(`admin.settings.updates.${confirmation}`) : ''"
       :message="confirmationMessage"
       :confirm-text="t('common.confirm')"
-      :danger="confirmation === 'rollback' || confirmation === 'recover'"
+      :danger="confirmation !== 'install'"
       @confirm="confirmOperation"
       @cancel="closeConfirmation"
     >
-      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="update-confirmation">
+      <label class="block text-sm font-medium text-gray-700 [overflow-wrap:anywhere] dark:text-gray-300" for="update-confirmation">
         {{ t('admin.settings.updates.confirmationLabel', { value: expectedConfirmation }) }}
       </label>
       <input id="update-confirmation" v-model="confirmationText" type="text" class="input mt-2 font-mono text-sm" autocomplete="off" />
@@ -104,7 +113,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
-import { checkUpdates, installUpdate, prepareUpdate, recoverUpdate, rollbackUpdate, type ReleaseNotes, type UpdateStatus } from '@/api/admin/system'
+import { checkUpdates, installUpdate, prepareUpdate, prepareRecovery, recoverUpdate, rollbackUpdate, type ReleaseNotes, type UpdateStatus } from '@/api/admin/system'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { useAppStore } from '@/stores'
@@ -116,7 +125,8 @@ const status = ref<UpdateStatus | null>(null)
 const loading = ref(false)
 const operating = ref(false)
 const error = ref('')
-const confirmation = ref<'install' | 'rollback' | 'recover' | null>(null)
+const recoveryPending = ref(false)
+const confirmation = ref<'install' | 'rollback' | 'recover' | 'prepareRecovery' | null>(null)
 const confirmationText = ref('')
 let mounted = true
 
@@ -130,11 +140,14 @@ const upstreamSyncLabel = computed(() => {
 })
 const targetVersion = computed(() => status.value?.latest_compatible_rework || '')
 const rollbackVersion = computed(() => status.value?.updater.rollback_version || '')
-const canPrepare = computed(() => !!status.value?.installable && !!targetVersion.value && status.value.updater.healthy && !status.value.updater.busy)
+const canPrepare = computed(() => !!status.value?.installable && !!targetVersion.value && status.value.updater.healthy && !status.value.updater.busy && !recoveryPending.value && !status.value.recovery?.confirmation)
 const canInstall = computed(() => canPrepare.value && status.value?.updater.prepared_version === targetVersion.value)
-const canRollback = computed(() => !!rollbackVersion.value && status.value?.updater.healthy && !status.value.updater.busy)
-const canRecover = computed(() => !!rollbackVersion.value && status.value?.updater.healthy && !status.value.updater.busy && supportsRecovery(status.value.updater.updater_version))
-const expectedConfirmation = computed(() => confirmation.value === 'install' ? `INSTALL ${targetVersion.value}` : confirmation.value === 'rollback' ? `ROLLBACK ${rollbackVersion.value}` : confirmation.value === 'recover' ? `RESTORE DATABASE AND ROLLBACK ${rollbackVersion.value}` : '')
+const recoverySupported = computed(() => supportsRecovery(status.value?.updater.updater_version))
+const rollbackSchemaVerified = computed(() => !!status.value?.recovery && status.value.recovery.source_version === rollbackVersion.value && Number.isInteger(status.value.recovery.current_schema) && Number.isInteger(status.value.recovery.source_schema) && status.value.recovery.current_schema === status.value.recovery.source_schema)
+const canRollback = computed(() => !!rollbackVersion.value && status.value?.updater.healthy && !status.value.updater.busy && status.value.updater.state !== 'critical' && rollbackSchemaVerified.value && !recoveryPending.value && !status.value.recovery?.confirmation)
+const canPrepareRecovery = computed(() => !!rollbackVersion.value && recoverySupported.value && status.value?.updater.state !== 'unavailable' && !status.value?.updater.busy && !recoveryPending.value && !status.value?.recovery?.confirmation)
+const canRecover = computed(() => recoverySupported.value && !!status.value?.recovery?.confirmation && !status.value.updater.busy && !recoveryPending.value)
+const expectedConfirmation = computed(() => confirmation.value === 'install' ? `INSTALL ${targetVersion.value}` : confirmation.value === 'rollback' ? `ROLLBACK ${rollbackVersion.value}` : confirmation.value === 'prepareRecovery' ? `PREPARE RECOVERY ${rollbackVersion.value}` : confirmation.value === 'recover' ? status.value?.recovery?.confirmation || '' : '')
 const confirmationMessage = computed(() => confirmation.value ? t(`admin.settings.updates.${confirmation.value}Confirm`) : '')
 const noteKeys: (keyof ReleaseNotes)[] = ['upstream', 'rework', 'compatibility', 'migrations', 'rollback']
 const notes = computed(() => noteKeys.flatMap((key) => {
@@ -151,7 +164,7 @@ function supportsRecovery(version: string | undefined): boolean {
   const parts = version?.match(/^(\d+)\.(\d+)\.(\d+)$/)
   if (!parts) return false
   const [major, minor, patch] = parts.slice(1).map(Number)
-  return major > 1 || (major === 1 && (minor > 1 || (minor === 1 && patch >= 4)))
+  return major > 1 || (major === 1 && (minor > 1 || (minor === 1 && patch >= 5)))
 }
 
 async function load(force = false): Promise<boolean> {
@@ -159,6 +172,7 @@ async function load(force = false): Promise<boolean> {
   error.value = ''
   try {
     status.value = await checkUpdates(force)
+    if (status.value.recovery?.confirmation) recoveryPending.value = false
     return true
   } catch (err) {
     error.value = extractApiErrorMessage(err, t('admin.settings.updates.loadFailed'))
@@ -173,7 +187,7 @@ async function prepare() {
   await runOperation(() => prepareUpdate(targetVersion.value))
 }
 
-function openConfirmation(action: 'install' | 'rollback' | 'recover') {
+function openConfirmation(action: 'install' | 'rollback' | 'recover' | 'prepareRecovery') {
   confirmation.value = action
   confirmationText.value = ''
 }
@@ -189,25 +203,31 @@ async function confirmOperation() {
     return
   }
   const action = confirmation.value
-  const version = action === 'install' ? targetVersion.value : rollbackVersion.value
+  const version = action === 'install' ? targetVersion.value : action === 'recover' ? status.value!.recovery!.source_version : rollbackVersion.value
+  const consent = expectedConfirmation.value
   closeConfirmation()
   await runOperation(() => action === 'install'
     ? installUpdate(version, `INSTALL ${version}`)
     : action === 'rollback'
       ? rollbackUpdate(version, `ROLLBACK ${version}`)
-      : recoverUpdate(version, `RESTORE DATABASE AND ROLLBACK ${version}`))
+      : action === 'prepareRecovery'
+        ? prepareRecovery(version, consent)
+        : recoverUpdate(version, consent), action === 'prepareRecovery')
 }
 
-async function runOperation(operation: () => Promise<unknown>) {
+async function runOperation(operation: () => Promise<unknown>, preparingRecovery = false) {
   operating.value = true
   try {
     await stepUp.run(operation)
+    if (preparingRecovery) recoveryPending.value = true
     appStore.showSuccess(t('admin.settings.updates.operationAccepted'))
     let loaded = await load(true)
-    while (mounted && (!loaded || status.value?.updater.busy)) {
+    let failures = loaded ? 0 : 1
+    while (mounted && (!loaded || status.value?.updater.busy) && failures < 3) {
       await new Promise(resolve => setTimeout(resolve, 1000))
       if (!mounted) break
       loaded = await load()
+      failures = loaded ? 0 : failures + 1
     }
   } catch (err) {
     if (isStepUpCancelled(err)) return

@@ -64,6 +64,18 @@ func (c *Client) Status(ctx context.Context) (*updatecontract.UpdaterStatus, err
 	return &status, nil
 }
 
+func (c *Client) RecoveryStatus(ctx context.Context) (*updatecontract.RecoveryStatus, error) {
+	var status updatecontract.RecoveryStatus
+	if err := c.do(ctx, http.MethodGet, "/v1/recovery", nil, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+func (c *Client) PrepareRecovery(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
+	return c.start(ctx, "/v1/prepare_recovery", request)
+}
+
 func (c *Client) Prepare(ctx context.Context, request updatecontract.OperationRequest) (*updatecontract.OperationAccepted, error) {
 	return c.start(ctx, "/v1/prepare", request)
 }

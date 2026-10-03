@@ -723,9 +723,13 @@ export default {
         rollback: 'Roll back',
 
         recover: 'Restore database and roll back',
+        prepareRecovery: 'Prepare recovery',
+        prepareRecoveryConfirm: 'This stops the application and creates and verifies a rescue backup of current data. The database is not restored until a separate confirmation.',
+        recoveryPrepared: 'Application stopped. Current-data rescue backup verified and retained (SHA-256: {sha}). Executing recovery reverts the active database to its pre-update backup.',
+        recoveryHostFollowup: 'Recovery preparation accepted. The application will stop, so this page may lose its connection. On the host, query GET /v1/recovery through the updater Unix socket; verify phase and rescue SHA-256, then send its exact confirmation to POST /v1/recover. The current-data rescue remains retained. Executing recovery reverts the active database. This page will not execute recovery automatically.',
         installConfirm: 'Installing replaces the running release after the updater verifies the prepared image.',
         rollbackConfirm: 'Rolling back restores the updater-recorded previous release.',
-        recoverConfirm: 'This restores the pre-update PostgreSQL backup. Writes made after that backup will be lost.',
+        recoverConfirm: 'This restores the pre-update PostgreSQL backup as the active database. Later writes will leave the active database; the verified current-data rescue backup remains retained.',
         confirmationLabel: 'Type {value} to confirm',
         confirmationMismatch: 'The confirmation text does not match.',
         states: {

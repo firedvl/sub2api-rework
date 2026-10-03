@@ -32,6 +32,24 @@ func TestReleaseManifestFromEnvironment(t *testing.T) {
 
 const trustedRepository = "ghcr.io/firedvl/sub2api-rework"
 
+func TestFutureSchemaAdvancingReleaseRequiresSafeUpdater(t *testing.T) {
+	m := validManifest()
+	m.ReworkVersion = "0.2.3-rework.7"
+	m.Image = trustedRepository + ":" + m.ReworkVersion
+	m.MigrationMin, m.MigrationMax = 244, 249
+	m.MinimumUpdaterVersion = "1.1.4"
+	_, err := Parse(encodeManifest(t, m), trustedRepository)
+	require.ErrorContains(t, err, "1.1.5")
+	m.MinimumUpdaterVersion = "1.1.5"
+	_, err = Parse(encodeManifest(t, m), trustedRepository)
+	require.NoError(t, err)
+	m.ReworkVersion, m.MinimumUpdaterVersion = "0.2.3-rework.6", "1.1.4"
+	m.Image = trustedRepository + ":" + m.ReworkVersion
+	m.MigrationMax = 244
+	_, err = Parse(encodeManifest(t, m), trustedRepository)
+	require.NoError(t, err, "historical fixture semantics remain installable")
+}
+
 func validManifest() Manifest {
 	return Manifest{
 		SchemaVersion:         1,

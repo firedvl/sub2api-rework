@@ -93,3 +93,64 @@ test('confirms a ready install by keyboard at a wide width', async ({ page }, te
   }])
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 })
+
+test('prepares recovery separately and shows host follow-up after the gateway stops', async ({ page }, testInfo) => {
+  const actions: { path: string; body: unknown }[] = []
+  let stopped = false
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/v1/admin/system/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/check-updates')) {
+      if (stopped) return route.abort('connectionrefused')
+      return fulfill(route, { ...readyStatus, updater: { ...readyStatus.updater, updater_version: '1.1.5', rollback_version: '0.1.183-rework.1' } })
+    }
+    actions.push({ path, body: route.request().postDataJSON() })
+    stopped = true
+    return fulfill(route, { operation_id: 'recovery-fixture', action: 'prepare_recovery', state: 'accepted' })
+  })
+  await page.goto('/admin/settings')
+  const card = page.getByRole('region', { name: 'Software Updates' })
+  await card.getByRole('button', { name: 'Prepare recovery', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Prepare recovery', exact: true })
+  await dialog.getByLabel('Type PREPARE RECOVERY 0.1.183-rework.1 to confirm').fill('PREPARE RECOVERY 0.1.183-rework.1')
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect(card).toContainText('On the host, query GET /v1/recovery')
+  await expect(card.getByRole('button', { name: 'Restore database and roll back' })).toBeDisabled()
+  await page.waitForTimeout(3500)
+  expect(actions).toEqual([{ path: '/api/v1/admin/system/prepare-recovery', body: { version: '0.1.183-rework.1', confirmation: 'PREPARE RECOVERY 0.1.183-rework.1' } }])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  await card.getByRole('status').filter({ hasText: 'On the host, query GET /v1/recovery' }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('recovery-host-followup-narrow.png'), fullPage: true })
+})
+
+test('executes only the exact prepared recovery consent and disables ordinary rollback', async ({ page }, testInfo) => {
+  const actions: unknown[] = []
+  const consent = `RESTORE PREUPDATE DATABASE 0.1.183-rework.1 USING RESCUE upd-${'1'.repeat(24)} sha256:${'a'.repeat(64)} ACK upd-${'2'.repeat(24)}`
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.route('**/api/v1/admin/system/**', async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/check-updates')) return fulfill(route, {
+      ...readyStatus,
+      updater: { ...readyStatus.updater, updater_version: '1.1.5' },
+      recovery: { source_version: '0.1.183-rework.1', current_schema: 249, source_schema: 239, rescue_sha256: 'a'.repeat(64), confirmation: consent, phase: 'prepared' },
+    })
+    actions.push(route.request().postDataJSON())
+    return fulfill(route, { operation_id: 'recovery-fixture', action: 'recover', state: 'accepted' })
+  })
+  await page.goto('/admin/settings')
+  const card = page.getByRole('region', { name: 'Software Updates' })
+  await expect(card).toContainText('Current-data rescue backup verified and retained')
+  await expect(card.getByRole('button', { name: 'Roll back', exact: true })).toBeDisabled()
+  await card.getByRole('button', { name: 'Restore database and roll back' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Restore database and roll back' })
+  const input = dialog.locator('#update-confirmation')
+  await input.fill('RESTORE DATABASE AND ROLLBACK 0.1.183-rework.1')
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+  expect(actions).toEqual([])
+  await input.fill(consent)
+  await expect(dialog).toHaveCSS('opacity', '1')
+  await expect(dialog.locator('.modal-content')).toHaveCSS('opacity', '1')
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('recovery-exact-consent-wide.png'), fullPage: true, animations: 'disabled' })
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect.poll(() => actions).toEqual([{ version: '0.1.183-rework.1', confirmation: consent }])
+})
