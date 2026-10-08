@@ -286,23 +286,22 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 	if dst == nil {
 		return
 	}
+	cacheReadTokens := src.CacheReadInputTokens
+	if cacheReadTokens == 0 && src.CachedTokens > 0 {
+		cacheReadTokens = src.CachedTokens
+	}
+	if cacheReadTokens == 0 && src.PromptTokensDetails != nil && src.PromptTokensDetails.CachedTokens > 0 {
+		cacheReadTokens = src.PromptTokensDetails.CachedTokens
+	}
+	if cacheReadTokens == 0 && src.PromptCacheHitTokens != nil {
+		cacheReadTokens = max(*src.PromptCacheHitTokens, 0)
+	}
 
 	// Some Anthropic-compatible providers retain OpenAI-style prompt/cache
 	// fields. Prefer those authoritative totals or hit/miss buckets over the
 	// overloaded input_tokens field. This covers Kimi's changing stream
 	// semantics as well as GLM/DeepSeek cache aliases.
 	if src.PromptTokens > 0 || src.PromptCacheHitTokens != nil || src.PromptCacheMissTokens != nil {
-		cacheReadTokens := src.CacheReadInputTokens
-		if cacheReadTokens == 0 && src.CachedTokens > 0 {
-			cacheReadTokens = src.CachedTokens
-		}
-		if cacheReadTokens == 0 && src.PromptTokensDetails != nil && src.PromptTokensDetails.CachedTokens > 0 {
-			cacheReadTokens = src.PromptTokensDetails.CachedTokens
-		}
-		if cacheReadTokens == 0 && src.PromptCacheHitTokens != nil {
-			cacheReadTokens = max(*src.PromptCacheHitTokens, 0)
-		}
-
 		if src.PromptCacheMissTokens != nil {
 			dst.InputTokens = max(*src.PromptCacheMissTokens, 0)
 		} else {
@@ -314,10 +313,8 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 		if src.InputTokens > 0 {
 			dst.InputTokens = src.InputTokens
 		}
-		if src.CacheReadInputTokens > 0 {
-			dst.CacheReadInputTokens = src.CacheReadInputTokens
-		} else if src.CachedTokens > 0 {
-			dst.CacheReadInputTokens = src.CachedTokens
+		if cacheReadTokens > 0 {
+			dst.CacheReadInputTokens = cacheReadTokens
 		}
 		if src.CacheCreationInputTokens > 0 {
 			dst.CacheCreationInputTokens = src.CacheCreationInputTokens
@@ -331,6 +328,28 @@ func mergeAnthropicUsage(dst *ClaudeUsage, src apicompat.AnthropicUsage) {
 // parseAnthropicSSEField parses an SSE field line in the form "field:value" or "field: value".
 // According to the SSE spec (https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation),
 // the space after the colon is optional. This function handles both formats.
+func syncAnthropicResponsesUsage(state *apicompat.AnthropicEventToResponsesState, usage ClaudeUsage) {
+	state.InputTokens = usage.InputTokens
+	state.OutputTokens = usage.OutputTokens
+	state.CacheReadInputTokens = usage.CacheReadInputTokens
+	state.CacheCreationInputTokens = usage.CacheCreationInputTokens
+}
+
+func normalizeAnthropicEventUsageForResponses(event *apicompat.AnthropicStreamEvent, usage ClaudeUsage) {
+	normalize := func(dst *apicompat.AnthropicUsage) {
+		if dst != nil {
+			dst.InputTokens = usage.InputTokens
+			dst.OutputTokens = usage.OutputTokens
+			dst.CacheReadInputTokens = usage.CacheReadInputTokens
+			dst.CacheCreationInputTokens = usage.CacheCreationInputTokens
+		}
+	}
+	normalize(event.Usage)
+	if event.Message != nil {
+		normalize(&event.Message.Usage)
+	}
+}
+
 func parseAnthropicSSEField(line, field string) (string, bool) {
 	prefix := field + ":"
 	if !strings.HasPrefix(line, prefix) {
@@ -590,6 +609,8 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		if event.Type == "message_start" && event.Message != nil {
 			mergeAnthropicUsage(&usage, event.Message.Usage)
 		}
+		syncAnthropicResponsesUsage(state, usage)
+		normalizeAnthropicEventUsageForResponses(event, usage)
 		return emitEvents(apicompat.AnthropicEventToResponsesEvents(event, state))
 	}
 
