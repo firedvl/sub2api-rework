@@ -202,7 +202,8 @@ func IsGPT61SolModelSpelling(model string) bool {
 }
 
 func ValidateGPT61SolReasoningEffort(model, effort string) error {
-	if IsGPT61SolModelSpelling(model) {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	if canonical == "gpt-6.1-sol" || strings.HasPrefix(canonical, "gpt-6.1-sol-") {
 		switch strings.ToLower(strings.TrimSpace(effort)) {
 		case "", "low", "medium", "high", "xhigh", "max":
 		default:

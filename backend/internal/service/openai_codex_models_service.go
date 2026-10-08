@@ -2546,8 +2546,8 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if account != nil {
 			target = account.GetMappedModel(slug)
 		}
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
+		if normalized := normalizeKnownOpenAICodexModel(target); normalized != "" {
+			target = normalized
 		}
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue

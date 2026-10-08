@@ -86,6 +86,26 @@ func TestGPT61SolMappedReasoningModeAndSampling(t *testing.T) {
 	require.Equal(t, "reasoning.encrypted_content", gjson.GetBytes(out, "include.0").String())
 }
 
+func TestGPT61SolResponsesShapedChatRetainsMappedEffort(t *testing.T) {
+	for _, suffix := range []string{"low", "medium", "high", "xhigh", "max", "none", "minimal", "ultra"} {
+		body := []byte(`{"model":"public","input":"hi"}`)
+		upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"fixture"}}`))}}
+		svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+		account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture-key", "base_url": "https://api.openai.com", "model_mapping": map[string]any{"public": "gpt-6.1-sol-" + suffix}}}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+		require.Error(t, err, "fixture ends with upstream400 or unsupported effort rejection")
+		if suffix == "none" || suffix == "minimal" || suffix == "ultra" {
+			require.Nil(t, upstream.lastReq, "unsupported mapped effort never dispatches")
+		} else {
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.Equal(t, suffix, gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+		}
+	}
+}
+
 func TestGPT61SolMappedResponsesBridgesPreserveToolsAndEffort(t *testing.T) {
 	for _, messages := range []bool{false, true} {
 		for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {

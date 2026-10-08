@@ -219,10 +219,10 @@ func TestGPT61SolFinalMappingPreservesOtherModelCompactRules(t *testing.T) {
 	account.Credentials["compact_model_mapping"] = map[string]any{"public": "gpt-5.4-openai-compact"}
 	require.Equal(t, "gpt-5.4-openai-compact", resolveOpenAIAccountUpstreamModelForRequest(account, "public", true))
 
-	account = forceChatResponsesFallbackAccount()
-	account.Credentials["model_mapping"] = map[string]any{"public": "gpt-5.4"}
-	account.Credentials["compact_model_mapping"] = map[string]any{"public": "gpt-6.1-sol-none"}
-	cfg := rawChatCompletionsTestConfig()
+	account = &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "fixture-key", "base_url": "https://api.openai.com", "model_mapping": map[string]any{"public": "gpt-5.4"}, "compact_model_mapping": map[string]any{"public": "gpt-6.1-sol-none"}},
+		Extra:       map[string]any{"openai_responses_mode": "force_chat_completions"}}
+	cfg := &config.Config{}
 	cfg.Gateway.OpenAICompactModel = "gpt-6.1-sol-minimal"
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"fixture"}}`))}}
 	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
@@ -234,6 +234,24 @@ func TestGPT61SolFinalMappingPreservesOtherModelCompactRules(t *testing.T) {
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "/v1/chat/completions", upstream.lastReq.URL.Path)
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
+}
+
+func TestGPT61SolRejectsUnsupportedAliasAndDisablesAPIKeyLite(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-sol-ultra", "openai/gpt-6.1-sol-ultra"} {
+		require.Error(t, validateGPT61SolCompatRequest([]byte(`{"model":"public"}`), model))
+		require.Error(t, validateGPT61SolCompatRequest([]byte(`{"model":"`+model+`"}`), "gpt-6.1-sol"))
+	}
+	for _, model := range []string{"gpt-6.1-sol-max", "openai/gpt-6.1-sol-high"} {
+		body, err := adjustAPIKeyCodexModelsManifest([]byte(`{"models":[{"slug":"`+model+`","use_responses_lite":true}]}`), nil)
+		require.NoError(t, err)
+		require.False(t, gjson.GetBytes(body, "models.0.use_responses_lite").Bool())
+		body, err = adjustAPIKeyCodexModelsManifest([]byte(`{"models":[{"slug":"public","use_responses_lite":true}]}`), &Account{Credentials: map[string]any{"model_mapping": map[string]any{"public": model}}})
+		require.NoError(t, err)
+		require.False(t, gjson.GetBytes(body, "models.0.use_responses_lite").Bool())
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://api.openai.com"}}
+		account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{model: {CodexToolCapabilities: map[string]json.RawMessage{"use_responses_lite": json.RawMessage("true")}}}})
+		require.JSONEq(t, "false", string(accountCodexToolCapabilities(account, model)["use_responses_lite"]))
+	}
 }
 
 func TestGPT61SolPricingTiersAndThreshold(t *testing.T) {

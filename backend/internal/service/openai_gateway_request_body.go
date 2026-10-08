@@ -2599,7 +2599,8 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 
 // Validate against the final mapped model before converters can discard intent.
 func validateGPT61SolCompatRequest(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) {
+	canonicalModel := canonicalizeOpenAIModelAliasSpelling(model)
+	if canonicalModel != "gpt-6.1-sol" && !strings.HasPrefix(canonicalModel, "gpt-6.1-sol-") {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
@@ -2618,7 +2619,7 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 		if effort := deriveOpenAIReasoningEffortFromModel(candidate); effort == "none" || effort == "minimal" {
 			return openai.ValidateGPT61SolReasoningEffort(model, effort)
 		}
-		if canonical := canonicalizeOpenAIModelAliasSpelling(candidate); openai.IsGPT61SolModelSpelling(canonical) {
+		if canonical := canonicalizeOpenAIModelAliasSpelling(candidate); strings.HasPrefix(canonical, "gpt-6.1-sol-") {
 			if effort, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok && effort != "openai-compact" {
 				if err := openai.ValidateGPT61SolReasoningEffort(model, effort); err != nil {
 					return err

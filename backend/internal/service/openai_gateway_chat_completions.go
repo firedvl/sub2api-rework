@@ -244,6 +244,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("rewrite model in responses-shape body: %w", err)
 		}
+		if openai.IsGPT61SolModelSpelling(upstreamModel) {
+			if effort := extractOpenAIReasoningEffortFromBody(body, billingModel, originalModel); effort != nil {
+				responsesBody, err = sjson.SetBytes(responsesBody, "reasoning.effort", *effort)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		// Strip Responses API parameters that no Codex upstream accepts.
 		// Because this branch forwards the raw body (the normal path rebuilds
 		// it from ChatCompletionsRequest and drops unknown fields naturally),
