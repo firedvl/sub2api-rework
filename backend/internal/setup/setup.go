@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -400,6 +402,10 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	return bootstrapAdminUser(ctx, db, cfg)
+}
+
+func bootstrapAdminUser(ctx context.Context, db *sql.DB, cfg *SetupConfig) (bool, string, error) {
 	var totalUsers int64
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(1) FROM users").Scan(&totalUsers); err != nil {
 		return false, "", err
@@ -413,14 +419,28 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, decision.reason, nil
 	}
 
-	if strings.TrimSpace(cfg.Admin.Password) == "" {
+	cfg.Admin.Email = strings.TrimSpace(cfg.Admin.Email)
+	emailGenerated := cfg.Admin.Email == ""
+	passwordGenerated := cfg.Admin.Password == ""
+	if emailGenerated {
+		suffix, genErr := generateSecret(6)
+		if genErr != nil {
+			return false, "", fmt.Errorf("failed to generate admin identity: %w", genErr)
+		}
+		cfg.Admin.Email = "admin-" + suffix + "@sub2api.local"
+	}
+	if !validateEmail(cfg.Admin.Email) {
+		return false, "", fmt.Errorf("invalid admin email")
+	}
+	if passwordGenerated {
 		password, genErr := generateSecret(16)
 		if genErr != nil {
 			return false, "", fmt.Errorf("failed to generate admin password: %w", genErr)
 		}
 		cfg.Admin.Password = password
-		fmt.Printf("Generated admin password (one-time): %s\n", cfg.Admin.Password)
-		fmt.Println("IMPORTANT: Save this password! It will not be shown again.")
+	}
+	if err := validatePassword(cfg.Admin.Password); err != nil {
+		return false, "", fmt.Errorf("invalid admin password: %w", err)
 	}
 
 	admin := &service.User{
@@ -436,8 +456,17 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 	if err := admin.SetPassword(cfg.Admin.Password); err != nil {
 		return false, "", err
 	}
+	if emailGenerated || passwordGenerated {
+		credentials := AdminConfig{Email: cfg.Admin.Email}
+		if passwordGenerated {
+			credentials.Password = cfg.Admin.Password
+		}
+		if err := saveBootstrapCredentials(credentials); err != nil {
+			return false, "", err
+		}
+	}
 
-	_, err = db.ExecContext(
+	_, err := db.ExecContext(
 		ctx,
 		`INSERT INTO users (email, password_hash, role, balance, concurrency, status, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -454,6 +483,44 @@ func createAdminUser(cfg *SetupConfig) (bool, string, error) {
 		return false, "", err
 	}
 	return true, decision.reason, nil
+}
+
+const bootstrapCredentialsFile = "admin-bootstrap.json"
+
+func saveBootstrapCredentials(credentials AdminConfig) error {
+	data, err := json.Marshal(credentials)
+	if err != nil {
+		return fmt.Errorf("encode bootstrap credentials: %w", err)
+	}
+	credentialPath := filepath.Join(GetDataDir(), bootstrapCredentialsFile)
+	file, err := os.OpenFile(credentialPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("create private bootstrap credential file: %w", err)
+	}
+	if _, err = file.Write(append(data, '\n')); err == nil {
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		var directory *os.File
+		directory, err = os.Open(GetDataDir())
+		if err == nil {
+			err = directory.Sync()
+			if closeErr := directory.Close(); err == nil {
+				err = closeErr
+			}
+		}
+	}
+	if err != nil {
+		_ = os.Remove(credentialPath)
+		return fmt.Errorf("save private bootstrap credentials: %w", err)
+	}
+	// Keep this file if insertion fails: a database error can leave the commit outcome unknown.
+	logger.LegacyPrintf("setup", "Generated admin credentials saved privately to %s", credentialPath)
+	return nil
 }
 
 func writeConfigFile(cfg *SetupConfig) error {
@@ -590,7 +657,7 @@ func AutoSetupFromEnv() error {
 			EnableTLS: getEnvOrDefault("REDIS_ENABLE_TLS", "false") == "true",
 		},
 		Admin: AdminConfig{
-			Email:    getEnvOrDefault("ADMIN_EMAIL", "admin@sub2api.local"),
+			Email:    getEnvOrDefault("ADMIN_EMAIL", ""),
 			Password: getEnvOrDefault("ADMIN_PASSWORD", ""),
 		},
 		Server: ServerConfig{
@@ -644,7 +711,7 @@ func AutoSetupFromEnv() error {
 		return fmt.Errorf("admin user creation failed: %w", err)
 	}
 	if created {
-		logger.LegacyPrintf("setup", "Admin user created: %s", cfg.Admin.Email)
+		logger.LegacyPrintf("setup", "%s", "Admin user created")
 	} else {
 		switch reason {
 		case adminBootstrapReasonAdminExists:

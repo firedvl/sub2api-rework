@@ -245,6 +245,8 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use http or https")
 	}
 	parsed.Fragment = ""
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	if parsed.Path == "" {
 		parsed.Path = "/"
 	}
