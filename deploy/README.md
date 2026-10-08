@@ -80,8 +80,8 @@ docker compose -f docker-compose.local.yml up -d
 # View logs
 docker compose -f docker-compose.local.yml logs -f sub2api
 
-# If admin password was auto-generated, find it in logs:
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+# Generated admin credentials are stored in a private file, never in logs.
+# Inspect data/admin-bootstrap.json privately and remove it after securing them.
 
 # Access Web UI
 # http://localhost:8080
@@ -113,7 +113,7 @@ mkdir -p data postgres_data redis_data
 # Start all services using local directory version
 docker compose -f docker-compose.local.yml up -d
 
-# View logs (check for auto-generated admin password)
+# View startup logs (credentials are stored privately, not logged)
 docker compose -f docker-compose.local.yml logs -f sub2api
 
 # Access Web UI
@@ -137,15 +137,20 @@ When using Docker Compose with `AUTO_SETUP=true`:
    - Connects to PostgreSQL and Redis
    - Applies database migrations (SQL files in `backend/migrations/*.sql`) and records them in `schema_migrations`
    - Generates JWT secret (if not provided)
-   - Creates admin account (password auto-generated if not provided)
+   - Creates admin account (email/password generated when absent; supplied passwords must be 8-72 bytes)
    - Writes config.yaml
 
 2. No manual Setup Wizard needed - just configure `.env` and start
 
-3. If `ADMIN_PASSWORD` is not set, check logs for the generated password:
-   ```bash
-   docker compose logs sub2api | grep "admin password"
-   ```
+3. When either administrator value is generated, setup saves the login email
+   and generated password to `admin-bootstrap.json` in the application data
+   directory with mode `0600`. For local-directory Compose, that is
+   `data/admin-bootstrap.json`. Inspect it privately, secure the credentials,
+   then remove the file. Explicitly supplied passwords are not copied there.
+   Startup logs show the path only. An existing file or symlink stops fresh
+   bootstrap before insertion. If insertion fails, the file stays because the
+   database outcome may be unknown; inspect the database and saved credentials
+   before removing the file and retrying. Existing users/admins skip bootstrap.
 
 ### Startup and Database Recovery
 
@@ -258,8 +263,8 @@ docker compose down -v
 | `JWT_SECRET` | **Recommended** | *(auto-generated)* | JWT secret (fixed for persistent sessions) |
 | `TOTP_ENCRYPTION_KEY` | **Recommended** | *(auto-generated)* | TOTP encryption key (fixed for persistent 2FA) |
 | `SERVER_PORT` | No | `8080` | Server port |
-| `ADMIN_EMAIL` | No | `admin@sub2api.local` | Admin email |
-| `ADMIN_PASSWORD` | No | *(auto-generated)* | Admin password |
+| `ADMIN_EMAIL` | No | *(random when absent)* | Admin login email |
+| `ADMIN_PASSWORD` | No | *(random when absent)* | Admin password, 8-72 bytes |
 | `TZ` | No | `Asia/Shanghai` | Timezone |
 | `UPDATE_GITHUB_TOKEN` | No | *(empty)* | Token for `api.github.com` release checks only; asset downloads remain anonymous. |
 | `SUB2API_IMAGE` | No | `weishaw/sub2api:latest` | Application image; the restricted updater pins this to an approved digest. |
