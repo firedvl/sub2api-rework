@@ -339,8 +339,9 @@ JWT_SECRET=your_jwt_secret_here
 TOTP_ENCRYPTION_KEY=your_totp_key_here
 
 # 可选：管理员账号
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your_admin_password
+# Leave empty to generate credentials in private data/admin-bootstrap.json, never in logs.
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
 
 # 可选：自定义端口
 SERVER_PORT=8080
@@ -401,10 +402,9 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 在浏览器中打开 `http://你的服务器IP:8080`
 
-如果管理员密码是自动生成的，在日志中查找：
-```bash
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
-```
+When either administrator value is generated, inspect `data/admin-bootstrap.json`
+privately (mode `0600`). Secure the credentials, then remove the file. Supplied
+passwords must be 8-72 bytes.
 
 #### 升级
 
