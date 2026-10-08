@@ -375,8 +375,26 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	}
 	// url.ParseQuery already decodes values — no additional decode needed.
 	params := make(map[string]string)
-	for k := range values {
+	for k, entries := range values {
+		switch k {
+		case "pid", "trade_no", "out_trade_no", "type", "name", "money", "trade_status", "param", "sign", "sign_type":
+		default:
+			return nil, fmt.Errorf("unexpected notify parameter")
+		}
+		if len(entries) != 1 {
+			return nil, fmt.Errorf("duplicate notify parameter")
+		}
 		params[k] = values.Get(k)
+	}
+	// Bind even legacy orders to the verifying merchant; decoded values can swallow signed fields.
+	if params["pid"] != strings.TrimSpace(e.config["pid"]) || params["pid"] == "" {
+		return nil, fmt.Errorf("invalid notify merchant")
+	}
+	if strings.TrimSpace(params["out_trade_no"]) == "" {
+		return nil, fmt.Errorf("missing notify order")
+	}
+	if params["sign_type"] != "" && params["sign_type"] != signTypeMD5 {
+		return nil, fmt.Errorf("unsupported notify signature type")
 	}
 	sign := params["sign"]
 	if sign == "" {
