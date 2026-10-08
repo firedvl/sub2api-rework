@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -241,6 +242,29 @@ func TestGPT61CompositeWebSocketFinalEffort(t *testing.T) {
 					require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(payload, "model").String())
 					require.Equal(t, "max", gjson.GetBytes(payload, "reasoning.effort").String())
 				}
+			})
+		}
+	}
+}
+
+func TestGPT61CompositeWebSocketPublicModelEffortPolicy(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
+		for _, first := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/first=%v", mode, first), func(t *testing.T) {
+				group := compositeWSGroup("public-alias")
+				group.ReasoningEffortMappings = []service.ReasoningEffortMapping{{From: "high", To: "deny", MatchType: "exact", Model: "public-alias"}}
+				firstPayload := `{"type":"response.create","model":"public-alias","input":"hi"}`
+				if first {
+					firstPayload = `{"type":"response.create","model":"public-alias","reasoning":{"effort":"high"}}`
+				}
+				runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload:  firstPayload,
+					secondPayload: `{"type":"response.create","model":"public-alias","reasoning":{"effort":"high"}}`,
+					group:         group, ingressMode: mode,
+					compositeResolver:       compositeWSResolver(service.PlatformOpenAI, "responses", "gpt-6.1-sol"),
+					firstFrameCloseExpected: first, secondTurnCloseExpected: !first,
+					closeReason: "reasoning effort",
+				})
 			})
 		}
 	}
