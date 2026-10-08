@@ -194,6 +194,12 @@ func ProvideOpenAIQuotaService(
 	return service
 }
 
+func ProvideClaudeResetCreditService(accountRepo AccountRepository, tokens *ClaudeTokenProvider, proxies ProxyRepository, settings *SettingService, idempotency *IdempotencyCoordinator, locks LeaderLockCache) *ClaudeResetCreditService {
+	s := NewClaudeResetCreditService(accountRepo, tokens, proxies, settings)
+	s.ConfigureRedemption(idempotency, locks)
+	return s
+}
+
 // ProvideOpenAIQuotaAutoResetService 启动账号级自动用卡队列与补偿扫描。
 func ProvideOpenAIQuotaAutoResetService(
 	accountRepo AccountRepository,
@@ -907,6 +913,7 @@ var ProviderSet = wire.NewSet(
 	ProvideUpstreamBillingProbeService,
 	ProvideOllamaCloudUsageService,
 	ProvideOpenCodeGoUsageService,
+	ProvideClaudeResetCreditService,
 	ProvideSettingService,
 	NewDataManagementService,
 	ProvideBackupService,
