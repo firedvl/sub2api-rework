@@ -113,6 +113,7 @@ func TestAutoResetSchedulerNotificationCooldownIsAtomicAndScoped(t *testing.T) {
 	wait.Wait()
 	require.Equal(t, int32(1), accepted.Load())
 	require.False(t, notifyOpenAIAutoResetFromSchedulerAt(accountA, now.Add(10*time.Second)))
+	require.False(t, notifyOpenAIAutoResetFromSchedulerAt(accountA, now.Add(-time.Millisecond)), "an earlier caller arriving late must not move the cooldown backwards")
 	require.True(t, notifyOpenAIAutoResetFromSchedulerAt(accountB, now))
 	require.True(t, notifyOpenAIAutoResetFromSchedulerAt(accountA, now.Add(30*time.Second)))
 	// Event-driven notifications are not suppressed by scheduler cooldown.

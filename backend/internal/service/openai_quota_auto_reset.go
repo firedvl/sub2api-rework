@@ -1029,7 +1029,7 @@ func notifyOpenAIAutoResetFromSchedulerAt(accountID int64, now time.Time) bool {
 			break
 		}
 		lastAt := last.(time.Time)
-		if elapsed := now.Sub(lastAt); elapsed >= 0 && elapsed < openAIAutoResetSchedulerNotifyCooldown {
+		if elapsed := now.Sub(lastAt); elapsed < openAIAutoResetSchedulerNotifyCooldown {
 			return false
 		}
 		if openAIAutoResetSchedulerNotifiedAt.CompareAndSwap(accountID, last, now) {
