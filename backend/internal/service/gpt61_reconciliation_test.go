@@ -26,10 +26,15 @@ func TestGPT61SolMetadataAndCompatibility(t *testing.T) {
 	require.NoError(t, json.Unmarshal(encoded, &descriptor))
 	require.Equal(t, "medium", descriptor["default_reasoning_level"])
 	require.Equal(t, true, descriptor["prefer_websockets"])
-	levels := descriptor["supported_reasoning_levels"].([]any)
+	levels, ok := descriptor["supported_reasoning_levels"].([]any)
+	require.True(t, ok)
 	require.Len(t, levels, 5)
-	require.Equal(t, "max", levels[4].(map[string]any)["effort"])
-	require.Contains(t, descriptor["model_messages"].(map[string]any), "tools")
+	maxLevel, ok := levels[4].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "max", maxLevel["effort"])
+	messages, ok := descriptor["model_messages"].(map[string]any)
+	require.True(t, ok)
+	require.Contains(t, messages, "tools")
 	for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol-max", "GPT_6.1_SOL"} {
 		require.Equal(t, "gpt-6.1-sol", normalizeKnownOpenAICodexModel(model))
 		require.Equal(t, "gpt-6.1-sol", normalizeOpenAIModelForUpstream(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, model))
@@ -54,7 +59,7 @@ func TestGPT61SolMetadataAndCompatibility(t *testing.T) {
 func TestGPT61SolNativeForwardFinalMapping(t *testing.T) {
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 		for _, compact := range []bool{false, true} {
-			for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "none", "minimal"} {
+			for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "none", "minimal", "ultra"} {
 				cfg := &config.Config{}
 				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"fixture stops after capture"}}`))}}
 				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
@@ -70,7 +75,7 @@ func TestGPT61SolNativeForwardFinalMapping(t *testing.T) {
 				c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 				_, err := svc.Forward(context.Background(), c, account, body)
 				require.Error(t, err)
-				if effort == "none" || effort == "minimal" {
+				if effort == "none" || effort == "minimal" || effort == "ultra" {
 					require.Nil(t, upstream.lastReq)
 					require.Contains(t, err.Error(), "reasoning effort")
 				} else {
@@ -84,7 +89,7 @@ func TestGPT61SolNativeForwardFinalMapping(t *testing.T) {
 }
 
 func TestGPT61SolNativeWebSocketMappedAlias(t *testing.T) {
-	for _, effort := range []string{"max", "none", "minimal"} {
+	for _, effort := range []string{"max", "none", "minimal", "ultra"} {
 		t.Run(effort, func(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAIWS.Enabled = true
@@ -107,7 +112,7 @@ func TestGPT61SolNativeWebSocketMappedAlias(t *testing.T) {
 					serverErrors <- err
 					return
 				}
-				defer conn.CloseNow()
+				defer func() { _ = conn.CloseNow() }()
 				_, first, err := conn.Read(r.Context())
 				if err != nil {
 					serverErrors <- err
@@ -122,7 +127,7 @@ func TestGPT61SolNativeWebSocketMappedAlias(t *testing.T) {
 			defer cancel()
 			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 			require.NoError(t, err)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"public","input":"hi","stream":false}`)))
 			_, _, readErr := client.Read(ctx)
 			if effort == "max" {
