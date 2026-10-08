@@ -3,6 +3,7 @@ package xai
 import (
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -16,7 +17,7 @@ const (
 	CLIProxyHost = "cli-chat-proxy.grok.com"
 
 	// CLIStableVersion is the known-good minimum client version accepted by cli-chat-proxy.
-	CLIStableVersion = "0.2.93"
+	CLIStableVersion = "1.0.13"
 
 	// CLIVersionEnv is the optional operator override for CLIStableVersion.
 	CLIVersionEnv = "XAI_GROK_CLI_VERSION"
@@ -25,10 +26,10 @@ const (
 	CLITokenAuth = "xai-grok-cli"
 
 	// CLIClientIdentifier is the x-grok-client-identifier value used by Grok shell/CLI.
-	CLIClientIdentifier = "grok-shell"
+	CLIClientIdentifier = "grok-pager"
 
 	// CLIClientMode is used by billing / quota probes on the CLI surface.
-	CLIClientMode = "cli"
+	CLIClientMode = "interactive"
 )
 
 // ResolveCLIVersion returns a supported CLI client version.
@@ -54,12 +55,24 @@ func IsSupportedCLIVersion(version string) bool {
 		semver.Compare(canonical, minimum) >= 0
 }
 
-// CLIUserAgent builds the workspace-style User-Agent for a CLI client version.
+// CLIUserAgent builds the official interactive CLI identity using Rust platform names.
 func CLIUserAgent(version string) string {
 	if strings.TrimSpace(version) == "" {
 		version = CLIClientVersion
 	}
-	return "xai-grok-workspace/" + version
+	platform, arch := runtime.GOOS, runtime.GOARCH
+	if platform == "darwin" {
+		platform = "macos"
+	}
+	switch arch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64":
+		arch = "aarch64"
+	case "386":
+		arch = "x86"
+	}
+	return "grok-pager/" + version + " grok-shell/" + version + " (" + platform + "; " + arch + ")"
 }
 
 // ApplyCLIProxyHeaders stamps the fixed Grok CLI identity when the request
@@ -71,9 +84,28 @@ func ApplyCLIProxyHeaders(req *http.Request) {
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	version := ResolveCLIVersion()
-	req.Header.Set("X-XAI-Token-Auth", CLITokenAuth)
-	req.Header.Set("x-grok-client-version", version)
-	req.Header.Set("x-grok-client-identifier", CLIClientIdentifier)
-	req.Header.Set("User-Agent", CLIUserAgent(version))
+	ApplyCLIIdentityHeaders(req.Header, ResolveCLIVersion())
+}
+
+// ApplyCLIIdentityHeaders replaces every casing of the official CLI identity headers.
+func ApplyCLIIdentityHeaders(headers http.Header, version string) {
+	if headers == nil {
+		return
+	}
+	for name, value := range map[string]string{
+		"X-XAI-Token-Auth":         CLITokenAuth,
+		"X-Grok-Client-Version":    version,
+		"X-Grok-Client-Identifier": CLIClientIdentifier,
+		"X-Grok-Client-Mode":       CLIClientMode,
+		"X-Authenticateresponse":   "authenticate-response",
+		"User-Agent":               CLIUserAgent(version),
+	} {
+		// Configured overrides can use raw map keys that Header.Set does not replace.
+		for existing := range headers {
+			if strings.EqualFold(existing, name) {
+				delete(headers, existing)
+			}
+		}
+		headers.Set(name, value)
+	}
 }
