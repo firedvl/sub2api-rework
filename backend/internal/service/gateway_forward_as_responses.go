@@ -542,25 +542,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 	}
 
-	// processEvent handles a single parsed Anthropic SSE event.
-	processEvent := func(event *apicompat.AnthropicStreamEvent) bool {
-		if firstChunk {
-			firstChunk = false
-			ms := int(time.Since(startTime).Milliseconds())
-			firstTokenMs = &ms
-		}
-
-		// Extract usage from message_delta
-		if event.Type == "message_delta" && event.Usage != nil {
-			mergeAnthropicUsage(&usage, *event.Usage)
-		}
-		// Also capture usage from message_start
-		if event.Type == "message_start" && event.Message != nil {
-			mergeAnthropicUsage(&usage, event.Message.Usage)
-		}
-
-		// Convert to Responses events
-		events := apicompat.AnthropicEventToResponsesEvents(event, state)
+	emitEvents := func(events []apicompat.ResponsesStreamEvent) bool {
 		for _, evt := range events {
 			payload, err := json.Marshal(evt)
 			if err != nil {
@@ -595,18 +577,24 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		return false
 	}
 
-	finalizeStream := func() (*ForwardResult, error) {
-		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
-			for _, evt := range finalEvents {
-				sse, err := apicompat.ResponsesEventToSSE(evt)
-				if err != nil {
-					continue
-				}
-				out := string(reverseToolNamesIfPresent(c, []byte(sse)))
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
-			}
-			c.Writer.Flush()
+	// Normal and EOF events share tool restoration so item types and IDs stay consistent.
+	processEvent := func(event *apicompat.AnthropicStreamEvent) bool {
+		if firstChunk {
+			firstChunk = false
+			ms := int(time.Since(startTime).Milliseconds())
+			firstTokenMs = &ms
 		}
+		if event.Type == "message_delta" && event.Usage != nil {
+			mergeAnthropicUsage(&usage, *event.Usage)
+		}
+		if event.Type == "message_start" && event.Message != nil {
+			mergeAnthropicUsage(&usage, event.Message.Usage)
+		}
+		return emitEvents(apicompat.AnthropicEventToResponsesEvents(event, state))
+	}
+
+	finalizeStream := func() (*ForwardResult, error) {
+		emitEvents(apicompat.FinalizeAnthropicResponsesStream(state))
 		return resultWithUsage(), nil
 	}
 
