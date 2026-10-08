@@ -17,6 +17,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type openAIWSClientFrameConn struct {
@@ -732,12 +733,26 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if initialRequestModel == "" {
 		initialRequestModel = openAIWSPassthroughRequestModelForFrame(firstClientMessage)
 	}
+	if normalized, normalizeErr := normalizeCompositeWSModelPayload(ctx, firstClientMessage); normalizeErr != nil {
+		return normalizeErr
+	} else {
+		firstClientMessage = normalized
+	}
 	if hooks != nil && hooks.MapRequestModel != nil {
 		mappedModel, mapErr := hooks.MapRequestModel(1, initialRequestModel)
 		if mapErr != nil {
 			return mapErr
 		}
 		if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+			if _, composite := RequestedPublicModelFromContext(ctx); composite {
+				mappedModel = account.GetMappedModel(mappedModel)
+				if gjson.GetBytes(firstClientMessage, "session.model").Exists() {
+					firstClientMessage, mapErr = sjson.SetBytes(firstClientMessage, "session.model", mappedModel)
+					if mapErr != nil {
+						return mapErr
+					}
+				}
+			}
 			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
 		}
 	}
@@ -982,6 +997,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			clientPayload := payload
+			if _, composite := RequestedPublicModelFromContext(ctx); composite {
+				normalized, normalizeErr := normalizeCompositeWSModelPayload(ctx, payload)
+				if normalizeErr != nil {
+					return payload, nil, normalizeErr
+				}
+				payload = normalized
+				if eventType == "session.update" && gjson.GetBytes(payload, "session.model").Exists() {
+					// Session updates do not start a turn or replace its mapping snapshot.
+					payload, normalizeErr = sjson.SetBytes(payload, "session.model", capturedSessionModel)
+					if normalizeErr != nil {
+						return payload, nil, normalizeErr
+					}
+				}
+			}
 			responseCreateAt := time.Time{}
 			acceptedTurn := false
 			if isResponseCreate {
@@ -1065,6 +1095,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						return payload, nil, err
 					}
 					if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+						if _, composite := RequestedPublicModelFromContext(ctx); composite {
+							upstreamModel = account.GetMappedModel(upstreamModel)
+							if gjson.GetBytes(payload, "session.model").Exists() {
+								payload, err = sjson.SetBytes(payload, "session.model", upstreamModel)
+								if err != nil {
+									return payload, nil, err
+								}
+							}
+						}
 						payload = s.ReplaceModelInBody(payload, upstreamModel)
 					}
 				}
@@ -1079,7 +1118,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
 				capturedSessionModel = updated
 			}
-			usageMeta.updateSessionRequestModel(payload)
+			if _, composite := RequestedPublicModelFromContext(ctx); composite {
+				usageMeta.updateSessionRequestModel(clientPayload)
+			} else {
+				usageMeta.updateSessionRequestModel(payload)
+			}
 			if requestModelForThisFrame == "" {
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 			}

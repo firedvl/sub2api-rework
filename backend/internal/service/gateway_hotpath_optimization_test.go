@@ -656,7 +656,7 @@ func TestGetAvailableModels_ErrorAndGlobalListBranches(t *testing.T) {
 	require.Equal(t, int64(1), okRepo.listAllCalls.Load())
 }
 
-func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
+func TestGetAvailableModels_OpenAIPassthroughPreservesMappedModels(t *testing.T) {
 	groupID := int64(10)
 
 	tests := []struct {
@@ -677,7 +677,7 @@ func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "passthrough wins over ordinary account mapping",
+			name: "passthrough preserves ordinary account mapping",
 			accounts: []Account{
 				{
 					ID:          2,
@@ -691,7 +691,7 @@ func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
 					Extra:       map[string]any{"openai_passthrough": true},
 				},
 			},
-			want: nil,
+			want: []string{"configured-model"},
 		},
 		{
 			name: "ordinary accounts preserve mapped whitelist",
@@ -745,6 +745,24 @@ func TestGetAvailableModels_GlobalListPreservesMappedModelsWithOpenAIPassthrough
 	}
 
 	require.Equal(t, []string{"claude-mapped"}, svc.GetAvailableModels(context.Background(), &groupID, ""))
+}
+
+func TestAvailableModelIDsFromAccounts_PassthroughManifestUnion(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Extra: map[string]any{"openai_passthrough": true}, Credentials: map[string]any{"model_mapping": map[string]any{"stale-model": "upstream"}}},
+		{ID: 2, Platform: PlatformOpenAI, Credentials: map[string]any{"model_mapping": map[string]any{"configured-model": "upstream"}}},
+		{ID: 3, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"claude-mapped": "upstream"}}},
+	}
+	manifestIDs := func(account *Account) []string {
+		if account.ID == 1 {
+			return []string{"observed-model", "configured-model"}
+		}
+		return nil
+	}
+	require.Equal(t, []string{"configured-model", "observed-model"}, availableModelIDsFromAccountsWithManifestIDs(accounts, PlatformOpenAI, manifestIDs))
+	require.Equal(t, []string{"claude-mapped", "configured-model", "observed-model"}, availableModelIDsFromAccountsWithManifestIDs(accounts, "", manifestIDs))
+	require.Equal(t, []string{"configured-model"}, availableModelIDsFromAccountsWithManifestIDs(accounts[:2], PlatformOpenAI, func(*Account) []string { return nil }))
+	require.Nil(t, availableModelIDsFromAccountsWithManifestIDs(accounts[:1], PlatformOpenAI, func(*Account) []string { return nil }))
 }
 
 func TestGatewayHotpathHelpers_CacheTTLAndStickyContext(t *testing.T) {
