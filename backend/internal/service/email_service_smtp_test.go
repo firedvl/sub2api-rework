@@ -58,10 +58,11 @@ type fakeSMTPServer struct {
 	tlsConfig         *tls.Config
 	advertiseStartTLS bool
 
-	mu       sync.Mutex
-	commands []string
-	conns    atomic.Int64
-	wg       sync.WaitGroup
+	mu        sync.Mutex
+	commands  []string
+	dataLines []string
+	conns     atomic.Int64
+	wg        sync.WaitGroup
 }
 
 func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fakeSMTPServer, int) {
@@ -115,6 +116,12 @@ func (srv *fakeSMTPServer) record(cmd string) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	srv.commands = append(srv.commands, cmd)
+}
+
+func (srv *fakeSMTPServer) recordData(line string) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+	srv.dataLines = append(srv.dataLines, line)
 }
 
 func (srv *fakeSMTPServer) sawCommand(prefix string) bool {
@@ -187,6 +194,7 @@ func (srv *fakeSMTPServer) serve(conn net.Conn, allowStartTLS bool) {
 				if strings.TrimRight(dataLine, "\r\n") == "." {
 					break
 				}
+				srv.recordData(dataLine)
 			}
 			if !writeLine("250 message accepted") {
 				return
@@ -250,6 +258,7 @@ func (srv *fakeSMTPServer) serveCommands(reader *bufio.Reader, writer *bufio.Wri
 				if strings.TrimRight(dataLine, "\r\n") == "." {
 					break
 				}
+				srv.recordData(dataLine)
 			}
 			if !writeLine("250 message accepted") {
 				return
