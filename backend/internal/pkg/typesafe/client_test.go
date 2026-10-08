@@ -53,6 +53,24 @@ func TestEvaluateContract(t *testing.T) {
 	}
 }
 
+func TestEvaluateDoesNotFollowCredentialBearingRedirect(t *testing.T) {
+	redirected := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == SystemOnePath {
+			w.Header().Set("Location", "/redirected")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+		}
+		redirected = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	_, status, err := Evaluate(context.Background(), server.Client(), server.URL, "test-secret", Request{})
+	require.Error(t, err)
+	require.Equal(t, http.StatusTemporaryRedirect, status)
+	require.False(t, redirected)
+}
+
 func TestEvaluateHTTPAndTimeoutDoNotExposePayload(t *testing.T) {
 	for _, status := range []int{401, 429, 500, 529} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,27 @@ function readBlobAsText(blob: Blob): Promise<string> {
 }
 
 describe('UseKeyModal', () => {
+
+  it('uses the native System One endpoint and shell examples for TypeSafe', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-typesafe-test', baseUrl: 'https://gateway.example.test/v1', platform: 'typesafe' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: { template: '<span />' } } },
+    })
+    await nextTick()
+    expect(wrapper.text()).toContain('keys.useKeyModal.cliTabs.systemOne')
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.codexCli')
+    for (const shell of ['macOS / Linux', 'Windows CMD', 'PowerShell']) {
+      await wrapper.findAll('button').find(button => button.text().trim() === shell)!.trigger('click')
+      const code = wrapper.findAll('pre code').map(block => block.text()).join('\n')
+      expect(code).toContain('https://gateway.example.test/v1/systemone')
+      expect(code).not.toContain('/v1/v1/')
+      expect(code).toContain('jev-latest')
+      expect(code).toContain('sk-typesafe-test')
+      expect(code).not.toContain('ANTHROPIC')
+    }
+    wrapper.unmount()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
     saveAsMock.mockClear()

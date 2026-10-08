@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -224,6 +225,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	if !compositeTargetPlatformResolved(c, apiKey, reqModel) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
+		return
+	}
+	if rejectSystemOneOnlyPlatform(c, apiKey, h.errorResponse) {
 		return
 	}
 
@@ -1220,6 +1224,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		writeGrokModelsList(c, xai.DefaultModelIDs())
 		return
 	}
+	if platform == service.PlatformTypeSafe {
+		writeModelsList(c, platform, nil)
+		return
+	}
 
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		writeModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(fallbackModels))
@@ -1291,8 +1299,23 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 	if platform == "" {
 		platform = group.Platform
 	}
+	if platform == service.PlatformTypeSafe {
+		return nil
+	}
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(ctx, groupID)
+		filteredModels := availableModels[:0]
+		for _, model := range availableModels {
+			if detected, ok := service.DetectModelPlatform(model); ok && detected == service.PlatformTypeSafe {
+				continue
+			}
+			decision, err := h.gatewayService.CompositeRouteResolver().Resolve(ctx, group.ID, model, service.CompositeRouteEndpointResponses)
+			if err == nil && decision.TargetPlatform == service.PlatformTypeSafe {
+				continue
+			}
+			filteredModels = append(filteredModels, model)
+		}
+		availableModels = filteredModels
 		if group.CustomModelsListEnabled() {
 			availableModels = filterModelsByCustomList(availableModels, nil, group.ModelsListConfig.Models)
 		}
@@ -1463,6 +1486,8 @@ func customModelsListSource(platform string, availableModels, fallbackModels []s
 }
 func defaultCodexModelIDsForPlatform(platform string) []string {
 	switch platform {
+	case service.PlatformTypeSafe:
+		return nil
 	case service.PlatformDeepseek:
 		return []string{"deepseek-v4-pro", "deepseek-v4-flash"}
 	case service.PlatformMiniMax:
@@ -1474,6 +1499,8 @@ func defaultCodexModelIDsForPlatform(platform string) []string {
 
 func defaultModelIDsForPlatform(platform string) []string {
 	switch platform {
+	case service.PlatformTypeSafe:
+		return []string{typesafe.JevLatestModel}
 	case service.PlatformOpenAI:
 		return openai.DefaultModelIDs()
 	case service.PlatformGemini:
@@ -2176,6 +2203,9 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	if !compositeTargetPlatformResolved(c, apiKey, parsedReq.Model) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
+		return
+	}
+	if rejectSystemOneOnlyPlatform(c, apiKey, h.errorResponse) {
 		return
 	}
 
