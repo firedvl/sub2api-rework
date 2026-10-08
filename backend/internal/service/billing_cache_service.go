@@ -330,12 +330,16 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 			return nil, err
 		}
 
-		// 异步建立缓存
-		_ = s.enqueueCacheWrite(cacheWriteTask{
-			kind:    cacheWriteSetBalance,
-			userID:  userID,
-			balance: balance,
-		})
+		if s.InflightReservationEnabled() {
+			// A queued refill could restore the old balance after synchronous settlement.
+			s.setBalanceCache(loadCtx, userID, balance)
+		} else {
+			_ = s.enqueueCacheWrite(cacheWriteTask{
+				kind:    cacheWriteSetBalance,
+				userID:  userID,
+				balance: balance,
+			})
+		}
 		return balance, nil
 	})
 	if err != nil {

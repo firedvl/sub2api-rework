@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -12,11 +13,12 @@ import (
 )
 
 type usageBillingRepository struct {
-	db *sql.DB
+	db    *sql.DB
+	cache service.BillingCache
 }
 
-func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingRepository {
-	return &usageBillingRepository{db: sqlDB}
+func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB, cache service.BillingCache) service.UsageBillingRepository {
+	return &usageBillingRepository{db: sqlDB, cache: cache}
 }
 
 func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
@@ -136,6 +138,18 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
+	// Every durable hold/capture/release changes available balance. Invalidate
+	// after commit (also on a successful dedup replay) before admission resumes.
+	defer func() {
+		if err != nil || r.cache == nil {
+			return
+		}
+		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if cacheErr := r.cache.InvalidateUserBalance(cacheCtx, cmd.UserID); cacheErr != nil {
+			logger.LegacyPrintf("repository.usage_billing", "Warning: invalidate balance after batch image hold failed user=%d: %v", cmd.UserID, cacheErr)
+		}
+	}()
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -187,16 +201,17 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		result.BalanceOverdrafted = !sufficient
 	}
 
+	// Key 已不存在时跳过其自身的额度/限速计数，其余结算项不受影响。
 	if cmd.APIKeyQuotaCost > 0 {
 		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
-		if err != nil {
+		if err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
 		result.APIKeyQuotaExhausted = exhausted
 	}
 
 	if cmd.APIKeyRateLimitCost > 0 {
-		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil {
+		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
 	}
