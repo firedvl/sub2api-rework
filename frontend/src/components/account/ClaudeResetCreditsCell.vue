@@ -113,6 +113,7 @@
       @confirm="confirmRedeem"
       @cancel="showRedeemConfirm = false"
     />
+    <TotpStepUpDialog :controller="resetStepUp" />
   </div>
 </template>
 
@@ -127,11 +128,14 @@ import {
   type ClaudeResetOutcome
 } from '@/api/admin/claudeResetCredits'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useStepUp, isStepUpCancelled, StepUpCancelledError } from '@/composables/useStepUp'
 
 const props = defineProps<{ account: Account }>()
 // Fired after a redemption attempt so the parent can refresh the usage row.
 const emit = defineEmits<{ redeemed: [outcome: ClaudeResetOutcome] }>()
 const { t } = useI18n()
+const resetStepUp = useStepUp()
 const status = ref<ClaudeResetCredits | null>(null)
 const loading = ref(false)
 const error = ref(false)
@@ -142,12 +146,13 @@ const redeemFeedback = ref<{ kind: 'success' | 'warning' | 'error'; text: string
 // same confirmation replays server-side instead of claiming a second reset.
 let pendingKey: string | null = null
 let generation = 0
-onBeforeUnmount(() => { generation++ })
+onBeforeUnmount(() => { generation++; resetStepUp.onCancel() })
 
 const visible = computed(() => props.account.platform === 'anthropic' && props.account.type === 'oauth')
 
 watch(() => [props.account.id, props.account.platform, props.account.type], () => {
   generation++
+  resetStepUp.onCancel()
   status.value = null
   loading.value = false
   error.value = false
@@ -295,10 +300,14 @@ async function confirmRedeem() {
   const accountID = props.account.id
   const current = generation
   pendingKey ??= newOperationKey(accountID)
+  const operationKey = pendingKey
   redeeming.value = true
   redeemFeedback.value = null
   try {
-    const result = await redeemClaudeResetCredit(accountID, pendingKey)
+    const result = await resetStepUp.run(() => {
+      if (current !== generation) throw new StepUpCancelledError()
+      return redeemClaudeResetCredit(accountID, operationKey)
+    })
     if (current !== generation) return
     // A definite server answer ends this confirmation; the next one gets a new key.
     pendingKey = null
@@ -308,6 +317,7 @@ async function confirmRedeem() {
     await refresh()
   } catch (e) {
     if (current !== generation) return
+    if (isStepUpCancelled(e)) { pendingKey = null; return }
     // Transport or unknown errors keep the key so a retry replays server-side.
     if (preClaimRefusals.has((e as { reason?: string })?.reason ?? '')) pendingKey = null
     redeemFeedback.value = { kind: 'error', text: errorText(e) }

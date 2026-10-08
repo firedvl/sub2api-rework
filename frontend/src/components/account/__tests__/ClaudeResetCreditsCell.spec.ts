@@ -7,6 +7,14 @@ const redeem = vi.hoisted(() => vi.fn())
 vi.mock('@/api/admin/claudeResetCredits', () => ({ getClaudeResetCredits: getCredits, redeemClaudeResetCredit: redeem }))
 const t = vi.hoisted(() => vi.fn((key: string, _params?: Record<string, unknown>) => key))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t }) }))
+vi.mock('@/components/auth/TotpStepUpDialog.vue', () => ({
+  default: {
+    props: ['controller'],
+    template: `<div v-if="controller.visible.value" data-testid="step-up-dialog">
+      <button data-testid="step-up-ok" @click="controller.onVerified()">verify</button>
+      <button data-testid="step-up-cancel" @click="controller.onCancel()">cancel</button></div>`
+  }
+}))
 // Minimal stand-in exposing the dialog's show state and confirm/cancel events.
 vi.mock('@/components/common/ConfirmDialog.vue', () => ({
   default: {
@@ -141,6 +149,33 @@ describe('Claude reset credit status', () => {
     redeem.mockResolvedValueOnce({ outcome: 'not_limited', replayed: false })
     await confirmReset(wrapper)
     expect(redeem.mock.calls[2][1]).not.toBe(redeem.mock.calls[0][1])
+  })
+
+  it('verifies step-up and retries the same confirmed operation', async () => {
+    const wrapper = await queried()
+    redeem.mockRejectedValueOnce({ status: 403, reason: 'STEP_UP_REQUIRED' })
+      .mockResolvedValueOnce({ outcome: 'not_limited', replayed: false })
+    await confirmReset(wrapper)
+    expect(wrapper.find('[data-testid="step-up-dialog"]').exists()).toBe(true)
+    expect(redeem).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-testid="step-up-ok"]').trigger('click')
+    await flushPromises()
+    expect(redeem).toHaveBeenCalledTimes(2)
+    expect(redeem.mock.calls[1]).toEqual(redeem.mock.calls[0])
+    expect(wrapper.emitted('redeemed')).toHaveLength(1)
+  })
+
+  it.each(['cancel', 'account', 'unmount'])('does not retry a step-up after %s', async action => {
+    const wrapper = await queried()
+    redeem.mockRejectedValueOnce({ status: 403, reason: 'STEP_UP_REQUIRED' })
+    await confirmReset(wrapper)
+    if (action === 'cancel') await wrapper.get('[data-testid="step-up-cancel"]').trigger('click')
+    if (action === 'account') await wrapper.setProps({ account: { ...account, id: 2 } })
+    if (action === 'unmount') wrapper.unmount()
+    await flushPromises()
+    expect(redeem).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('redeemed')).toBeUndefined()
+    if (action !== 'unmount') expect(wrapper.find('[data-testid="claude-reset-feedback"]').exists()).toBe(false)
   })
 
   it.each([

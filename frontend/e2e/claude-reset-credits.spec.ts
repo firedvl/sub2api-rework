@@ -9,12 +9,23 @@ for (const width of [390, 1280]) {
     let queries = 0
     const keys: string[] = []
     let consumed = false
+    let verified = false
+    await page.route('**/api/v1/user/totp/step-up', async route => {
+      expect(route.request().postDataJSON()).toEqual({ code: '123456' })
+      verified = true
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ code: 0, data: {} }) })
+    })
     await page.route('**/api/v1/admin/accounts/102/claude/reset-credits**', async route => {
       const request = route.request()
       if (request.method() === 'POST') {
         keys.push(request.headers()['idempotency-key'])
         expect(request.postData()).toBeNull()
-        if (keys.length === 1) {
+        if (!verified) {
+          return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({
+            code: 403, reason: 'STEP_UP_REQUIRED', message: 'Verification required',
+          }) })
+        }
+        if (keys.length === 3) {
           return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
             code: 409, reason: 'IDEMPOTENCY_IN_PROGRESS', message: 'Still processing',
           }) })
@@ -56,12 +67,25 @@ for (const width of [390, 1280]) {
     expect(keys).toHaveLength(0)
     await reset.click()
     await dialog.getByRole('button', { name: 'Reset', exact: true }).click()
+    const verification = page.locator('.fixed.inset-0.z-\\[60\\]').filter({ has: page.getByText('Two-Factor Verification Required', { exact: true }) })
+    await expect(verification).toBeVisible()
+    await verification.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(verification).toBeHidden()
+    expect(keys).toHaveLength(1)
+    await reset.click()
+    await dialog.getByRole('button', { name: 'Reset', exact: true }).click()
+    await expect(verification).toBeVisible()
+    const digits = verification.locator('input[maxlength="1"]')
+    for (let index = 0; index < 6; index++) await digits.nth(index).fill(String(index + 1))
+    await expect(verification).toBeHidden()
     await expect(row.getByTestId('claude-reset-feedback')).toContainText('still processing')
     await reset.click()
     await dialog.getByRole('button', { name: 'Reset', exact: true }).click()
     await expect(row.getByTestId('claude-reset-feedback')).toContainText('Reset applied')
-    expect(keys).toHaveLength(2)
-    expect(keys[1]).toBe(keys[0])
+    expect(keys).toHaveLength(4)
+    expect(keys[1]).not.toBe(keys[0])
+    expect(keys[2]).toBe(keys[1])
+    expect(keys[3]).toBe(keys[1])
     await expect(count).toHaveText('Resets0')
     await expect(reset).toBeDisabled()
     await page.screenshot({ path: testInfo.outputPath(`claude-complete-${width}.png`), animations: 'disabled' })
