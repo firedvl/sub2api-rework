@@ -115,6 +115,7 @@ backend/data/
 backend/config.yaml
 deploy/config.yaml
 backend/.installed
+admin-bootstrap.json
 
 # ===================
 # 其他

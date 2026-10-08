@@ -22,7 +22,7 @@ describe('UsageProgressBar', () => {
     vi.useRealTimers()
   })
 
-  it('showNowWhenIdle=true 且利用率为 0 时显示“现在”', () => {
+  it('shows the known future reset countdown even when idle', () => {
     const wrapper = mount(UsageProgressBar, {
       props: {
         label: '5h',
@@ -33,8 +33,15 @@ describe('UsageProgressBar', () => {
       }
     })
 
+    expect(wrapper.text()).toContain('2h 30m')
+    expect(wrapper.text()).not.toContain('usage.resetNow')
+  })
+
+  it('shows now for an idle window without a reset time', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 0, showNowWhenIdle: true, color: 'indigo' }
+    })
     expect(wrapper.text()).toContain('usage.resetNow')
-    expect(wrapper.text()).not.toContain('2h 30m')
   })
 
   it('showNowWhenIdle=true 但利用率大于 0 时显示倒计时', () => {
