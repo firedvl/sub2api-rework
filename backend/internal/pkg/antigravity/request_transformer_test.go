@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -620,6 +621,79 @@ func TestGeminiToolConfig_IncludeServerSideToolInvocations(t *testing.T) {
 		require.Nil(t, req.Request.ToolConfig.IncludeServerSideToolInvocations)
 		require.NotContains(t, raw, "includeServerSideToolInvocations")
 	})
+}
+
+func TestBuildParts_DocumentBecomesInlineData(t *testing.T) {
+	content := `[
+		{"type":"text","text":"read this"},
+		{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}}
+	]`
+	parts, stripped, err := buildParts(json.RawMessage(content), map[string]string{}, true)
+	require.NoError(t, err)
+	require.False(t, stripped)
+	require.Len(t, parts, 2)
+	require.NotNil(t, parts[1].InlineData)
+	require.Equal(t, "application/pdf", parts[1].InlineData.MimeType)
+	require.Equal(t, "JVBERi0=", parts[1].InlineData.Data)
+}
+
+func TestBuildParts_ChatPDFConversionChain(t *testing.T) {
+	chat := &apicompat.ChatCompletionsRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`[
+			{"type":"text","text":"read this"},
+			{"type":"file","file":{"filename":"test.pdf","file_data":"data:application/pdf;base64,JVBERi0="}}
+		]`)}},
+	}
+	responses, err := apicompat.ChatCompletionsToResponses(chat)
+	require.NoError(t, err)
+	anthropic, err := apicompat.ResponsesToAnthropicRequest(responses)
+	require.NoError(t, err)
+	require.Len(t, anthropic.Messages, 1)
+	parts, stripped, err := buildParts(anthropic.Messages[0].Content, map[string]string{}, true)
+	require.NoError(t, err)
+	require.False(t, stripped)
+	require.Len(t, parts, 2)
+	require.Equal(t, "read this", parts[0].Text)
+	require.NotNil(t, parts[1].InlineData)
+	require.Equal(t, "application/pdf", parts[1].InlineData.MimeType)
+	require.Equal(t, "JVBERi0=", parts[1].InlineData.Data)
+}
+
+func TestBuildParts_UnsupportedDocumentSourcesAreDropped(t *testing.T) {
+	for _, source := range []string{
+		`null`,
+		`{"type":"url","url":"https://example.invalid/test.pdf"}`,
+		`{"type":"base64","media_type":"application/pdf","data":"   "}`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			content := json.RawMessage(`[{"type":"text","text":"read this"},{"type":"document","source":` + source + `}]`)
+			parts, stripped, err := buildParts(content, map[string]string{}, true)
+			require.NoError(t, err)
+			require.False(t, stripped)
+			require.Len(t, parts, 1)
+			require.Equal(t, "read this", parts[0].Text)
+		})
+	}
+}
+
+func TestBuildParts_ChatPlainTextFileConversionChain(t *testing.T) {
+	responses, err := apicompat.ChatCompletionsToResponses(&apicompat.ChatCompletionsRequest{
+		Model: "gemini-3.1-pro",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`[
+			{"type":"file","file":{"filename":"test.txt","file_data":"data:text/plain;base64,ICBoZWxsbyB3b3JsZAog"}}
+		]`)}},
+	})
+	require.NoError(t, err)
+	anthropic, err := apicompat.ResponsesToAnthropicRequest(responses)
+	require.NoError(t, err)
+	require.Len(t, anthropic.Messages, 1)
+	parts, stripped, err := buildParts(anthropic.Messages[0].Content, map[string]string{}, true)
+	require.NoError(t, err)
+	require.False(t, stripped)
+	require.Len(t, parts, 1)
+	require.Equal(t, "  hello world\n ", parts[0].Text)
+	require.Nil(t, parts[0].InlineData)
 }
 
 // TestToolConfigAlwaysPresent ensures toolConfig is always emitted, including for

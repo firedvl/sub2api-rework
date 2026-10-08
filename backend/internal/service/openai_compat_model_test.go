@@ -24,6 +24,27 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestForwardAsAnthropic_DisabledThinkingOverridesMaxForResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"sol","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"thinking":{"type":"disabled"},"output_config":{"effort":"max"},"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_no_thinking", "gpt-5.6-sol")}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, rawGPT56ResponsesOAuthAccount("sol", "gpt-5.6-sol"), body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "none", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+	require.NotNil(t, result.ReasoningEffort)
+	require.Equal(t, "none", *result.ReasoningEffort)
+}
+
 type openAICompatFailingWriter struct {
 	gin.ResponseWriter
 	failAfter int
