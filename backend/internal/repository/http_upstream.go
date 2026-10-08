@@ -453,12 +453,18 @@ func newGrokOfficialAPIFallbackRequest(req *http.Request) (*http.Request, error)
 	for _, header := range []string{
 		"X-XAI-Token-Auth",
 		"X-Grok-Client-Version",
+		"X-Grok-Client-Mode",
+		"X-Authenticateresponse",
 		"X-Grok-Client-Surface",
 		"X-UserID",
 		"X-Email",
 		"User-Agent",
 	} {
-		fallbackReq.Header.Del(header)
+		for existing := range fallbackReq.Header {
+			if strings.EqualFold(existing, header) {
+				delete(fallbackReq.Header, existing)
+			}
+		}
 	}
 	return fallbackReq, nil
 }
@@ -515,10 +521,7 @@ func applyGrokCLIProxyHeaders(req *http.Request) {
 	if !isSupportedGrokCLIVersion(version) {
 		version = grokCLIStableVersion
 	}
-	req.Header.Set("X-XAI-Token-Auth", xai.CLITokenAuth)
-	req.Header.Set("x-grok-client-version", version)
-	req.Header.Set("x-grok-client-identifier", xai.CLIClientIdentifier)
-	req.Header.Set("User-Agent", xai.CLIUserAgent(version))
+	xai.ApplyCLIIdentityHeaders(req.Header, version)
 }
 
 func isSupportedGrokCLIVersion(version string) bool {
