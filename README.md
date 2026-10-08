@@ -58,6 +58,11 @@ The inherited deployment scripts and configuration remain available, but they
 have not all been qualified as rework releases. Review generated configuration
 and secrets before exposing an instance to a network.
 
+Fresh setup generates an administrator login email and password when absent.
+Generated credentials are stored in a private `admin-bootstrap.json` file in
+the application data directory; logs show only its path. Supplied passwords
+must be 8-72 bytes. See [setup and credential retrieval](deploy/README.md#how-auto-setup-works).
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md). New and substantially reworked public
