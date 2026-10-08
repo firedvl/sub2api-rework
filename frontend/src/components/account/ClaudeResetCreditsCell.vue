@@ -113,7 +113,7 @@
       @confirm="confirmRedeem"
       @cancel="showRedeemConfirm = false"
     />
-    <TotpStepUpDialog :controller="resetStepUp" />
+    <TotpStepUpDialog v-if="resetStepUp.visible.value" :controller="resetStepUp" />
   </div>
 </template>
 
