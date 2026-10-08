@@ -41,3 +41,15 @@ func TestAPIKeyCacheIncrementCreateCountUsesFixedWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), count)
 }
+
+func TestAPIKeyCacheIncrementCreateCountRepairsMissingExpiry(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer func() { _ = client.Close() }()
+	ctx := context.Background()
+	require.NoError(t, client.Set(ctx, apiKeyCreateCountKey(7), 3, 0).Err())
+	count, err := NewAPIKeyCache(client).IncrementCreateCount(ctx, 7, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), count)
+	require.Equal(t, time.Hour, server.TTL(apiKeyCreateCountKey(7)))
+}
