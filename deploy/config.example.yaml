@@ -712,6 +712,13 @@ api_key_auth_cache:
     capacity: 16384
 
 # =============================================================================
+# API Key Creation Limits
+# Counts undeleted keys, including inactive keys. Zero disables each limit.
+api_key_create:
+  max_active_per_user: 200
+  # Fixed one-hour creation budget for generated and custom keys; deletion does not refund.
+  max_per_user_per_hour: 60
+
 # Dashboard Cache Configuration
 # 仪表盘缓存配置
 # =============================================================================
