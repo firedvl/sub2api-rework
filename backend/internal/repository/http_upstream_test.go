@@ -369,7 +369,8 @@ func serializedGrokHeaders(t *testing.T, headers http.Header) http.Header {
 	t.Helper()
 	var wire bytes.Buffer
 	require.NoError(t, headers.Write(&wire))
-	wire.WriteString("\r\n")
+	_, err := wire.WriteString("\r\n")
+	require.NoError(t, err)
 	parsed, err := textproto.NewReader(bufio.NewReader(&wire)).ReadMIMEHeader()
 	require.NoError(t, err)
 	return http.Header(parsed)
