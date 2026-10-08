@@ -109,14 +109,56 @@ func TestResponsesToAnthropic_UnknownItemTypeKeepsRecognizableText(t *testing.T)
 	require.NotContains(t, string(messages[0].Content), "drop me")
 }
 
-// user 消息的分片全部不可识别时，以前会退化成 content:""，Anthropic 拒收空内容消息。
-func TestResponsesToAnthropic_UserMessageWithOnlyUnknownPartsIsDropped(t *testing.T) {
+// data URI 形式的 input_file 要变成 Anthropic document，供后续 Gemini inlineData 使用。
+func TestResponsesToAnthropic_InputFileDataURIBecomesDocument(t *testing.T) {
 	messages := responsesToAnthropicMessages(t, `[
-		{"type":"message","role":"user","content":[{"type":"input_file","file_id":"file_1"}]}
+		{"type":"message","role":"user","content":[
+			{"type":"input_text","text":"read this"},
+			{"type":"input_file","filename":"token.pdf","file_data":"data:application/pdf;base64,JVBERi0="}
+		]}
 	]`)
 
 	requireAnthropicMessagesAreSendable(t, messages)
-	require.Empty(t, messages)
+	require.Len(t, messages, 1)
+	require.Contains(t, string(messages[0].Content), `"type":"document"`)
+	require.Contains(t, string(messages[0].Content), `"media_type":"application/pdf"`)
+	require.Contains(t, string(messages[0].Content), `"data":"JVBERi0="`)
+}
+
+func TestResponsesToAnthropic_InputFileRejectsUnsupportedSources(t *testing.T) {
+	for _, part := range []string{
+		`{"type":"input_file","file_id":"file_1"}`,
+		`{"type":"input_file","file_url":"https://example.invalid/test.pdf"}`,
+		`{"type":"input_file","file_data":"data:image/png;base64,aGVsbG8="}`,
+		`{"type":"input_file","file_data":"data:application/pdf;base64,invalid!"}`,
+		`{"type":"input_file","file_data":"data:application/pdf;base64,"}`,
+		`{"type":"input_file","file_data":"data:text/plain;base64,/w=="}`,
+		`{"type":"input_file","file_data":"data:text/plain;base64,ICA="}`,
+		`{"type":"input_file","file_data":"not a data URI"}`,
+	} {
+		t.Run(part, func(t *testing.T) {
+			out, err := ResponsesToAnthropicRequest(&ResponsesRequest{
+				Model: "claude-sonnet-4-6",
+				Input: json.RawMessage(`[{"type":"message","role":"user","content":[{"type":"input_text","text":"read this"},` + part + `]}]`),
+			})
+			require.ErrorContains(t, err, "input_file")
+			require.Nil(t, out, "unsupported files must not result in a partial successful request")
+		})
+	}
+}
+
+func TestResponsesToAnthropic_InputFilePlainTextIsDecoded(t *testing.T) {
+	messages := responsesToAnthropicMessages(t, `[
+		{"type":"message","role":"user","content":[
+			{"type":"input_file","file_data":"data:text/plain;base64,ICBoZWxsbyB3b3JsZAog"}
+		]}
+	]`)
+	requireAnthropicMessagesAreSendable(t, messages)
+	require.Len(t, messages, 1)
+	blocks := parseContentBlocks(messages[0].Content)
+	require.Len(t, blocks, 1)
+	require.Equal(t, "text", blocks[0].Type)
+	require.Equal(t, "  hello world\n ", blocks[0].Text)
 }
 
 // assistant 侧同理：以前会退化成单个空 text 块，Anthropic 同样拒收。
