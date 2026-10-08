@@ -1005,10 +1005,9 @@ oidc_connect:
 # 默认设置
 # =============================================================================
 default:
-  # Initial admin account (created on first run)
-  # 初始管理员账户（首次运行时创建）
-  admin_email: "admin@example.com"
-  admin_password: "admin123"
+  # Legacy fields; fresh bootstrap uses ADMIN_EMAIL/ADMIN_PASSWORD or the setup wizard.
+  admin_email: ""
+  admin_password: ""
 
   # Default settings for new users
   # 新用户默认设置
