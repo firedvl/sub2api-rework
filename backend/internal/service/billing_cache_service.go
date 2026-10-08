@@ -22,6 +22,14 @@ import (
 // 与"Redis 故障"走同一条 fail-open + DB 一次性检查的分支。
 var errBillingCacheUnavailable = fmt.Errorf("billing cache unavailable")
 
+// BalanceCacheFencer prevents a DB snapshot from overwriting a later financial mutation.
+type BalanceCacheFencer interface {
+	GetUserBalanceEpoch(context.Context, int64) (string, error)
+	SetUserBalanceIfEpoch(context.Context, int64, float64, string) (bool, error)
+}
+
+var ErrBalanceCacheChanged = fmt.Errorf("balance cache changed during billing admission")
+
 var (
 	ErrSubscriptionInvalid       = infraerrors.Forbidden("SUBSCRIPTION_INVALID", "subscription is invalid or expired")
 	ErrBillingServiceUnavailable = infraerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", "Billing service temporarily unavailable. Please retry later.")
@@ -87,6 +95,7 @@ type cacheWriteTask struct {
 	groupID          int64
 	apiKeyID         int64
 	balance          float64
+	balanceEpoch     string
 	amount           float64
 	subscriptionData *subscriptionCacheData
 }
@@ -219,7 +228,13 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 		switch task.kind {
 		case cacheWriteSetBalance:
-			s.setBalanceCache(ctx, task.userID, task.balance)
+			if fence, ok := s.cache.(BalanceCacheFencer); ok && task.balanceEpoch != "" {
+				if _, err := fence.SetUserBalanceIfEpoch(ctx, task.userID, task.balance, task.balanceEpoch); err != nil {
+					logger.LegacyPrintf("service.billing_cache", "Warning: fenced balance refill failed for user %d: %v", task.userID, err)
+				}
+			} else {
+				s.setBalanceCache(ctx, task.userID, task.balance)
+			}
 		case cacheWriteSetSubscription:
 			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
 		case cacheWriteUpdateSubscriptionUsage:
@@ -325,18 +340,43 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 		loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
 		defer cancel()
 
-		balance, err := s.getUserBalanceFromDB(loadCtx, userID)
-		if err != nil {
-			return nil, err
+		for attempt := 0; attempt < 3; attempt++ {
+			fence, fenced := s.cache.(BalanceCacheFencer)
+			epoch := ""
+			if fenced {
+				var epochErr error
+				epoch, epochErr = fence.GetUserBalanceEpoch(loadCtx, userID)
+				if epochErr != nil {
+					// Preserve Redis outage fallback without publishing an unfenced snapshot.
+					return s.getUserBalanceFromDB(loadCtx, userID)
+				}
+			}
+			balance, err := s.getUserBalanceFromDB(loadCtx, userID)
+			if err != nil {
+				return nil, err
+			}
+			if s.InflightReservationEnabled() {
+				if fenced {
+					published, err := fence.SetUserBalanceIfEpoch(loadCtx, userID, balance, epoch)
+					if err != nil {
+						logger.LegacyPrintf("service.billing_cache", "Warning: fenced balance refill failed for user %d: %v", userID, err)
+						return balance, nil
+					}
+					if !published {
+						if current, err := s.cache.GetUserBalance(loadCtx, userID); err == nil {
+							return current, nil
+						}
+						continue
+					}
+				} else {
+					s.setBalanceCache(loadCtx, userID, balance)
+				}
+			} else {
+				_ = s.enqueueCacheWrite(cacheWriteTask{kind: cacheWriteSetBalance, userID: userID, balance: balance, balanceEpoch: epoch})
+			}
+			return balance, nil
 		}
-
-		// 异步建立缓存
-		_ = s.enqueueCacheWrite(cacheWriteTask{
-			kind:    cacheWriteSetBalance,
-			userID:  userID,
-			balance: balance,
-		})
-		return balance, nil
+		return nil, ErrBalanceCacheChanged
 	})
 	if err != nil {
 		return 0, err

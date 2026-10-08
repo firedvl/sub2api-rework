@@ -44,6 +44,12 @@ func billingBalanceKey(userID int64) string {
 	return fmt.Sprintf("%s%d", billingBalanceKeyPrefix, userID)
 }
 
+func billingBalanceEpochKey(userID int64) string {
+	// Hash the full existing balance key so all financial Lua keys share its slot.
+	// Epochs do not expire: losing a token could permit an old snapshot after ABA.
+	return fmt.Sprintf("billing:balance_epoch:{%s}", billingBalanceKey(userID))
+}
+
 // billingSubKey generates the Redis key for subscription cache.
 func billingSubKey(userID, groupID int64) string {
 	return fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
@@ -73,7 +79,26 @@ const (
 )
 
 var (
+	setBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+		return 1
+	`)
+	setBalanceIfEpochScript = redis.NewScript(`
+		if (redis.call('GET', KEYS[2]) or '0') ~= ARGV[3] then
+			return 0
+		end
+		redis.call('INCR', KEYS[2])
+		redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+		return 1
+	`)
+	invalidateBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('DEL', KEYS[1])
+		return 1
+	`)
 	deductBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
 			return 0
@@ -140,6 +165,8 @@ type billingCache struct {
 	rdb *redis.Client
 }
 
+var _ service.BalanceCacheFencer = (*billingCache)(nil)
+
 func NewBillingCache(rdb *redis.Client) service.BillingCache {
 	return &billingCache{rdb: rdb}
 }
@@ -154,13 +181,25 @@ func (c *billingCache) GetUserBalance(ctx context.Context, userID int64) (float6
 }
 
 func (c *billingCache) SetUserBalance(ctx context.Context, userID int64, balance float64) error {
-	key := billingBalanceKey(userID)
-	return c.rdb.Set(ctx, key, balance, jitteredTTL()).Err()
+	return setBalanceScript.Run(ctx, c.rdb, []string{billingBalanceKey(userID), billingBalanceEpochKey(userID)}, balance, jitteredTTL().Milliseconds()).Err()
+}
+
+func (c *billingCache) GetUserBalanceEpoch(ctx context.Context, userID int64) (string, error) {
+	epoch, err := c.rdb.Get(ctx, billingBalanceEpochKey(userID)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "0", nil
+	}
+	return epoch, err
+}
+
+func (c *billingCache) SetUserBalanceIfEpoch(ctx context.Context, userID int64, balance float64, epoch string) (bool, error) {
+	result, err := setBalanceIfEpochScript.Run(ctx, c.rdb, []string{billingBalanceKey(userID), billingBalanceEpochKey(userID)}, balance, jitteredTTL().Milliseconds(), epoch).Int64()
+	return result == 1, err
 }
 
 func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
 	key := billingBalanceKey(userID)
-	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{key}, amount, int(jitteredTTL().Seconds())).Result()
+	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{key, billingBalanceEpochKey(userID)}, amount, int(jitteredTTL().Seconds())).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Printf("Warning: deduct balance cache failed for user %d: %v", userID, err)
 		return err
@@ -169,8 +208,7 @@ func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amou
 }
 
 func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) error {
-	key := billingBalanceKey(userID)
-	return c.rdb.Del(ctx, key).Err()
+	return invalidateBalanceScript.Run(ctx, c.rdb, []string{billingBalanceKey(userID), billingBalanceEpochKey(userID)}).Err()
 }
 
 func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*service.SubscriptionCacheData, error) {
