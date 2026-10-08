@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -469,6 +470,25 @@ func (s *userHandlerEmailCacheStub) SetVerificationCode(context.Context, string,
 
 func (s *userHandlerEmailCacheStub) DeleteVerificationCode(context.Context, string) error {
 	return nil
+}
+
+func (s *userHandlerEmailCacheStub) IncrVerificationCodeAttempts(_ context.Context, _ string, expected *service.VerificationCodeData, consume bool) (int, error) {
+	if s.data == nil || s.data.Code != expected.Code || !s.data.CreatedAt.Equal(expected.CreatedAt) {
+		return 0, errors.New("verification code not found")
+	}
+	n := s.data.Attempts + 1
+	if !consume {
+		s.data.Attempts = n
+	}
+	return n, nil
+}
+
+func (s *userHandlerEmailCacheStub) IncrNotifyVerifyCodeAttempts(context.Context, string, *service.VerificationCodeData, bool) (int, error) {
+	return 0, errors.New("notify verification code not found")
+}
+
+func (s *userHandlerEmailCacheStub) ConsumePasswordResetToken(context.Context, string, string) (bool, error) {
+	return false, nil
 }
 
 func (s *userHandlerEmailCacheStub) GetNotifyVerifyCode(context.Context, string) (*service.VerificationCodeData, error) {

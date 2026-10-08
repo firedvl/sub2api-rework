@@ -811,16 +811,23 @@ func (s *emailBindSettingRepoStub) Delete(context.Context, string) error {
 }
 
 type emailBindCacheStub struct {
+	mu        sync.Mutex
 	data      *service.VerificationCodeData
 	err       error
 	setEmails []string
 }
 
 func (s *emailBindCacheStub) GetVerificationCode(context.Context, string) (*service.VerificationCodeData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.data, nil
+	if s.data == nil {
+		return nil, nil
+	}
+	data := *s.data
+	return &data, nil
 }
 
 func (s *emailBindCacheStub) SetVerificationCode(_ context.Context, email string, _ *service.VerificationCodeData, _ time.Duration) error {
@@ -830,6 +837,27 @@ func (s *emailBindCacheStub) SetVerificationCode(_ context.Context, email string
 
 func (s *emailBindCacheStub) DeleteVerificationCode(context.Context, string) error {
 	return nil
+}
+
+func (s *emailBindCacheStub) IncrVerificationCodeAttempts(_ context.Context, _ string, expected *service.VerificationCodeData, consume bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data == nil || s.data.Code != expected.Code || !s.data.CreatedAt.Equal(expected.CreatedAt) {
+		return 0, errors.New("verification code not found")
+	}
+	n := s.data.Attempts + 1
+	if !consume {
+		s.data.Attempts = n
+	}
+	return n, nil
+}
+
+func (s *emailBindCacheStub) IncrNotifyVerifyCodeAttempts(context.Context, string, *service.VerificationCodeData, bool) (int, error) {
+	return 0, errors.New("notify verification code not found")
+}
+
+func (s *emailBindCacheStub) ConsumePasswordResetToken(context.Context, string, string) (bool, error) {
+	return false, nil
 }
 
 func (s *emailBindCacheStub) GetNotifyVerifyCode(context.Context, string) (*service.VerificationCodeData, error) {

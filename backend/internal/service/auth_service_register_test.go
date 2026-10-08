@@ -184,6 +184,25 @@ func (s *emailCacheStub) DeleteVerificationCode(ctx context.Context, email strin
 	return nil
 }
 
+func (s *emailCacheStub) IncrVerificationCodeAttempts(_ context.Context, _ string, expected *VerificationCodeData, consume bool) (int, error) {
+	if s.data == nil || s.data.Code != expected.Code || !s.data.CreatedAt.Equal(expected.CreatedAt) {
+		return 0, errors.New("verification code not found")
+	}
+	n := s.data.Attempts + 1
+	if !consume {
+		s.data.Attempts = n
+	}
+	return n, nil
+}
+
+func (s *emailCacheStub) IncrNotifyVerifyCodeAttempts(context.Context, string, *VerificationCodeData, bool) (int, error) {
+	return 0, errors.New("notify verification code not found")
+}
+
+func (s *emailCacheStub) ConsumePasswordResetToken(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (s *emailCacheStub) GetNotifyVerifyCode(ctx context.Context, email string) (*VerificationCodeData, error) {
 	return nil, nil
 }
