@@ -282,7 +282,7 @@ func TestAvailableModelIDsUsesOpenAIDiscoveryOnlyWithoutExplicitRestriction(t *t
 		availableModelIDsFromAccounts([]Account{unrestricted, strict}, PlatformOpenAI),
 	)
 	require.Equal(t,
-		[]string{"gpt-6-astra"},
+		[]string{"gpt-5.5", "gpt-6-astra", "public-alias"},
 		availableModelIDsFromAccounts([]Account{strict, passthrough}, PlatformOpenAI),
 	)
 
