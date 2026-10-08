@@ -215,6 +215,22 @@ func TestHandleResponsesStreamingResponse_RestoresNamespaceTool(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), `"name":"codex_app__read_thread"`)
 }
 
+func TestHandleResponsesStreamingResponse_RestoresCustomToolAtEOF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_eof\",\"model\":\"claude-fable-5\",\"usage\":{\"input_tokens\":11}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_eof\",\"name\":\"eval\",\"input\":{\"input\":\"print(1)\"}}}\n\n"
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(stream))}
+	_, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "public-model", "claude-fable-5", nil, time.Now(), apicompat.ResponsesClientToolMapping{CustomTools: map[string]bool{"eval": true}})
+	require.NoError(t, err)
+	output := rec.Body.String()
+	require.Contains(t, output, `response.custom_tool_call_input.done`)
+	require.Contains(t, output, `"input":"print(1)"`)
+	require.Contains(t, output, `"type":"custom_tool_call"`)
+	require.NotContains(t, output, `response.function_call_arguments`)
+	require.NotContains(t, output, `"type":"function_call"`)
+}
+
 func TestExtractResponsesReasoningEffortFromBody(t *testing.T) {
 	t.Parallel()
 

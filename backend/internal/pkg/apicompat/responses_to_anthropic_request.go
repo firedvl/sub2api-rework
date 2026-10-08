@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
@@ -530,6 +531,18 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Source: src,
 				})
 			}
+		case "input_file":
+			src, err := dataURIToAnthropicFileSource(p.FileData)
+			if err != nil {
+				return nil, err
+			}
+			if src != nil {
+				if src.Type == "text" {
+					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: src.Data})
+				} else {
+					blocks = append(blocks, AnthropicContentBlock{Type: "document", Source: src})
+				}
+			}
 		}
 	}
 
@@ -615,6 +628,35 @@ func dataURIToAnthropicImageSource(dataURI string) *AnthropicImageSource {
 		MediaType: mediaType,
 		Data:      data,
 	}
+}
+
+// Only PDF documents and decoded plain text can be sent through the native bridge.
+func dataURIToAnthropicFileSource(fileData string) (*AnthropicImageSource, error) {
+	if fileData == "" {
+		return nil, fmt.Errorf("input_file requires inline file_data; file references cannot be resolved")
+	}
+	src := dataURIToAnthropicImageSource(fileData)
+	if src == nil {
+		return nil, fmt.Errorf("input_file requires a base64 data URI")
+	}
+	if src.MediaType != "application/pdf" && src.MediaType != "text/plain" {
+		return nil, fmt.Errorf("unsupported input_file media type %q", src.MediaType)
+	}
+	data, err := base64.StdEncoding.DecodeString(src.Data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input_file base64: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("input_file data is empty")
+	}
+	if src.MediaType == "text/plain" {
+		if !utf8.Valid(data) || strings.TrimSpace(string(data)) == "" {
+			return nil, fmt.Errorf("input_file text must contain nonblank UTF-8 text")
+		}
+		src.Type = "text"
+		src.Data = string(data)
+	}
+	return src, nil
 }
 
 // mergeConsecutiveMessages merges consecutive messages with the same role
