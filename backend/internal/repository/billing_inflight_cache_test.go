@@ -89,6 +89,73 @@ func TestInflightReservation_ConcurrentAdmitsOnlyWhatBalanceCovers(t *testing.T)
 	release()
 }
 
+func TestInflightReservation_UsesCurrentBalanceAfterStalledAdmission(t *testing.T) {
+	_, cache, _ := newInflightTestEnv(t, true, 60)
+	ctx := context.Background()
+	require.NoError(t, cache.SetUserBalance(ctx, 90, 10))
+	stale, err := cache.GetUserBalance(ctx, 90)
+	require.NoError(t, err)
+	allowed, _, err := cache.ReserveInflightBalance(ctx, 90, "a", 9, stale, time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.NoError(t, cache.DeductUserBalance(ctx, 90, 9))
+	require.NoError(t, cache.ReleaseInflightBalance(ctx, 90, "a"))
+	allowed, _, err = cache.ReserveInflightBalance(ctx, 90, "c", 0.5, 1, time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	// A second instance submits the old pre-read balance after settlement.
+	other := &billingCache{rdb: cache.rdb}
+	allowed, _, err = other.ReserveInflightBalance(ctx, 90, "b", 1, stale, time.Minute)
+	require.NoError(t, err)
+	require.False(t, allowed, "admission must atomically read the current $1 balance, not the old $10 argument")
+}
+
+type pausedBalanceSnapshotRepo struct {
+	service.UserRepository
+	mu      sync.Mutex
+	balance float64
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *pausedBalanceSnapshotRepo) GetByID(ctx context.Context, id int64) (*service.User, error) {
+	r.mu.Lock()
+	balance := r.balance
+	r.mu.Unlock()
+	r.once.Do(func() { close(r.started); <-r.release })
+	return &service.User{ID: id, Balance: balance}, nil
+}
+
+func TestInflightReservation_FencesSnapshotAcrossMissingCacheDeduction(t *testing.T) {
+	_, cache, _ := newInflightTestEnv(t, true, 60)
+	repo := &pausedBalanceSnapshotRepo{balance: 10, started: make(chan struct{}), release: make(chan struct{})}
+	cfg := &config.Config{}
+	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+	billing := service.NewBillingCacheService(cache, repo, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	result := make(chan float64, 1)
+	errs := make(chan error, 1)
+	go func() {
+		balance, err := billing.GetUserBalance(context.Background(), 91)
+		result <- balance
+		errs <- err
+	}()
+	<-repo.started
+	// Commit on another instance while the old DB snapshot is paused.
+	repo.mu.Lock()
+	repo.balance = 1
+	repo.mu.Unlock()
+	other := &billingCache{rdb: cache.rdb}
+	require.NoError(t, other.DeductUserBalance(context.Background(), 91, 9))
+	close(repo.release)
+	require.NoError(t, <-errs)
+	require.Equal(t, 1.0, <-result, "a fenced-out DB snapshot must be reloaded before returning")
+	current, err := cache.GetUserBalance(context.Background(), 91)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, current, "old snapshot cannot restore pre-settlement balance")
+}
+
 func TestInflightReservation_FirstRequestAlwaysAdmitted(t *testing.T) {
 	_, cache, svc := newInflightTestEnv(t, true, 60)
 	ctx := context.Background()
@@ -289,6 +356,7 @@ func TestInflightReservation_RenewDoesNotResurrectExpiredMember(t *testing.T) {
 func TestInflightReservation_ShortTTLDoesNotExpireLongerReservation(t *testing.T) {
 	mr, cache, _ := newInflightTestEnv(t, true, 60)
 	ctx := context.Background()
+	require.NoError(t, cache.SetUserBalance(ctx, 80, 1))
 	allowed, _, err := cache.ReserveInflightBalance(ctx, 80, "long", 0.7, 1, time.Minute)
 	require.NoError(t, err)
 	require.True(t, allowed)
@@ -303,4 +371,43 @@ func TestInflightReservation_ShortTTLDoesNotExpireLongerReservation(t *testing.T
 	require.NoError(t, err)
 	require.False(t, allowed, "short request TTL cannot erase a still-live longer hold")
 	require.GreaterOrEqual(t, sum, 0.7)
+}
+
+func TestBalanceEpochFencesEveryMutationAndExpiresOnlyBalance(t *testing.T) {
+	mr, cache, _ := newInflightTestEnv(t, true, 60)
+	ctx := context.Background()
+	other := &billingCache{rdb: cache.rdb}
+	for _, mutation := range []string{"set", "deduct_missing", "invalidate", "publish"} {
+		t.Run(mutation, func(t *testing.T) {
+			epoch, err := cache.GetUserBalanceEpoch(ctx, 92)
+			require.NoError(t, err)
+			switch mutation {
+			case "set":
+				require.NoError(t, other.SetUserBalance(ctx, 92, 1))
+			case "deduct_missing":
+				require.NoError(t, cache.rdb.Del(ctx, billingBalanceKey(92)).Err())
+				require.NoError(t, other.DeductUserBalance(ctx, 92, 9))
+			case "invalidate":
+				require.NoError(t, other.InvalidateUserBalance(ctx, 92))
+			case "publish":
+				ok, err := other.SetUserBalanceIfEpoch(ctx, 92, 1, epoch)
+				require.NoError(t, err)
+				require.True(t, ok)
+			}
+			ok, err := cache.SetUserBalanceIfEpoch(ctx, 92, 10, epoch)
+			require.NoError(t, err)
+			require.False(t, ok, "old snapshots cannot survive any financial mutation")
+		})
+	}
+	epoch, err := cache.GetUserBalanceEpoch(ctx, 92)
+	require.NoError(t, err)
+	mr.FastForward(10 * time.Minute)
+	current, err := other.GetUserBalanceEpoch(ctx, 92)
+	require.NoError(t, err)
+	require.Equal(t, epoch, current, "epoch cannot expire and allow an ABA snapshot to publish")
+	zkey, hkey := billingInflightKeys(92)
+	tag := "{" + billingBalanceKey(92) + "}"
+	require.Contains(t, zkey, tag)
+	require.Contains(t, hkey, tag)
+	require.Contains(t, billingBalanceEpochKey(92), tag, "Lua keys must hash to the existing balance key's Redis Cluster slot")
 }

@@ -107,6 +107,86 @@ func TestInflightEstimate_ChannelAliasUsesMappedModel(t *testing.T) {
 	require.InDelta(t, direct, est, 1e-12, "alias must be estimated as the channel-mapped billing model")
 }
 
+func TestInflightEstimate_CompositeResolvedRouteAndExplicitAliasPricing(t *testing.T) {
+	svc := newInflightEstimateGateway(t, nil)
+	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(95), Group: &Group{ID: 95, Platform: PlatformComposite, RateMultiplier: 1}}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{Matched: true,
+		PublicModel: "public-premium", TargetPlatform: PlatformAnthropic, UpstreamModel: "claude-opus-4-1"})
+	req := InflightEstimateRequest{Model: "public-premium", BodyBytes: 4000, MaxTokens: 1000}
+	estimate, priced := svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	req.Model = "claude-opus-4-1"
+	direct, known := svc.EstimateInflightReservation(context.Background(), key, req)
+	require.True(t, known)
+	require.InDelta(t, direct, estimate, 1e-12, "resolved route must price an otherwise unknown public alias")
+	price := 0.001
+	key.Group.ModelPricing = []ChannelModelPricing{{Models: []string{"public-premium"}, BillingMode: BillingModePerRequest, PerRequestPrice: &price}}
+	req.Model = "public-premium"
+	estimate, priced = svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	require.InDelta(t, price, estimate, 1e-12, "explicit group alias card retains pricing ownership")
+}
+
+func TestInflightEstimate_ResolvedRouteThenChannelThenAccountMapping(t *testing.T) {
+	const groupID int64 = 96
+	cs := newTestChannelService(makeStandardRepo(Channel{ID: 96, Status: StatusActive, GroupIDs: []int64{groupID},
+		ModelMapping: map[string]map[string]string{PlatformAnthropic: {"route-target": "account-alias"}},
+	}, map[int64]string{groupID: PlatformAnthropic}))
+	svc := newInflightEstimateGateway(t, cs)
+	attachInflightSnapshot(svc, &inflightSnapshotCacheStub{byBucket: map[string][]Account{inflightBucketKey(groupID, PlatformAnthropic): {
+		{ID: 1, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"account-alias": "claude-opus-4-1"}}},
+	}}})
+	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(groupID), Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{Matched: true,
+		PublicModel: "public-unpriced", TargetPlatform: PlatformAnthropic, UpstreamModel: "route-target"})
+	req := InflightEstimateRequest{Model: "public-unpriced", BodyBytes: 4000, MaxTokens: 1000}
+	estimate, priced := svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced, "public -> resolved route -> channel -> account must follow the forwarding order")
+	req.Model = "claude-opus-4-1"
+	direct, known := svc.EstimateInflightReservation(context.Background(), key, req)
+	require.True(t, known)
+	require.InDelta(t, direct, estimate, 1e-12)
+	price := 0.001
+	key.Group.ModelPricing = []ChannelModelPricing{{Models: []string{"public-unpriced"}, BillingMode: BillingModePerRequest, PerRequestPrice: &price}}
+	req.Model = "public-unpriced"
+	estimate, priced = svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	require.InDelta(t, price, estimate, 1e-12, "explicit requested alias card retains ownership through all mapping stages")
+}
+
+func TestOpenAIInflightEstimate_CompositeGrokUsesResolvedSnapshotPool(t *testing.T) {
+	const groupID int64 = 97
+	cs := newTestChannelService(makeStandardRepo(Channel{ID: 97, Status: StatusActive, GroupIDs: []int64{groupID},
+		ModelMapping: map[string]map[string]string{PlatformGrok: {"grok-route-alias": "grok-account-alias"}},
+	}, map[int64]string{groupID: PlatformGrok}))
+	gw := newInflightEstimateGateway(t, cs)
+	snapshot := &inflightSnapshotCacheStub{byBucket: map[string][]Account{inflightBucketKey(groupID, PlatformGrok): {
+		{ID: 1, Platform: PlatformGrok, Credentials: map[string]any{"model_mapping": map[string]any{"grok-account-alias": "grok-4.5"}}},
+	}}}
+	attachInflightSnapshot(gw, snapshot)
+	svc := &OpenAIGatewayService{cfg: gw.cfg, billingService: gw.billingService, resolver: gw.resolver,
+		channelService: cs, schedulerSnapshot: gw.schedulerSnapshot}
+	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(groupID), Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{Matched: true,
+		PublicModel: "public-grok-premium", TargetPlatform: PlatformGrok, UpstreamModel: "grok-route-alias"})
+	req := InflightEstimateRequest{Model: "public-grok-premium", BodyBytes: 4000, MaxTokens: 1000}
+	estimate, priced := svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced, "OpenAI-compatible Composite requests must read the resolved Grok scheduler pool")
+	req.Model = "grok-4.5"
+	direct, known := svc.EstimateInflightReservation(context.Background(), key, req)
+	require.True(t, known)
+	require.Greater(t, direct, 0.0)
+	require.InDelta(t, direct, estimate, 1e-12)
+	price := 0.001
+	key.Group.ModelPricing = []ChannelModelPricing{{Models: []string{"public-grok-premium"}, BillingMode: BillingModePerRequest, PerRequestPrice: &price}}
+	req.Model = "public-grok-premium"
+	readsBefore := snapshot.reads.Load()
+	estimate, priced = svc.EstimateInflightReservation(ctx, key, req)
+	require.True(t, priced)
+	require.InDelta(t, price, estimate, 1e-12)
+	require.Equal(t, readsBefore, snapshot.reads.Load(), "explicit alias pricing must not consult another pool or stack concrete pricing")
+}
+
 func TestInflightEstimate_GroupPerRequestPricing(t *testing.T) {
 	groupID := int64(20)
 	price := 0.5
@@ -325,6 +405,55 @@ func TestInflightBalanceRefillCannotOverwriteSettlement(t *testing.T) {
 			require.Equal(t, want, balance, "draining old cache work must not restore pre-settlement balance")
 		})
 	}
+}
+
+type contendedBalanceCache struct {
+	*inflightRefillCache
+	conflict  bool
+	epoch     atomic.Int64
+	publishes atomic.Int64
+}
+
+func (c *contendedBalanceCache) GetUserBalanceEpoch(context.Context, int64) (string, error) {
+	return fmt.Sprint(c.epoch.Load()), nil
+}
+
+func (c *contendedBalanceCache) SetUserBalanceIfEpoch(ctx context.Context, id int64, balance float64, epoch string) (bool, error) {
+	c.publishes.Add(1)
+	if c.conflict || epoch != fmt.Sprint(c.epoch.Load()) {
+		return false, nil
+	}
+	c.epoch.Add(1)
+	return true, c.SetUserBalance(ctx, id, balance)
+}
+
+func TestInflightBalanceContentionIsBoundedAndDoesNotFailOpen(t *testing.T) {
+	cache := &contendedBalanceCache{inflightRefillCache: &inflightRefillCache{memInflightCache: newMemInflightCache(0)}, conflict: true}
+	cfg := &config.Config{}
+	cfg.Billing.InflightReservation.Enabled = true
+	svc := &BillingCacheService{cache: cache, userRepo: &balanceLoadUserRepoStub{balance: 10}, cfg: cfg}
+	_, err := svc.ReserveInflight(context.Background(), &User{ID: 1}, nil, nil, 1)
+	require.ErrorIs(t, err, ErrBillingServiceUnavailable)
+	require.Equal(t, int64(3), cache.publishes.Load(), "healthy refill contention has bounded retries")
+	require.Zero(t, cache.count(), "contention must not admit without a reservation")
+}
+
+func TestDisabledBalanceQueueCarriesEpochAcrossMutation(t *testing.T) {
+	cache := &contendedBalanceCache{inflightRefillCache: &inflightRefillCache{memInflightCache: newMemInflightCache(0)}}
+	svc := &BillingCacheService{cache: cache, userRepo: &balanceLoadUserRepoStub{balance: 10}, cfg: &config.Config{}, cacheWriteChan: make(chan cacheWriteTask, 1)}
+	_, err := svc.GetUserBalance(context.Background(), 1)
+	require.NoError(t, err)
+	require.False(t, cache.filled.Load(), "disabled mode still queues fills")
+	// A newer settlement/refill advances the shared epoch before queued work runs.
+	cache.epoch.Add(1)
+	require.NoError(t, cache.SetUserBalance(context.Background(), 1, 1))
+	close(svc.cacheWriteChan)
+	svc.cacheWriteWg.Add(1)
+	svc.cacheWriteWorker(svc.cacheWriteChan)
+	balance, err := cache.GetUserBalance(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, balance)
+	require.Equal(t, int64(1), cache.publishes.Load(), "old queued fill attempts CAS without overwriting the newer balance")
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ type InflightBalanceReservationCache interface {
 	// ReserveInflightBalance 原子地：清理过期预留；若用户已有在途预留且
 	// balance - sum(在途) < amount 则拒绝；否则登记 requestID 的预留（ttl 后自动失效）。
 	// 返回是否放行以及登记前的在途合计。
+	// Redis reads current balance atomically; the balance argument remains for non-Redis implementations.
 	ReserveInflightBalance(ctx context.Context, userID int64, requestID string, amount, balance float64, ttl time.Duration) (bool, float64, error)
 	// ReleaseInflightBalance 释放 requestID 的预留（幂等）。
 	ReleaseInflightBalance(ctx context.Context, userID int64, requestID string) error
@@ -231,6 +233,7 @@ func (s *BillingCacheService) ReserveInflightBalance(ctx context.Context, user *
 // 以下情况直接放行且不登记预留（fail-open，保持旧行为）：
 // 开关关闭 / 简易模式 / 订阅模式 / estimate <= 0 / 缓存不支持 / 余额读取失败 / Redis 执行失败。
 // 仅当 Redis 明确判定 缓存余额 - 在途合计 < estimate（且已有在途请求）时返回 ErrInsufficientBalance。
+// Repeated healthy balance invalidation returns ErrBillingServiceUnavailable rather than bypassing admission.
 func (s *BillingCacheService) ReserveInflight(ctx context.Context, user *User, group *Group, subscription *UserSubscription, estimate float64) (*InflightReservation, error) {
 	return s.reserveInflight(ctx, user, group, subscription, estimate, true)
 }
@@ -256,6 +259,9 @@ func (s *BillingCacheService) reserveInflight(ctx context.Context, user *User, g
 
 	balance, err := s.GetUserBalance(ctx, user.ID)
 	if err != nil {
+		if errors.Is(err, ErrBalanceCacheChanged) {
+			return nil, ErrBillingServiceUnavailable.WithCause(err)
+		}
 		logger.LegacyPrintf("service.billing_cache", "Warning: inflight reservation balance read failed for user %d (fail-open): %v", user.ID, err)
 		return nil, nil
 	}
@@ -266,8 +272,24 @@ func (s *BillingCacheService) reserveInflight(ctx context.Context, user *User, g
 	}
 	requestID := uuid.NewString()
 	reserveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inflightReservationReserveTimeout)
-	allowed, inflight, err := rc.ReserveInflightBalance(reserveCtx, user.ID, requestID, estimate, balance, ttl)
-	cancel()
+	defer cancel()
+	var allowed bool
+	var inflight float64
+	for attempt := 0; attempt < 3; attempt++ {
+		allowed, inflight, err = rc.ReserveInflightBalance(reserveCtx, user.ID, requestID, estimate, balance, ttl)
+		if !errors.Is(err, ErrBalanceCacheChanged) {
+			break
+		}
+		balance, err = s.GetUserBalance(reserveCtx, user.ID)
+		if err != nil {
+			break
+		}
+		// A healthy cache miss/invalidation is contention, not a Redis outage.
+		err = ErrBalanceCacheChanged
+	}
+	if errors.Is(err, ErrBalanceCacheChanged) {
+		return nil, ErrBillingServiceUnavailable.WithCause(err)
+	}
 	if err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: inflight reservation failed for user %d (fail-open): %v", user.ID, err)
 		return nil, nil
@@ -411,23 +433,42 @@ func logInflightUnpriced(model string, groupID *int64) {
 //   - requested → 请求模型；
 //   - upstream / response_model 在准入时未知 → 取请求模型与映射模型两者较高估算。
 func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, model string) (primary, fallbacks []string, upstreamInput string) {
-	upstreamInput = model
-	primary = []string{model}
-	if apiKey == nil || apiKey.GroupID == nil {
-		return primary, nil, upstreamInput
+	routeInput := model
+	if routed, ok := ResolvedUpstreamModelFromContext(ctx); ok {
+		routeInput = routed
 	}
-	if deps.resolveMapping != nil {
-		m := deps.resolveMapping(ctx, *apiKey.GroupID, model)
-		if mapped := m.MappedModel; mapped != "" && mapped != model {
+	upstreamInput = routeInput
+	requested := false
+	if apiKey != nil && apiKey.GroupID != nil && deps.resolveMapping != nil {
+		m := deps.resolveMapping(ctx, *apiKey.GroupID, routeInput)
+		requested = m.BillingModelSource == BillingModelSourceRequested
+		if mapped := m.MappedModel; mapped != "" {
 			upstreamInput = mapped
-			if m.BillingModelSource == BillingModelSourceRequested {
-				fallbacks = append(fallbacks, mapped)
-			} else {
-				primary = []string{mapped, model}
-			}
+		}
+	}
+	if requested || (routeInput != model && inflightHasExplicitPricing(ctx, deps, apiKey, model)) {
+		primary = []string{model}
+		if upstreamInput != model {
+			fallbacks = append(fallbacks, upstreamInput)
+		}
+		if routeInput != model && routeInput != upstreamInput {
+			fallbacks = append(fallbacks, routeInput)
+		}
+	} else {
+		primary = []string{upstreamInput, model}
+		if routeInput != model && routeInput != upstreamInput {
+			primary = append(primary, routeInput)
 		}
 	}
 	return primary, fallbacks, upstreamInput
+}
+
+func inflightHasExplicitPricing(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, model string) bool {
+	if deps.resolver == nil || apiKey == nil {
+		return false
+	}
+	resolved := deps.resolver.Resolve(ctx, PricingInput{Model: model, GroupID: apiKey.GroupID, Group: apiKey.Group})
+	return resolved != nil && (resolved.Source == PricingSourceGroup || resolved.Source == PricingSourceChannel)
 }
 
 func (d inflightEstimateDeps) rates(ctx context.Context, apiKey *APIKey) (text, image, base float64) {
@@ -653,7 +694,7 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	best, priced := bestOf(primary)
 	// composite 分组：计费侧除非别名有显式渠道价，否则按实际转发的具体模型计费；
 	// 别名本身可能命中家族模糊价（低估），因此与候选具体模型一起取最高。
-	composite := apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite
+	composite := apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite && !inflightHasExplicitPricing(ctx, d, apiKey, req.Model)
 	if !priced || composite {
 		// 与 billableModelWithFallback 同口径：首选模型无价时回退到实际转发模型。
 		c, known := bestOf(fallbacks)
@@ -747,7 +788,9 @@ func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {
 			},
 			func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool) {
 				platform := PlatformOpenAI
-				if apiKey.Group != nil && apiKey.Group.Platform != "" && apiKey.Group.Platform != PlatformComposite {
+				if resolved, ok := ResolvedTargetPlatformFromContext(ctx); ok {
+					platform = resolved
+				} else if apiKey.Group != nil && apiKey.Group.Platform != "" && apiKey.Group.Platform != PlatformComposite {
 					platform = apiKey.Group.Platform
 				}
 				return NormalizeOpenAICompatiblePlatform(platform), false, true
