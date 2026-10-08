@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CC_SWITCH_USAGE_SCRIPT,
   GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink
@@ -50,17 +51,17 @@ describe('ccswitchImport utils', () => {
 
     expect(params.get('resource')).toBe('provider')
     expect(params.get('app')).toBe('codex')
-    expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/v1`)
+    expect(params.get('endpoint')).toBe(baseInput.baseUrl)
     expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
     expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
   })
 
   it.each([
-    'https://api.example.com',
-    'https://api.example.com/',
-    'https://api.example.com/v1',
-    'https://api.example.com/v1/'
-  ])('imports Codex with exactly one /v1 suffix for base URL %s', (baseUrl) => {
+    ['https://api.example.com', 'https://api.example.com'],
+    ['https://api.example.com/', 'https://api.example.com'],
+    ['https://api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1/', 'https://api.example.com/v1']
+  ])('preserves the configured Codex endpoint for %s', (baseUrl, endpoint) => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         ...baseInput,
@@ -70,7 +71,7 @@ describe('ccswitchImport utils', () => {
       })
     )
 
-    expect(params.get('endpoint')).toBe('https://api.example.com/v1')
+    expect(params.get('endpoint')).toBe(endpoint)
   })
 
   it.each([
@@ -123,4 +124,39 @@ describe('ccswitchImport utils', () => {
     expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/antigravity`)
     expect(params.has('model')).toBe(false)
   })
+})
+
+describe('CC Switch usage script', () => {
+  function usageUrlFor(baseUrl: string): string {
+    const script = CC_SWITCH_USAGE_SCRIPT.split('{{baseUrl}}').join(baseUrl).split('{{apiKey}}').join('sk-test')
+    // eslint-disable-next-line no-new-func
+    const config = new Function(`return ${script}`)() as { request: { url: string } }
+    return config.request.url
+  }
+
+  it.each([
+    'https://api.example.com',
+    'https://api.example.com/',
+    'https://api.example.com/v1',
+    'https://api.example.com/v1/'
+  ])('queries exactly one /v1/usage for %s', (baseUrl) => {
+    expect(usageUrlFor(baseUrl)).toBe('https://api.example.com/v1/usage')
+  })
+
+  it.each(['anthropic', 'openai', 'grok', 'gemini', 'antigravity'] as GroupPlatform[])(
+    'queries the matching usage route for imported %s providers', (platform) => {
+      for (const clientType of ['claude', 'gemini'] as const) {
+        const params = paramsFromDeeplink(buildCcSwitchImportDeeplink({
+          baseUrl: 'https://api.example.com/', platform, clientType,
+          providerName: 'Sub2API', apiKey: 'sk-test', usageScript: CC_SWITCH_USAGE_SCRIPT
+        }))
+        expect(atob(params.get('usageScript') || '')).toBe(CC_SWITCH_USAGE_SCRIPT)
+        expect(usageUrlFor(params.get('endpoint') || '')).toBe(
+          platform === 'antigravity'
+            ? 'https://api.example.com/antigravity/v1/usage'
+            : 'https://api.example.com/v1/usage'
+        )
+      }
+    }
+  )
 })
