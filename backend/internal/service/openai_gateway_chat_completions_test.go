@@ -48,6 +48,108 @@ func (r *openAIChatStreamReadErrorCloser) Read(p []byte) (int, error) {
 
 func (r *openAIChatStreamReadErrorCloser) Close() error { return nil }
 
+func TestGPT61SolRejectsDisabledReasoningBeforeForwarding(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"public","reasoning_effort":"none"}`,
+		`{"model":"public","reasoning":{"effort":"minimal"}}`,
+		`{"model":"public","output_config":{"effort":"none"}}`,
+		`{"model":"public","thinking":{"type":"disabled"}}`,
+		`{"model":"gpt-6.1-sol-minimal"}`,
+		`{"model":"gpt-5.4-none"}`,
+	} {
+		require.Error(t, validateGPT61SolCompatRequest([]byte(body), "gpt-6.1-sol"))
+		require.NoError(t, validateGPT61SolCompatRequest([]byte(body), "gpt-6-sol"))
+	}
+	for _, field := range []string{`"reasoning_effort":"none"`, `"reasoning_effort":"minimal"`, `"tools":[{"type":"function","function":{"name":"lookup"}}]`} {
+		body := []byte(`{"model":"public",` + field + `,"messages":[{"role":"user","content":"hello"}]}`)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"public": "gpt-6.1-sol"}}}
+		svc := &OpenAIGatewayService{cfg: &config.Config{}}
+		_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+		require.Error(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "gpt-6.1-sol")
+	}
+}
+
+func TestGPT61SolMappedReasoningModeAndSampling(t *testing.T) {
+	body := []byte(`{"model":"public","reasoning":{"mode":"pro","effort":"max"},"temperature":0.5,"top_p":0.9,"logprobs":true,"top_logprobs":2,"include":["message.output_text.logprobs","reasoning.encrypted_content"]}`)
+	out, _, err := normalizeOpenAIResponsesReasoningMode(body, "gpt-6.1-sol")
+	require.NoError(t, err)
+	require.Equal(t, "pro", gjson.GetBytes(out, "reasoning.mode").String())
+	require.Equal(t, "max", gjson.GetBytes(out, "reasoning.effort").String())
+	for _, field := range []string{"temperature", "top_p", "logprobs", "top_logprobs"} {
+		require.False(t, gjson.GetBytes(out, field).Exists(), field)
+	}
+	require.Equal(t, "reasoning.encrypted_content", gjson.GetBytes(out, "include.0").String())
+}
+
+func TestGPT61SolMappedResponsesBridgesPreserveToolsAndEffort(t *testing.T) {
+	for _, messages := range []bool{false, true} {
+		for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+			body := []byte(`{"model":"public","reasoning_effort":"` + effort + `","temperature":0.7,"top_p":0.9,"prompt_cache_options":{"mode":"explicit","ttl":"30m"},"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],"messages":[{"role":"user","content":"hello"}]}`)
+			if messages {
+				body = []byte(`{"model":"public","max_tokens":1000,"output_config":{"effort":"` + effort + `"},"temperature":0.7,"top_p":0.9,"tools":[{"name":"lookup","input_schema":{"type":"object"}}],"messages":[{"role":"user","content":"hello"}]}`)
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"fixture stops after capture"}}`))}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "fixture-key", "base_url": "https://api.openai.com", "model_mapping": map[string]any{"public": "gpt-6.1-sol"}}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			if messages {
+				_, _ = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+			} else {
+				_, _ = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			}
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, "/v1/responses", upstream.lastReq.URL.Path)
+			require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.Equal(t, effort, gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
+			require.Len(t, gjson.GetBytes(upstream.lastBody, "tools").Array(), 1)
+			require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "top_p").Exists())
+			if !messages {
+				require.Equal(t, "explicit", gjson.GetBytes(upstream.lastBody, "prompt_cache_options.mode").String())
+				require.Equal(t, "30m", gjson.GetBytes(upstream.lastBody, "prompt_cache_options.ttl").String())
+			}
+		}
+	}
+}
+
+func TestGPT61SolOnlyChatFallbackRejectsToolsAndDisabledReasoning(t *testing.T) {
+	for _, responses := range []bool{false, true} {
+		bodies := []string{
+			`{"model":"public","max_tokens":100,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`,
+			`{"model":"public","max_tokens":100,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"disabled"}}`,
+		}
+		if responses {
+			bodies = []string{
+				`{"model":"public","input":"hi","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`,
+				`{"model":"public","input":"hi","reasoning":{"effort":"none"}}`,
+			}
+		}
+		for _, body := range bodies {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"public": "gpt-6.1-sol"}}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			var err error
+			if responses {
+				_, err = svc.forwardResponsesViaRawChatCompletions(context.Background(), c, account, []byte(body))
+			} else {
+				_, err = svc.forwardAnthropicViaRawChatCompletions(context.Background(), c, account, []byte(body), "")
+			}
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Contains(t, rec.Body.String(), "gpt-6.1-sol")
+		}
+	}
+}
+
 func TestHandleChatStreamingResponse_ClassifiesHTTP2ReadError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

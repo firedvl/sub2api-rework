@@ -815,12 +815,30 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+	model := resolveOpenAIAccountUpstreamModelAliasForRequest(account, requestedModel, requireCompact)
+	if account != nil && account.IsOpenAIPassthroughEnabled() && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) && (!requireCompact || !openai.IsGPT61SolModelSpelling(model)) {
+		return model
+	}
+	if requireCompact && account != nil && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) && !openai.IsGPT61SolModelSpelling(model) {
+		if compact, matched := account.ResolveCompactMappedModel(strings.TrimSpace(requestedModel)); matched && strings.TrimSpace(compact) != "" {
+			return model
+		}
+		ordinary := resolveOpenAIForwardModel(account, requestedModel, "")
+		if resolveOpenAICompactForwardModel(account, ordinary) != ordinary {
+			return model
+		}
+	}
+	return normalizeOpenAIModelForUpstream(account, model)
+}
+
+// Retain the mapped alias until request effort has been extracted and validated.
+func resolveOpenAIAccountUpstreamModelAliasForRequest(account *Account, requestedModel string, requireCompact bool) string {
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		upstreamModel := resolveOpenAIForwardModel(account, requestedModel, "")
-		return normalizeOpenAIModelForUpstream(account, upstreamModel)
+		return upstreamModel
 	}
 
 	// Passthrough accounts only replace authentication. Their Forward path
@@ -860,7 +878,7 @@ func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 			return compactModel
 		}
 	}
-	return normalizeOpenAIModelForUpstream(account, upstreamModel)
+	return upstreamModel
 }
 
 // ResolveOpenAIAccountUpstreamModelForRequest exposes the scheduler's exact

@@ -3,6 +3,8 @@ package openai
 
 import (
 	_ "embed"
+	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -72,6 +74,11 @@ var instructionsGPT55 string
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
 
+// Compatibility metadata only; account discovery determines availability.
+//
+//go:embed codex_gpt61_sol.json
+var CodexGPT61SolMetadata []byte
+
 // latestCodexInstructions 返回当前已知最新版本的 Codex base instructions，
 // 当前为 GPT-5.5；若 5.5 prompt 意外为空则回退到 DefaultInstructions 保证非空。
 func latestCodexInstructions() string {
@@ -134,6 +141,16 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
+	case IsGPT61SolModelSpelling(canonical):
+		var metadata struct {
+			ModelMessages struct {
+				InstructionsTemplate string `json:"instructions_template"`
+			} `json:"model_messages"`
+		}
+		if err := json.Unmarshal(CodexGPT61SolMetadata, &metadata); err != nil {
+			panic(err)
+		}
+		return metadata.ModelMessages.InstructionsTemplate
 	case canonical == "gpt-6" || canonical == "gpt-6-astra" || strings.HasPrefix(canonical, "gpt-6-astra-"):
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
@@ -168,4 +185,29 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 		}
 	}
 	return false
+}
+
+func IsGPT61SolModelSpelling(model string) bool {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	if canonical == "gpt-6.1-sol" {
+		return true
+	}
+	if suffix, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok {
+		switch suffix {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateGPT61SolReasoningEffort(model, effort string) error {
+	if IsGPT61SolModelSpelling(model) {
+		switch strings.ToLower(strings.TrimSpace(effort)) {
+		case "", "low", "medium", "high", "xhigh", "max":
+		default:
+			return fmt.Errorf("gpt-6.1-sol does not support reasoning effort %q; use low, medium, high, xhigh or max", effort)
+		}
+	}
+	return nil
 }

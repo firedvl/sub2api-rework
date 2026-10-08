@@ -4,6 +4,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"math"
 	"strings"
@@ -31,6 +32,21 @@ func captureStdLog(t *testing.T) *bytes.Buffer {
 
 func newTestBillingService() *BillingService {
 	return NewBillingService(&config.Config{}, nil)
+}
+
+func TestGPT61SolSelectedEffortMultiplierOnce(t *testing.T) {
+	bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, []ChannelModelPricing{{
+		Platform: PlatformOpenAI, Models: []string{"gpt-6.1-sol"}, BillingMode: BillingModeToken,
+		InputPrice: testPtrFloat64(2e-6), OutputPrice: testPtrFloat64(10e-6),
+		ReasoningEffortMultipliers: map[string]float64{"max": 3},
+	}}, nil)
+	cost, err := bs.CalculateTokenCostForRequest(TokenCostRequest{
+		Ctx: context.Background(), Model: "gpt-6.1-sol", Group: &Group{ID: 100, Platform: PlatformOpenAI}, Resolver: resolver,
+		Tokens: UsageTokens{InputTokens: 1000, OutputTokens: 200}, RateMultiplier: 0.8, ReasoningEffort: "max",
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 0.004*3, cost.TotalCost, 1e-12)
+	require.InDelta(t, cost.TotalCost*0.8, cost.ActualCost, 1e-12)
 }
 
 func newTestBillingServiceWithOpenAILadderCatalog(t *testing.T) *BillingService {
