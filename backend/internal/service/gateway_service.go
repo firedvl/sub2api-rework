@@ -1543,32 +1543,20 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 
 func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform string, manifestIDs func(*Account) []string) []string {
 	modelSet := make(map[string]struct{})
-	if platform == PlatformOpenAI {
-		hasPassthrough := false
-		for i := range accounts {
-			account := &accounts[i]
-			if account.Platform != platform || !account.IsOpenAIPassthroughEnabled() {
-				continue
-			}
-			hasPassthrough = true
-			for _, model := range manifestIDs(account) {
-				modelSet[model] = struct{}{}
-			}
-		}
-		if hasPassthrough {
-			return sortedModelIDSet(modelSet)
-		}
-	}
 	for i := range accounts {
 		account := &accounts[i]
 		mixedGemini := platform == PlatformGemini && account.IsMixedSchedulingEnabled()
 		if platform != "" && account.Platform != platform && !mixedGemini {
 			continue
 		}
-		if platform == PlatformOpenAI && len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0 {
+		passthrough := account.IsOpenAI() && account.IsOpenAIPassthroughEnabled()
+		if account.IsOpenAI() && (passthrough || len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0) {
 			for _, model := range manifestIDs(account) {
 				modelSet[model] = struct{}{}
 			}
+		}
+		if passthrough {
+			continue
 		}
 		mapping := account.GetModelMapping()
 		if len(mapping) == 0 {
@@ -1654,7 +1642,11 @@ func compositeModelOwnershipFromAccounts(accounts []Account, model string, prefe
 	for i := range accounts {
 		account := &accounts[i]
 		platform := strings.TrimSpace(account.Platform)
-		if !isConcreteRequestPlatform(platform) || !modelMappingClaims(account, model) {
+		claimsModel := modelMappingClaims(account, model)
+		if account.IsOpenAICompatible() {
+			claimsModel = explicitModelMappingClaims(*account, model)
+		}
+		if !isConcreteRequestPlatform(platform) || !claimsModel {
 			continue
 		}
 		platforms[platform] = struct{}{}
