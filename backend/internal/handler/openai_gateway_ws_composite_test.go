@@ -212,3 +212,36 @@ func TestCompositeWSModelRejectionDoesNotReportAccountFailure(t *testing.T) {
 	err := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect", nil)
 	require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
 }
+
+func TestGPT61CompositeWebSocketFinalEffort(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeDedicated} {
+		for _, modelField := range []string{`"model":"public-alias",`, ""} {
+			t.Run(mode+"/"+modelField, func(t *testing.T) {
+				for _, effort := range []string{"none", "minimal", "ultra"} {
+					runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+						firstPayload:  `{"type":"response.create","model":"public-alias","input":"hi"}`,
+						secondPayload: `{"type":"response.create",` + modelField + `"reasoning":{"effort":"` + effort + `"}}`,
+						group:         compositeWSGroup("public-alias"), ingressMode: mode,
+						compositeResolver:       compositeWSResolver(service.PlatformOpenAI, "responses", "route-target"),
+						channelMapping:          map[string]string{"route-target": "channel-target"},
+						accountModelMapping:     map[string]any{"channel-target": "gpt-6.1-sol"},
+						secondTurnCloseExpected: true,
+						closeReason:             "gpt-6.1-sol does not support reasoning effort",
+					})
+				}
+				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+					firstPayload:  `{"type":"response.create","model":"public-alias","input":"hi"}`,
+					secondPayload: `{"type":"response.create",` + modelField + `"input":"again"}`,
+					group:         compositeWSGroup("public-alias"), ingressMode: mode,
+					compositeResolver:   compositeWSResolver(service.PlatformOpenAI, "responses", "route-target"),
+					channelMapping:      map[string]string{"route-target": "channel-target"},
+					accountModelMapping: map[string]any{"channel-target": "gpt-6.1-sol-max"},
+				})
+				for _, payload := range got.upstreamPayloads {
+					require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(payload, "model").String())
+					require.Equal(t, "max", gjson.GetBytes(payload, "reasoning.effort").String())
+				}
+			})
+		}
+	}
+}
