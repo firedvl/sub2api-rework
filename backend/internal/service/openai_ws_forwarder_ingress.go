@@ -23,6 +23,60 @@ type openAIWSRejectedFieldRetryError struct {
 	reason string
 }
 
+// Composite connections bind a public model and route once. Canonicalize model
+// keys before rewriting so duplicate/case-variant keys cannot select a new route.
+func normalizeCompositeWSModelPayload(ctx context.Context, payload []byte) ([]byte, error) {
+	publicModel, composite := RequestedPublicModelFromContext(ctx)
+	if !composite {
+		return payload, nil
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
+	}
+	var invalid bool
+	check := func(value gjson.Result) {
+		value.ForEach(func(key, value gjson.Result) bool {
+			if strings.EqualFold(key.String(), "model") && strings.TrimSpace(value.String()) != publicModel {
+				invalid = true
+			}
+			return true
+		})
+	}
+	parsed := gjson.ParseBytes(payload)
+	check(parsed)
+	parsed.ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.String(), "session") {
+			check(value)
+		}
+		return true
+	})
+	if invalid {
+		return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect", nil)
+	}
+	modelValue, _ := json.Marshal(publicModel)
+	canonicalize := func(object map[string]json.RawMessage) {
+		for key := range object {
+			if strings.EqualFold(key, "model") {
+				delete(object, key)
+				object["model"] = modelValue
+			}
+		}
+	}
+	canonicalize(body)
+	for key, raw := range body {
+		if strings.EqualFold(key, "session") {
+			var session map[string]json.RawMessage
+			if json.Unmarshal(raw, &session) == nil && session != nil {
+				canonicalize(session)
+				delete(body, key)
+				body["session"], _ = json.Marshal(session)
+			}
+		}
+	}
+	return json.Marshal(body)
+}
+
 func (e *openAIWSRejectedFieldRetryError) Error() string {
 	if e == nil || strings.TrimSpace(e.reason) == "" {
 		return "retry websocket turn after rejected field normalization"
@@ -239,7 +293,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
 		eventType := strings.TrimSpace(values[0].String())
-		normalized := trimmed
+		normalized, normalizeErr := normalizeCompositeWSModelPayload(ctx, trimmed)
+		if normalizeErr != nil {
+			return openAIWSClientPayload{}, normalizeErr
+		}
 		switch eventType {
 		case "":
 			eventType = "response.create"
@@ -389,6 +446,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		if _, composite := RequestedPublicModelFromContext(ctx); composite && gjson.GetBytes(normalized, "session.model").Exists() {
+			var setErr error
+			normalized, setErr = sjson.SetBytes(normalized, "session.model", upstreamModel)
+			if setErr != nil {
+				return openAIWSClientPayload{}, setErr
+			}
+		}
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {
@@ -582,7 +646,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeAccountFailoverInputExists := false
 		for turn := 1; ; turn++ {
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
-				if err := hooks.BeforeRequest(turn, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel); err != nil {
+				if err := hooks.BeforeRequest(turn, currentBridgePayload.rawForHash, currentBridgePayload.originalModel); err != nil {
 					return err
 				}
 			}
@@ -1267,6 +1331,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	currentPayload := firstPayload.payloadRaw
+	// Admission hooks must see client model candidates before upstream mapping.
+	currentClientPayload := firstPayload.rawForHash
 	currentOriginalModel := firstPayload.originalModel
 	currentImageBillingModel := firstPayload.imageBillingModel
 	currentImageSizeTier := firstPayload.imageSizeTier
@@ -1456,7 +1522,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	for {
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {
-			if err := hooks.BeforeRequest(turn, currentPayload, currentOriginalModel); err != nil {
+			if err := hooks.BeforeRequest(turn, currentClientPayload, currentOriginalModel); err != nil {
 				return err
 			}
 		}
@@ -1965,6 +2031,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		currentPayload = nextPayload.payloadRaw
+		currentClientPayload = nextPayload.rawForHash
 		currentOriginalModel = nextPayload.originalModel
 		currentImageBillingModel = nextPayload.imageBillingModel
 		currentImageSizeTier = nextPayload.imageSizeTier
