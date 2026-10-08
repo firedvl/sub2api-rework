@@ -2630,6 +2630,32 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 	return nil
 }
 
+func gpt61ChatRequestHasToolCalls(body []byte) bool {
+	if openAIRequestBodyHasTools(body) || len(gjson.GetBytes(body, "functions").Array()) > 0 {
+		return true
+	}
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if isCodexToolCallContextItemType(item.Get("type").String()) || isCodexToolCallOutputItemType(item.Get("type").String()) {
+			return true
+		}
+	}
+	for _, message := range gjson.GetBytes(body, "messages").Array() {
+		if role := message.Get("role").String(); role == "tool" || role == "function" {
+			return true
+		}
+		if len(message.Get("tool_calls").Array()) > 0 || message.Get("function_call").IsObject() {
+			return true
+		}
+		for _, block := range message.Get("content").Array() {
+			switch block.Get("type").String() {
+			case "tool_use", "tool_result", "server_tool_use", "web_search_tool_result":
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func normalizeGPT61SolMappedRequest(body []byte, account *Account, compact bool, finalAlias string) ([]byte, bool, error) {
 	if finalAlias == "" {
 		finalAlias = resolveOpenAIAccountUpstreamModelAliasForRequest(account, gjson.GetBytes(body, "model").String(), compact)

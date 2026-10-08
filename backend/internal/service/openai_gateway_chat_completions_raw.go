@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		grokCacheIdentity = resolveGrokCacheIdentity(c, body, "", upstreamModel)
 	}
 	// 3. Rewrite model in body (no protocol conversion)
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && (len(gjson.GetBytes(body, "tools").Array()) > 0 || len(gjson.GetBytes(body, "functions").Array()) > 0) {
+	if openai.IsGPT61SolModelSpelling(upstreamModel) && gpt61ChatRequestHasToolCalls(body) {
 		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
