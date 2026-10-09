@@ -365,3 +365,38 @@ func (s *BillingCacheSuite) TestUpdateSubscriptionUsage_ErrorPropagation() {
 func TestBillingCacheSuite(t *testing.T) {
 	suite.Run(t, new(BillingCacheSuite))
 }
+
+func TestBillingBalanceEpochAndAtomicAdmissionRealRedis(t *testing.T) {
+	ctx := context.Background()
+	cache := &billingCache{rdb: testRedis(t)}
+	other := &billingCache{rdb: cache.rdb}
+	require.NoError(t, cache.SetUserBalance(ctx, 93, 10))
+	epoch, err := cache.GetUserBalanceEpoch(ctx, 93)
+	require.NoError(t, err)
+	allowed, _, err := cache.ReserveInflightBalance(ctx, 93, "a", 9, 10, time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.NoError(t, other.DeductUserBalance(ctx, 93, 9))
+	require.NoError(t, cache.ReleaseInflightBalance(ctx, 93, "a"))
+	allowed, _, err = cache.ReserveInflightBalance(ctx, 93, "c", 0.5, 1, time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	allowed, _, err = other.ReserveInflightBalance(ctx, 93, "b", 1, 10, time.Minute)
+	require.NoError(t, err)
+	require.False(t, allowed)
+	ok, err := cache.SetUserBalanceIfEpoch(ctx, 93, 10, epoch)
+	require.NoError(t, err)
+	require.False(t, ok)
+	epoch, err = cache.GetUserBalanceEpoch(ctx, 93)
+	require.NoError(t, err)
+	require.NoError(t, other.InvalidateUserBalance(ctx, 93))
+	require.NoError(t, other.DeductUserBalance(ctx, 93, 1))
+	ok, err = cache.SetUserBalanceIfEpoch(ctx, 93, 10, epoch)
+	require.NoError(t, err)
+	require.False(t, ok, "missing balance deductions must still fence an in-progress DB load")
+	epoch, err = cache.GetUserBalanceEpoch(ctx, 93)
+	require.NoError(t, err)
+	ok, err = cache.SetUserBalanceIfEpoch(ctx, 93, 1, epoch)
+	require.NoError(t, err)
+	require.True(t, ok, "unchanged epoch permits a legitimate fresh DB refill")
+}
