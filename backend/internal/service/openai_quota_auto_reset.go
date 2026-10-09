@@ -21,16 +21,18 @@ import (
 )
 
 const (
-	openAIAutoResetScanInterval  = time.Minute
-	openAIAutoResetSnapshotTTL   = openAIProbeCacheTTL
-	openAIAutoResetBatchSize     = 100
-	openAIAutoResetWorkerCount   = 4
-	openAIAutoResetQueueCapacity = 1024
-	openAIQuotaRecoveryWorkers   = 1
-	openAIQuotaRecoveryQueueSize = 1024
-	openAIAutoResetAttemptTTL    = 8 * 24 * time.Hour
-	openAIAutoResetLeaderLockKey = "jobs:openai-auto-reset-credit"
-	openAIQuotaRecoveryCursorKey = "jobs:openai-quota-recovery"
+	openAIAutoResetScanInterval            = time.Minute
+	openAIAutoResetSnapshotTTL             = openAIProbeCacheTTL
+	openAIAutoResetBatchSize               = 100
+	openAIAutoResetWorkerCount             = 4
+	openAIAutoResetQueueCapacity           = 1024
+	openAIQuotaRecoveryWorkers             = 1
+	openAIQuotaRecoveryQueueSize           = 1024
+	openAIAutoResetAttemptTTL              = 8 * 24 * time.Hour
+	openAIAutoResetLeaderLockKey           = "jobs:openai-auto-reset-credit"
+	openAIQuotaRecoveryCursorKey           = "jobs:openai-quota-recovery"
+	openAIAutoResetQueryFailureRetryAfter  = time.Minute
+	openAIAutoResetSchedulerNotifyCooldown = 30 * time.Second
 )
 
 const (
@@ -416,9 +418,13 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	now := time.Now()
 	assessment := s.assessExtra(account, config, now)
 	state := openAIAutoResetStateFromExtra(account.Extra)
-	needsQuery := recoverable || openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached || assessment.missingEnabled
+	needsQuery := recoverable || openAIAutoResetSnapshotStale(account.Extra, now) ||
+		(assessment.resetReached && !openAIAutoResetNoCreditConfirmed(state, now)) || assessment.missingEnabled
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
+	}
+	if needsQuery && !recoverable && openAIAutoResetQueryFailureBackoffActive(state, now) {
+		needsQuery = false
 	}
 	if !needsQuery {
 		if !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
@@ -861,6 +867,27 @@ func openAIAutoResetStateFromExtra(extra map[string]any) *OpenAIAutoResetCreditS
 	return &state
 }
 
+func openAIAutoResetNoCreditConfirmed(state *OpenAIAutoResetCreditState, now time.Time) bool {
+	return state != nil && state.Status == OpenAIAutoResetStatusNoCredit && !openAIAutoResetStateStale(state, now)
+}
+
+func openAIAutoResetQueryFailureBackoffActive(state *OpenAIAutoResetCreditState, now time.Time) bool {
+	if state == nil || state.Status != OpenAIAutoResetStatusFailed {
+		return false
+	}
+	switch state.ErrorCode {
+	case "RESET_CREDIT_QUERY_FAILED", "USAGE_SNAPSHOT_WRITE_FAILED", "RESET_CREDIT_DETAILS_UNAVAILABLE":
+	default:
+		return false
+	}
+	failedAt, err := time.Parse(time.RFC3339, state.LastResultAt)
+	if err != nil {
+		return false
+	}
+	elapsed := now.Sub(failedAt)
+	return elapsed >= 0 && elapsed < openAIAutoResetQueryFailureRetryAfter
+}
+
 func openAIAutoResetStateStale(state *OpenAIAutoResetCreditState, now time.Time) bool {
 	if state == nil || state.CheckedAt == "" {
 		return true
@@ -987,4 +1014,31 @@ func notifyOpenAIQuotaRecovery(accountID int64) {
 // NotifyOpenAIAutoResetCredit 供额度查询入口发送轻量信号；不执行同步上游请求。
 func NotifyOpenAIAutoResetCredit(accountID int64) {
 	notifyOpenAIAutoReset(accountID)
+}
+
+// ponytail: timestamps live for this process; prune if account churn makes retention material.
+var openAIAutoResetSchedulerNotifiedAt sync.Map
+
+func notifyOpenAIAutoResetFromSchedulerAt(accountID int64, now time.Time) bool {
+	if accountID <= 0 {
+		return false
+	}
+	for {
+		last, exists := openAIAutoResetSchedulerNotifiedAt.LoadOrStore(accountID, now)
+		if !exists {
+			break
+		}
+		lastAt, ok := last.(time.Time)
+		if !ok {
+			return false
+		}
+		if elapsed := now.Sub(lastAt); elapsed < openAIAutoResetSchedulerNotifyCooldown {
+			return false
+		}
+		if openAIAutoResetSchedulerNotifiedAt.CompareAndSwap(accountID, last, now) {
+			break
+		}
+	}
+	notifyOpenAIAutoReset(accountID)
+	return true
 }
