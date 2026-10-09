@@ -25,7 +25,7 @@ func TestPaymentBonusUpgrade249Through251(t *testing.T) {
 	var has250 bool
 	for _, name := range files {
 		var number int
-		_, err := fmt.Sscanf(name, "%d_", &number)
+		_, err := fmt.Sscanf(name, "%d", &number)
 		require.NoError(t, err)
 		if number == 250 {
 			has250 = true
