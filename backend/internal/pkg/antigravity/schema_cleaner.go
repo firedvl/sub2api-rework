@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -244,6 +245,27 @@ func cleanJSONSchemaRecursive(value any) any {
 		if value, ok := schemaMap["const"]; ok {
 			if !hasKey(schemaMap, "enum") {
 				schemaMap["enum"] = []any{value}
+			} else if constant, ok := value.(string); ok {
+				if existing, ok := schemaMap["enum"].([]any); ok {
+					intersection := []any{}
+					for _, candidate := range existing {
+						if text, ok := candidate.(string); ok && text == constant {
+							intersection = append(intersection, constant)
+							break
+						}
+					}
+					schemaMap["enum"] = intersection
+				}
+			}
+			if !hasKey(schemaMap, "type") {
+				switch value.(type) {
+				case string:
+					schemaMap["type"] = "string"
+				case bool:
+					schemaMap["type"] = "boolean"
+				case float64, float32, int, int64, json.Number:
+					schemaMap["type"] = "number"
+				}
 			}
 			delete(schemaMap, "const")
 		}
