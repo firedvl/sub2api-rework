@@ -71,6 +71,10 @@ func TestPaymentBonusUpgrade249Through251(t *testing.T) {
 	require.Equal(t, 14.0, amount)
 	require.Equal(t, 100.0, pay)
 	require.Zero(t, bonus)
+	var precision, scale int
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, `SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_schema='public' AND table_name='payment_orders' AND column_name='pay_amount'`).Scan(&precision, &scale))
+	require.Equal(t, 21, precision)
+	require.Equal(t, 3, scale)
 }
 
 func TestPaymentBonusMigrationPreservesLegacyCredit(t *testing.T) {
@@ -80,6 +84,9 @@ func TestPaymentBonusMigrationPreservesLegacyCredit(t *testing.T) {
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_name='payment_orders' AND column_name='bonus_amount'`).Scan(&precision, &scale))
 	require.Equal(t, 20, precision)
 	require.Equal(t, 2, scale)
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT numeric_precision, numeric_scale FROM information_schema.columns WHERE table_schema='public' AND table_name='payment_orders' AND column_name='pay_amount'`).Scan(&precision, &scale))
+	require.Equal(t, 21, precision)
+	require.Equal(t, 3, scale)
 	// A disposable pre-promotion schema verifies default backfill and repeat application.
 	db, err := sql.Open("postgres", integrationPostgresDSN)
 	require.NoError(t, err)

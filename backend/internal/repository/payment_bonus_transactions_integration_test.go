@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,13 +29,19 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 	for _, tc := range []struct {
 		name                        string
 		credit, bonus, pay, balance float64
+		currency                    string
 		overflow                    bool
 	}{
 		{name: "bonus", credit: 16.8, bonus: 2.8, pay: 102.5},
 		{name: "discount", credit: 14, bonus: 2.8, pay: 82},
+		{name: "three decimal discount callback", credit: 10, bonus: 0, pay: 9.999, currency: "IQD"},
 		{name: "balance overflow rolls back redemption", credit: 16.8, bonus: 2.8, pay: 102.5, balance: 999999999990, overflow: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			currency, status := "CNY", service.OrderStatusPaid
+			if tc.currency != "" {
+				currency, status = tc.currency, service.OrderStatusPending
+			}
 			key := fmt.Sprintf("promotion-%d", time.Now().UnixNano())
 			user, err := client.User.Create().SetEmail(key + "@example.test").SetPasswordHash("hash").SetBalance(tc.balance).Save(ctx)
 			require.NoError(t, err)
@@ -42,10 +49,17 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 				SetAmount(tc.credit).SetBonusAmount(tc.bonus).SetPayAmount(tc.pay).SetFeeRate(2.5).
 				SetRechargeCode(key).SetOutTradeNo(key).SetPaymentType(payment.TypeAlipay).SetPaymentTradeNo(key).
 				SetProviderInstanceID(strconv.FormatInt(instance.ID, 10)).SetProviderKey(payment.TypeAlipay).
-				SetProviderSnapshot(map[string]any{"schema_version": 2, "provider_instance_id": strconv.FormatInt(instance.ID, 10), "provider_key": payment.TypeAlipay, "currency": "CNY"}).
-				SetStatus(service.OrderStatusPaid).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
+				SetProviderSnapshot(map[string]any{"schema_version": 2, "provider_instance_id": strconv.FormatInt(instance.ID, 10), "provider_key": payment.TypeAlipay, "currency": currency}).
+				SetStatus(status).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
 			require.NoError(t, err)
-			err = svc.ExecuteBalanceFulfillment(ctx, order.ID)
+			persisted, err := client.PaymentOrder.Get(ctx, order.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.pay, persisted.PayAmount)
+			if tc.currency != "" {
+				err = svc.HandlePaymentNotification(ctx, &payment.PaymentNotification{OrderID: key, TradeNo: key, Amount: tc.pay, Status: payment.NotificationStatusSuccess}, payment.TypeAlipay)
+			} else {
+				err = svc.ExecuteBalanceFulfillment(ctx, order.ID)
+			}
 			if tc.overflow {
 				require.Error(t, err)
 				code, err := redeemRepo.GetByCode(ctx, key)
@@ -69,7 +83,8 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 				plan, result, err := svc.PrepareRefund(ctx, order.ID, tc.credit*fraction, "fixture", false, false)
 				require.NoError(t, err)
 				require.Nil(t, result)
-				require.Equal(t, tc.pay*fraction, plan.GatewayAmount, "refund must use the stored gateway ratio")
+				expected := decimal.NewFromFloat(tc.pay).Mul(decimal.NewFromFloat(fraction)).Round(int32(payment.CurrencyMaxFractionDigits(currency))).InexactFloat64()
+				require.Equal(t, expected, plan.GatewayAmount, "refund must use the stored gateway ratio")
 			}
 		})
 	}
