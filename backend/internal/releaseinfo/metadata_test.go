@@ -18,7 +18,7 @@ func TestEmbeddedMetadataIsCanonicalAndManual(t *testing.T) {
 	require.Equal(t, "manual", metadata.DefaultPolicy)
 	require.Equal(t, "1.1.5", metadata.MinimumUpdaterVersion)
 	require.Equal(t, 239, metadata.MigrationMin)
-	require.Equal(t, 250, metadata.MigrationMax)
+	require.Equal(t, 251, metadata.MigrationMax)
 
 	var fromJSON Metadata
 	require.NoError(t, json.Unmarshal(JSON(), &fromJSON))
