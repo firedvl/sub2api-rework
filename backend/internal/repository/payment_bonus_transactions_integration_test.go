@@ -26,6 +26,10 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 		SetName("promotion transaction fixture").SetConfig("{}").SetSupportedTypes(payment.TypeAlipay).
 		SetRefundEnabled(true).Save(ctx)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, `DELETE FROM payment_provider_instances WHERE id=$1`, instance.ID)
+		require.NoError(t, err)
+	})
 	for _, tc := range []struct {
 		name                        string
 		credit, bonus, pay, balance float64
@@ -45,6 +49,14 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 			key := fmt.Sprintf("promotion-%d", time.Now().UnixNano())
 			user, err := client.User.Create().SetEmail(key + "@example.test").SetPasswordHash("hash").SetBalance(tc.balance).Save(ctx)
 			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, err := integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user.ID)
+				require.NoError(t, err)
+			})
+			t.Cleanup(func() {
+				_, err := integrationDB.ExecContext(ctx, `DELETE FROM redeem_codes WHERE code=$1`, key)
+				require.NoError(t, err)
+			})
 			order, err := client.PaymentOrder.Create().SetUserID(user.ID).SetUserEmail(user.Email).SetUserName(key).
 				SetAmount(tc.credit).SetBonusAmount(tc.bonus).SetPayAmount(tc.pay).SetFeeRate(2.5).
 				SetRechargeCode(key).SetOutTradeNo(key).SetPaymentType(payment.TypeAlipay).SetPaymentTradeNo(key).
@@ -53,6 +65,12 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 				SetProviderSnapshot(map[string]any{"schema_version": 2, "provider_instance_id": strconv.FormatInt(instance.ID, 10), "provider_key": payment.TypeAlipay, "currency": currency}).
 				SetStatus(status).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
 			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, err := integrationDB.ExecContext(ctx, `DELETE FROM payment_audit_logs WHERE order_id=$1`, strconv.FormatInt(order.ID, 10))
+				require.NoError(t, err)
+				_, err = integrationDB.ExecContext(ctx, `DELETE FROM payment_orders WHERE id=$1`, order.ID)
+				require.NoError(t, err)
+			})
 			persisted, err := client.PaymentOrder.Get(ctx, order.ID)
 			require.NoError(t, err)
 			require.Equal(t, tc.pay, persisted.PayAmount)
