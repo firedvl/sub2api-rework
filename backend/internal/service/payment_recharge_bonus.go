@@ -271,6 +271,17 @@ type rechargeBonusQuote struct {
 	Percent float64
 }
 
+func validatePromotedBalanceCredit(user *User, credited float64) error {
+	// Both balance and total_recharged use DECIMAL(20,8), and redemption adds the full credit to each.
+	for _, current := range []float64{user.Balance, user.TotalRecharged} {
+		if math.IsNaN(current) || math.IsInf(current, 0) || math.IsNaN(credited) || math.IsInf(credited, 0) ||
+			decimal.NewFromFloat(current).Add(decimal.NewFromFloat(credited)).Round(8).GreaterThanOrEqual(decimal.NewFromInt(1_000_000_000_000)) {
+			return infraerrors.BadRequest("INVALID_AMOUNT", "credited balance is out of range")
+		}
+	}
+	return nil
+}
+
 // quoteRechargeBonus 按配置模式报价。currency 用于折扣模式实付基数的精度。
 // 未配置阶梯、未命中、或折扣百分比 ≥ 100（非法历史数据，fail-safe）时按无优惠处理。
 func quoteRechargeBonus(cfg *PaymentConfig, paymentAmount float64, currency string) rechargeBonusQuote {

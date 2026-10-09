@@ -73,6 +73,12 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		limitAmount = quote.PayBase
 		bonusAmount = quote.Bonus
 		orderAmount = quote.Credited
+		mode, _ := NormalizeRechargeBonusMode(cfg.RechargeBonusMode)
+		if bonusAmount > 0 && mode == RechargeBonusModeBonus {
+			if err := validatePromotedBalanceCredit(user, orderAmount); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if math.IsNaN(orderAmount) || math.IsInf(orderAmount, 0) || orderAmount <= 0 || orderAmount >= 1e18 {
 		return nil, infraerrors.BadRequest("INVALID_AMOUNT", "credited balance is out of range")

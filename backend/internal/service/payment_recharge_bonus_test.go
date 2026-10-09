@@ -354,6 +354,41 @@ func TestCreateOrderRejectsPromotionCreditOverflowBeforeProvider(t *testing.T) {
 	require.Contains(t, err.Error(), "credited balance is out of range")
 }
 
+func TestPromotedBalanceCreditStoredCapacity(t *testing.T) {
+	user := &User{}
+	require.NoError(t, validatePromotedBalanceCredit(user, 900_000_000_000), "baseline credit fits storage")
+	require.Error(t, validatePromotedBalanceCredit(user, 1_080_000_000_000), "20 percent bonus crosses storage capacity")
+	require.NoError(t, validatePromotedBalanceCredit(user, 999_999_999_999.99))
+	require.Error(t, validatePromotedBalanceCredit(user, 1_000_000_000_000))
+	for _, user := range []*User{{Balance: 999_999_999_999.99}, {TotalRecharged: 999_999_999_999.99}, {Balance: math.NaN()}, {TotalRecharged: math.Inf(1)}} {
+		require.Error(t, validatePromotedBalanceCredit(user, .01))
+	}
+}
+
+func TestCreateOrderRejectsInflatedPromotionBeforeProvider(t *testing.T) {
+	for _, user := range []*User{
+		{ID: 1, Status: payment.EntityStatusActive},
+		{ID: 1, Status: payment.EntityStatusActive, Balance: 950_000_000_000},
+		{ID: 1, Status: payment.EntityStatusActive, TotalRecharged: 950_000_000_000},
+	} {
+		svc := &PaymentService{
+			configService: &PaymentConfigService{settingRepo: &paymentConfigSettingRepoStub{values: map[string]string{
+				SettingPaymentEnabled: "true", SettingBalanceRechargeMult: "1",
+				SettingRechargeBonusTiers: `[{"min_amount":1,"bonus_percent":20}]`,
+			}}},
+			userRepo: &mockUserRepo{getByIDUser: user},
+		}
+		amount := 900_000_000_000.0
+		if user.Balance > 0 || user.TotalRecharged > 0 {
+			amount = 50_000_000_000
+		}
+		// Missing provider and database dependencies make any call past the guard fail this test.
+		response, err := svc.CreateOrder(context.Background(), CreateOrderRequest{UserID: 1, Amount: amount, PaymentType: payment.TypeAlipay})
+		require.Nil(t, response)
+		require.ErrorContains(t, err, "credited balance is out of range")
+	}
+}
+
 func TestUpdatePaymentConfigRechargeBonusMode(t *testing.T) {
 	ctx := context.Background()
 
