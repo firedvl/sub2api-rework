@@ -500,6 +500,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
   opencode_go: 'OpenCode Go',
+  typesafe: 'TypeSafe / Jev',
 })[platform]
 
 const accountTypeLabel = (type: AccountType) => ({
