@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,49 @@ import (
 
 type compositeRouteRepoStub struct {
 	routes []service.CompositeModelRoute
+}
+
+func TestCompositeTypeSafeRewritePreservesParserAmbiguityForRejection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{
+		ID: 1, GroupID: 1, PublicModel: "native-alias", MatchType: service.CompositeRouteMatchExact,
+		TargetPlatform: service.PlatformTypeSafe, UpstreamModel: typesafe.JevLatestModel,
+		Endpoint: service.CompositeRouteEndpointAny, Enabled: true,
+	}}})
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"model":"native-alias","state":"sample","questions":{"q":{"type":"noul"}}}`, http.StatusNoContent},
+		{`{"model":"native-alias","model":"jev-latest","state":"sample","questions":{"q":{"type":"noul"}}}`, http.StatusBadRequest},
+		{`{"model":"native-alias","MODEL":"jev-latest","state":"sample","questions":{"q":{"type":"noul"}}}`, http.StatusBadRequest},
+		{`{"model":"native-alias","state":"sample","questions":{"q":{"type":"noul"}},"stream":true,"Stream":false}`, http.StatusBadRequest},
+	} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: 1, Platform: service.PlatformComposite}})
+			c.Next()
+		})
+		router.Use(compositeTargetPlatformMiddleware(resolver))
+		router.POST("/v1/systemone", func(c *gin.Context) {
+			body, err := io.ReadAll(c.Request.Body)
+			require.NoError(t, err)
+			_, err = typesafe.ValidateSystemOneRequest(body)
+			if err != nil {
+				c.Status(http.StatusBadRequest)
+				return
+			}
+			platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context())
+			require.True(t, ok)
+			require.Equal(t, service.PlatformTypeSafe, platform)
+			c.Status(http.StatusNoContent)
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		require.Equal(t, tc.status, rec.Code, tc.body)
+	}
 }
 
 func (s compositeRouteRepoStub) ListByGroup(ctx context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {

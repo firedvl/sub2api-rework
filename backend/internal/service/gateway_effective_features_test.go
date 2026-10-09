@@ -99,6 +99,14 @@ func TestGatewayProtocolFeatureMessagesUsesOpenAIChatGate(t *testing.T) {
 	require.Equal(t, gatewayFeatureUnsupported, gatewayProtocolFeature(account, "messages"))
 }
 
+func TestTypeSafeGatewayCapabilitiesRejectChatProtocols(t *testing.T) {
+	account := &Account{Platform: PlatformTypeSafe, Type: AccountTypeAPIKey}
+	for _, protocol := range gatewayEffectiveProtocols {
+		require.Equal(t, gatewayFeatureUnsupported, gatewayAccountFeatures(account, "jev-latest", protocol).Features["protocol"])
+	}
+	require.Equal(t, gatewayFeatureSupported, gatewayProtocolFeature(&Account{Platform: PlatformAnthropic}, "messages"))
+}
+
 func TestGatewayAccountFeaturesCompleteManifestMergeRemainsKnown(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{
 		codexFingerprintSeedExtraKey: "11111111-1111-4111-8111-111111111111",
