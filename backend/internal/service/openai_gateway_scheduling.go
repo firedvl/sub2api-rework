@@ -528,7 +528,7 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
 	paused, decision := evaluateOpenAIAccountQuotaPause(ctx, account)
 	if paused && decision.reason != "" {
-		notifyOpenAIAutoReset(account.ID)
+		notifyOpenAIAutoResetFromSchedulerAt(account.ID, time.Now())
 	}
 	return paused, decision
 }
@@ -700,10 +700,15 @@ func resolveOpenAIQuotaUtilization(extra map[string]any, window string, now time
 	}
 	// 快照过于陈旧（账号长期未收到流量刷新）时，不再据此暂停。放行后下一次响应头
 	// 会刷新快照实现自愈，避免账号在错误/过期的 used% 上被永久跳过（issue #2994）。
-	if openAICodexSnapshotStaleForPause(extra, now) {
+	if openAICodexSnapshotStaleForPause(extra, now) && !openAIQuotaWindowResetPending(extra, window, now) {
 		return 0, false
 	}
 	return usedPercent / 100, true
+}
+
+func openAIQuotaWindowResetPending(extra map[string]any, window string, now time.Time) bool {
+	resetAt, ok := openAICodexWindowResetAt(extra, window)
+	return ok && now.Before(resetAt)
 }
 
 // openAICodexSnapshotStaleForPause reports whether the Codex usage snapshot is stale
@@ -822,12 +827,30 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+	model := resolveOpenAIAccountUpstreamModelAliasForRequest(account, requestedModel, requireCompact)
+	if account != nil && account.IsOpenAIPassthroughEnabled() && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) && (!requireCompact || !openai.IsGPT61SolModelSpelling(model)) {
+		return model
+	}
+	if requireCompact && account != nil && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) && !openai.IsGPT61SolModelSpelling(model) {
+		if compact, matched := account.ResolveCompactMappedModel(strings.TrimSpace(requestedModel)); matched && strings.TrimSpace(compact) != "" {
+			return model
+		}
+		ordinary := resolveOpenAIForwardModel(account, requestedModel, "")
+		if resolveOpenAICompactForwardModel(account, ordinary) != ordinary {
+			return model
+		}
+	}
+	return normalizeOpenAIModelForUpstream(account, model)
+}
+
+// Retain the mapped alias until request effort has been extracted and validated.
+func resolveOpenAIAccountUpstreamModelAliasForRequest(account *Account, requestedModel string, requireCompact bool) string {
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		upstreamModel := resolveOpenAIForwardModel(account, requestedModel, "")
-		return normalizeOpenAIModelForUpstream(account, upstreamModel)
+		return upstreamModel
 	}
 
 	// Passthrough accounts only replace authentication. Their Forward path
@@ -867,7 +890,7 @@ func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 			return compactModel
 		}
 	}
-	return normalizeOpenAIModelForUpstream(account, upstreamModel)
+	return upstreamModel
 }
 
 // ResolveOpenAIAccountUpstreamModelForRequest exposes the scheduler's exact

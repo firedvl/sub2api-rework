@@ -11,6 +11,7 @@ import (
 )
 
 var codexModelMap = map[string]string{
+	"gpt-6.1-sol":          "gpt-6.1-sol",
 	"gpt-6-astra":          "gpt-6-astra",
 	"gpt-5.6-sol":          "gpt-5.6-sol",
 	"gpt-5.6-terra":        "gpt-5.6-terra",
@@ -1225,6 +1226,9 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
+	if openai.IsGPT61SolModelSpelling(model) {
+		return "gpt-6.1-sol"
+	}
 	if account == nil || account.UsesOpenAICodexProtocol() {
 		return normalizeCodexModel(model)
 	}
@@ -1259,6 +1263,9 @@ func SupportsVerbosity(model string) bool {
 }
 
 func getNormalizedCodexModel(modelID string) string {
+	if openai.IsGPT61SolModelSpelling(modelID) {
+		return "gpt-6.1-sol"
+	}
 	key := codexModelLookupKey(modelID)
 	if key == "" {
 		return ""
