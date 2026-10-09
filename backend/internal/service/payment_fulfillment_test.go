@@ -825,6 +825,7 @@ func TestExecuteBalanceFulfillmentBypassesUserRedeemRateLimit(t *testing.T) {
 	order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPaid, time.Now())
 	order, err := client.PaymentOrder.UpdateOneID(order.ID).
 		SetOrderType(payment.OrderTypeBalance).
+		SetBonusAmount(5).
 		ClearPlanID().
 		ClearSubscriptionGroupID().
 		ClearSubscriptionDays().
@@ -859,6 +860,9 @@ func TestExecuteBalanceFulfillmentBypassesUserRedeemRateLimit(t *testing.T) {
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusCompleted, reloaded.Status)
+	require.NoError(t, svc.ExecuteBalanceFulfillment(ctx, order.ID))
+	require.InDelta(t, order.Amount, credited, 1e-8, "promotion credit must be granted only once")
+	require.Equal(t, 1, redeemRepo.createCalls)
 }
 
 func TestExecuteBalanceFulfillmentRecoversAfterRedeemWithoutCreditingAgain(t *testing.T) {
