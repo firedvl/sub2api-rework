@@ -858,7 +858,7 @@ Invoke-RestMethod -Method Post -Uri "${endpoint}" -Headers $headers -ContentType
       content: `curl -X POST "${endpoint}" ^
   -H "Authorization: Bearer ${apiKey}" ^
   -H "Content-Type: application/json" ^
-  --data "${JSON.stringify(JSON.parse(payload)).replaceAll('"', '\\"')}"`
+  --data "${JSON.stringify(JSON.parse(payload)).replace(/"/g, '\\"')}"`
     }
   }
   return {
