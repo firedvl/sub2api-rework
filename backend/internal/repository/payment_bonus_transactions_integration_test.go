@@ -48,6 +48,7 @@ func TestPaymentPromotionPostgresTransactions(t *testing.T) {
 			order, err := client.PaymentOrder.Create().SetUserID(user.ID).SetUserEmail(user.Email).SetUserName(key).
 				SetAmount(tc.credit).SetBonusAmount(tc.bonus).SetPayAmount(tc.pay).SetFeeRate(2.5).
 				SetRechargeCode(key).SetOutTradeNo(key).SetPaymentType(payment.TypeAlipay).SetPaymentTradeNo(key).
+				SetClientIP("127.0.0.1").SetSrcHost("fixture.example.test").
 				SetProviderInstanceID(strconv.FormatInt(instance.ID, 10)).SetProviderKey(payment.TypeAlipay).
 				SetProviderSnapshot(map[string]any{"schema_version": 2, "provider_instance_id": strconv.FormatInt(instance.ID, 10), "provider_key": payment.TypeAlipay, "currency": currency}).
 				SetStatus(status).SetExpiresAt(time.Now().Add(time.Hour)).Save(ctx)
