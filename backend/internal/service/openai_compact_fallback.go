@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -67,6 +68,10 @@ func (s *OpenAIGatewayService) resolveOpenAICompactFallbackModel(account *Accoun
 	fallback := strings.TrimSpace(s.cfg.Gateway.OpenAICompactModel)
 	if fallback == "" {
 		return ""
+	}
+	alias := resolveOpenAIAccountUpstreamModelAliasForRequest(account, fallback, false)
+	if openai.IsGPT61SolModelSpelling(alias) {
+		return strings.TrimSpace(alias)
 	}
 	return strings.TrimSpace(resolveOpenAIAccountUpstreamModelForRequest(account, fallback, false))
 }

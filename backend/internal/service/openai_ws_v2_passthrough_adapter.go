@@ -738,6 +738,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	} else {
 		firstClientMessage = normalized
 	}
+	firstFinalAlias := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	if hooks != nil && hooks.MapRequestModel != nil {
 		mappedModel, mapErr := hooks.MapRequestModel(1, initialRequestModel)
 		if mapErr != nil {
@@ -746,6 +747,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
 			if _, composite := RequestedPublicModelFromContext(ctx); composite {
 				mappedModel = account.GetMappedModel(mappedModel)
+				firstFinalAlias = mappedModel
+				mappedModel = normalizeOpenAIModelForUpstream(account, mappedModel)
 				if gjson.GetBytes(firstClientMessage, "session.model").Exists() {
 					firstClientMessage, mapErr = sjson.SetBytes(firstClientMessage, "session.model", mappedModel)
 					if mapErr != nil {
@@ -753,15 +756,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 				}
 			}
+			if _, composite := RequestedPublicModelFromContext(ctx); !composite {
+				firstFinalAlias = mappedModel
+			}
 			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
 		}
+	}
+	if err := validateGPT61SolCompatRequest(originalFirstClientMessage, firstFinalAlias); err != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 	}
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
 	firstMessageResponsesLite := isOpenAIResponsesLiteWebSocketPayload(firstClientMessage)
-	if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(firstClientMessage, account, firstMessageResponsesLite); normalizeErr != nil {
+	if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(firstClientMessage, account, firstMessageResponsesLite, firstFinalAlias); normalizeErr != nil {
 		return fmt.Errorf("normalize first websocket response.create: %w", normalizeErr)
 	} else if compatibilityChanged {
 		firstClientMessage = normalized
@@ -1027,14 +1036,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}()
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
-			if isResponseCreate {
-				if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(payload, account, responsesLite); normalizeErr != nil {
-					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
-				} else if compatibilityChanged {
-					payload = normalized
-				}
-			}
-			if account.IsOpenAIOAuthLike() && (isResponseCreate || eventType == "session.update") {
+			if account.IsOpenAIOAuthLike() && eventType == "session.update" {
 				aliasedBody, reverse, aliased, aliasErr := aliasOpenAIOAuthReservedToolNamesBody(payload)
 				if aliasErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, aliasErr.Error(), aliasErr)
@@ -1061,19 +1063,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					payload = litePayload
 				}
-				originalResponseCreate := payload
+				usageMeta.captureRequestedReasoningEffort(clientPayload)
 				if next, policyErr := applyOpenAIWSReasoningEffortPolicy(payload, hooks); policyErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 				} else {
 					payload = next
 				}
-				usageMeta.captureRequestedReasoningEffort(originalResponseCreate)
 			}
 			turnNo := int(completedTurns.Load()) + 1
 			if turnNo < 2 {
 				turnNo = 2
 			}
 			requestModelForThisFrame := ""
+			finalAlias := openAIWSPassthroughPolicyModelForFrame(account, payload)
 			if isResponseCreate {
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 				if requestModelForThisFrame == "" {
@@ -1097,12 +1099,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
 						if _, composite := RequestedPublicModelFromContext(ctx); composite {
 							upstreamModel = account.GetMappedModel(upstreamModel)
+							finalAlias = upstreamModel
+							upstreamModel = normalizeOpenAIModelForUpstream(account, upstreamModel)
 							if gjson.GetBytes(payload, "session.model").Exists() {
 								payload, err = sjson.SetBytes(payload, "session.model", upstreamModel)
 								if err != nil {
 									return payload, nil, err
 								}
 							}
+						}
+						if _, composite := RequestedPublicModelFromContext(ctx); !composite {
+							finalAlias = upstreamModel
 						}
 						payload = s.ReplaceModelInBody(payload, upstreamModel)
 					}
@@ -1137,6 +1144,30 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
+			}
+			if isResponseCreate {
+				if finalAlias == "" {
+					finalAlias = model
+				}
+				// Validate original intent against the final target before policy or compatibility can rewrite it.
+				if err := validateGPT61SolCompatRequest(clientPayload, finalAlias); err != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
+				if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(payload, account, responsesLite, finalAlias); normalizeErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+				} else if compatibilityChanged {
+					payload = normalized
+				}
+				if account.IsOpenAIOAuthLike() {
+					aliasedBody, reverse, aliased, aliasErr := aliasOpenAIOAuthReservedToolNamesBody(payload)
+					if aliasErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, aliasErr.Error(), aliasErr)
+					}
+					updateCodexToolNameReverseForWSFrame(c, payload, reverse)
+					if aliased {
+						payload = aliasedBody
+					}
+				}
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
