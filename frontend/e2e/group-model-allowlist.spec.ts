@@ -39,16 +39,16 @@ test('edits the enforced allowlist without changing the display-only model list'
   await allowlistToggle.click()
   await expect(dialog.getByText('gpt-5.5', { exact: true })).toBeVisible()
   await expect(dialog.getByText('catalog-only-model', { exact: true })).toHaveCount(0)
-  await dialog.getByPlaceholder('Custom entry, e.g. claude-* or gpt-5.5-codex').fill('gpt-6-*')
+  await dialog.getByPlaceholder('Custom entry, e.g. gpt-*-codex or claude-*').fill('gpt-*-codex')
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(dialog.getByText('gpt-6-*', { exact: false })).toBeVisible()
+  await expect(dialog.getByText('gpt-*-codex wildcard', { exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('group-model-allowlist-desktop.png'), animations: 'disabled' })
 
   await dialog.getByRole('button', { name: 'Update', exact: true }).click()
   await expect.poll(() => updates).toHaveLength(1)
   expect(updates[0].model_allowlist).toEqual({
     enabled: true,
-    models: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-6-*'],
+    models: ['gpt-5.5', 'gpt-5.4-mini', 'gpt-*-codex'],
   })
   expect(updates[0].models_list_config).toEqual({ enabled: false, models: ['catalog-only-model'] })
 })

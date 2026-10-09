@@ -133,6 +133,12 @@ export default {
       schedulableEnabled: '调度已开启',
       schedulableDisabled: '调度已关闭',
       failedToToggleSchedulable: '切换调度状态失败',
+      priorityQuick: {
+        raise: '提高优先级（数值 -1）',
+        lower: '降低优先级（数值 +1）',
+        editHint: '点击直接输入；数值越小越优先',
+        failed: '更新优先级失败'
+      },
       groupCountTotal: '共 {count} 个分组',
       columns: {
         name: '名称',
@@ -985,6 +991,7 @@ export default {
       enterCustomModelName: '输入自定义模型名称',
       addModel: '填入',
       modelExists: '该模型已存在',
+      modelMappingConflict: '请先移除该模型的映射。',
       modelCount: '{count} 个模型',
       poolMode: '池模式',
       poolModeHint: '上游为账号池时启用，错误不标记本地账号状态',
