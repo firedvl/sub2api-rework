@@ -7,6 +7,7 @@ import (
 )
 
 var codexToolCapabilityFields = []string{
+	"service_tiers",
 	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
 	"multi_agent_reasoning_effort", "multi_agent_version",
 }
@@ -18,9 +19,14 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 		if len(value) == 0 {
 			continue
 		}
-		// These Codex fields are nullable booleans or strings, never arbitrary objects.
+		// Validate known Codex capability fields before forwarding metadata.
 		if !bytes.Equal(value, []byte("null")) {
-			if field == "supports_search_tool" || field == "use_responses_lite" {
+			if field == "service_tiers" {
+				var tiers []configuredCodexServiceTier
+				if json.Unmarshal(value, &tiers) != nil {
+					continue
+				}
+			} else if field == "supports_search_tool" || field == "use_responses_lite" {
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
 				}
@@ -399,6 +405,9 @@ func applyUpstreamModelMetadataToCodexDescriptor(
 		descriptor.ContextWindow = min(descriptor.ContextWindow, metadata.MaxContextWindow)
 	}
 	capabilities := metadata.CodexToolCapabilities
+	if value := bytes.TrimSpace(capabilities["service_tiers"]); len(value) > 0 {
+		_ = json.Unmarshal(value, &descriptor.ServiceTiers)
+	}
 	if value := bytes.TrimSpace(capabilities["supports_search_tool"]); len(value) > 0 {
 		_ = json.Unmarshal(value, &descriptor.SupportsSearchTool)
 	}

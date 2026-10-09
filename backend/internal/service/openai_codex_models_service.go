@@ -926,11 +926,18 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 	}
 
 	if isClaudeCodexModel(modelID) {
+		if isClaude55SignedThinkingModel(modelID) {
+			descriptor.ContextWindow = 1_000_000
+			descriptor.MaxContextWindow = 1_000_000
+		}
 		descriptor.DisplayName = claudeCodexDisplayName(modelID)
 		descriptor.Description = "Claude coding and reasoning model routed through Sub2API."
 		descriptor.SupportsParallelToolCalls = true
 		if levels := configuredCodexClaudeReasoningLevels(modelID); len(levels) > 0 {
 			defaultReasoningLevel := claudeCodexDefaultReasoningLevel(levels)
+			if claude.IsSonnet55(modelID) {
+				defaultReasoningLevel = "high"
+			}
 			descriptor.DefaultReasoningLevel = &defaultReasoningLevel
 			descriptor.SupportedReasoningLevels = levels
 		}
@@ -1203,6 +1210,9 @@ func isClaudeCodexModel(modelID string) bool {
 }
 
 func claudeCodexDisplayName(modelID string) string {
+	if claude.IsSonnet55(modelID) {
+		return "Claude Sonnet 5.5"
+	}
 	normalized := strings.ToLower(codexProviderQualifiedModelID(modelID))
 	normalized = strings.TrimPrefix(normalized, "anthropic.")
 	if normalized == "" {
