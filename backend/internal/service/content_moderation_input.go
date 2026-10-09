@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/tidwall/gjson"
 )
 
@@ -31,6 +32,11 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 	collector := moderationTextCollector{filterReminders: filterReminders}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return ContentModerationInput{}
+	}
+	if protocol == ContentModerationProtocolOpenAIChat || protocol == ContentModerationProtocolOpenAIResponses {
+		if normalized, err := apicompat.NormalizeInlineFilePartsForInspection(body); err == nil {
+			body = normalized
+		}
 	}
 	var parts []string
 	var images []string
