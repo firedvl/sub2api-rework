@@ -185,6 +185,13 @@ func TestGatewayEffectiveProtocolOperatorGates(t *testing.T) {
 	result, err := gateway.PreflightGatewayRequest(context.Background(), group, GatewayPreflightRequest{SchemaVersion: 2, Model: "public", Protocol: "responses"}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "restricted", result.Routing.State)
+	fallbackID := int64(43)
+	group.FallbackGroupID = &fallbackID
+	result, err = gateway.PreflightGatewayRequest(context.Background(), group, GatewayPreflightRequest{SchemaVersion: 2, Model: "public", Protocol: "responses"}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", result.Routing.State)
+	require.Equal(t, "REQUEST_DEPENDENT_POLICY_UNKNOWN", result.Decision.Reason)
+	group.FallbackGroupID = nil
 	group.ClaudeCodeOnly = false
 	group.RequirePrivacySet = true
 	group.Platform = PlatformOpenAI

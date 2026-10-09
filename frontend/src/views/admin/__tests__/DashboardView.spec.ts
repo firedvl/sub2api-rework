@@ -177,7 +177,7 @@ describe('admin DashboardView', () => {
       include_group_stats: false,
       include_users_trend: false
     })
-    expect(getUserUsageTrend).not.toHaveBeenCalled()
+    expect(getUserUsageTrend).toHaveBeenCalledWith({ granularity: 'day', limit: 12, metric: 'tokens' })
     expect(getUserSpendingRanking).not.toHaveBeenCalled()
   })
 

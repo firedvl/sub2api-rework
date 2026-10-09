@@ -986,6 +986,16 @@ func (s *GatewayService) ResolveChannelMappingAndRestrict(ctx context.Context, g
 	return s.channelService.ResolveChannelMappingAndRestrict(ctx, groupID, model)
 }
 
+// Compatible endpoints must forward the same channel target checked by fallback scheduling.
+func (s *GatewayService) ResolveCompatibleChannelMapping(ctx context.Context, groupID *int64, model string) (ChannelMappingResult, error) {
+	_, effectiveGroupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
+	if err != nil {
+		return ChannelMappingResult{}, err
+	}
+	mapping, _ := s.ResolveChannelMappingAndRestrict(ctx, effectiveGroupID, model)
+	return mapping, nil
+}
+
 // checkChannelPricingRestriction 根据渠道计费基准检查模型是否受定价列表限制。
 // 供调度阶段预检查（requested / channel_mapped）。
 // upstream 需逐账号检查，此处返回 false。
