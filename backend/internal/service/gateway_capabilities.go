@@ -44,6 +44,7 @@ var gatewayCapabilityPlatforms = []string{
 	PlatformDeepseek,
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
+	PlatformTypeSafe,
 }
 
 // GatewayCapabilityModel is an explicit public DTO. Account and route records
@@ -474,6 +475,9 @@ func gatewayCapabilityExactRouteModelIDs(routes []CompositeModelRoute) []string 
 			continue
 		}
 		endpoint := normalizeCompositeRouteEndpoint(route.Endpoint)
+		if route.TargetPlatform == PlatformTypeSafe && endpoint != CompositeRouteEndpointAny {
+			continue
+		}
 		if endpoint != CompositeRouteEndpointResponses && endpoint != CompositeRouteEndpointAny {
 			continue
 		}

@@ -190,7 +190,13 @@ func RegisterGatewayRoutes(
 		}
 		c.Next()
 	})
-	gateway.Use(bodyLimit)
+	gateway.Use(func(c *gin.Context) {
+		if c.Request.URL.Path == "/v1/systemone" {
+			textBodyLimit(c)
+			return
+		}
+		bodyLimit(c)
+	})
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
@@ -211,6 +217,8 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.Messages(c)
 		})
+		// System One carries only JSON text, so it uses the text body limit.
+		gateway.POST("/systemone", textBodyLimit, h.Gateway.SystemOne)
 		// /v1/messages/count_tokens: OpenAI bridges upstream, Grok estimates
 		// locally, and Anthropic-compatible platforms retain their existing path.
 		gateway.POST("/messages/count_tokens", countTokensHandler)
