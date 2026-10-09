@@ -266,6 +266,48 @@ func TestPassthroughLifecycle_LaterTurnPreOutputRateLimitRequestsReconnect(t *te
 	}
 }
 
+func TestGPT61PassthroughLaterOAuthLegacyToolHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := newStagedPassthroughConn()
+	account := passthroughLifecycleAccount()
+	account.Type = AccountTypeOAuth
+	account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough}
+	account.Credentials["access_token"] = "fixture-token"
+	account.Credentials["chatgpt_account_id"] = "fixture-account"
+	cfg := passthroughLifecycleConfig()
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	server, _ := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(*gin.Context) *OpenAIWSIngressHooks {
+		return &OpenAIWSIngressHooks{MapRequestModel: func(int, string) (string, error) { return "gpt-6.1-sol", nil }}
+	})
+	defer server.Close()
+	client := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = client.CloseNow() }()
+	first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(first, "model").String())
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-6.1-sol","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err := readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	writeCtx, cancelWrite := context.WithTimeout(ctx, time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"public-alias","messages":[{"role":"assistant","tool_calls":[{"id":"call1","type":"function","function":{"name":"python","arguments":"{}"}}]}],"tools":[{"type":"function","function":{"name":"python","parameters":{"type":"object"}}}]}`))
+	cancelWrite()
+	require.NoError(t, err)
+	second := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.False(t, gjson.GetBytes(second, "messages").Exists())
+	declaration := gjson.GetBytes(second, "tools.0.name").String()
+	require.NotEmpty(t, declaration)
+	require.NotEqual(t, "python", declaration)
+	var callName string
+	for _, item := range gjson.GetBytes(second, "input").Array() {
+		if item.Get("type").String() == "function_call" {
+			callName = item.Get("name").String()
+		}
+	}
+	require.Equal(t, declaration, callName)
+}
+
 func TestPassthroughLifecycle_CyberTerminalEventsMarkBeforeAfterTurn(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
