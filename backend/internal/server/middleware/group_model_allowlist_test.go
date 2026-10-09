@@ -161,6 +161,37 @@ func TestGroupModelAllowlistJSONBodyAllowed(t *testing.T) {
 	}
 }
 
+func TestGroupModelAllowlistAnchoredGlobAdmissionIsCallerScoped(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, model string
+		allowed        bool
+	}{
+		{"*-sol", "gpt-6.1-sol", true},
+		{"gpt-*-sol", "gpt-6.1-sol", true},
+		{"gpt-*-sol", "other-gpt-6.1-sol", false},
+		{"gpt-*-sol", "gpt-6.1-sol-extra", false},
+		{"gpt-*-sol", "gpt-sol", false},
+		{"gpt-?-sol", "gpt-6-sol", false},
+	} {
+		t.Run(tc.pattern+"/"+tc.model, func(t *testing.T) {
+			router, calls := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, tc.pattern), "/v1")
+			w := doJSON(t, router, http.MethodPost, "/v1/responses", `{"model":"`+tc.model+`"}`)
+			if tc.allowed {
+				if w.Code != http.StatusOK || len(*calls) != 1 {
+					t.Fatalf("expected allowed, got %d/%v", w.Code, *calls)
+				}
+			} else if w.Code != http.StatusNotFound || len(*calls) != 0 {
+				t.Fatalf("expected denied, got %d/%v", w.Code, *calls)
+			}
+			other, otherCalls := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, "private-*"), "/v1")
+			w = doJSON(t, other, http.MethodPost, "/v1/responses", `{"model":"`+tc.model+`"}`)
+			if w.Code != http.StatusNotFound || len(*otherCalls) != 0 {
+				t.Fatalf("caller rule leaked: %d/%v", w.Code, *otherCalls)
+			}
+		})
+	}
+}
+
 func TestGroupModelAllowlistJSONBodyDeniedOpenAIFormat(t *testing.T) {
 	router, calls := newGroupModelAllowlistTestRouter(allowlistAPIKey(true, "claude-sonnet-4.5"), "/v1")
 
