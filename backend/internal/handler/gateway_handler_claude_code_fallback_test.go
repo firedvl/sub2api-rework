@@ -5,18 +5,37 @@ package handler
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+type fallbackWireUpstream struct{ models []string }
+
+func (u *fallbackWireUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.models = append(u.models, gjson.GetBytes(body, "model").String())
+	return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"synthetic provider rejection"}}`))}, nil
+}
+
+func (u *fallbackWireUpstream) DoWithTLS(req *http.Request, proxy string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, accountID, concurrency)
+}
 
 // groupScopedSchedulerCache 按桶的分组只返回该分组的成员账号，并记录被查询过的分组。
 type groupScopedSchedulerCache struct {
@@ -104,9 +123,11 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 		for _, tc := range []struct {
 			name        string
 			hasFallback bool
+			wireMapping bool
 		}{
 			{name: "with fallback group", hasFallback: true},
 			{name: "without fallback group", hasFallback: false},
+			{name: "fallback mapping reaches provider", hasFallback: true, wireMapping: true},
 		} {
 			t.Run(ep.name+"/"+tc.name, func(t *testing.T) {
 				primary := &service.Group{
@@ -126,15 +147,27 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 					newAccount(primaryAccountID, primaryGroupID),
 					newAccount(fallbackAccountID, fallbackGroupID),
 				}}}
+				cfg := &config.Config{RunMode: config.RunModeSimple}
+				upstream := &fallbackWireUpstream{}
+				var channels *service.ChannelService
+				if tc.wireMapping {
+					schedulerCache.accounts[1].Credentials = map[string]any{"api_key": "fixture-key", "base_url": "https://fixture.example", "model_mapping": map[string]any{"claude-sonnet-4-5": "claude-sonnet-4-5"}}
+					channels = service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
+						channels: []service.Channel{
+							{ID: 1, Status: service.StatusActive, GroupIDs: []int64{primaryGroupID}, ModelMapping: map[string]map[string]string{service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-opus-4-6"}}},
+							{ID: 2, Status: service.StatusActive, GroupIDs: []int64{fallbackGroupID}, RestrictModels: true, BillingModelSource: service.BillingModelSourceUpstream, ModelMapping: map[string]map[string]string{service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-sonnet-4-6"}}, ModelPricing: []service.ChannelModelPricing{{Platform: service.PlatformAnthropic, Models: []string{"claude-sonnet-4-6"}}}},
+						},
+						groupPlatforms: map[int64]string{primaryGroupID: service.PlatformAnthropic, fallbackGroupID: service.PlatformAnthropic},
+					}, nil, nil, nil, nil)
+				}
 				gatewayService := service.NewGatewayService(
 					nil, &groupMapRepo{fakeGroupRepo: &fakeGroupRepo{}, groups: map[int64]*service.Group{
 						primaryGroupID:  primary,
 						fallbackGroupID: fallback,
-					}}, nil, nil, nil, nil, nil, nil, nil,
+					}}, nil, nil, nil, nil, nil, nil, cfg,
 					service.NewSchedulerSnapshotService(schedulerCache, nil, nil, nil, nil),
-					nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+					nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, channels, nil, nil, nil, nil,
 				)
-				cfg := &config.Config{RunMode: config.RunModeSimple}
 				billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 				t.Cleanup(billingCacheService.Stop)
 				h := &GatewayHandler{
@@ -175,6 +208,13 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				queried := schedulerCache.queriedGroupIDs()
 				require.Contains(t, queried, fallbackGroupID)
 				require.NotContains(t, queried, primaryGroupID)
+				if tc.wireMapping {
+					require.NotEmpty(t, upstream.models)
+					for _, model := range upstream.models {
+						require.Equal(t, "claude-sonnet-4-6", model)
+					}
+					require.Equal(t, primaryGroupID, *apiKey.GroupID, "fallback routing must not move caller billing ownership")
+				}
 			})
 		}
 	}

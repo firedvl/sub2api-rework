@@ -289,7 +289,7 @@ func (s *GatewayService) gatewayEffectiveCandidates(ctx context.Context, group *
 		return result
 	}
 	if group != nil && group.ClaudeCodeOnly && (route.targetPlatform == PlatformAnthropic || route.targetPlatform == PlatformGemini || route.targetPlatform == PlatformAntigravity) {
-		if protocol == CompositeRouteEndpointMessages {
+		if protocol == CompositeRouteEndpointMessages || group.FallbackGroupID != nil {
 			// Client identity and fallback-group admission require the real request.
 			result.reason = "REQUEST_DEPENDENT_POLICY_UNKNOWN"
 			return result

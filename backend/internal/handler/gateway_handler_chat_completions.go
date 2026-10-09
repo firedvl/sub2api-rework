@@ -98,9 +98,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
 
-	// 解析渠道级模型映射
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
-
 	// Claude Code only restriction: /v1/chat/completions is never a Claude Code
 	// endpoint. With a fallback group the request continues and account selection
 	// (checkClaudeCodeRestriction) schedules it in the fallback group; without one
@@ -108,6 +105,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly && apiKey.Group.FallbackGroupID == nil {
 		h.chatCompletionsErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group is restricted to Claude Code clients (/v1/messages only)")
+		return
+	}
+	channelMapping, err := h.gatewayService.ResolveCompatibleChannelMapping(c.Request.Context(), apiKey.GroupID, reqModel)
+	if err != nil {
+		h.chatCompletionsErrorResponse(c, http.StatusForbidden, "permission_error", "No permitted fallback route is available")
 		return
 	}
 
