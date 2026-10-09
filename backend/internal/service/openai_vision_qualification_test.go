@@ -179,7 +179,7 @@ func TestGetOpenAIVisionQualificationPromotionEligibilityFollowsCurrentCapabilit
 }
 
 func visionAnswer(status int, answer string) *http.Response {
-	body := fmt.Sprintf("data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\ndata: {\"type\":\"response.completed\"}\n\n", answer)
+	body := fmt.Sprintf("data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", answer)
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
 

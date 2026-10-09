@@ -445,7 +445,11 @@ func (s *AccountTestService) runOpenAIVisionQualificationAttempt(ctx context.Con
 		attempt.FailureClassification = visionFailureInvalidResponse
 		return attempt
 	}
-	attempt.VisualAnswer, _ = parseOpenAIResponsesSSEForAlphaSearch(body)
+	attempt.VisualAnswer, _, err = parseOpenAIResponsesSSEForAlphaSearch(body)
+	if err != nil && !json.Valid(body) {
+		attempt.FailureClassification = visionFailureInvalidResponse
+		return attempt
+	}
 	if strings.TrimSpace(attempt.VisualAnswer) == "" {
 		attempt.VisualAnswer = extractOpenAIResponsesText(body)
 	}
