@@ -92,7 +92,8 @@ func TestOpenAISchedulerCanonicalResetScoresMatchSnapshot(t *testing.T) {
 	plan := scheduler.buildOpenAIAccountLoadPlan(context.Background(), OpenAIAccountScheduleRequest{}, accounts, nil)
 	scores := openAIPlanScores(plan)
 	require.InDelta(t, 1, scores[1]-scores[2], 1e-9)
-	snapshots := buildOpenAIAccountSchedulerScoreSnapshot(accounts, nil, scheduler.service.openAIWSSchedulerWeights(), false, nil)
+	multiplier := float64(defaultOpenAIOAuthSchedulingRateMultiplier)
+	snapshots := buildOpenAIAccountSchedulerScoreSnapshot(accounts, nil, scheduler.service.openAIWSSchedulerWeights(), false, &multiplier)
 	for _, account := range accounts {
 		require.InDelta(t, scores[account.ID], snapshots[account.ID].BaseScore, 1e-9)
 	}

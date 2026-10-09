@@ -61,8 +61,8 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	}
 	if account.IsOpenAIApiKey() {
 		target := modelID
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
+		if normalized := normalizeKnownOpenAICodexModel(target); normalized != "" {
+			target = normalized
 		}
 		_, disabled := apiKeyCodexModelsWithoutResponsesLite[target]
 		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {

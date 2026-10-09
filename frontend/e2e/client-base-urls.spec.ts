@@ -20,10 +20,43 @@ for (const width of [390, 1280]) {
         created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', expires_at: null }],
       total: 1, page: 1, page_size: 10, pages: 1
     } } }))
+    let catalogRequests = 0
+    await page.route('https://gateway.example.test/v1/models?**', route => {
+      catalogRequests += 1
+      expect(route.request().headers().authorization).toBe('Bearer sk-fixture')
+      return route.fulfill({ json: { models: [{
+        slug: 'gpt-6.1', display_name: 'GPT-6.1',
+        default_reasoning_level: 'xhigh', supported_reasoning_levels: [{ effort: 'xhigh' }]
+      }] } })
+    })
     await page.goto('/keys')
     await page.getByRole('button', { name: 'Use Key', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Use API Key' })
     await expect(dialog.locator('pre code').filter({ hasText: 'model_provider = "OpenAI"' })).toContainText('base_url = "https://gateway.example.test/v1"')
+    const config = dialog.locator('pre code').filter({ hasText: 'model_provider = "OpenAI"' })
+    await expect(config).toContainText('model_catalog_url = "https://gateway.example.test/v1/models"')
+    await expect(config).toContainText('api_key_model_discovery = true')
+    await expect(config).not.toContainText('\nmodel =')
+    await expect(config).not.toContainText('\nreview_model =')
+    const source = dialog.getByTestId('codex-model-catalog-mode')
+    await source.selectOption('file')
+    await expect(config).toContainText('model_catalog_json = "~/.codex/codex-models.json"')
+    await expect(config).not.toContainText('model_catalog_url')
+    await expect(config).not.toContainText('api_key_model_discovery')
+    await dialog.getByRole('button', { name: 'Windows', exact: true }).click()
+    await expect(config).toContainText('model_catalog_json = "~/.codex/codex-models.json"')
+    await expect(dialog.getByTestId('codex-model-catalog')).toContainText('%userprofile%')
+    expect(catalogRequests).toBe(0)
+    await dialog.getByTestId('codex-model-catalog-fetch').click()
+    await expect(config).toContainText('model = "gpt-6.1"')
+    await expect(config).toContainText('model_reasoning_effort = "xhigh"')
+    await expect(source).toHaveValue('file')
+    await page.screenshot({ path: testInfo.outputPath(`codex-local-catalog-${width}.png`) })
+    await source.selectOption('remote')
+    await expect(config).toContainText('api_key_model_discovery = true')
+    await expect(config).toContainText('model = "gpt-6.1"')
+    expect(catalogRequests).toBe(1)
+    await page.screenshot({ path: testInfo.outputPath(`codex-remote-catalog-${width}.png`) })
     await dialog.getByRole('button', { name: 'Codex CLI (WebSocket)', exact: true }).click()
     await expect(dialog.locator('pre code').filter({ hasText: 'model_provider = "OpenAI"' })).toContainText('base_url = "https://gateway.example.test/v1"')
     await dialog.getByRole('button', { name: 'Claude Code', exact: true }).click()

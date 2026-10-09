@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
+import ClaudeResetCreditsCell from '../ClaudeResetCreditsCell.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { Account } from '@/types'
 
@@ -90,6 +91,26 @@ const cnUsageCellStubs = {
 }
 
 describe('AccountUsageCell', () => {
+  it('keeps the native Claude reset cell through loading, data and missing usage', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3010, platform: 'anthropic', type: 'oauth' }),
+        requestBatchedUsage: vi.fn(),
+        batchedUsageLoading: true,
+      },
+      global: { stubs: { UsageProgressBar: true, AccountQuotaInfo: true } },
+    })
+    const cell = wrapper.getComponent(ClaudeResetCreditsCell).vm.$.uid
+    await wrapper.setProps({
+      batchedUsageLoading: false,
+      batchedUsage: { five_hour: { utilization: 10, resets_at: null, remaining_seconds: null } },
+    })
+    expect(wrapper.getComponent(ClaudeResetCreditsCell).vm.$.uid).toBe(cell)
+    await wrapper.setProps({ batchedUsage: null })
+    expect(wrapper.getComponent(ClaudeResetCreditsCell).vm.$.uid).toBe(cell)
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     getUsage.mockReset()
     Object.defineProperty(window, 'matchMedia', {

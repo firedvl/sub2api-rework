@@ -24,7 +24,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
-	filteredBody, filterErr := filterOpenAIResponsesNoneReasoningEffortForAccount(account, body)
+	compactRequest := isOpenAIResponsesCompactPath(c)
+	finalAlias := resolveOpenAIAccountUpstreamModelAliasForRequest(account, gjson.GetBytes(body, "model").String(), compactRequest)
+	if compactRequest && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		if fallback := s.resolveOpenAICompactFallbackModel(account, gjson.GetBytes(body, "model").String()); fallback != "" {
+			finalAlias = fallback
+		}
+	}
+	normalizedGPT61Body, _, normalizationErr := normalizeGPT61SolMappedRequest(body, account, compactRequest, finalAlias)
+	if normalizationErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": normalizationErr.Error()}})
+		return nil, normalizationErr
+	}
+	body = normalizedGPT61Body
+	filteredBody, filterErr := filterOpenAIResponsesNoneReasoningEffortForAccount(account, body, finalAlias)
 	if filterErr != nil {
 		return nil, filterErr
 	}
@@ -78,7 +91,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		body = sanitizedToolBody
 	}
 	if account.IsOpenAIOAuthLike() {
-		reasoningBody, reasoningChanged, reasoningErr := normalizeOpenAIResponsesReasoningMode(body, account.GetMappedModel(gjson.GetBytes(body, "model").String()))
+		reasoningBody, reasoningChanged, reasoningErr := normalizeOpenAIResponsesReasoningMode(body, finalAlias)
 		if reasoningErr != nil {
 			return nil, fmt.Errorf("normalize OpenAI Responses reasoning.mode: %w", reasoningErr)
 		}
@@ -379,6 +392,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if isCompactRequest {
 		if compactModel := s.resolveOpenAICompactFallbackModel(account, requestedModel); compactModel != "" {
 			upstreamModel = compactModel
+			if openai.IsGPT61SolModelSpelling(compactModel) && !account.IsOpenAIPassthroughEnabled() {
+				upstreamModel = normalizeOpenAIModelForUpstream(account, compactModel)
+			}
 		}
 	}
 	instructions := gjson.GetBytes(body, "instructions")
