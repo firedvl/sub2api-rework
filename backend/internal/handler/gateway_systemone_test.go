@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -15,6 +19,51 @@ import (
 )
 
 const validSystemOneHandlerBody = `{"model":"jev-latest","state":"sample","questions":{"q":{"type":"noul","instructions":"Evaluate"}}}`
+
+func TestSystemOneUsageSnapshotsModelBeforeContextReuse(t *testing.T) {
+	pool := newUsageRecordTestPool(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	pool.Submit(func(context.Context) { close(started); <-release })
+	<-started
+	t.Cleanup(func() { unblock(); pool.Stop() })
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	repo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gateway := service.NewGatewayService(
+		nil, nil, repo, nil, nil, nil, nil, nil, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, nil, nil, nil,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := &GatewayHandler{gatewayService: gateway, usageRecordWorkerPool: pool}
+	c, _ := newSystemOneHandlerContext(validSystemOneHandlerBody)
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestedPublicModel, "first-caller-model"))
+	key := &service.APIKey{ID: 4, UserID: 5, User: &service.User{ID: 5}}
+	account := &service.Account{ID: 6, Platform: service.PlatformTypeSafe}
+	result := &service.SystemOneForwardResult{ForwardResult: service.ForwardResult{Model: "jev-latest", UpstreamModel: "jev-latest"}}
+	h.recordSystemOneUsage(c, key, account, nil, service.ChannelMappingResult{}, "jev-latest", []byte(validSystemOneHandlerBody), result, 5, time.Now())
+
+	// Gin reuses the same context after the first handler returns.
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/systemone", nil)
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.RequestedPublicModel, "later-caller-model"))
+	select {
+	case <-repo.created:
+		t.Fatal("billing ran while the worker was blocked")
+	default:
+	}
+	unblock()
+	select {
+	case usage := <-repo.created:
+		require.Equal(t, "first-caller-model", usage.RequestedModel)
+		require.Equal(t, int64(5), usage.UserID)
+		require.Equal(t, int64(4), usage.APIKeyID)
+		require.Equal(t, int64(6), usage.AccountID)
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued usage was not recorded")
+	}
+}
 
 func newSystemOneHandlerContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
