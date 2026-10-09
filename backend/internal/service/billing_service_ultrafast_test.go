@@ -49,7 +49,7 @@ func TestAstraUltrafastPricingUsesSixTimesStandard(t *testing.T) {
 
 func TestGPT61UltrafastSelectedPricingAppliedOnce(t *testing.T) {
 	svc := NewBillingService(&config.Config{}, nil)
-	for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol-2026-09-23"} {
+	for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol-max"} {
 		for _, price := range []float64{0, 1e-6} {
 			fast := 3.0
 			base := &ModelPricing{InputPricePerToken: price, OutputPricePerToken: price, CacheReadPricePerToken: price, CacheCreationPricePerToken: price,
@@ -73,4 +73,32 @@ func TestGPT61UltrafastSelectedPricingAppliedOnce(t *testing.T) {
 	}
 	pricing := svc.applyModelSpecificPricingPolicyEx("gpt-6.1-other", &ModelPricing{}, false, time.Time{})
 	require.Zero(t, pricing.UltrafastMultiplier)
+}
+
+func TestGPT61UltrafastCatalogPrices(t *testing.T) {
+	data, err := os.ReadFile("../../resources/model-pricing/model_prices_and_context_window.json")
+	require.NoError(t, err)
+	catalog := &PricingService{}
+	catalog.pricingData, err = catalog.parsePricingData(data)
+	require.NoError(t, err)
+	for _, svc := range []*BillingService{NewBillingService(&config.Config{}, nil), NewBillingService(&config.Config{}, catalog)} {
+		for _, model := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol-max"} {
+			for _, input := range []int{271999, 272000, 272001} {
+				tokens := UsageTokens{InputTokens: input - 3000, CacheReadTokens: 2000, CacheCreationTokens: 1000, OutputTokens: 500}
+				standard, err := svc.CalculateCostWithServiceTier(model, tokens, 0.8, "default")
+				require.NoError(t, err)
+				ultra, err := svc.CalculateCostWithServiceTier(model, tokens, 0.8, "ultrafast")
+				require.NoError(t, err)
+				require.InDelta(t, standard.TotalCost*6, ultra.TotalCost, 1e-10)
+				require.InDelta(t, standard.ActualCost*6, ultra.ActualCost, 1e-10)
+				require.InDelta(t, standard.CacheReadCost*6, ultra.CacheReadCost, 1e-10)
+				require.InDelta(t, standard.CacheCreationCost*6, ultra.CacheCreationCost, 1e-10)
+				cacheMultiplier := 1.0
+				if input > 272000 {
+					cacheMultiplier = 2
+				}
+				require.InDelta(t, 1000*2.5e-6*cacheMultiplier*6, ultra.CacheCreationCost, 1e-10)
+			}
+		}
+	}
 }

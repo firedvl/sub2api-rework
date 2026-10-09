@@ -49,6 +49,24 @@ func TestGPT61SolSelectedEffortMultiplierOnce(t *testing.T) {
 	require.InDelta(t, cost.TotalCost*0.8, cost.ActualCost, 1e-12)
 }
 
+func TestGPT61SolUltrafastSelectedEffortMultiplierOnce(t *testing.T) {
+	for _, price := range []float64{0, 2e-6} {
+		bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, []ChannelModelPricing{{
+			Platform: PlatformOpenAI, Models: []string{"gpt-6.1-sol"}, BillingMode: BillingModeToken,
+			InputPrice: &price, OutputPrice: &price, CacheWritePrice: &price, CacheReadPrice: &price,
+			ReasoningEffortMultipliers: map[string]float64{"max": 3},
+		}}, nil)
+		cost, err := bs.CalculateTokenCostForRequest(TokenCostRequest{
+			Ctx: context.Background(), Model: "gpt-6.1-sol", Group: &Group{ID: 100, Platform: PlatformOpenAI}, Resolver: resolver,
+			Tokens: UsageTokens{InputTokens: 1000, OutputTokens: 1000, CacheReadTokens: 1000, CacheCreationTokens: 1000}, RateMultiplier: 0.8,
+			ReasoningEffort: "max", ServiceTier: "ultrafast",
+		})
+		require.NoError(t, err)
+		require.InDelta(t, price*4000*3*6, cost.TotalCost, 1e-12)
+		require.InDelta(t, cost.TotalCost*0.8, cost.ActualCost, 1e-12)
+	}
+}
+
 func newTestBillingServiceWithOpenAILadderCatalog(t *testing.T) *BillingService {
 	t.Helper()
 	return NewBillingService(&config.Config{}, newStubPricingServiceFromJSON(t, openAILadderCatalogJSON))

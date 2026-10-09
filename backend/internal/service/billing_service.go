@@ -1787,8 +1787,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		(pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
 	fastRatio := openAIModelFastPricingRatio(normalized)
 	needsOpus55FastMultiplier := claude.IsOpus55(model) && pricing.FastMultiplier == nil
-	ultrafastModel := canonicalizeOpenAIModelAliasSpelling(model)
-	needsUltrafast := isOpenAIGPT6AstraModel(model) || ultrafastModel == "gpt-6.1-sol" || strings.HasPrefix(ultrafastModel, "gpt-6.1-sol-")
+	needsUltrafast := isOpenAIGPT6AstraModel(model) || openai.IsGPT61SolModelSpelling(model)
 	if !needsCacheCreationPolicy && fastRatio <= 0 && !needsOpus55FastMultiplier && !needsUltrafast {
 		return pricing
 	}
