@@ -15,6 +15,7 @@ import (
 const (
 	apiKeyRateLimitKeyPrefix   = "apikey:ratelimit:"
 	apiKeyRateLimitDuration    = 24 * time.Hour
+	apiKeyCreateCountKeyPrefix = "apikey:create_count:"
 	apiKeyAuthCachePrefix      = "apikey:auth:"
 	authCacheInvalidateChannel = "auth:cache:invalidate"
 )
@@ -22,6 +23,11 @@ const (
 // apiKeyRateLimitKey generates the Redis key for API key creation rate limiting.
 func apiKeyRateLimitKey(userID int64) string {
 	return fmt.Sprintf("%s%d", apiKeyRateLimitKeyPrefix, userID)
+}
+
+// apiKeyCreateCountKey generates the Redis key for per-user API key creation counting.
+func apiKeyCreateCountKey(userID int64) string {
+	return fmt.Sprintf("%s%d", apiKeyCreateCountKeyPrefix, userID)
 }
 
 func apiKeyAuthCacheKey(key string) string {
@@ -54,10 +60,20 @@ func (c *apiKeyCache) IncrementCreateAttemptCount(ctx context.Context, userID in
 	return err
 }
 
-func (c *apiKeyCache) DeleteCreateAttemptCount(ctx context.Context, userID int64) error {
-	key := apiKeyRateLimitKey(userID)
-	return c.rdb.Del(ctx, key).Err()
+// IncrementCreateCount 在固定窗口内累加创建次数并返回累加后的值。
+// Set expiry only on a new or unexpiring key; Lua keeps the window atomic on Redis 6+.
+func (c *apiKeyCache) IncrementCreateCount(ctx context.Context, userID int64, window time.Duration) (int64, error) {
+	key := apiKeyCreateCountKey(userID)
+	return incrementAPIKeyCreateCountScript.Run(ctx, c.rdb, []string{key}, window.Milliseconds()).Int64()
 }
+
+var incrementAPIKeyCreateCountScript = redis.NewScript(`
+	local count = redis.call('INCR', KEYS[1])
+	if redis.call('PTTL', KEYS[1]) < 0 then
+		redis.call('PEXPIRE', KEYS[1], ARGV[1])
+	end
+	return count
+`)
 
 func (c *apiKeyCache) IncrementDailyUsage(ctx context.Context, apiKey string) error {
 	return c.rdb.Incr(ctx, apiKey).Err()
