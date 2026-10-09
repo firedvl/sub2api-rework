@@ -15,6 +15,11 @@ func TestResolveBillingServiceTier(t *testing.T) {
 		downgraded bool
 	}{
 		{name: "openai priority served as default", requested: "priority", observed: "default", billing: "default", downgraded: true},
+		{name: "ultrafast served as priority", requested: "ultrafast", observed: "priority", billing: "priority", downgraded: true},
+		{name: "ultrafast served as default", requested: "ultrafast", observed: "default", billing: "default", downgraded: true},
+		{name: "ultrafast honoured", requested: "ultrafast", observed: "ultrafast", billing: "ultrafast"},
+		{name: "ultrafast missing declaration", requested: "ultrafast", billing: "ultrafast"},
+		{name: "response cannot upgrade to ultrafast", requested: "priority", observed: "ultrafast", billing: "priority"},
 		{name: "anthropic fast served as standard", requested: "fast", observed: "standard", billing: "standard", downgraded: true},
 		{name: "priority honoured", requested: "priority", observed: "priority", billing: "priority"},
 		{name: "no declaration keeps request", requested: "priority", observed: "", billing: "priority"},

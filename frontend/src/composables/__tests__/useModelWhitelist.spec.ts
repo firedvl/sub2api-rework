@@ -7,6 +7,16 @@ vi.mock('@/api/admin/accounts', () => ({
 import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
+  it('offers Sonnet 5.5 compatibility presets only for supported platforms', () => {
+    expect(getModelsByPlatform('claude')).toContain('claude-sonnet-5-5')
+    expect(getModelsByPlatform('antigravity')).not.toContain('claude-sonnet-5-5')
+    expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5' })
+    ]))
+    expect(getPresetMappingsByPlatform('bedrock')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'claude-sonnet-5-5', to: 'global.anthropic.claude-sonnet-5-5' })
+    ]))
+  })
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
     const models = getModelsByPlatform('openai')
 
