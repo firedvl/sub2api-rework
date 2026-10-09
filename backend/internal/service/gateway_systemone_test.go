@@ -340,10 +340,15 @@ func TestForwardSystemOneRedactsEncodedCredentialBeforeErrorSinks(t *testing.T) 
 				}
 				var failover *UpstreamFailoverError
 				if errors.As(err, &failover) {
-					var parsed map[string]any
+					var parsed struct {
+						Nested []struct {
+							Note string `json:"note"`
+						} `json:"nested"`
+					}
 					require.NoError(t, json.Unmarshal(failover.ResponseBody, &parsed))
 					require.NotContains(t, extractUpstreamErrorMessage(failover.ResponseBody), key)
-					require.Equal(t, "Bearer ***", parsed["nested"].([]any)[0].(map[string]any)["note"])
+					require.Len(t, parsed.Nested, 1)
+					require.Equal(t, "Bearer ***", parsed.Nested[0].Note)
 				}
 			})
 		}
