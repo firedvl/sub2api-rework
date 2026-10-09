@@ -93,7 +93,8 @@ watch(
       resetInputs()
       nextTick(() => inputRefs.value[0]?.focus())
     }
-  }
+  },
+  { immediate: true }
 )
 
 // Auto-submit once 6 digits are entered.

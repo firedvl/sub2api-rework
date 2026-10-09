@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -139,6 +140,14 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := s.resolveOpenAICompactFallbackModel(account, reqModel)
+		if openai.IsGPT61SolModelSpelling(compactMappedModel) {
+			normalized, _, err := normalizeGPT61SolMappedRequest(body, account, true, compactMappedModel)
+			if err != nil {
+				return nil, err
+			}
+			body = normalized
+			compactMappedModel = normalizeOpenAIModelForUpstream(account, compactMappedModel)
+		}
 		if compactMappedModel != "" && compactMappedModel != reqModel {
 			nextBody, setErr := sjson.SetBytes(body, "model", compactMappedModel)
 			if setErr != nil {

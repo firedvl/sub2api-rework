@@ -83,7 +83,16 @@ func shouldPreserveOpenAIResponsesNoneReasoningEffort(account *Account) bool {
 // Codex 0.149.0 needs a single advertised effort to directly select a visible
 // non-reasoning model. Treat that catalog-only "none" value as omission for
 // compatible upstreams, while preserving official OpenAI request semantics.
-func filterOpenAIResponsesNoneReasoningEffortForAccount(account *Account, body []byte) ([]byte, error) {
+func filterOpenAIResponsesNoneReasoningEffortForAccount(account *Account, body []byte, finalModel ...string) ([]byte, error) {
+	if account != nil {
+		model := resolveOpenAIAccountUpstreamModelAliasForRequest(account, gjson.GetBytes(body, "model").String(), false)
+		if len(finalModel) > 0 {
+			model = finalModel[0]
+		}
+		if err := validateGPT61SolCompatRequest(body, model); err != nil {
+			return body, err
+		}
+	}
 	if len(body) == 0 || shouldPreserveOpenAIResponsesNoneReasoningEffort(account) {
 		return body, nil
 	}
@@ -111,6 +120,12 @@ func filterOpenAIResponsesNoneReasoningEffortForAccount(account *Account, body [
 }
 
 func deleteOpenAIResponsesNoneReasoningEffortFromObject(account *Account, body map[string]any) {
+	if account != nil && body != nil {
+		model, _ := body["model"].(string)
+		if openai.IsGPT61SolModelSpelling(resolveOpenAIAccountUpstreamModelAliasForRequest(account, model, false)) {
+			return
+		}
+	}
 	if body == nil || shouldPreserveOpenAIResponsesNoneReasoningEffort(account) {
 		return
 	}
@@ -1340,9 +1355,12 @@ func normalizeOpenAIResponsesReasoningMode(body []byte, mappedModel ...string) (
 	if len(mappedModel) > 0 && mappedModel[0] != "" {
 		model = mappedModel[0]
 	}
+	if err := validateGPT61SolCompatRequest(body, model); err != nil {
+		return body, false, err
+	}
 	// GPT-6 treats reasoning.mode and reasoning.effort as independent fields.
 	if isOpenAIGPT6Model(model) {
-		if !openai.IsGPT6SolOrLunaModelSpelling(model) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+		if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
 			return body, false, nil
 		}
 		updated := body
@@ -1425,18 +1443,25 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	return normalized, true, nil
 }
 
-func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
+func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool, finalModel ...string) ([]byte, bool, error) {
 	if account == nil || !account.IsOpenAI() {
 		return body, false, nil
 	}
-	normalized := body
-	changed := false
+	finalAlias := resolveOpenAIAccountUpstreamModelAliasForRequest(account, gjson.GetBytes(body, "model").String(), false)
+	if len(finalModel) > 0 {
+		finalAlias = finalModel[0]
+	}
+	normalized, changed, err := normalizeGPT61SolMappedRequest(body, account, false, finalAlias)
+	if err != nil {
+		return body, false, err
+	}
 	if account.IsOpenAIOAuthLike() {
-		var err error
-		normalized, changed, err = normalizeOpenAIResponsesLegacyIngress(body)
+		next, legacyChanged, err := normalizeOpenAIResponsesLegacyIngress(normalized)
 		if err != nil {
 			return body, false, err
 		}
+		normalized = next
+		changed = changed || legacyChanged
 	}
 	if next, normalizedReasoningContent, err := normalizeOpenAIResponsesReasoningContentReplay(normalized); err != nil {
 		return body, false, err
@@ -1465,7 +1490,7 @@ func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Ac
 		changed = true
 	}
 	if account != nil && account.IsOpenAI() && account.IsOAuth() {
-		if reasoningBody, reasoningChanged, err := normalizeOpenAIResponsesReasoningMode(normalized, account.GetMappedModel(gjson.GetBytes(normalized, "model").String())); err != nil {
+		if reasoningBody, reasoningChanged, err := normalizeOpenAIResponsesReasoningMode(normalized, finalAlias); err != nil {
 			return body, false, err
 		} else if reasoningChanged {
 			normalized = reasoningBody
@@ -2570,4 +2595,85 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	default:
 		return false
 	}
+}
+
+// Validate against the final mapped model before converters can discard intent.
+func validateGPT61SolCompatRequest(body []byte, model string) error {
+	canonicalModel := canonicalizeOpenAIModelAliasSpelling(model)
+	if canonicalModel != "gpt-6.1-sol" && !strings.HasPrefix(canonicalModel, "gpt-6.1-sol-") {
+		return nil
+	}
+	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		value := gjson.GetBytes(body, path)
+		if value.Exists() && value.Type != gjson.String {
+			return fmt.Errorf("gpt-6.1-sol reasoning effort must be a string")
+		}
+		if err := openai.ValidateGPT61SolReasoningEffort(model, value.String()); err != nil {
+			return err
+		}
+	}
+	if strings.EqualFold(gjson.GetBytes(body, "thinking.type").String(), "disabled") {
+		return openai.ValidateGPT61SolReasoningEffort(model, "none")
+	}
+	for _, candidate := range []string{model, gjson.GetBytes(body, "model").String()} {
+		if effort := deriveOpenAIReasoningEffortFromModel(candidate); effort == "none" || effort == "minimal" {
+			return openai.ValidateGPT61SolReasoningEffort(model, effort)
+		}
+		if canonical := canonicalizeOpenAIModelAliasSpelling(candidate); strings.HasPrefix(canonical, "gpt-6.1-sol-") {
+			if effort, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok && effort != "openai-compact" {
+				if err := openai.ValidateGPT61SolReasoningEffort(model, effort); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func gpt61ChatRequestHasToolCalls(body []byte) bool {
+	if openAIRequestBodyHasTools(body) || len(gjson.GetBytes(body, "functions").Array()) > 0 {
+		return true
+	}
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if isCodexToolCallContextItemType(item.Get("type").String()) || isCodexToolCallOutputItemType(item.Get("type").String()) {
+			return true
+		}
+	}
+	for _, message := range gjson.GetBytes(body, "messages").Array() {
+		if role := message.Get("role").String(); role == "tool" || role == "function" {
+			return true
+		}
+		if len(message.Get("tool_calls").Array()) > 0 || message.Get("function_call").IsObject() {
+			return true
+		}
+		for _, block := range message.Get("content").Array() {
+			switch block.Get("type").String() {
+			case "tool_use", "tool_result", "server_tool_use", "web_search_tool_result":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeGPT61SolMappedRequest(body []byte, account *Account, compact bool, finalAlias string) ([]byte, bool, error) {
+	if finalAlias == "" {
+		finalAlias = resolveOpenAIAccountUpstreamModelAliasForRequest(account, gjson.GetBytes(body, "model").String(), compact)
+	}
+	if err := validateGPT61SolCompatRequest(body, finalAlias); err != nil {
+		return body, false, err
+	}
+	if !openai.IsGPT61SolModelSpelling(finalAlias) {
+		return body, false, nil
+	}
+	// Authentication-only passthrough retains the client's actual model spelling.
+	if !compact && account != nil && account.IsOpenAIPassthroughEnabled() && !shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		return body, false, nil
+	}
+	effort := extractOpenAIReasoningEffortFromBody(body, finalAlias, gjson.GetBytes(body, "model").String())
+	if effort == nil {
+		return body, false, nil
+	}
+	out, err := sjson.SetBytes(body, "reasoning.effort", *effort)
+	return out, err == nil && !bytes.Equal(out, body), err
 }

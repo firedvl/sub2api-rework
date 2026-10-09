@@ -4,6 +4,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"math"
 	"strings"
@@ -31,6 +32,21 @@ func captureStdLog(t *testing.T) *bytes.Buffer {
 
 func newTestBillingService() *BillingService {
 	return NewBillingService(&config.Config{}, nil)
+}
+
+func TestGPT61SolSelectedEffortMultiplierOnce(t *testing.T) {
+	bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, []ChannelModelPricing{{
+		Platform: PlatformOpenAI, Models: []string{"gpt-6.1-sol"}, BillingMode: BillingModeToken,
+		InputPrice: testPtrFloat64(2e-6), OutputPrice: testPtrFloat64(10e-6),
+		ReasoningEffortMultipliers: map[string]float64{"max": 3},
+	}}, nil)
+	cost, err := bs.CalculateTokenCostForRequest(TokenCostRequest{
+		Ctx: context.Background(), Model: "gpt-6.1-sol", Group: &Group{ID: 100, Platform: PlatformOpenAI}, Resolver: resolver,
+		Tokens: UsageTokens{InputTokens: 1000, OutputTokens: 200}, RateMultiplier: 0.8, ReasoningEffort: "max",
+	})
+	require.NoError(t, err)
+	require.InDelta(t, 0.004*3, cost.TotalCost, 1e-12)
+	require.InDelta(t, cost.TotalCost*0.8, cost.ActualCost, 1e-12)
 }
 
 func newTestBillingServiceWithOpenAILadderCatalog(t *testing.T) *BillingService {
@@ -1860,19 +1876,49 @@ func TestGetModelPricingWithChannel_UnknownModelReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "pricing not found")
 }
 
-func TestGetModelPricingWithChannel_NilImageOutputPriceZerosAndMarksExplicit(t *testing.T) {
-	svc := newTestBillingService()
+func TestGetModelPricingWithChannel_NilImagePricesInheritCatalog(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			Mode:                    "image_generation",
+			InputCostPerToken:       5e-6,
+			OutputCostPerToken:      10e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerImageToken: 30e-6,
+		},
+	}))
 
 	chPricing := &ChannelModelPricing{
-		InputPrice:  testPtrFloat64(10e-6),
-		OutputPrice: testPtrFloat64(20e-6),
-		// ImageOutputPrice intentionally nil
+		InputPrice:  testPtrFloat64(6e-6),
+		OutputPrice: testPtrFloat64(12e-6),
+		// ImageInputPrice / ImageOutputPrice intentionally nil
 	}
-	pricing, err := svc.GetModelPricingWithChannel("claude-sonnet-4", chPricing)
+	pricing, err := svc.GetModelPricingWithChannel("gpt-image-2", chPricing)
 	require.NoError(t, err)
 
+	require.InDelta(t, 6e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 30e-6, pricing.ImageOutputPricePerToken, 1e-12)
+	require.False(t, pricing.ImageOutputPriceExplicit)
+	require.InDelta(t, 8e-6, pricing.ImageInputPricePerToken, 1e-12)
+}
+
+func TestGetModelPricingWithChannel_ExplicitImagePricesOverrideCatalog(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{
+		"gpt-image-2": {
+			Mode:                    "image_generation",
+			InputCostPerToken:       5e-6,
+			InputCostPerImageToken:  8e-6,
+			OutputCostPerImageToken: 30e-6,
+		},
+	}))
+
+	pricing, err := svc.GetModelPricingWithChannel("gpt-image-2", &ChannelModelPricing{
+		ImageInputPrice:  testPtrFloat64(9e-6),
+		ImageOutputPrice: testPtrFloat64(0),
+	})
+	require.NoError(t, err)
 	require.Equal(t, 0.0, pricing.ImageOutputPricePerToken)
-	require.True(t, pricing.ImageOutputPriceExplicit)
+	require.True(t, pricing.ImageOutputPriceExplicit, "显式 0 仍表示图片输出免费")
+	require.InDelta(t, 9e-6, pricing.ImageInputPricePerToken, 1e-12)
 }
 
 func TestComputeTokenBreakdown_ExplicitZeroImagePrice_NoFallback(t *testing.T) {

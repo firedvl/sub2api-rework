@@ -10,6 +10,7 @@ import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+import OpenAIFastPolicyUserSelector from "../settings/OpenAIFastPolicyUserSelector.vue";
 
 const settingsViewSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../SettingsView.vue"),
@@ -741,6 +742,26 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("round trips trusted risk users and allows removing all members", async () => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, cyber_policy_user_allowlist: "12, 34\n12" });
+    const wrapper = mountView();
+    await flushPromises();
+    const tab = wrapper.findAll("button").find(button => button.text().includes("admin.settings.tabs.features"));
+    expect(tab).toBeDefined();
+    await tab!.trigger("click");
+    const selector = wrapper.get('[data-testid="risk-control-allowlist"]').findComponent(OpenAIFastPolicyUserSelector);
+    expect(selector.props("modelValue")).toEqual([12, 34]);
+    selector.vm.$emit("update:modelValue", [34, 56]);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ cyber_policy_user_allowlist: "34,56" }));
+    selector.vm.$emit("update:modelValue", []);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ cyber_policy_user_allowlist: "" }));
+    wrapper.unmount();
   });
 
   it("loads and saves the open button visibility for each custom menu", async () => {

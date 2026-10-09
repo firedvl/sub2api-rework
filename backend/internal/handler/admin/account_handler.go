@@ -67,6 +67,7 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
+	claudeResetCredits      claudeResetReader
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
