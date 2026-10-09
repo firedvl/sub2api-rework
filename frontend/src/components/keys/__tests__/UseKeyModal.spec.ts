@@ -52,6 +52,12 @@ describe('UseKeyModal', () => {
       expect(code).toContain('jev-latest')
       expect(code).toContain('sk-typesafe-test')
       expect(code).not.toContain('ANTHROPIC')
+      if (shell === 'Windows CMD') {
+        const argument = code.match(/--data "(.*)"$/)?.[1]
+        expect(argument).toBeDefined()
+        expect(argument).toContain('\\"model\\"')
+        expect(JSON.parse(argument!.replaceAll('\\"', '"'))).toMatchObject({ model: 'jev-latest', state: 'Text to evaluate' })
+      }
     }
     wrapper.unmount()
   })

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -111,6 +112,50 @@ func IsSystemOneRequestErrorStatus(status int) bool {
 	}
 }
 
+func redactSystemOneErrorBody(body []byte, key string) []byte {
+	if key == "" {
+		return body
+	}
+	var decoded any
+	if err := decodeOpenAIJSONUseNumber(body, &decoded); err != nil {
+		return []byte(`{"error":{"message":"Upstream error"}}`)
+	}
+	var redact func(any) any
+	redact = func(value any) any {
+		switch v := value.(type) {
+		case string:
+			// Error messages may themselves contain JSON that the shared extractor decodes again.
+			var nested any
+			if err := decodeOpenAIJSONUseNumber([]byte(v), &nested); err == nil {
+				switch nested.(type) {
+				case map[string]any, []any, string:
+					if encoded, err := json.Marshal(redact(nested)); err == nil {
+						v = string(encoded)
+					}
+				}
+			} else if strings.HasPrefix(strings.TrimSpace(v), "{") {
+				return "Upstream error"
+			}
+			return strings.ReplaceAll(v, key, "***")
+		case map[string]any:
+			out := make(map[string]any, len(v))
+			for name, item := range v {
+				out[strings.ReplaceAll(name, key, "***")] = redact(item)
+			}
+			return out
+		case []any:
+			for i := range v {
+				v[i] = redact(v[i])
+			}
+		}
+		return value
+	}
+	if encoded, err := json.Marshal(redact(decoded)); err == nil {
+		return encoded
+	}
+	return []byte(`{"error":{"message":"Upstream error"}}`)
+}
+
 // handleSystemOneErrorResponse applies the shared account error policy to a
 // non-2xx System One response. 400/413/422 describe the caller's own payload, so
 // they never touch account state (a tenant must not be able to disable an
@@ -120,10 +165,11 @@ func IsSystemOneRequestErrorStatus(status int) bool {
 // or the policy took the account out of rotation.
 func (s *GatewayService) handleSystemOneErrorResponse(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, upstreamURL string) error {
 	respBody, _ := s.readUpstreamErrorBody(resp)
-	if key := account.GetTypeSafeAPIKey(); key != "" {
-		respBody = []byte(strings.ReplaceAll(string(respBody), key, "***"))
-	}
+	respBody = redactSystemOneErrorBody(respBody, account.GetTypeSafeAPIKey())
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
+	if key := account.GetTypeSafeAPIKey(); key != "" {
+		upstreamMsg = strings.ReplaceAll(upstreamMsg, key, "***")
+	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
 	event := OpsUpstreamErrorEvent{
 		Passthrough:        true,

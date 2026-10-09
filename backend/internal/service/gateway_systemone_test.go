@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -318,6 +320,67 @@ func TestForwardSystemOneHonorsCustomErrorCodes(t *testing.T) {
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, 1, repo.errorCalls)
+}
+
+func TestForwardSystemOneRedactsEncodedCredentialBeforeErrorSinks(t *testing.T) {
+	for _, key := range []string{"ts-secret", `ts-"secret`, "ts-<secret>"} {
+		for _, status := range []int{http.StatusBadRequest, http.StatusServiceUnavailable} {
+			t.Run(fmt.Sprintf("%s/%d", key, status), func(t *testing.T) {
+				encoded, err := json.Marshal("Bearer " + key)
+				require.NoError(t, err)
+				encoded = []byte(strings.ReplaceAll(string(encoded), "-", `\u002d`))
+				body := `{"error":{"message":` + string(encoded) + `},"nested":[{"note":` + string(encoded) + `}]}`
+				account := &Account{ID: 99, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "http://typesafe.test", "api_key": key}}
+				svc := newSystemOneTestService(newSystemOneStatusUpstream(status, body))
+				c := newSystemOneTestContext()
+				_, err = svc.ForwardSystemOne(context.Background(), c, account, []byte(`{}`))
+				require.Error(t, err)
+				for _, event := range systemOneOpsEvents(t, c) {
+					require.NotContains(t, event.Message, key)
+				}
+				var failover *UpstreamFailoverError
+				if errors.As(err, &failover) {
+					var parsed map[string]any
+					require.NoError(t, json.Unmarshal(failover.ResponseBody, &parsed))
+					require.NotContains(t, extractUpstreamErrorMessage(failover.ResponseBody), key)
+					require.Equal(t, "Bearer ***", parsed["nested"].([]any)[0].(map[string]any)["note"])
+				}
+			})
+		}
+	}
+}
+
+func TestSystemOneRedactsNestedJSONErrorStrings(t *testing.T) {
+	body := []byte(`{"error":{"message":"{\"error\":{\"message\":\"Bearer ts\\u002dsecret\"}}"}}`)
+	for depth := 0; depth < 3; depth++ {
+		redacted := redactSystemOneErrorBody(body, "ts-secret")
+		require.NotContains(t, extractUpstreamErrorMessage(redacted), "ts-secret")
+		require.Contains(t, extractUpstreamErrorMessage(redacted), "***")
+		nested, err := json.Marshal(string(body))
+		require.NoError(t, err)
+		body = []byte(`{"error":{"message":` + string(nested) + `}}`)
+	}
+}
+
+func TestSystemOneRedactsMalformedEncodedErrorBody(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"message":"Bearer ts\u002dsecret"}`,
+		`{"message":"{\"error\":{\"message\":\"Bearer ts\\u002dsecret\"}}"`,
+		`plain failure ts-secret`,
+		`{"error":{"message":"Bearer ts\u002dsecret"}} {"extra":"ts-secret"}`,
+	} {
+		redacted := redactSystemOneErrorBody([]byte(body), "ts-secret")
+		require.True(t, json.Valid(redacted))
+		require.NotContains(t, extractUpstreamErrorMessage(redacted), "ts-secret")
+	}
+}
+
+func TestSystemOneRedactsMalformedNestedJSONMessage(t *testing.T) {
+	body := []byte(`{"error":{"message":"{\"error\":{\"message\":\"Bearer ts\\u002dsecret\"}"}}`)
+	require.True(t, json.Valid(body))
+	redacted := redactSystemOneErrorBody(body, "ts-secret")
+	require.NotContains(t, extractUpstreamErrorMessage(redacted), "ts-secret")
+	require.Equal(t, "Upstream error", extractUpstreamErrorMessage(redacted))
 }
 
 func TestForwardSystemOneUnhandledStatusDoesNotFailOver(t *testing.T) {
