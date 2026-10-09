@@ -114,7 +114,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
 	}
-	channelMapping, err := h.gatewayService.ResolveCompatibleChannelMapping(requestCtx, apiKey.GroupID, reqModel)
+	channelMapping, routingGroup, err := h.gatewayService.ResolveCompatibleChannelMapping(requestCtx, apiKey.GroupID, reqModel)
 	if err != nil {
 		h.responsesErrorResponse(c, http.StatusForbidden, "permission_error", "No permitted fallback route is available")
 		return
@@ -157,7 +157,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
-	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(reqModel, body))
+	inflightEstimate := tokenInflightEstimate(reqModel, body)
+	inflightEstimate.ChannelMapping = &channelMapping
+	inflightEstimate.RoutingGroup = routingGroup
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
 	if err != nil {
 		reqLog.Info("gateway.responses.inflight_reservation_rejected", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)

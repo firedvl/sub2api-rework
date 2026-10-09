@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -23,6 +24,16 @@ import (
 )
 
 type fallbackWireUpstream struct{ models []string }
+
+type fallbackReservationCache struct {
+	*handlerInflightCache
+	amounts []float64
+}
+
+func (c *fallbackReservationCache) ReserveInflightBalance(ctx context.Context, userID int64, id string, amount, balance float64, ttl time.Duration) (bool, float64, error) {
+	c.amounts = append(c.amounts, amount)
+	return c.handlerInflightCache.ReserveInflightBalance(ctx, userID, id, amount, balance, ttl)
+}
 
 func (u *fallbackWireUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	body, err := io.ReadAll(req.Body)
@@ -124,10 +135,12 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 			name        string
 			hasFallback bool
 			wireMapping bool
+			reservation bool
 		}{
 			{name: "with fallback group", hasFallback: true},
 			{name: "without fallback group", hasFallback: false},
 			{name: "fallback mapping reaches provider", hasFallback: true, wireMapping: true},
+			{name: "expensive fallback reserves original billing price", hasFallback: true, wireMapping: true, reservation: true},
 		} {
 			t.Run(ep.name+"/"+tc.name, func(t *testing.T) {
 				primary := &service.Group{
@@ -148,6 +161,17 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 					newAccount(fallbackAccountID, fallbackGroupID),
 				}}}
 				cfg := &config.Config{RunMode: config.RunModeSimple}
+				cheap, expensive := 1.0, 10.0
+				if tc.reservation {
+					cfg.RunMode = config.RunModeStandard
+					cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+					primary.RateMultiplier = 2
+					primary.ModelPricing = []service.ChannelModelPricing{
+						{Models: []string{"claude-sonnet-4-5"}, BillingMode: service.BillingModePerRequest, PerRequestPrice: &cheap},
+						{Models: []string{"claude-opus-4-6"}, BillingMode: service.BillingModePerRequest, PerRequestPrice: &expensive},
+					}
+					fallback.RateMultiplier = 50
+				}
 				upstream := &fallbackWireUpstream{}
 				var channels *service.ChannelService
 				if tc.wireMapping {
@@ -159,16 +183,27 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 						},
 						groupPlatforms: map[int64]string{primaryGroupID: service.PlatformAnthropic, fallbackGroupID: service.PlatformAnthropic},
 					}, nil, nil, nil, nil)
+					if tc.reservation {
+						channels = service.NewChannelService(&openAIWSUsageHandlerChannelRepoStub{
+							channels: []service.Channel{
+								{ID: 1, Status: service.StatusActive, GroupIDs: []int64{primaryGroupID}, ModelMapping: map[string]map[string]string{service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-sonnet-4-5"}}},
+								{ID: 2, Status: service.StatusActive, GroupIDs: []int64{fallbackGroupID}, BillingModelSource: service.BillingModelSourceChannelMapped, ModelMapping: map[string]map[string]string{service.PlatformAnthropic: {"claude-sonnet-4-5": "claude-opus-4-6"}}},
+							},
+							groupPlatforms: map[int64]string{primaryGroupID: service.PlatformAnthropic, fallbackGroupID: service.PlatformAnthropic},
+						}, nil, nil, nil, nil)
+					}
 				}
+				billingService := service.NewBillingService(cfg, nil)
 				gatewayService := service.NewGatewayService(
 					nil, &groupMapRepo{fakeGroupRepo: &fakeGroupRepo{}, groups: map[int64]*service.Group{
 						primaryGroupID:  primary,
 						fallbackGroupID: fallback,
 					}}, nil, nil, nil, nil, nil, nil, cfg,
 					service.NewSchedulerSnapshotService(schedulerCache, nil, nil, nil, nil),
-					nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, channels, nil, nil, nil, nil,
+					nil, billingService, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, channels, service.NewModelPricingResolver(channels, billingService), nil, nil, nil,
 				)
-				billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+				reservationCache := &fallbackReservationCache{handlerInflightCache: newHandlerInflightCache(100)}
+				billingCacheService := service.NewBillingCacheService(reservationCache, nil, nil, nil, nil, nil, cfg, nil)
 				t.Cleanup(billingCacheService.Stop)
 				h := &GatewayHandler{
 					gatewayService:      gatewayService,
@@ -211,9 +246,18 @@ func TestGatewayOpenAICompatibleHandlersClaudeCodeOnlyFallback(t *testing.T) {
 				if tc.wireMapping {
 					require.NotEmpty(t, upstream.models)
 					for _, model := range upstream.models {
-						require.Equal(t, "claude-sonnet-4-6", model)
+						if tc.reservation {
+							require.Equal(t, "claude-opus-4-6", model)
+						} else {
+							require.Equal(t, "claude-sonnet-4-6", model)
+						}
 					}
 					require.Equal(t, primaryGroupID, *apiKey.GroupID, "fallback routing must not move caller billing ownership")
+					if tc.reservation {
+						require.Equal(t, []float64{20}, reservationCache.amounts, "reserve expensive fallback price 10 times original billing rate 2")
+						require.Zero(t, reservationCache.count(), "synthetic provider errors release the reservation")
+						require.Same(t, primary, apiKey.Group)
+					}
 				}
 			})
 		}

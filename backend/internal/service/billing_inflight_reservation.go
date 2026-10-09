@@ -329,6 +329,9 @@ const (
 
 // InflightEstimateRequest 单请求估算输入。
 type InflightEstimateRequest struct {
+	// Compatible fallback routing is separate from the API key's billing identity.
+	ChannelMapping  *ChannelMappingResult
+	RoutingGroup    *Group
 	Model           string
 	BodyBytes       int
 	MaxTokens       int
@@ -432,15 +435,21 @@ func logInflightUnpriced(model string, groupID *int64) {
 //   - channel_mapped（默认）→ 映射后模型（同时估算请求模型，取较高者）；
 //   - requested → 请求模型；
 //   - upstream / response_model 在准入时未知 → 取请求模型与映射模型两者较高估算。
-func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, model string) (primary, fallbacks []string, upstreamInput string) {
+func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDeps, apiKey *APIKey, req InflightEstimateRequest) (primary, fallbacks []string, upstreamInput string) {
+	model := req.Model
 	routeInput := model
 	if routed, ok := ResolvedUpstreamModelFromContext(ctx); ok {
 		routeInput = routed
 	}
 	upstreamInput = routeInput
 	requested := false
-	if apiKey != nil && apiKey.GroupID != nil && deps.resolveMapping != nil {
+	mapping := req.ChannelMapping
+	if mapping == nil && apiKey != nil && apiKey.GroupID != nil && deps.resolveMapping != nil {
 		m := deps.resolveMapping(ctx, *apiKey.GroupID, routeInput)
+		mapping = &m
+	}
+	if mapping != nil {
+		m := *mapping
 		requested = m.BillingModelSource == BillingModelSourceRequested
 		if mapped := m.MappedModel; mapped != "" {
 			upstreamInput = mapped
@@ -678,7 +687,7 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		// 免费分组：不计费，也无需预留。
 		return 0, true
 	}
-	primary, fallbacks, upstreamInput := inflightBillingModelCandidates(ctx, d, apiKey, req.Model)
+	primary, fallbacks, upstreamInput := inflightBillingModelCandidates(ctx, d, apiKey, req)
 	bestOf := func(models []string) (float64, bool) {
 		best := 0.0
 		priced := false
@@ -701,7 +710,14 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 		best, priced = math.Max(best, c), priced || known
 		// 账号级映射候选（读调度器快照）仅在仍无法定价或 composite 时才查，已定价模型不触发。
 		if (!priced || composite) && d.accountMappedModels != nil {
-			c, known := bestOf(d.accountMappedModels(ctx, apiKey, upstreamInput))
+			routingKey := apiKey
+			if req.RoutingGroup != nil {
+				key := *apiKey
+				key.GroupID = &req.RoutingGroup.ID
+				key.Group = req.RoutingGroup
+				routingKey = &key
+			}
+			c, known := bestOf(d.accountMappedModels(ctx, routingKey, upstreamInput))
 			best, priced = math.Max(best, c), priced || known
 		}
 	}
