@@ -3,7 +3,7 @@ import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
 import { operatorFixtureUser } from './fixtures/operatorData'
 
 const fulfill = (route: Route, data: unknown) => route.fulfill({ json: { code: 0, data } })
-const platforms = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go']
+const platforms = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe']
 
 for (const width of [390, 1280]) {
   test(`quota editor preserves all supported limits at ${width}px`, async ({ page }) => {
@@ -35,13 +35,15 @@ for (const width of [390, 1280]) {
     await page.getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('button', { name: 'Platform Quotas', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Platform Quotas' })
-    await expect(dialog.locator('tbody tr')).toHaveCount(10)
+    await expect(dialog.locator('tbody tr')).toHaveCount(platforms.length)
     const deepseek = dialog.locator('tr').filter({ has: page.locator('td').filter({ hasText: /^deepseek$/ }) })
     await deepseek.locator('input').nth(1).fill('12.5')
+    const typesafe = dialog.locator('tr').filter({ has: page.locator('td').filter({ hasText: /^typesafe$/ }) })
+    await typesafe.locator('input').nth(0).fill('3.25')
     await page.screenshot({ path: `test-results/quota-platforms-${width}.png`, fullPage: true, animations: 'disabled' })
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect.poll(() => saved).toEqual({ quotas: platforms.map(platform => ({
-      platform, daily_limit_usd: 0, weekly_limit_usd: platform === 'deepseek' ? 12.5 : null, monthly_limit_usd: 50,
+      platform, daily_limit_usd: platform === 'typesafe' ? 3.25 : 0, weekly_limit_usd: platform === 'deepseek' ? 12.5 : null, monthly_limit_usd: 50,
     })) })
     await expect(dialog).not.toBeVisible()
     await page.goto('/admin/redeem')

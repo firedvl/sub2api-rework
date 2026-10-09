@@ -125,6 +125,9 @@ func GatewayChatAccountCompatible(targetPlatform string, account *Account) bool 
 }
 
 func gatewayProtocolFeature(account *Account, protocol string) string {
+	if account.IsTypeSafe() {
+		return gatewayFeatureUnsupported
+	}
 	switch protocol {
 	case CompositeRouteEndpointResponses, CompositeRouteEndpointChatCompletions, CompositeRouteEndpointMessages:
 	default:

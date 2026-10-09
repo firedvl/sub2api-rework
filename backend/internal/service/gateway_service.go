@@ -1440,6 +1440,10 @@ func (s *GatewayService) GetCatalogModels(ctx context.Context, groupID *int64, p
 	if err != nil {
 		return nil, false
 	}
+	if platform == PlatformTypeSafe {
+		models := availableModelIDsFromAccounts(accounts, platform)
+		return models, len(models) > 0
+	}
 	backed := false
 	for i := range accounts {
 		if accounts[i].Platform == platform || (platform == PlatformGemini && accounts[i].IsMixedSchedulingEnabled()) {
@@ -1519,6 +1523,12 @@ func (s *GatewayService) GetCompositeCatalogModels(ctx context.Context, groupID 
 	backed := make([]string, 0, len(models))
 	for _, publicModel := range models {
 		route := gatewayCapabilityRouteForModel(group, publicModel, routes, routesKnown, accounts, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
+		if route.targetPlatform == PlatformTypeSafe {
+			route = gatewayCapabilityRouteForEndpoint(group, publicModel, CompositeRouteEndpointAny, routes, routesKnown, accounts, s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)
+			if route.targetPlatform != PlatformTypeSafe || route.upstreamModel != "jev-latest" {
+				continue
+			}
+		}
 		routeCtx := WithCompositeRouteDecision(ctx, route.decision)
 		if len(s.gatewayCapabilitySupportingAccounts(routeCtx, accounts, route, false)) > 0 {
 			backed = append(backed, publicModel)
@@ -1547,6 +1557,12 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 		account := &accounts[i]
 		mixedGemini := platform == PlatformGemini && account.IsMixedSchedulingEnabled()
 		if platform != "" && account.Platform != platform && !mixedGemini {
+			continue
+		}
+		if account.IsTypeSafe() {
+			if account.Type == AccountTypeAPIKey && account.IsModelSupported("jev-latest") {
+				modelSet["jev-latest"] = struct{}{}
+			}
 			continue
 		}
 		passthrough := account.IsOpenAI() && account.IsOpenAIPassthroughEnabled()
@@ -1622,7 +1638,7 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(
 		ctx,
 		queryGroupID,
-		[]string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek},
+		gatewayCapabilityPlatforms,
 		includeGrouped,
 	)
 	if err != nil {

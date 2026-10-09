@@ -49,6 +49,22 @@ func newGatewayRoutesTestRouterWithGroup(group *service.Group) *gin.Engine {
 	return router
 }
 
+func TestSystemOneTextLimitRunsBeforeAllowlistAndCompositePreread(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterGatewayRoutes(router, &handler.Handlers{Gateway: &handler.GatewayHandler{}, OpenAIGateway: &handler.OpenAIGatewayHandler{}, AsyncImage: handler.NewAsyncImageHandler(nil, nil)},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: 1, Platform: service.PlatformComposite, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"jev-latest"}}}})
+			c.Next()
+		}), nil, nil, nil, nil, nil, &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1 << 20, TextMaxBodySize: 128}})
+	body := `{"model":"jev-latest","state":"` + strings.Repeat("x", 128) + `","questions":{"q":{"type":"noul"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
 func allowlistGroup(platform string, enabled bool, models ...string) *service.Group {
 	return &service.Group{
 		Platform: platform,
@@ -152,6 +168,7 @@ func TestGatewayRoutesGroupModelAllowlistCoversRootAliasRoutes(t *testing.T) {
 		{http.MethodGet, "/realtime?model=gpt-4.1", ""},
 		{http.MethodPost, "/v1/responses", `{"model":"gpt-4.1"}`},
 		{http.MethodPost, "/v1/messages", `{"model":"gpt-4.1"}`},
+		{http.MethodPost, "/v1/systemone", `{"model":"gpt-4.1","state":"x","questions":{"q":{"type":"noul","instructions":"x"}}}`},
 		{http.MethodPost, "/v1/messages/count_tokens", `{"model":"gpt-4.1","messages":[]}`},
 		{http.MethodPost, "/v1/chat/completions", `{"model":"gpt-4.1"}`},
 		{http.MethodPost, "/v1/embeddings", `{"model":"gpt-4.1","input":"hi"}`},

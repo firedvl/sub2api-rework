@@ -20,6 +20,7 @@ type promptAuditOrderCase struct {
 
 func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.T) {
 	tests := []promptAuditOrderCase{
+		{file: "gateway_systemone.go", function: "SystemOne", auditToken: "checkSecurityAudit"},
 		{file: "gateway_handler.go", function: "Messages", auditToken: "checkSecurityAudit"},
 		{file: "gateway_handler_chat_completions.go", function: "ChatCompletions", auditToken: "checkSecurityAudit"},
 		{file: "gateway_handler_responses.go", function: "Responses", auditToken: "checkSecurityAudit"},

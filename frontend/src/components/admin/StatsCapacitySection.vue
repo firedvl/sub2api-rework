@@ -338,6 +338,7 @@ const providerLabel = (platform: AccountPlatform) => ({
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
   opencode_go: 'OpenCode Go',
+  typesafe: 'TypeSafe / Jev',
 })[platform]
 const formatPercent = (value: number) => value.toFixed(2).replace(/\.?0+$/, '')
 const remainingLabel = (value: number | null) => value === null

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/releaseinfo"
 	"github.com/Wei-Shaw/sub2api/internal/updatecontract"
 )
 
@@ -36,6 +37,8 @@ const (
 	stagingRedisSecret   = "synthetic-staging-redis-password"
 	stagingWrongSecret   = "synthetic-staging-wrong-redis-password"
 )
+
+var stagingCandidateMigration = releaseinfo.Current().MigrationMax
 
 type stagingManifestFetcher struct {
 	targetImage  string
@@ -54,7 +57,7 @@ func (f stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte
 			stagingTargetVersion: "a", stagingFailedVersion: "b",
 		}[version], 40),
 		Image: image, ImageDigest: digest,
-		MigrationMin: 239, MigrationMax: 249, ReleaseDate: "2026-09-09T00:00:00Z",
+		MigrationMin: 239, MigrationMax: stagingCandidateMigration, ReleaseDate: "2026-09-09T00:00:00Z",
 		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: Version,
 	}
 	if manifest.GitSHA == "" {
@@ -350,8 +353,8 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingTargetVersion)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
-	if status.CurrentMigration != 249 || stagingMigration(t, docker, compose) != 249 {
-		t.Fatalf("candidate installation did not reach migration 249: %+v", status)
+	if status.CurrentMigration != stagingCandidateMigration || stagingMigration(t, docker, compose) != stagingCandidateMigration {
+		t.Fatalf("candidate installation did not reach migration %d: %+v", stagingCandidateMigration, status)
 	}
 	if stagingApplicationImageID(t, docker, compose) != runner.targetID {
 		t.Fatal("candidate container does not use the locally built candidate image")
@@ -404,7 +407,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	runner.failNextApplicationHealth()
 	requestStagingOperation(t, docker, compose, policy.SocketPath, updatecontract.OperationInstall, stagingFailedVersion)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 5*time.Minute)
-	if status.LastAttempt == nil || status.LastAttempt.RollbackResult != "suppressed" || stagingMigration(t, docker, compose) != 249 {
+	if status.LastAttempt == nil || status.LastAttempt.RollbackResult != "suppressed" || stagingMigration(t, docker, compose) != stagingCandidateMigration {
 		t.Fatalf("post-exposure failure did not preserve migrated database: %+v", status)
 	}
 	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingSourceVersion)
@@ -479,8 +482,8 @@ func verifyStagingRescue(t *testing.T, docker string, compose []string, service 
 	query := "SELECT value FROM recovery_post_success_sentinel; " + migrationQuery
 	args = append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", "rescue_verification", "-Atc", query)
 	output, err := runStagingCommand(docker, args...)
-	if err != nil || strings.TrimSpace(output) != "must-be-rescued\n249" {
-		t.Fatalf("rescue lost sentinel/schema249: %v: %s", err, output)
+	if err != nil || strings.TrimSpace(output) != fmt.Sprintf("must-be-rescued\n%d", stagingCandidateMigration) {
+		t.Fatalf("rescue lost sentinel/candidate schema %d: %v: %s", stagingCandidateMigration, err, output)
 	}
 	if out, err := runStagingCommand(docker, append(append([]string(nil), compose...), "exec", "-T", "postgres", "dropdb", "-U", "sub2api", "rescue_verification")...); err != nil {
 		t.Fatalf("remove rescue verification DB: %v: %s", err, out)
