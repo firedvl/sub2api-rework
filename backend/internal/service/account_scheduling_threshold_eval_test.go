@@ -172,7 +172,7 @@ func TestEvaluateAccountSchedulingThreshold_OpenAISkipsStaleSnapshot(t *testing.
 		Extra: map[string]any{
 			"codex_usage_updated_at": now.Add(-2 * time.Hour).Format(time.RFC3339),
 			"codex_5h_used_percent":  100.0,
-			"codex_5h_reset_at":      now.Add(3 * time.Hour).Format(time.RFC3339),
+			"codex_5h_reset_at":      "invalid",
 		},
 	}
 
