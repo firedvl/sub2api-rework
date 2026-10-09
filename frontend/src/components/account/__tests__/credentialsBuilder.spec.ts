@@ -451,13 +451,13 @@ describe('plan_type helpers', () => {
   describe('planTypeDisplayLabel', () => {
     it('maps canonical + alias values to friendly labels', () => {
       expect(planTypeDisplayLabel('plus')).toBe('Plus')
-      expect(planTypeDisplayLabel('pro')).toBe('Pro 20x')
-      expect(planTypeDisplayLabel('chatgptpro')).toBe('Pro 20x')
-      expect(planTypeDisplayLabel(' pro_lite ')).toBe('Pro 5x')
+      expect(planTypeDisplayLabel('pro')).toBe('Pro 200')
+      expect(planTypeDisplayLabel('chatgptpro')).toBe('Pro 200')
+      expect(planTypeDisplayLabel(' pro_lite ')).toBe('Pro 100')
       expect(planTypeDisplayLabel('SELF-SERVE BUSINESS_PROLITE')).toBe('Business Premium')
       expect(planTypeDisplayLabel('free')).toBe('Free')
-      expect(planTypeDisplayLabel('team')).toBe('Business Standard')
-      expect(planTypeDisplayLabel('CHATGPTPRO')).toBe('Pro 20x')
+      expect(planTypeDisplayLabel('team')).toBe('Business')
+      expect(planTypeDisplayLabel('CHATGPTPRO')).toBe('Pro 200')
     })
     it('returns unknown values verbatim', () => {
       expect(planTypeDisplayLabel('self_serve_business')).toBe('self_serve_business')
@@ -478,46 +478,22 @@ describe('plan_type helpers', () => {
   })
 
   describe('buildPlanTypeOptions', () => {
-    const clear = 'Clear'
-    it('returns clear + presets when current is empty', () => {
-      expect(buildPlanTypeOptions('', clear)).toEqual([
-        { value: '', label: clear },
-        { value: 'plus', label: 'Plus' },
-        { value: 'pro', label: 'Pro 20x' },
-        { value: 'prolite', label: 'Pro 5x' },
-        { value: 'self_serve_business_prolite', label: 'Business Premium' },
-        { value: 'free', label: 'Free' }
+    it('preserves distinct SKUs even when labels are shared', () => {
+      const opts = buildPlanTypeOptions('ent26', 'Clear')
+      expect(opts.filter(option => option.label === 'Enterprise').map(option => option.value)).toEqual([
+        'business', 'enterprise', 'ent26', 'enterprise_cbp_usage_based'
       ])
+      expect(opts).toContainEqual({ value: 'promax', label: 'Pro 500' })
+      expect(opts).toContainEqual({ value: 'edu_plus', label: 'Edu Plus' })
+      expect(opts[0]).toEqual({ value: '', label: 'Clear' })
     })
-    it('keeps canonical chatgptpro under a single friendly option', () => {
-      const opts = buildPlanTypeOptions('chatgptpro', clear)
-      const pros = opts.filter(o => o.label === 'Pro 20x')
-      expect(pros).toHaveLength(1)
-      expect(pros[0].value).toBe('chatgptpro')
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'chatgptpro', 'prolite', 'self_serve_business_prolite', 'free'])
+    it.each([['chatgpt_pro', 'pro'], [' pro_lite ', 'prolite']])('preserves alias %s without duplicating SKU', (alias, canonical) => {
+      const opts = buildPlanTypeOptions(alias, 'Clear')
+      expect(opts.filter(option => option.value === alias.trim())).toHaveLength(1)
+      expect(opts.some(option => option.value === canonical)).toBe(false)
     })
-    it('appends an unknown-but-labeled value (team) as its own option', () => {
-      const opts = buildPlanTypeOptions('team', clear)
-      expect(opts.find(o => o.value === 'team')).toEqual({ value: 'team', label: 'Business Standard' })
-      // presets untouched
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'pro', 'prolite', 'self_serve_business_prolite', 'free', 'team'])
-    })
-    it('appends a fully custom value with a raw label', () => {
-      const opts = buildPlanTypeOptions('weird_x', clear)
-      expect(opts.at(-1)).toEqual({ value: 'weird_x', label: 'weird_x' })
-    })
-    it('does not duplicate an exact preset value', () => {
-      const opts = buildPlanTypeOptions('pro', clear)
-      expect(opts.filter(o => o.value === 'pro')).toHaveLength(1)
-      expect(opts.map(o => o.value)).toEqual(['', 'plus', 'pro', 'prolite', 'self_serve_business_prolite', 'free'])
-    })
-    it.each([
-      [' pro_lite ', 'Pro 5x'],
-      ['Self-Serve Business ProLite', 'Business Premium'],
-      ['CHATGPT_PRO', 'Pro 20x'],
-    ])('preserves the current alias %s without duplicate labels', (value, label) => {
-      const options = buildPlanTypeOptions(value, clear).filter(option => option.label === label)
-      expect(options).toEqual([{ value: value.trim(), label }])
+    it('retains unknown values', () => {
+      expect(buildPlanTypeOptions('future_sku', 'Clear').at(-1)).toEqual({ value: 'future_sku', label: 'future_sku' })
     })
   })
 

@@ -86,6 +86,7 @@
         compact
         @retry="loadAccountCapacity"
       />
+      <UserUsageTrend v-if="!loading && stats" />
     </div>
   </AppLayout>
 </template>
@@ -104,6 +105,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
+import UserUsageTrend from '@/components/admin/UserUsageTrend.vue'
 import {
   buildProviderCapacity,
   classifyOperatorAccount,

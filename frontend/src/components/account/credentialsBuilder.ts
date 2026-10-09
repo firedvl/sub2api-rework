@@ -1,4 +1,4 @@
-import { openAIPlanTypeLabel } from '@/utils/planType'
+import { openAIPlanTypeKey, openAIPlanTypeLabel, openAIPlanTypes } from '@/utils/planType'
 
 export function applyInterceptWarmup(
   credentials: Record<string, unknown>,
@@ -518,30 +518,17 @@ export function readPlanType(credentials: Record<string, unknown> | undefined | 
 
 /**
  * 构建 plan_type 下拉选项：清空 + OpenAI 预设。
- * 若当前值是某预设的别名（如 chatgptpro↔Pro 20x），用当前的 canonical 值占据该
- * 标签位（保留 canonical，显示友好标签，避免重复项）；若是完全预设外的值
- * （如 team 或异常值），追加为一项，避免编辑时下拉丢失原值。
+ * 别名仅替换相同 SKU，标签相同但 SKU 不同的选项仍各自保留。
  */
 export function buildPlanTypeOptions(current: string, clearLabel: string): PlanTypeOption[] {
   const cur = (current || '').trim()
-  const curLabel = cur ? planTypeDisplayLabel(cur) : ''
-  const presets: PlanTypeOption[] = [
-    { value: 'plus', label: 'Plus' },
-    { value: 'pro', label: 'Pro 20x' },
-    { value: 'prolite', label: 'Pro 5x' },
-    { value: 'self_serve_business_prolite', label: 'Business Premium' },
-    { value: 'free', label: 'Free' }
-  ]
+  const key = openAIPlanTypeKey(cur)
   const opts: PlanTypeOption[] = [{ value: '', label: clearLabel }]
-  for (const p of presets) {
-    if (cur && p.value !== cur.toLowerCase() && p.label === curLabel) {
-      // 当前值是该预设的别名：用 canonical 当前值占位，标签仍显示友好名
-      opts.push({ value: cur, label: p.label })
-    } else {
-      opts.push(p)
-    }
+  for (const preset of openAIPlanTypes) {
+    const value = cur && key === openAIPlanTypeKey(preset) ? cur : preset
+    opts.push({ value, label: planTypeDisplayLabel(value) })
   }
-  if (cur && !opts.some(o => o.value.toLowerCase() === cur.toLowerCase())) {
+  if (cur && !opts.some(option => option.value === cur)) {
     opts.push({ value: cur, label: planTypeDisplayLabel(cur) })
   }
   return opts
