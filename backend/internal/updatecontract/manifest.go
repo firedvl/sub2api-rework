@@ -128,6 +128,10 @@ func (m Manifest) Validate(trustedRepository string) error {
 		semver.Compare("v"+m.MinimumUpdaterVersion, "v1.1.5") < 0 {
 		return errors.New("schema-advancing releases after .6 require updater 1.1.5 or newer")
 	}
+	if CompareRework(m.ReworkVersion, "0.2.3-rework.8") >= 0 && m.MigrationMax > 249 &&
+		semver.Compare("v"+m.MinimumUpdaterVersion, "v1.1.6") < 0 {
+		return errors.New("schema-advancing releases after .7 require updater 1.1.6 or newer")
+	}
 	for name, value := range map[string]string{
 		"upstream": m.ReleaseNotes.Upstream, "rework": m.ReleaseNotes.Rework,
 		"compatibility": m.ReleaseNotes.Compatibility, "migrations": m.ReleaseNotes.Migrations,

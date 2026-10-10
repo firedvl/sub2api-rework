@@ -237,6 +237,18 @@ or recreate the application. Do not retry `0.1.183-rework.7` after `.8` exists.
 
 ### Replace An Active Updater
 
+Updater `1.1.6` fixes the source-write window in `1.1.5`: install verifies
+application quiescence before taking the pre-update snapshot. Releases advancing
+beyond schema249 from `.8` require `minimum_updater_version >= 1.1.6`.
+The candidate is pulled and verified before shutdown. If shutdown or backup
+preparation fails before candidate activation, the updater restarts and checks
+the unchanged source without restoring the database. A failed source restart
+remains critical. Accepting a new install revokes the previous rollback/recovery
+handle; its backup files remain preserved. Interrupted installs fail closed.
+
+This is source preparation only. Production remains `.7`, schema249, updater
+`1.1.5`; replacing the production updater requires separate authorization.
+
 Updater `1.1.5` replaces unsafe post-exposure restore in `1.1.4`. It reads
 legitimate schema-v2 state from `1.1.4`, keeps `/v1/status` compatible with the
 immutable `.6` application's strict client, and adds `/v1/recovery` for rescue

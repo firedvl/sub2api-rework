@@ -92,6 +92,37 @@ func TestHandlePaymentNotification_NonSuccessStatus_Skips(t *testing.T) {
 		"non-success notifications must short-circuit before the DB lookup")
 }
 
+func TestHandlePaymentNotification_MissingLegacyOrder_ReturnsSentinel(t *testing.T) {
+	client := newOrderNotFoundTestClient(t)
+	svc := &PaymentService{entClient: client}
+	err := svc.HandlePaymentNotification(context.Background(), &payment.PaymentNotification{
+		OrderID: "sub2_42", Status: payment.NotificationStatusSuccess,
+	}, payment.TypeAlipay)
+	require.ErrorIs(t, err, ErrOrderNotFound)
+}
+
+func TestHandlePaymentNotification_LegacyLookupFailure_RemainsRetryable(t *testing.T) {
+	client := newOrderNotFoundTestClient(t)
+	lookupErr := errors.New("legacy lookup database failure")
+	queries := 0
+	client.PaymentOrder.Intercept(dbent.InterceptFunc(func(next dbent.Querier) dbent.Querier {
+		return dbent.QuerierFunc(func(ctx context.Context, query dbent.Query) (dbent.Value, error) {
+			queries++
+			if queries == 2 {
+				return nil, lookupErr
+			}
+			return next.Query(ctx, query)
+		})
+	}))
+	svc := &PaymentService{entClient: client}
+	err := svc.HandlePaymentNotification(context.Background(), &payment.PaymentNotification{
+		OrderID: "sub2_42", Status: payment.NotificationStatusSuccess,
+	}, payment.TypeAlipay)
+	require.ErrorIs(t, err, lookupErr)
+	require.NotErrorIs(t, err, ErrOrderNotFound)
+	require.Equal(t, 2, queries)
+}
+
 // TestErrOrderNotFound_DistinctFromOtherErrors guards against an accidental
 // collapse where a generic wrapped error would start matching ErrOrderNotFound
 // (which would silently mask real DB failures).

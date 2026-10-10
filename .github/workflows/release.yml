@@ -334,7 +334,7 @@ jobs:
                 rework: $rework_notes,
                 compatibility: "Approved after release qualification checks.",
                 migrations: ("Supports schema migrations " + ($migration_min | tostring) + " through " + ($migration_max | tostring) + "."),
-                rollback: "Do not run .6 against schema249. Automatic restore is allowed only before candidate exposure. After candidate exposure, rollback requires updater 1.1.5 two-stage rescue recovery back to the recorded schema244 snapshot; preserve the rescue backup of the current database."
+                rollback: "Do not roll back .8 to .7 against schema251. Updater 1.1.6 quiesces writers before the pre-update snapshot. Automatic restore is allowed only before candidate exposure. After candidate exposure, rollback requires updater 1.1.6 two-stage rescue recovery back to the recorded schema249 snapshot and exact .7 image; preserve the verified schema251 rescue backup, including post-upgrade writes."
               }
             }' > release-manifest.json
 
