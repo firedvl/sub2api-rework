@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "rework_version": "0.2.3-rework.7",
-  "upstream_baseline": "v0.2.8",
-  "upstream_baseline_sha": "fd80b08c90b55edcad5b00171b53f08721d30da1",
+  "upstream_baseline": "v0.2.14",
+  "upstream_baseline_sha": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d",
   "upstream_repository": "Wei-Shaw/sub2api",
   "rework_repository": "firedvl/sub2api-rework",
   "artifact_repository": "ghcr.io/firedvl/sub2api-rework",

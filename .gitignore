@@ -157,6 +157,8 @@ docs/*
 !docs/UPSTREAM_V023_PARITY.md
 !docs/UPSTREAM_V028_PARITY.md
 !docs/upstream-v028-commit-coverage.tsv
+!docs/UPSTREAM_V0214_PARITY.md
+!docs/upstream-v0214-commit-coverage.tsv
 !docs/websocket-policy.md
 !docs/legal/
 !docs/legal/*.md
