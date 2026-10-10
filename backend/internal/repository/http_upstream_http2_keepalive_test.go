@@ -24,9 +24,7 @@ func http2KeepAliveTestPoolSettings() poolSettings {
 }
 
 // requireHTTP2Configured 断言 http2 已显式挂到 http.Transport 上。
-// x/net/http2 在 go1.27 && !http2legacy 下是标准库 HTTP/2 的包装：ConfigureTransports 通过
-// Transport.RegisterProtocol("http/2") 注册配置并打开 Protocols.HTTP2（TLSNextProto 不承载 h2 入口），
-// ReadIdleTimeout/PingTimeout 在建连时映射为 http.HTTP2Config.SendPingTimeout/PingTimeout。
+// Native HTTP/2 configuration enables the protocol even with a custom dialer.
 func requireHTTP2Configured(t *testing.T, tr *http.Transport, msg string) {
 	t.Helper()
 	require.NotNil(t, tr.Protocols, msg)
@@ -41,12 +39,11 @@ func requireHTTP2Configured(t *testing.T, tr *http.Transport, msg string) {
 func TestEnableOpenAIHTTP2KeepAlive_EnablesPingHealthCheck(t *testing.T) {
 	tr := &http.Transport{}
 
-	h2, err := enableHTTP2KeepAlive(tr, upstreamProtocolModeOpenAIH2)
-	require.NoError(t, err)
-	require.NotNil(t, h2, "必须返回已配置的 *http2.Transport")
+	h2 := enableHTTP2KeepAlive(tr, upstreamProtocolModeOpenAIH2)
+	require.Same(t, tr.HTTP2, h2)
 
-	require.Positive(t, h2.ReadIdleTimeout, "必须启用空闲 PING 探测以剔除死连接")
-	require.Equal(t, openAIHTTP2ReadIdleTimeout, h2.ReadIdleTimeout)
+	require.Positive(t, h2.SendPingTimeout, "必须启用空闲 PING 探测以剔除死连接")
+	require.Equal(t, openAIHTTP2ReadIdleTimeout, h2.SendPingTimeout)
 	require.Equal(t, openAIHTTP2PingTimeout, h2.PingTimeout, "PING 无响应必须有超时判定")
 	requireHTTP2Configured(t, tr, "http2 必须已挂到底层 http.Transport 上")
 }
@@ -55,9 +52,8 @@ func TestLongStreamHTTP2KeepAlive(t *testing.T) {
 	svc := &httpUpstreamService{}
 	require.Equal(t, upstreamProtocolModeLongStreamH2, svc.resolveProtocolMode(service.HTTPUpstreamProfileLongStream, "direct", nil))
 	transport := &http.Transport{}
-	h2, err := enableHTTP2KeepAlive(transport, upstreamProtocolModeLongStreamH2)
-	require.NoError(t, err)
-	require.Equal(t, 10*time.Second, h2.ReadIdleTimeout)
+	h2 := enableHTTP2KeepAlive(transport, upstreamProtocolModeLongStreamH2)
+	require.Equal(t, 10*time.Second, h2.SendPingTimeout)
 	require.Equal(t, 5*time.Second, h2.PingTimeout)
 	proxyURL, err := url.Parse("http://127.0.0.1:8080")
 	require.NoError(t, err)
