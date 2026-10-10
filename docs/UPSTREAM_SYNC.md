@@ -13,8 +13,8 @@ The accepted rework baseline is defined once in
 `backend/internal/releaseinfo/metadata.json`:
 
 ```text
-"upstream_baseline": "v0.2.8"
-"upstream_baseline_sha": "fd80b08c90b55edcad5b00171b53f08721d30da1"
+"upstream_baseline": "v0.2.14"
+"upstream_baseline_sha": "0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d"
 ```
 
 This document explains the baseline; scripts and builds consume the JSON record.
@@ -32,7 +32,7 @@ deploy anything.
 git fetch upstream --tags
 git log --oneline --decorate main..upstream/main
 git diff --stat main...upstream/main
-git range-diff v0.2.8..main v0.2.8..upstream/main
+git range-diff v0.2.14..main v0.2.14..upstream/main
 ./scripts/upstream-status.sh
 ```
 
@@ -106,6 +106,22 @@ against the changed backend, API, provider, authentication, account, routing,
 configuration, migration, and frontend surfaces. Keep this a reviewed inventory;
 a diff parser cannot reliably infer feature semantics or applicability.
 
+## v0.2.14 Change Audit
+
+The reconciliation accounts for all 173 commits from the pinned v0.2.8 base to
+v0.2.14 in 66 semantic clusters, with zero unresolved dispositions or findings.
+[The reconciliation record](UPSTREAM_V0214_PARITY.md) links the source ledger,
+records tested behavior, and distinguishes offline compatibility from live
+provider availability.
+
+The canonical development baseline is v0.2.14 at
+`0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`, with schema 251. Historical SQL
+through 249 is unchanged. Disposable fresh and 249-to-251 upgrade tests pass.
+Rework remains `0.2.3-rework.7`, with manual updates, source floor 239, and
+minimum updater 1.1.5. Production remains `.7` at schema 249. This development
+reconciliation prepared no release and deployed nothing; a separate release
+task is required to deliver it to installations.
+
 ## v0.2.8 Change Audit
 
 The development reconciliation accounts for all 575 commits from v0.2.3 to the
@@ -114,7 +130,7 @@ pinned v0.2.8 target in 250 semantic clusters, with zero unresolved dispositions
 inventory, independent source review, preserved contracts, intentional
 differences, migration audit and executed acceptance evidence.
 
-The machine-readable baseline now records v0.2.8 and development schema 249.
+At that checkpoint, the machine-readable baseline recorded v0.2.8 and schema 249.
 Historical SQL through 244 remains unchanged; disposable fresh and 244-to-249
 upgrade checks pass. The updater source floor stays 239. Rework version
 `0.2.3-rework.6`, manual update policy and release identity remain unchanged.
