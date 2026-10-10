@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 )
 
 var (
@@ -41,8 +43,17 @@ func ExtractBlockingPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnap
 }
 
 func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, error) {
+	body := req.Body
+	switch strings.ToLower(strings.TrimSpace(req.Protocol)) {
+	case "openai_chat_completions", "openai_chat", "chat_completions", "openai_responses", "responses", "responses_websocket":
+		var err error
+		body, err = apicompat.NormalizeInlineFilePartsForInspection(body)
+		if err != nil {
+			return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
+		}
+	}
 	var document any
-	if err := json.Unmarshal(req.Body, &document); err != nil {
+	if err := json.Unmarshal(body, &document); err != nil {
 		return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
 	}
 	extracted := extractProtocolSegments(req.Protocol, document)
@@ -91,7 +102,7 @@ func extractProtocolSegments(protocol string, document any) []promptSegment {
 	case "gemini", "gemini_generate_content":
 		return extractGeminiRoot(root)
 	case "openai_responses", "responses", "responses_websocket":
-		if frameType := stringValue(root["type"]); frameType != "" || protocol == "responses_websocket" {
+		if frameType := stringValue(root["type"]); frameType == "response.create" || protocol == "responses_websocket" {
 			if frameType != "response.create" {
 				return nil
 			}

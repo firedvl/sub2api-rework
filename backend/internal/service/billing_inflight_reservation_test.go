@@ -107,6 +107,83 @@ func TestInflightEstimate_ChannelAliasUsesMappedModel(t *testing.T) {
 	require.InDelta(t, direct, est, 1e-12, "alias must be estimated as the channel-mapped billing model")
 }
 
+func TestInflightEstimate_CompatibleFallbackPreservesBillingIdentity(t *testing.T) {
+	const primaryID, fallbackID int64 = 98, 99
+	cheap, expensive := 1.0, 10.0
+	cs := newTestChannelService(makeStandardRepo(Channel{ID: 98, Status: StatusActive, GroupIDs: []int64{primaryID},
+		ModelMapping: map[string]map[string]string{PlatformAnthropic: {"public-alias": "claude-sonnet-4-5"}},
+	}, map[int64]string{primaryID: PlatformAnthropic}))
+	svc := newInflightEstimateGateway(t, cs)
+	group := &Group{ID: primaryID, Platform: PlatformAnthropic, RateMultiplier: 3, ModelPricing: []ChannelModelPricing{
+		{Models: []string{"public-alias", "claude-sonnet-4-5"}, BillingMode: BillingModePerRequest, PerRequestPrice: &cheap},
+		{Models: []string{"claude-opus-4-6"}, BillingMode: BillingModePerRequest, PerRequestPrice: &expensive},
+	}}
+	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(primaryID), Group: group}
+	fallback := &Group{ID: fallbackID, Platform: PlatformAnthropic, RateMultiplier: 50}
+	d := svc.inflightEstimateDeps()
+	rateCalls := 0
+	d.userGroupRate = func(_ context.Context, userID, groupID int64, defaultRate float64) float64 {
+		require.Equal(t, int64(1), userID)
+		require.Equal(t, primaryID, groupID)
+		require.Equal(t, 3.0, defaultRate)
+		rateCalls++
+		return 2
+	}
+	for _, tc := range []struct {
+		name, source string
+		want         float64
+	}{
+		{"mapped", BillingModelSourceChannelMapped, 20},
+		{"requested", BillingModelSourceRequested, 2},
+		{"upstream", BillingModelSourceUpstream, 20},
+		{"response", BillingModelSourceResponse, 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mapping := ChannelMappingResult{Mapped: true, MappedModel: "claude-opus-4-6", BillingModelSource: tc.source}
+			before := rateCalls
+			cost, priced := d.estimate(context.Background(), key, InflightEstimateRequest{Model: "public-alias", ChannelMapping: &mapping, RoutingGroup: fallback})
+			require.True(t, priced)
+			require.Equal(t, tc.want, cost)
+			require.Equal(t, before+1, rateCalls, "selected billing multiplier applies once")
+			require.Same(t, group, key.Group)
+			require.Equal(t, primaryID, *key.GroupID)
+		})
+	}
+	// A caller without the fallback snapshot still uses its own primary mapping.
+	cost, priced := d.estimate(context.Background(), key, InflightEstimateRequest{Model: "public-alias"})
+	require.True(t, priced)
+	require.Equal(t, 2.0, cost)
+}
+
+func TestInflightEstimate_CompatibleFallbackUsesEffectiveAccountPoolWhenUnpriced(t *testing.T) {
+	const primaryID, fallbackID int64 = 100, 101
+	cheap, expensive := 1.0, 10.0
+	svc := newInflightEstimateGateway(t, nil)
+	group := &Group{ID: primaryID, Platform: PlatformAnthropic, RateMultiplier: 2, ModelPricing: []ChannelModelPricing{
+		{Models: []string{"cheap-account"}, BillingMode: BillingModePerRequest, PerRequestPrice: &cheap},
+		{Models: []string{"expensive-account"}, BillingMode: BillingModePerRequest, PerRequestPrice: &expensive},
+	}}
+	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(primaryID), Group: group}
+	snapshot := &inflightSnapshotCacheStub{byBucket: map[string][]Account{
+		inflightBucketKey(primaryID, PlatformAnthropic):  {{ID: 1, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"account-alias": "cheap-account"}}}},
+		inflightBucketKey(fallbackID, PlatformAnthropic): {{ID: 2, Platform: PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"account-alias": "expensive-account"}}}},
+	}}
+	repo := attachInflightSnapshot(svc, snapshot)
+	mapping := ChannelMappingResult{Mapped: true, MappedModel: "account-alias", BillingModelSource: BillingModelSourceChannelMapped}
+	req := InflightEstimateRequest{Model: "public-unpriced", ChannelMapping: &mapping, RoutingGroup: &Group{ID: fallbackID, Platform: PlatformAnthropic, RateMultiplier: 50}}
+	cost, priced := svc.EstimateInflightReservation(context.Background(), key, req)
+	require.True(t, priced)
+	require.Equal(t, 20.0, cost, "fallback account model uses original group price and rate")
+	require.Zero(t, repo.dbCalls.Load())
+	require.Equal(t, int64(1), snapshot.reads.Load())
+	require.Same(t, group, key.Group)
+	require.Equal(t, primaryID, *key.GroupID)
+	req.RoutingGroup = nil
+	cost, priced = svc.EstimateInflightReservation(context.Background(), key, req)
+	require.True(t, priced)
+	require.Equal(t, 2.0, cost, "another caller retains its primary account pool")
+}
+
 func TestInflightEstimate_CompositeResolvedRouteAndExplicitAliasPricing(t *testing.T) {
 	svc := newInflightEstimateGateway(t, nil)
 	key := &APIKey{User: &User{ID: 1}, GroupID: i64p(95), Group: &Group{ID: 95, Platform: PlatformComposite, RateMultiplier: 1}}

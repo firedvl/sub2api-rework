@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.27.0, as declared by `backend/go.mod`
+- Go 1.27.2, as declared by `backend/go.mod`
 - Node.js 20
 - pnpm 9
 - PostgreSQL 15 or newer for database-backed tests and local operation
