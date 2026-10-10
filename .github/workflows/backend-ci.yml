@@ -201,6 +201,16 @@ jobs:
       - name: Operator console browser tests
         working-directory: frontend
         run: pnpm test:e2e
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   golangci-lint:
     runs-on: ubuntu-latest
