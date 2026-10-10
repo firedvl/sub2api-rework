@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const Version = "1.1.5"
+const Version = "1.1.6"
 
 var actorPattern = regexp.MustCompile(`^admin:[1-9][0-9]*$`)
 var operationIDPattern = regexp.MustCompile(`^upd-[0-9a-f]{24}$`)
@@ -193,6 +194,11 @@ func (s *Service) Start(action updatecontract.Operation, request updatecontract.
 			state.Recovery.Phase = recoveryPreparing
 		}
 	}
+	if action == updatecontract.OperationInstall {
+		// An interrupted new install must never authorize an older snapshot.
+		state.Backup, state.Recovery, state.Exposure = nil, nil, ""
+		state.Status.RollbackVersion = ""
+	}
 	if err := s.store.save(state); err != nil {
 		lock.release()
 		return nil, err
@@ -307,28 +313,37 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	if err != nil {
 		return err
 	}
+	if err := s.pullAndVerify(ctx, manifest); err != nil {
+		return err
+	}
+	if err := s.quiesceApplication(ctx); err != nil {
+		return s.resumeUnchangedSource(summary, state, currentMigration, "application quiescence failed")
+	}
 	backup, err := s.createBackup(ctx, summary.OperationID, state.Status.InstalledVersion, version, currentMigration, "")
 	if err != nil {
-		return fmt.Errorf("backup failed")
+		return s.resumeUnchangedSource(summary, state, currentMigration, "backup failed")
+	}
+	if err := s.validateRecoveryBackup(backup); err != nil {
+		return s.resumeUnchangedSource(summary, state, currentMigration, "backup checksum validation failed")
+	}
+	if err := s.validateArchive(ctx, backup); err != nil {
+		return s.resumeUnchangedSource(summary, state, currentMigration, "backup archive validation failed")
 	}
 	state.Backup = backup
 	state.Exposure = preExposure
 	state.Recovery = nil
 	state.Status.RollbackVersion = backup.SourceVersion
 	if err := s.store.save(*state); err != nil {
-		return fmt.Errorf("backup state persistence failed")
+		return s.resumeUnchangedSource(summary, state, currentMigration, "backup state persistence failed")
 	}
-	if err := s.pullAndVerify(ctx, manifest); err != nil {
-		return err
+	if err := ctx.Err(); err != nil {
+		return s.resumeUnchangedSource(summary, state, currentMigration, "installation canceled before activation")
 	}
 
 	migrationAttempted := false
-	err = s.stopApplication(ctx)
-	if err == nil {
-		err = rewriteEnvironmentImage(s.policy.EnvironmentFile, manifest.ImmutableImage())
-		if err != nil {
-			err = fmt.Errorf("activate approved image failed")
-		}
+	err = rewriteEnvironmentImage(s.policy.EnvironmentFile, manifest.ImmutableImage())
+	if err != nil {
+		err = fmt.Errorf("activate approved image failed")
 	}
 	if err == nil {
 		migrationAttempted = true
@@ -391,6 +406,28 @@ func (s *Service) install(ctx context.Context, version string, summary *updateco
 	state.Status.CurrentMigration = manifest.MigrationMax
 	state.Status.State = updatecontract.UpdaterStateSucceeded
 	return nil
+}
+
+func (s *Service) resumeUnchangedSource(summary *updatecontract.OperationSummary, state *persistedState, migration int, failure string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), s.policy.operationTimeout())
+	defer cancel()
+	currentMigration, err := s.currentMigration(ctx)
+	if err == nil && currentMigration != migration {
+		err = fmt.Errorf("source schema changed")
+	}
+	if err == nil {
+		err = s.runDocker(ctx, nil, io.Discard, s.composeArgs("up", "-d", "--no-deps", "--force-recreate", s.policy.ApplicationService)...)
+	}
+	if err == nil {
+		err = s.validateDeployment(ctx, migration)
+	}
+	if err != nil {
+		state.Status.State = updatecontract.UpdaterStateCritical
+		summary.RollbackResult = "failed"
+		return fmt.Errorf("%s; unchanged source restart failed; recovery required", failure)
+	}
+	summary.RollbackResult = "succeeded"
+	return fmt.Errorf("%s; unchanged source restarted without database restore", failure)
 }
 
 func (s *Service) rollback(ctx context.Context, version string, state *persistedState) error {

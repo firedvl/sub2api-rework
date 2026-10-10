@@ -50,6 +50,19 @@ func TestFutureSchemaAdvancingReleaseRequiresSafeUpdater(t *testing.T) {
 	require.NoError(t, err, "historical fixture semantics remain installable")
 }
 
+func TestSchema251ReleaseRequiresQuiescentSnapshotUpdater(t *testing.T) {
+	m := validManifest()
+	m.ReworkVersion = "0.2.3-rework.8"
+	m.Image = trustedRepository + ":" + m.ReworkVersion
+	m.MigrationMin, m.MigrationMax = 239, 251
+	m.MinimumUpdaterVersion = "1.1.5"
+	_, err := Parse(encodeManifest(t, m), trustedRepository)
+	require.ErrorContains(t, err, "1.1.6")
+	m.MinimumUpdaterVersion = "1.1.6"
+	_, err = Parse(encodeManifest(t, m), trustedRepository)
+	require.NoError(t, err)
+}
+
 func validManifest() Manifest {
 	return Manifest{
 		SchemaVersion:         1,

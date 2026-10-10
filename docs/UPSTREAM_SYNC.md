@@ -117,10 +117,12 @@ provider availability.
 The canonical development baseline is v0.2.14 at
 `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`, with schema 251. Historical SQL
 through 249 is unchanged. Disposable fresh and 249-to-251 upgrade tests pass.
-Rework remains `0.2.3-rework.7`, with manual updates, source floor 239, and
-minimum updater 1.1.5. Production remains `.7` at schema 249. This development
-reconciliation prepared no release and deployed nothing; a separate release
-task is required to deliver it to installations.
+Release preparation uses `0.2.3-rework.8`, with manual updates, source floor 239,
+and minimum updater 1.1.6. Production remains `.7` at schema 249 with updater
+1.1.5. The development
+reconciliation prepared no release and deployed nothing. See the
+[.8 candidate notes](releases/v0.2.3-rework.8.md) for migration and recovery
+requirements; publication and deployment require separate authorization.
 
 ## v0.2.8 Change Audit
 

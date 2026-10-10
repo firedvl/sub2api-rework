@@ -27,10 +27,18 @@ const (
 	stagingDot6Version              = "0.2.3-rework.6"
 	stagingDot6Image                = "ghcr.io/firedvl/sub2api-rework@sha256:74bbf1f694e59cf0418ef9518f91562ae0a4bab0e8bdd74afa8038180e9c28cb"
 	stagingDot6Revision             = "2d61454ebfd43f36baee38bf55bf01a4b6ffd2c3"
-	stagingRecoveryCandidateVersion = "0.2.4-rework.0"
+	stagingDot7Version              = "0.2.3-rework.7"
+	stagingDot7Image                = "ghcr.io/firedvl/sub2api-rework@sha256:2b26950d90b21235697f5de1aca542ba8eadca1a29196da561fcd2b5d2c75aa5"
+	stagingDot7Revision             = "c3b8715c497bb54c8f18ce4e2fe24b644f576aa8"
+	stagingRecoveryCandidateVersion = "0.2.3-rework.8"
 	stagingRecoveryCandidateImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingRecoveryCandidateVersion
 	stagingLegacyPricingGroup       = "synthetic-dot6-max-multiplier"
 )
+
+type stagingRecoverySource struct {
+	version, image, revision string
+	migration                int
+}
 
 type stagingRecoveryManifestFetcher struct{ digest string }
 
@@ -39,10 +47,10 @@ func (f stagingRecoveryManifestFetcher) Fetch(_ context.Context, version string)
 		return nil, fmt.Errorf("unknown synthetic recovery candidate")
 	}
 	return json.Marshal(updatecontract.Manifest{
-		SchemaVersion: 1, ReworkVersion: version, UpstreamVersion: "v0.2.3",
+		SchemaVersion: 1, ReworkVersion: version, UpstreamVersion: "v0.2.14",
 		GitSHA: strings.Repeat("c", 40), Image: stagingRecoveryCandidateImage, ImageDigest: f.digest,
-		MigrationMin: 244, MigrationMax: stagingCandidateMigration, ReleaseDate: "2026-10-02T00:00:00Z",
-		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: "1.1.5",
+		MigrationMin: 239, MigrationMax: stagingCandidateMigration, ReleaseDate: "2026-10-10T00:00:00Z",
+		Compatibility: updatecontract.CompatibilityApproved, MinimumUpdaterVersion: "1.1.6",
 	})
 }
 
@@ -60,6 +68,7 @@ type stagingRecoveryFaultRunner struct {
 	blocked             bool
 	docker              string
 	compose             []string
+	beforeStop          func() error
 }
 
 func (r *stagingRecoveryFaultRunner) Run(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
@@ -67,6 +76,13 @@ func (r *stagingRecoveryFaultRunner) Run(ctx context.Context, in io.Reader, out 
 		return err
 	}
 	command := strings.Join(args, " ")
+	if r.beforeStop != nil && len(args) >= 2 && args[0] == "update" && args[1] == "--restart=no" {
+		write := r.beforeStop
+		r.beforeStop = nil
+		if err := write(); err != nil {
+			return err
+		}
+	}
 	if r.healthFailure && strings.Contains(command, " up -d --no-deps sub2api") || r.sourceHealthFailure && strings.Contains(command, " up -d --no-deps --force-recreate sub2api") {
 		r.healthFailure = false
 		r.sourceHealthFailure = false
@@ -106,52 +122,60 @@ func (r *stagingRecoveryFaultRunner) Run(ctx context.Context, in io.Reader, out 
 	return nil
 }
 
-func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, service *Service, runner *stagingRunner, targetImage string) {
+func qualifyStagingRecovery(t *testing.T, docker string, compose []string, service *Service, runner *stagingRunner, targetImage string, source stagingRecoverySource) {
 	t.Helper()
-	if Version != "1.1.5" {
-		t.Fatalf("recovery qualification requires updater1.1.5, got %s", Version)
+	if Version != "1.1.6" {
+		t.Fatalf("recovery qualification requires updater1.1.6, got %s", Version)
 	}
-	if output, err := runStagingCommand(docker, "pull", stagingDot6Image); err != nil {
-		t.Fatalf("pull immutable published .6: %v: %s", err, output)
+	if output, err := runStagingCommand(docker, "pull", source.image); err != nil {
+		t.Fatalf("pull immutable published recovery source: %v: %s", err, output)
 	}
-	assertStagingDot6Provenance(t, docker)
+	assertStagingRecoveryProvenance(t, docker, source)
 	if output, err := runStagingCommand(docker, "tag", targetImage, stagingRecoveryCandidateImage); err != nil {
 		t.Fatalf("tag synthetic recovery candidate: %v: %s", err, output)
 	}
 	t.Cleanup(func() { _, _ = runStagingCommand(docker, "image", "rm", stagingRecoveryCandidateImage) })
 	runner.mu.Lock()
 	runner.targetImage = stagingRecoveryCandidateImage
+	runner.exposureStatePath = service.policy.StatePath
 	runner.failCommand, runner.failAfter, runner.failNextUp, runner.healthFailed = "", false, false, false
 	runner.mu.Unlock()
 	service.fetcher = stagingRecoveryManifestFetcher{digest: runner.targetDigest}
 	service.healthHTTP.Transport = http.DefaultTransport
 	service.policy.HealthTimeoutSeconds = 30
 
-	if err := rewriteEnvironmentImage(service.policy.EnvironmentFile, stagingDot6Image); err != nil {
+	if err := rewriteEnvironmentImage(service.policy.EnvironmentFile, source.image); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := runStagingCommand(docker, append(append([]string(nil), compose...),
 		"up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "180", "sub2api")...); err != nil {
-		t.Fatalf("advance disposable .13 fixture to immutable .6: %v: %s", err, output)
+		t.Fatalf("advance disposable fixture to immutable recovery source: %v: %s", err, output)
 	}
-	if stagingMigration(t, docker, compose) != 244 || stagingApplicationImageReference(t, docker, compose) != stagingDot6Image {
-		t.Fatal("published .6 fixture did not reach exact source digest/schema244")
+	if stagingMigration(t, docker, compose) != source.migration || stagingApplicationImageReference(t, docker, compose) != source.image {
+		t.Fatal("published recovery source fixture did not reach exact source digest/source schema")
 	}
 	// Fixture transition only; production state is never rewritten by qualification.
 	state := stagingRecoveryState(t, service)
 	state.Prepared, state.Backup, state.Recovery, state.Exposure = nil, nil, nil, ""
 	state.Status = updatecontract.UpdaterStatus{
 		SchemaVersion: state.Status.SchemaVersion, UpdaterVersion: Version, Healthy: true,
-		State: updatecontract.UpdaterStateIdle, InstalledVersion: stagingDot6Version,
-		CurrentMigration: 244, UpdatedAt: time.Now().UTC(),
+		State: updatecontract.UpdaterStateIdle, InstalledVersion: source.version,
+		CurrentMigration: source.migration, UpdatedAt: time.Now().UTC(),
 	}
 	if err := service.store.save(state); err != nil {
 		t.Fatal(err)
 	}
-	stagingSQL(t, docker, compose, `INSERT INTO groups (name, platform, model_pricing)
+	if source.version == stagingDot6Version {
+		stagingSQL(t, docker, compose, `INSERT INTO groups (name, platform, model_pricing)
 		VALUES ('synthetic-dot6-max-multiplier', 'openai',
 		'[{"platform":"openai","models":["gpt-staging-max"],"billing_mode":"token","input_price":0.01,"output_price":0.02,"max_reasoning_effort_multiplier":3}]'::jsonb)`)
-	assertStagingDot6Healthy(t, docker, compose, service)
+	} else {
+		assertStagingMigratedMultiplier(t, docker, compose, "sub2api")
+	}
+	assertStagingRecoveryHealthy(t, docker, compose, service, source)
+	if source.version == stagingDot7Version {
+		stagingSQL(t, docker, compose, "CREATE TABLE recovery_acknowledged_write (value text NOT NULL)")
+	}
 
 	for _, scenario := range []struct {
 		name, command          string
@@ -162,10 +186,18 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		{name: "candidate_up", command: " up -d --no-deps sub2api", exposed: true},
 		{name: "actual_candidate_health", exposed: true, health: true},
 	} {
-		t.Logf(".6/schema244 -> candidate/schema%d failure matrix: %s", stagingCandidateMigration, scenario.name)
+		t.Logf("%s/schema%d -> .8/schema%d failure matrix: %s", source.version, source.migration, stagingCandidateMigration, scenario.name)
 		prepareStagingRecoveryCandidate(t, service)
 		before := stagingRecoveryCommands(runner)
 		setStagingRecoveryFailure(runner, scenario.command, scenario.after)
+		if source.version == stagingDot7Version && !scenario.exposed {
+			service.runner = &stagingRecoveryFaultRunner{stagingRunner: runner, beforeStop: func() error {
+				args := append(append([]string(nil), compose...), "exec", "-T", "postgres", "psql", "-U", "sub2api", "-d", "sub2api", "-v", "ON_ERROR_STOP=1", "-c",
+					"INSERT INTO recovery_acknowledged_write VALUES ('"+scenario.name+"')")
+				_, err := runStagingCommand(docker, args...)
+				return err
+			}}
+		}
 		if scenario.health {
 			service.runner = &stagingRecoveryFaultRunner{stagingRunner: runner, healthFailure: true, docker: docker, compose: compose}
 		}
@@ -185,7 +217,10 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 			if status.LastAttempt.RollbackResult != "succeeded" || !strings.Contains(strings.Join(commands, "\n"), " pg_restore -U ") {
 				t.Fatal("pre-exposure failure did not execute successful real automatic restore")
 			}
-			assertStagingDot6Healthy(t, docker, compose, service)
+			assertStagingRecoveryHealthy(t, docker, compose, service, source)
+			if source.version == stagingDot7Version && stagingQuery(t, docker, compose, "SELECT COUNT(*) FROM recovery_acknowledged_write WHERE value='"+scenario.name+"'") != "1" {
+				t.Fatal("pre-exposure automatic restore lost acknowledged schema249 write before quiescence")
+			}
 			continue
 		}
 		if status.LastAttempt.RollbackResult != "suppressed" || stagingMigration(t, docker, compose) != stagingCandidateMigration {
@@ -194,11 +229,11 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		assertStagingNoDestructiveCommands(t, commands, true)
 		assertStagingRecoveryApplicationStopped(t, docker, compose)
 		assertStagingMigratedMultiplier(t, docker, compose, "sub2api")
-		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
-		assertStagingRecoveryPrepared(t, docker, compose, service, stagingCandidateMigration)
-		requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingDot6Version)
+		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
+		assertStagingRecoveryPrepared(t, docker, compose, service, source, stagingCandidateMigration)
+		requestHostStagingOperation(t, service, updatecontract.OperationRecover, source.version)
 		waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
-		assertStagingDot6Healthy(t, docker, compose, service)
+		assertStagingRecoveryHealthy(t, docker, compose, service, source)
 	}
 
 	prepareStagingRecoveryCandidate(t, service)
@@ -209,7 +244,22 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 	}
 	assertStagingMigratedMultiplier(t, docker, compose, "sub2api")
 	stagingSQL(t, docker, compose, "CREATE TABLE recovery_post_success_sentinel (value text NOT NULL); INSERT INTO recovery_post_success_sentinel VALUES ('must-be-rescued')")
-	oldRequest := updatecontract.OperationRequest{Version: stagingDot6Version, Actor: "admin:1", Confirmation: "RESTORE DATABASE AND ROLLBACK " + stagingDot6Version}
+	beforeRollback := stagingRecoveryCommands(runner)
+	if _, err := service.Start(updatecontract.OperationRollback, updatecontract.OperationRequest{
+		Version: source.version, Actor: "admin:1", Confirmation: "ROLLBACK " + source.version,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateFailed, time.Minute)
+	if status.LastAttempt == nil || status.LastAttempt.Result != "failed" || !strings.Contains(status.LastError, "database migrations changed") {
+		t.Fatal("application-only rollback did not reject changed migration compatibility")
+	}
+	assertStagingNoDestructiveCommands(t, stagingRecoveryCommands(runner)[len(beforeRollback):], true)
+	assertStagingCurrentSentinel(t, docker, compose)
+	if stagingApplicationImageID(t, docker, compose) != runner.targetID {
+		t.Fatal("blocked rollback changed candidate image")
+	}
+	oldRequest := updatecontract.OperationRequest{Version: source.version, Actor: "admin:1", Confirmation: "RESTORE DATABASE AND ROLLBACK " + source.version}
 	assertStagingRecoveryRejected(t, service, runner, oldRequest)
 	assertStagingCurrentSentinel(t, docker, compose)
 
@@ -223,7 +273,7 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		} else {
 			service.runner = &stagingRecoveryFaultRunner{stagingRunner: runner, dumpFailure: failure}
 		}
-		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
+		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
 		status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
 		service.runner = runner
 		setStagingRecoveryFailure(runner, "", false)
@@ -239,14 +289,14 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 	}
 
 	before := stagingRecoveryCommands(runner)
-	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
-	state = assertStagingRecoveryPrepared(t, docker, compose, service, stagingCandidateMigration)
+	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
+	state = assertStagingRecoveryPrepared(t, docker, compose, service, source, stagingCandidateMigration)
 	assertStagingNoDestructiveCommands(t, stagingRecoveryCommands(runner)[len(before):], true)
 	assertStagingCurrentSentinel(t, docker, compose)
 	staleConsent := stagingRecoveryConsent(t, service)
 	before = stagingRecoveryCommands(runner)
 	setStagingRecoveryFailure(runner, " pg_dump ", true)
-	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
+	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
 	setStagingRecoveryFailure(runner, "", false)
 	if status.LastAttempt == nil || status.LastAttempt.Result != "failed" || stagingRecoveryState(t, service).Recovery.Phase != recoveryPreparing {
@@ -262,14 +312,14 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 	if err := service.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
 		t.Fatal("failed re-preparation damaged previous rescue")
 	}
-	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
-	state = assertStagingRecoveryPrepared(t, docker, compose, service, stagingCandidateMigration)
+	requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
+	state = assertStagingRecoveryPrepared(t, docker, compose, service, source, stagingCandidateMigration)
 	assertStagingRecoveryRejected(t, service, runner, staleConsent)
 	preparedStatus, err := service.RecoveryStatus()
 	if err != nil || preparedStatus == nil || preparedStatus.Confirmation == "" {
 		t.Fatal("operation-bound consent unavailable")
 	}
-	request := updatecontract.OperationRequest{Version: stagingDot6Version, Actor: "admin:1", Confirmation: preparedStatus.Confirmation}
+	request := updatecontract.OperationRequest{Version: source.version, Actor: "admin:1", Confirmation: preparedStatus.Confirmation}
 	for _, backup := range []*backupMetadata{state.Recovery.Rescue, state.Backup} {
 		original, err := os.ReadFile(backup.DatabaseBackup)
 		if err != nil {
@@ -301,10 +351,11 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 	}
 	assertStagingRecoveryApplicationStopped(t, docker, compose)
 	assertStagingCurrentSentinel(t, docker, compose)
-	verifyStagingDot6PricingIncompatibility(t, docker, compose, service, state.Recovery.Rescue)
+	if source.version == stagingDot6Version {
+		verifyStagingDot6PricingIncompatibility(t, docker, compose, service, state.Recovery.Rescue)
+	}
 
-	// Interrupt real recreation and restore in turn. A retry reuses the first
-	// Keep the candidate-schema rescue even after the managed database has reached source244.
+	// Restore retries retain the original candidate-schema rescue.
 	for _, command := range []string{"DROP DATABASE IF EXISTS", " pg_restore -U "} {
 		t.Logf("real Stage2 interruption after %s", strings.TrimSpace(command))
 		consent := stagingRecoveryConsent(t, service)
@@ -314,7 +365,7 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 				t.Fatal(err)
 			}
 		} else {
-			requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingDot6Version)
+			requestHostStagingOperation(t, service, updatecontract.OperationRecover, source.version)
 		}
 		status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
 		setStagingRecoveryFailure(runner, "", false)
@@ -328,7 +379,7 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		assertStagingRecoveryApplicationStopped(t, docker, compose)
 		assertStagingRecoveryRejected(t, service, runner, consent)
 		before := stagingRecoveryCommands(runner)
-		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
+		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
 		status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
 		if status.LastAttempt == nil || status.LastAttempt.Result != "succeeded" || !reflect.DeepEqual(stagingRecoveryState(t, service).Recovery.Rescue, state.Recovery.Rescue) {
 			t.Fatal("partial restore preparation overwrote current-data rescue")
@@ -356,7 +407,7 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		case "audit":
 			restoreAudit = breakStagingRecoveryAudit(t, service.policy.AuditPath)
 		}
-		requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingDot6Version)
+		requestHostStagingOperation(t, service, updatecontract.OperationRecover, source.version)
 		status = waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 5*time.Minute)
 		if restoreAudit != nil {
 			restoreAudit()
@@ -373,15 +424,15 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 		if failure == "audit" {
 			assertStagingNoDestructiveCommands(t, stagingRecoveryCommands(runner)[len(before):], true)
 		}
-		if stagingMigration(t, docker, compose) != 244 {
-			t.Fatal("source-start retry did not retain the already restored schema244")
+		if stagingMigration(t, docker, compose) != source.migration {
+			t.Fatal("source-start retry did not retain the already restored source schema")
 		}
 		if err := service.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
 			t.Fatal("original candidate-schema rescue was not retained after source-start/audit failure")
 		}
 		assertStagingRecoveryRejected(t, service, runner, consent)
-		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, stagingDot6Version)
-		fresh := assertStagingRecoveryPrepared(t, docker, compose, service, 244)
+		requestHostStagingOperation(t, service, updatecontract.OperationPrepareRecovery, source.version)
+		fresh := assertStagingRecoveryPrepared(t, docker, compose, service, source, source.migration)
 		if stagingRecoveryConsent(t, service).Confirmation == consent.Confirmation || fresh.Recovery.Rescue.DatabaseBackup == state.Recovery.Rescue.DatabaseBackup {
 			t.Fatal("source-start retry failed to create separate fresh rescue consent")
 		}
@@ -389,23 +440,23 @@ func qualifyStagingDot6Recovery(t *testing.T, docker string, compose []string, s
 	}
 
 	assertStagingConcurrentRecovery(t, service, runner, updatecontract.OperationPrepareRecovery, " pg_dump ")
-	assertStagingRecoveryPrepared(t, docker, compose, service, 244)
+	assertStagingRecoveryPrepared(t, docker, compose, service, source, source.migration)
 	finalConsent := stagingRecoveryConsent(t, service)
 	assertStagingConcurrentRecovery(t, service, runner, updatecontract.OperationRecover, "pg_restore --list")
 	status = waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
-	if status.InstalledVersion != stagingDot6Version || status.CurrentMigration != 244 {
-		t.Fatal("explicit recovery did not restore .6/schema244")
+	if status.InstalledVersion != source.version || status.CurrentMigration != source.migration {
+		t.Fatal("explicit recovery did not restore recorded source version/schema")
 	}
-	assertStagingDot6Healthy(t, docker, compose, service)
+	assertStagingRecoveryHealthy(t, docker, compose, service, source)
 	if stagingQuery(t, docker, compose, "SELECT to_regclass('recovery_post_success_sentinel') IS NULL") != "t" {
-		t.Fatal("source244 recovery retained post-success sentinel")
+		t.Fatal("source snapshot recovery retained post-success sentinel")
 	}
 	verifyStagingRescue(t, docker, compose, service, state.Recovery.Rescue)
 	if err := service.validateRecoveryBackup(state.Backup); err != nil {
 		t.Fatal(err)
 	}
 	assertStagingRecoveryRejected(t, service, runner, finalConsent)
-	t.Logf(".6/schema244 -> candidate/schema%d recovery matrix passed; current writes retained in separately restored rescue", stagingCandidateMigration)
+	t.Logf("%s/schema%d -> .8/schema%d recovery matrix passed; current writes retained in separately restored rescue", source.version, source.migration, stagingCandidateMigration)
 }
 
 func stagingRecoveryState(t *testing.T, service *Service) persistedState {
@@ -435,29 +486,29 @@ func prepareStagingRecoveryCandidate(t *testing.T, service *Service) {
 	waitForStagingOperation(t, service, updatecontract.UpdaterStatePrepared, 3*time.Minute)
 }
 
-func assertStagingDot6Provenance(t *testing.T, docker string) {
+func assertStagingRecoveryProvenance(t *testing.T, docker string, source stagingRecoverySource) {
 	t.Helper()
-	labels, err := runStagingCommand(docker, "image", "inspect", stagingDot6Image, "--format", "{{json .Config.Labels}}")
+	labels, err := runStagingCommand(docker, "image", "inspect", source.image, "--format", "{{json .Config.Labels}}")
 	var values map[string]string
-	if err != nil || json.Unmarshal([]byte(labels), &values) != nil || values["org.opencontainers.image.revision"] != stagingDot6Revision || values["org.opencontainers.image.version"] != stagingDot6Version {
-		t.Fatal("published .6 OCI version/revision does not match authoritative source")
+	if err != nil || json.Unmarshal([]byte(labels), &values) != nil || values["org.opencontainers.image.revision"] != source.revision || values["org.opencontainers.image.version"] != source.version {
+		t.Fatal("published recovery source OCI version/revision does not match authoritative source")
 	}
-	version, err := runStagingCommandCombined(docker, "run", "--rm", "--network", "none", stagingDot6Image, "/app/sub2api", "--version")
-	if err != nil || !strings.Contains(version, stagingDot6Version) || !strings.Contains(version, stagingDot6Revision[:7]) {
-		t.Fatal("published .6 binary identity differs from expected version/revision")
+	version, err := runStagingCommandCombined(docker, "run", "--rm", "--network", "none", source.image, "/app/sub2api", "--version")
+	if err != nil || !strings.Contains(version, source.version) || !strings.Contains(version, source.revision[:7]) {
+		t.Fatal("published recovery source binary identity differs from expected version/revision")
 	}
 }
 
-func assertStagingDot6Healthy(t *testing.T, docker string, compose []string, service *Service) {
+func assertStagingRecoveryHealthy(t *testing.T, docker string, compose []string, service *Service, source stagingRecoverySource) {
 	t.Helper()
 	status, err := service.Status()
-	if err != nil || status.InstalledVersion != stagingDot6Version || status.CurrentMigration != 244 || stagingMigration(t, docker, compose) != 244 || stagingApplicationImageReference(t, docker, compose) != stagingDot6Image {
-		t.Fatal("source recovery identity differs from immutable .6/schema244")
+	if err != nil || status.InstalledVersion != source.version || status.CurrentMigration != source.migration || stagingMigration(t, docker, compose) != source.migration || stagingApplicationImageReference(t, docker, compose) != source.image {
+		t.Fatal("source recovery identity differs from immutable recovery source/schema")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := service.validateDeployment(ctx, 244); err != nil {
-		t.Fatalf("recovered .6 deployment unhealthy: %v", err)
+	if err := service.validateDeployment(ctx, source.migration); err != nil {
+		t.Fatalf("recovered source deployment unhealthy: %v", err)
 	}
 	if stagingQuery(t, docker, compose, "SELECT value FROM recovery_source_sentinel") != "source-before-backup" {
 		t.Fatal("source sentinel was not retained")
@@ -487,14 +538,14 @@ func assertStagingRecoveryApplicationStopped(t *testing.T, docker string, compos
 	}
 }
 
-func assertStagingRecoveryPrepared(t *testing.T, docker string, compose []string, service *Service, currentSchema int) persistedState {
+func assertStagingRecoveryPrepared(t *testing.T, docker string, compose []string, service *Service, source stagingRecoverySource, currentSchema int) persistedState {
 	t.Helper()
 	status := waitForStagingOperation(t, service, updatecontract.UpdaterStateCritical, 3*time.Minute)
 	if status.LastAttempt == nil || status.LastAttempt.Result != "succeeded" || status.LastAttempt.Action != updatecontract.OperationPrepareRecovery {
 		t.Fatal("rescue preparation did not finish successfully in critical state")
 	}
 	state := stagingRecoveryState(t, service)
-	if state.Recovery == nil || state.Recovery.Phase != recoveryPrepared || state.Recovery.Rescue.SourceMigration != currentSchema || state.Backup.SourceMigration != 244 || state.Backup.SourceDigest != stagingDot6Image {
+	if state.Recovery == nil || state.Recovery.Phase != recoveryPrepared || state.Recovery.Rescue.SourceMigration != currentSchema || state.Backup.SourceMigration != source.migration || state.Backup.SourceDigest != source.image {
 		t.Fatal("prepared rescue/source schema or digest differs")
 	}
 	if err := service.validateRecoveryBackup(state.Recovery.Rescue); err != nil {
@@ -502,10 +553,10 @@ func assertStagingRecoveryPrepared(t *testing.T, docker string, compose []string
 	}
 	public, err := service.RecoveryStatus()
 	currentVersion := stagingRecoveryCandidateVersion
-	if currentSchema == 244 {
-		currentVersion = stagingDot6Version
+	if currentSchema == source.migration {
+		currentVersion = source.version
 	}
-	if err != nil || public == nil || public.CurrentSchema != currentSchema || public.SourceSchema != 244 || public.CurrentVersion != currentVersion || public.SourceVersion != stagingDot6Version || public.OperationID != state.Recovery.OperationID || !strings.Contains(public.Confirmation, state.Recovery.AuthorizationID) || !strings.Contains(public.Confirmation, state.Recovery.Rescue.DatabaseSHA256) {
+	if err != nil || public == nil || public.CurrentSchema != currentSchema || public.SourceSchema != source.migration || public.CurrentVersion != currentVersion || public.SourceVersion != source.version || public.OperationID != state.Recovery.OperationID || !strings.Contains(public.Confirmation, state.Recovery.AuthorizationID) || !strings.Contains(public.Confirmation, state.Recovery.Rescue.DatabaseSHA256) {
 		t.Fatal("public recovery status is not bound to prepared rescue consent")
 	}
 	assertStagingRecoveryApplicationStopped(t, docker, compose)
@@ -529,7 +580,7 @@ func stagingRecoveryConsent(t *testing.T, service *Service) updatecontract.Opera
 	if err != nil || status == nil || status.Confirmation == "" {
 		t.Fatal("current operation-bound recovery consent unavailable")
 	}
-	return updatecontract.OperationRequest{Version: stagingDot6Version, Actor: "admin:1", Confirmation: status.Confirmation}
+	return updatecontract.OperationRequest{Version: status.SourceVersion, Actor: "admin:1", Confirmation: status.Confirmation}
 }
 
 func breakStagingRecoveryAudit(t *testing.T, path string) func() {
@@ -565,7 +616,7 @@ func assertStagingConcurrentRecovery(t *testing.T, service *Service, runner *sta
 	unblock := func() { once.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
 	service.runner = &stagingRecoveryFaultRunner{stagingRunner: runner, blockCommand: command, entered: entered, release: release}
-	requestHostStagingOperation(t, service, operation, stagingDot6Version)
+	requestHostStagingOperation(t, service, operation, oldConsent.Version)
 	select {
 	case <-entered:
 	case <-time.After(time.Minute):
@@ -577,11 +628,11 @@ func assertStagingConcurrentRecovery(t *testing.T, service *Service, runner *sta
 		action  updatecontract.Operation
 		request updatecontract.OperationRequest
 	}{
-		{updatecontract.OperationPrepareRecovery, updatecontract.OperationRequest{Version: stagingDot6Version, Actor: "admin:1", Confirmation: "PREPARE RECOVERY " + stagingDot6Version}},
+		{updatecontract.OperationPrepareRecovery, updatecontract.OperationRequest{Version: oldConsent.Version, Actor: "admin:1", Confirmation: "PREPARE RECOVERY " + oldConsent.Version}},
 		{updatecontract.OperationRecover, oldConsent},
 		{updatecontract.OperationPrepare, updatecontract.OperationRequest{Version: stagingRecoveryCandidateVersion, Actor: "admin:1"}},
 		{updatecontract.OperationInstall, updatecontract.OperationRequest{Version: stagingRecoveryCandidateVersion, Actor: "admin:1", Confirmation: "INSTALL " + stagingRecoveryCandidateVersion}},
-		{updatecontract.OperationRollback, updatecontract.OperationRequest{Version: stagingDot6Version, Actor: "admin:1", Confirmation: "ROLLBACK " + stagingDot6Version}},
+		{updatecontract.OperationRollback, updatecontract.OperationRequest{Version: oldConsent.Version, Actor: "admin:1", Confirmation: "ROLLBACK " + oldConsent.Version}},
 	} {
 		if _, err := service.Start(competing.action, competing.request); !errors.Is(err, ErrOperationBusy) {
 			t.Fatalf("concurrent %s did not fail at operation lock: %v", competing.action, err)

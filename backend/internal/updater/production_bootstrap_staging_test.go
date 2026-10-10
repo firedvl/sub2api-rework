@@ -68,15 +68,16 @@ func (f stagingManifestFetcher) Fetch(_ context.Context, version string) ([]byte
 
 type stagingRunner struct {
 	ExecRunner
-	targetImage  string
-	targetDigest string
-	targetID     string
-	failCommand  string
-	failAfter    bool
-	commands     []string
-	mu           sync.Mutex
-	failNextUp   bool
-	healthFailed bool
+	targetImage       string
+	targetDigest      string
+	targetID          string
+	failCommand       string
+	failAfter         bool
+	commands          []string
+	mu                sync.Mutex
+	failNextUp        bool
+	healthFailed      bool
+	exposureStatePath string
 }
 
 func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error {
@@ -86,6 +87,13 @@ func (runner *stagingRunner) Run(ctx context.Context, stdin io.Reader, stdout io
 	fail := runner.failCommand != "" && strings.Contains(command, runner.failCommand)
 	after := runner.failAfter
 	runner.mu.Unlock()
+	if runner.exposureStatePath != "" && strings.Contains(command, " up -d --no-deps sub2api") {
+		data, err := os.ReadFile(runner.exposureStatePath)
+		var state persistedState
+		if err != nil || json.Unmarshal(data, &state) != nil || state.Exposure != exposurePossible {
+			return fmt.Errorf("candidate launch lacks persisted EXPOSURE_POSSIBLE")
+		}
+	}
 	if fail && !after {
 		return fmt.Errorf("synthetic staging command failure")
 	}
@@ -415,7 +423,12 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	requestHostStagingOperation(t, service, updatecontract.OperationRecover, stagingSourceVersion)
 	waitForStagingOperation(t, service, updatecontract.UpdaterStateSucceeded, 5*time.Minute)
 	assertStagingApplicationAccess(t, docker, compose, policy, strconv.Itoa(os.Getgid()))
-	qualifyStagingDot6Recovery(t, docker, compose, service, runner, targetImage)
+	for _, source := range []stagingRecoverySource{
+		{stagingDot6Version, stagingDot6Image, stagingDot6Revision, 244},
+		{stagingDot7Version, stagingDot7Image, stagingDot7Revision, 249},
+	} {
+		qualifyStagingRecovery(t, docker, compose, service, runner, targetImage, source)
+	}
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
 		t.Fatalf("deployment-specific systemd drop-in is invalid: %q, %v", dropIn, err)
 	}

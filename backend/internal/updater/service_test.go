@@ -620,7 +620,7 @@ func TestAutomaticRollbackUsesFreshBoundedContext(t *testing.T) {
 	err = service.install(ctx, "0.1.184-rework.1", &summary, &state)
 
 	require.ErrorContains(t, err, "automatic rollback succeeded")
-	require.True(t, runner.hasCall(" pg_restore "))
+	require.True(t, runner.hasCall(" pg_restore -U"))
 	live, bounded := runner.recoveryContextState()
 	require.True(t, live)
 	require.True(t, bounded)
@@ -634,7 +634,7 @@ func TestFailedMigrationForcesDatabaseRestore(t *testing.T) {
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 3*time.Second)
 	require.Equal(t, "succeeded", status.LastAttempt.RollbackResult)
-	require.True(t, runner.hasCall(" pg_restore "))
+	require.True(t, runner.hasCall(" pg_restore -U"))
 }
 
 func TestRestoreStopFailureSkipsDatabaseRestore(t *testing.T) {
@@ -645,7 +645,7 @@ func TestRestoreStopFailureSkipsDatabaseRestore(t *testing.T) {
 	require.NoError(t, err)
 	status := waitForUpdater(t, service, 3*time.Second)
 	require.Equal(t, updatecontract.UpdaterStateCritical, status.State)
-	require.False(t, runner.hasCall(" pg_restore "))
+	require.False(t, runner.hasCall(" pg_restore -U"))
 }
 
 func TestHealthFailurePreservesDatabaseWithoutSourceStart(t *testing.T) {
@@ -662,7 +662,7 @@ func TestHealthFailurePreservesDatabaseWithoutSourceStart(t *testing.T) {
 	require.Equal(t, "0.1.183-rework.1", status.InstalledVersion)
 	require.Equal(t, 233, status.CurrentMigration)
 	require.Equal(t, 233, runner.migration)
-	require.False(t, runner.hasCall(" pg_restore "))
+	require.False(t, runner.hasCall(" pg_restore -U"))
 	require.False(t, runner.hasCall("DROP DATABASE IF EXISTS"))
 	require.True(t, runner.applicationStopped)
 	environment, err := os.ReadFile(policy.EnvironmentFile)
@@ -841,7 +841,7 @@ func TestPostSuccessRecoveryRestoresRecordedDatabaseAndIdentity(t *testing.T) {
 	require.Equal(t, 232, status.CurrentMigration)
 	require.Equal(t, "0.1.183-rework.1", status.RollbackVersion, "recovery keeps its sole recorded retry target")
 	require.Equal(t, updatecontract.OperationRecover, status.LastRollback.Action)
-	require.True(t, runner.hasCall(" pg_restore "))
+	require.True(t, runner.hasCall(" pg_restore -U"))
 
 	state, err := service.store.load(service.policy.InitialInstalledVersion, service.policy.InitialMigration, Version)
 	require.NoError(t, err)
@@ -877,7 +877,7 @@ func TestRecoveryRejectsLegacyOrTamperedBackupWithoutMutation(t *testing.T) {
 
 			_, err = service.Start(updatecontract.OperationPrepareRecovery, updatecontract.OperationRequest{Version: recoverRequest().Version, Actor: "admin:1", Confirmation: "PREPARE RECOVERY " + recoverRequest().Version})
 			require.ErrorContains(t, err, "recorded recovery backup is invalid")
-			require.False(t, runner.hasCall(" pg_restore "))
+			require.False(t, runner.hasCall(" pg_restore -U"))
 		})
 	}
 }

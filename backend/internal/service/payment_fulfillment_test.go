@@ -969,6 +969,93 @@ func TestPaymentNotificationRejectsAmountMismatchBeforeFulfillment(t *testing.T)
 	require.Equal(t, OrderStatusPending, reloaded.Status)
 }
 
+func TestPaymentNotificationLegacyFallbackRejectsModernOrder(t *testing.T) {
+	for _, form := range []string{"canonical", "leading_zero", "plus", "whitespace"} {
+		t.Run(form, func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPending, time.Now())
+			order, err := client.PaymentOrder.UpdateOneID(order.ID).
+				SetOrderType(payment.OrderTypeBalance).
+				ClearPlanID().ClearSubscriptionGroupID().ClearSubscriptionDays().Save(ctx)
+			require.NoError(t, err)
+
+			usedBy := order.UserID
+			redeemRepo := &redeemCodeRepoStub{codesByCode: map[string]*RedeemCode{
+				order.RechargeCode: {ID: 103, Code: order.RechargeCode, Type: RedeemTypeBalance,
+					Value: order.Amount, Status: StatusUsed, UsedBy: &usedBy},
+			}}
+			svc := &PaymentService{entClient: client, redeemService: &RedeemService{redeemRepo: redeemRepo}}
+			legacyID := orderIDPrefix + strconv.FormatInt(order.ID, 10)
+			switch form {
+			case "leading_zero":
+				legacyID = orderIDPrefix + "0" + strconv.FormatInt(order.ID, 10)
+			case "plus":
+				legacyID = orderIDPrefix + "+" + strconv.FormatInt(order.ID, 10)
+			case "whitespace":
+				legacyID = " " + legacyID + " "
+			}
+			err = svc.HandlePaymentNotification(ctx, &payment.PaymentNotification{
+				OrderID: legacyID, TradeNo: "historical-trade", Amount: order.PayAmount,
+				Status: payment.NotificationStatusSuccess,
+			}, payment.TypeAlipay)
+			require.ErrorIs(t, err, ErrOrderNotFound)
+			reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+			require.NoError(t, err)
+			require.Equal(t, OrderStatusPending, reloaded.Status)
+			require.Equal(t, order.PaymentTradeNo, reloaded.PaymentTradeNo)
+			require.Equal(t, order.OutTradeNo, reloaded.OutTradeNo)
+			require.Empty(t, redeemRepo.useCalls)
+			auditCount, err := client.PaymentAuditLog.Query().Count(ctx)
+			require.NoError(t, err)
+			require.Zero(t, auditCount)
+		})
+	}
+}
+
+func TestPaymentNotificationPreservesLegacyAndExactOrderIdentity(t *testing.T) {
+	for _, identity := range []string{"legacy_blank", "legacy_exact", "modern_exact"} {
+		t.Run(identity, func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			order := createPaymentFulfillmentSubscriptionOrder(t, ctx, client, OrderStatusPending, time.Now())
+			legacyID := orderIDPrefix + strconv.FormatInt(order.ID, 10)
+			outTradeNo := order.OutTradeNo
+			switch identity {
+			case "legacy_blank":
+				outTradeNo = ""
+			case "legacy_exact":
+				outTradeNo = orderIDPrefix + strconv.FormatInt(order.ID+100, 10)
+			}
+			order, err := client.PaymentOrder.UpdateOneID(order.ID).
+				SetOutTradeNo(outTradeNo).SetOrderType(payment.OrderTypeBalance).
+				ClearPlanID().ClearSubscriptionGroupID().ClearSubscriptionDays().Save(ctx)
+			require.NoError(t, err)
+			usedBy := order.UserID
+			redeemRepo := &redeemCodeRepoStub{codesByCode: map[string]*RedeemCode{
+				order.RechargeCode: {ID: 104, Code: order.RechargeCode, Type: RedeemTypeBalance,
+					Value: order.Amount, Status: StatusUsed, UsedBy: &usedBy},
+			}}
+			svc := &PaymentService{entClient: client, redeemService: &RedeemService{redeemRepo: redeemRepo}}
+			callbackID := outTradeNo
+			if identity == "legacy_blank" {
+				callbackID = legacyID
+			}
+			notification := &payment.PaymentNotification{
+				OrderID: callbackID, TradeNo: "valid-trade", Amount: order.PayAmount,
+				Status: payment.NotificationStatusSuccess,
+			}
+			require.NoError(t, svc.HandlePaymentNotification(ctx, notification, payment.TypeAlipay))
+			require.NoError(t, svc.HandlePaymentNotification(ctx, notification, payment.TypeAlipay))
+			reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+			require.NoError(t, err)
+			require.Equal(t, OrderStatusCompleted, reloaded.Status)
+			require.Equal(t, "valid-trade", reloaded.PaymentTradeNo)
+			require.Empty(t, redeemRepo.useCalls, "replayed callbacks must not redeem an already-used code")
+		})
+	}
+}
+
 func TestExecuteBalanceFulfillmentRejectsCodeUsedByAnotherUser(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

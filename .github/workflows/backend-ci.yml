@@ -82,7 +82,7 @@ jobs:
           docker buildx build --load --metadata-file /tmp/sub2api-rework-staging-image.json \
             --build-arg GOPROXY=https://proxy.golang.org,direct \
             --build-arg GOSUMDB=sum.golang.org \
-            --build-arg VERSION=0.2.3-rework.1 \
+            --build-arg VERSION=0.2.3-rework.8 \
             --build-arg COMMIT="$GITHUB_SHA" \
             -t sub2api-v023-recovery-candidate:ci ..
           staging_digest="$(jq -er '."containerimage.digest"' /tmp/sub2api-rework-staging-image.json)"
@@ -125,9 +125,9 @@ jobs:
             'Environment=SUB2API_STAGING_TARGET_IMAGE=sub2api-v023-recovery-candidate:ci' \
             "Environment=SUB2API_STAGING_TARGET_DIGEST=$staging_digest" \
             'ExecStart=' \
-            'ExecStart=/usr/local/libexec/sub2api-rework-updater-qualification -test.run=^TestProductionBootstrapPreservesUpdaterAccess$ -test.v -test.count=1 -test.timeout=20m' \
+            'ExecStart=/usr/local/libexec/sub2api-rework-updater-qualification -test.run=^TestProductionBootstrapPreservesUpdaterAccess$ -test.v -test.count=1 -test.timeout=30m' \
             'Restart=no' \
-            'TimeoutStartSec=25min' \
+            'TimeoutStartSec=35min' \
             | sudo tee \
               /etc/systemd/system/sub2api-rework-updater.service.d/20-qualification.conf \
               >/dev/null
@@ -201,6 +201,16 @@ jobs:
       - name: Operator console browser tests
         working-directory: frontend
         run: pnpm test:e2e
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   golangci-lint:
     runs-on: ubuntu-latest
