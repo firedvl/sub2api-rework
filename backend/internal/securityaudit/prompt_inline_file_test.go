@@ -129,6 +129,17 @@ func TestPromptSnapshotInlineFileContainers(t *testing.T) {
 	require.Equal(t, "blocked file", snapshot.ScanText)
 }
 
+func TestPromptSnapshotInlineFileChatMessageTypeExtension(t *testing.T) {
+	for _, extension := range []string{`17`, `{}`, `[]`, `null`} {
+		req := Request{Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","type":` + extension + `,"content":[{"type":"file","file":{"file_data":"data:text/plain;base64,YmxvY2tlZCBmaWxl"}}]}]}`)}
+		for _, latestOnly := range []bool{false, true} {
+			snapshot, err := ExtractBlockingPromptSnapshot(req, latestOnly)
+			require.NoError(t, err)
+			require.Equal(t, "blocked file", snapshot.ScanText)
+		}
+	}
+}
+
 func TestPromptSnapshotHTTPTypeIsNotWebSocketFrameType(t *testing.T) {
 	for _, kind := range []string{"file", "input_file", "response.cancel"} {
 		for _, content := range []string{`"blocked ordinary text"`, `[{"type":"input_file","file_data":"data:text/plain;base64,YmxvY2tlZCBmaWxl"}]`} {

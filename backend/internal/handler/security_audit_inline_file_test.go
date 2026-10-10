@@ -59,7 +59,11 @@ func TestInlineFilePolicyBlocksBeforeGatewaySideEffects(t *testing.T) {
 			})
 			router.POST("/policy-test", func(c *gin.Context) { endpoint.call(gateway, openAI, c) })
 
-			for _, contentKind := range []string{"file", "text", "mixed"} {
+			kinds := []string{"file", "text", "mixed"}
+			if endpoint.field == "messages" {
+				kinds = append(kinds, "file with type extension")
+			}
+			for _, contentKind := range kinds {
 				part := map[string]any{"type": "input_text", "text": "POLICY_BLOCK ordinary text"}
 				if contentKind != "text" {
 					fileData := "data:text/plain;base64," + base64.StdEncoding.EncodeToString([]byte("POLICY_BLOCK file text"))
@@ -72,7 +76,11 @@ func TestInlineFilePolicyBlocksBeforeGatewaySideEffects(t *testing.T) {
 				if contentKind == "mixed" {
 					parts = append([]any{map[string]any{"type": "text", "text": "ordinary text"}}, parts...)
 				}
-				body, err := json.Marshal(map[string]any{"model": "claude-sonnet-4-5", endpoint.field: []any{map[string]any{"role": "user", "content": parts}}})
+				message := map[string]any{"role": "user", "content": parts}
+				if contentKind == "file with type extension" {
+					message["type"] = 17
+				}
+				body, err := json.Marshal(map[string]any{"model": "claude-sonnet-4-5", endpoint.field: []any{message}})
 				require.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				request := httptest.NewRequest(http.MethodPost, "/policy-test", strings.NewReader(string(body)))

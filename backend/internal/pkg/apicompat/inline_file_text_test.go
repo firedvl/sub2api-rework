@@ -135,3 +135,19 @@ func TestInlineFileInspectionPreservesKnownRoleAndToolBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, string(plain), string(normalized))
 }
+
+func TestInlineFileInspectionIgnoresChatMessageTypeExtension(t *testing.T) {
+	for _, extension := range []string{`17`, `{}`, `[]`, `null`} {
+		body := []byte(`{"model":"test","messages":[{"role":"user","type":` + extension + `,"content":[{"type":"file","file":{"file_data":"data:text/plain;base64,YmxvY2tlZCBmaWxl"}}]}]}`)
+		var chat ChatCompletionsRequest
+		require.NoError(t, json.Unmarshal(body, &chat))
+		responses, err := ChatCompletionsToResponses(&chat)
+		require.NoError(t, err)
+		anthropic, err := ResponsesToAnthropicRequest(responses)
+		require.NoError(t, err)
+		require.Contains(t, string(anthropic.Messages[0].Content), "blocked file")
+		normalized, err := NormalizeInlineFilePartsForInspection(body)
+		require.NoError(t, err)
+		require.Contains(t, string(normalized), `"text":"blocked file"`)
+	}
+}

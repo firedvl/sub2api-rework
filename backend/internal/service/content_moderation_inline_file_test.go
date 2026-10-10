@@ -105,6 +105,14 @@ func TestContentModerationInlineFileContainers(t *testing.T) {
 	require.Equal(t, "blocked file", extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, body))
 }
 
+func TestContentModerationInlineFileChatMessageTypeExtension(t *testing.T) {
+	for _, extension := range []string{`17`, `{}`, `[]`, `null`} {
+		body := []byte(`{"messages":[{"role":"user","type":` + extension + `,"content":[{"type":"file","file":{"file_data":"data:text/plain;base64,YmxvY2tlZCBmaWxl"}}]}]}`)
+		require.Equal(t, "blocked file", ExtractContentModerationText(ContentModerationProtocolOpenAIChat, body))
+		require.Equal(t, "blocked file", extractContentModerationKeywordText(ContentModerationProtocolOpenAIChat, body))
+	}
+}
+
 func TestContentModerationKeywordBlocksInlineFileOnlyRequests(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.Enabled = true

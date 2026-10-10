@@ -93,13 +93,22 @@ func normalizeInlineFileMessages(raw json.RawMessage, chat bool) json.RawMessage
 	}
 	for i, message := range messages {
 		var fields struct {
-			Type    string          `json:"type"`
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		}
 		var object map[string]json.RawMessage
 		if json.Unmarshal(message, &fields) != nil || json.Unmarshal(message, &object) != nil || object == nil {
 			continue
+		}
+		kind := ""
+		if !chat {
+			var response struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(message, &response) != nil {
+				continue
+			}
+			kind = response.Type
 		}
 		var parts []json.RawMessage
 		if json.Unmarshal(fields.Content, &parts) != nil {
@@ -117,7 +126,7 @@ func normalizeInlineFileMessages(raw json.RawMessage, chat bool) json.RawMessage
 		}
 		content, _ := json.Marshal(parts)
 		setInspectionField(object, "content", content)
-		if hasInlineText && inlineFileUsesUserFallback(fields.Role, fields.Type, chat) {
+		if hasInlineText && inlineFileUsesUserFallback(fields.Role, kind, chat) {
 			fields.Role = "user"
 		}
 		role, _ := json.Marshal(fields.Role)
