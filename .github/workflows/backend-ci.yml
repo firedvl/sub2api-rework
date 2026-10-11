@@ -82,7 +82,7 @@ jobs:
           docker buildx build --load --metadata-file /tmp/sub2api-rework-staging-image.json \
             --build-arg GOPROXY=https://proxy.golang.org,direct \
             --build-arg GOSUMDB=sum.golang.org \
-            --build-arg VERSION=0.2.3-rework.8 \
+            --build-arg VERSION=0.2.3-rework.9 \
             --build-arg COMMIT="$GITHUB_SHA" \
             -t sub2api-v023-recovery-candidate:ci ..
           staging_digest="$(jq -er '."containerimage.digest"' /tmp/sub2api-rework-staging-image.json)"

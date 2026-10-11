@@ -117,12 +117,13 @@ provider availability.
 The canonical development baseline is v0.2.14 at
 `0363b8cdba8cec3e2ba4b2dbd49c4481143fa55d`, with schema 251. Historical SQL
 through 249 is unchanged. Disposable fresh and 249-to-251 upgrade tests pass.
-Release preparation uses `0.2.3-rework.8`, with manual updates, source floor 239,
-and minimum updater 1.1.6. Production remains `.7` at schema 249 with updater
-1.1.5. The development
-reconciliation prepared no release and deployed nothing. See the
-[.8 candidate notes](releases/v0.2.3-rework.8.md) for migration and recovery
-requirements; publication and deployment require separate authorization.
+Release preparation uses `0.2.3-rework.9`, with manual updates, source floor 239,
+schema maximum 251, and minimum updater 1.1.6. The reported production baseline
+is the immutable `.8` at schema 251 with updater 1.1.6. The `.9` preparation
+fixes the GPT-6.1 catalog/request effort discrepancy without a migration or
+production changes. See the [.9 candidate notes](releases/v0.2.3-rework.9.md)
+and [acceptance evidence](GPT61_ULTRA_CONTRACT_HOTFIX.md). Publication and
+deployment require separate authorization for the final qualified source.
 
 ## v0.2.8 Change Audit
 
