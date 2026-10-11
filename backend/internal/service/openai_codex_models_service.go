@@ -207,7 +207,21 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 	if err != nil {
 		return fmt.Errorf("load group configured Codex models: %w", err)
 	}
-	return applyGroupCodexModelsManifestPolicy(manifest, group, configuredModels, ifNoneMatch)
+	_, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	if err != nil {
+		return err
+	}
+	if err := applyGroupCodexModelsManifestPolicy(manifest, group, configuredModels, ""); err != nil {
+		return err
+	}
+	if err := qualifyGroupCodexManifestReasoning(manifest, group, accounts, nil, true); err != nil {
+		return err
+	}
+	if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
+		manifest.Body = nil
+		manifest.NotModified = true
+	}
+	return nil
 }
 
 // FilterGroupCodexModelsManifest applies group display and allowlist policy to
@@ -316,6 +330,17 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 		return nil, true, err
 	}
 	manifest := &CodexModelsManifest{Body: body, ETag: codexModelsManifestBodyETag(body)}
+	var routes []CompositeModelRoute
+	routesAvailable := true
+	if group.Platform == PlatformComposite && s.compositeResolver != nil && s.compositeResolver.repo != nil {
+		routes, err = s.compositeResolver.repo.ListByGroup(ctx, group.ID, false)
+		if err != nil {
+			return nil, true, err
+		}
+	}
+	if err := qualifyGroupCodexManifestReasoning(manifest, group, accounts, routes, routesAvailable); err != nil {
+		return nil, true, err
+	}
 	if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
 		manifest.Body = nil
 		manifest.NotModified = true
@@ -867,6 +892,7 @@ type codexModelMetadataOverride struct {
 	UpstreamModelMetadata
 	reasoningConflict       bool
 	inputModalitiesConflict bool
+	reasoningContractModels []string
 }
 
 func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescriptor {
@@ -1006,6 +1032,9 @@ func (d configuredCodexModelDescriptor) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	for key, value := range official {
+		if key == "default_reasoning_level" && d.DefaultReasoningLevel == nil {
+			continue
+		}
 		if _, exists := fields[key]; !exists {
 			fields[key] = value
 		}
@@ -1384,7 +1413,7 @@ func buildCodexModelsManifest(
 	modelMetadata map[string]codexModelMetadataOverride,
 ) ([]byte, error) {
 	seen := make(map[string]struct{}, len(modelIDs))
-	models := make([]configuredCodexModelDescriptor, 0, len(modelIDs))
+	models := make([]json.RawMessage, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		modelID = strings.TrimSpace(modelID)
 		if modelID == "" {
@@ -1413,10 +1442,24 @@ func buildCodexModelsManifest(
 			descriptor.DisplayName = modelID
 			descriptor.Description = configuredCodexCustomDescription
 		}
-		models = append(models, descriptor)
+		raw, err := json.Marshal(descriptor)
+		if err != nil {
+			return nil, err
+		}
+		contractModels := modelMetadata[modelID].reasoningContractModels
+		if len(contractModels) == 0 {
+			contractModels = []string{metadataModelID}
+		}
+		for _, target := range contractModels {
+			raw, err = qualifyCodexModelReasoning(raw, target)
+			if err != nil {
+				return nil, err
+			}
+		}
+		models = append(models, raw)
 	}
 	return json.Marshal(struct {
-		Models []configuredCodexModelDescriptor `json:"models"`
+		Models []json.RawMessage `json:"models"`
 	}{Models: models})
 }
 
@@ -2682,9 +2725,13 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 // CompleteAPIKeyCodexModelsManifestForClient fills the complete ModelInfo
 // contract immediately before a group-specific API key manifest is returned.
 // The shared upstream cache remains independent from local group policy.
+// All account types receive request-contract filtering on their client copy.
 func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manifest *CodexModelsManifest, account *Account) error {
-	if manifest == nil || account == nil || !account.IsOpenAIApiKey() || manifest.NotModified || len(manifest.Body) == 0 {
+	if manifest == nil || account == nil || manifest.NotModified || len(manifest.Body) == 0 {
 		return nil
+	}
+	if !account.IsOpenAIApiKey() {
+		return qualifyCodexManifestReasoning(manifest, nil)
 	}
 	body := manifest.Body
 	if len(manifest.upstreamSourceBody) > 0 {
@@ -2712,7 +2759,7 @@ func (s *OpenAIGatewayService) CompleteAPIKeyCodexModelsManifestForClient(manife
 	}
 	manifest.Body = body
 	manifest.ETag = codexModelsManifestBodyETag(manifest.Body)
-	return nil
+	return qualifyCodexManifestReasoning(manifest, nil)
 }
 
 func applySyncedAPIKeyCodexModelMetadata(body []byte, account *Account, overwriteLocalDefaults bool) ([]byte, error) {

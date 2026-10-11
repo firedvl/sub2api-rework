@@ -139,7 +139,15 @@ func (s *OpenAIGatewayService) FetchPinnedCodexModelsManifest(ctx context.Contex
 	if err != nil {
 		return nil, nil, fmt.Errorf("merge pinned codex models manifests: %w", err)
 	}
-	return &OpenAIModelsResponse{Body: merged, ETag: codexModelsManifestBodyETag(merged)}, results[0].account, nil
+	manifest := &OpenAIModelsResponse{Body: merged, ETag: codexModelsManifestBodyETag(merged)}
+	_, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := qualifyGroupCodexManifestReasoning(manifest, group, accounts, nil, true); err != nil {
+		return nil, nil, err
+	}
+	return manifest, results[0].account, nil
 }
 
 type pinnedOpenAIModelsResult struct {
