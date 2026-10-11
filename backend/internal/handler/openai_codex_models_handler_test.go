@@ -771,6 +771,39 @@ func performPinnedCodexModelsRequest(t *testing.T, handler *OpenAIGatewayHandler
 	return performCodexModelsRequestForGroup(t, handler, group, etag)
 }
 
+func TestGPT61CatalogContractPinnedMixedTargets(t *testing.T) {
+	for _, order := range [][]int64{{2, 3}, {3, 2}} {
+		accounts := []service.Account{newPinnedCodexAccount(2, service.StatusActive, true, false), newPinnedCodexAccount(3, service.StatusActive, true, false)}
+		accounts[0].Credentials["model_mapping"] = map[string]any{"public-sol": "gpt-5.6-sol"}
+		accounts[1].Credentials["model_mapping"] = map[string]any{"public-sol": "gpt-6.1-sol"}
+		upstream := &codexModelsPinnedHTTPUpstream{bodies: map[int64]string{
+			2: `{"models":[{"slug":"gpt-5.6-sol","default_reasoning_level":"ultra","supported_reasoning_levels":[{"effort":"high"},{"effort":"ultra"}]}]}`,
+			3: `{"models":[{"slug":"gpt-6.1-sol","default_reasoning_level":"ultra","supported_reasoning_levels":[{"effort":"high"},{"effort":"ultra"}]}]}`,
+		}}
+		handler := newPinnedCodexTestHandler(accounts, upstream, 3)
+		group := &service.Group{ID: 79, Platform: service.PlatformOpenAI, CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: order}}
+		response := performPinnedCodexModelsRequest(t, handler, group, "")
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var catalog struct {
+			Models []struct {
+				Slug    string `json:"slug"`
+				Default string `json:"default_reasoning_level"`
+				Levels  []struct {
+					Effort string `json:"effort"`
+				} `json:"supported_reasoning_levels"`
+			} `json:"models"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &catalog))
+		require.Len(t, catalog.Models, 1)
+		require.Equal(t, "public-sol", catalog.Models[0].Slug)
+		require.Equal(t, "high", catalog.Models[0].Default)
+		require.Len(t, catalog.Models[0].Levels, 1)
+		require.Equal(t, "high", catalog.Models[0].Levels[0].Effort)
+		notModified := performPinnedCodexModelsRequest(t, handler, group, response.Header().Get("ETag"))
+		require.Equal(t, http.StatusNotModified, notModified.Code)
+	}
+}
+
 func TestCodexModelsPinnedAccountsMergeUnionWithoutScheduler(t *testing.T) {
 	// 账号 1 优先级最高（调度器会先选它）；固定配置只用 2、3，
 	// 返回并集且不打账号 1，即可证明没有经过调度器。

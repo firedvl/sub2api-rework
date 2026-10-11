@@ -99,6 +99,9 @@ func gatewayAccountFeaturesWithMetadata(account *Account, upstreamModel, protoco
 		}
 	}
 	result.ReasoningEfforts = normalizeReasoningLevels(modelMetadata.SupportedReasoningLevels)
+	if account.Platform == PlatformOpenAI {
+		result.ReasoningEfforts = qualifiedOpenAIReasoningLevels(upstreamModel, result.ReasoningEfforts)
+	}
 	result.ContextWindow = modelMetadata.ContextWindow
 
 	if value, declared := gatewayCodexCapabilityBool(modelMetadata.CodexToolCapabilities, "supports_search_tool"); declared {

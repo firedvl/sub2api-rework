@@ -141,6 +141,7 @@ func groupCodexModelMetadata(
 		codexExplicitModelTargetsConflictForPlatform(accounts, platform, modelID)
 	publicAlias := upstreamModel != modelID
 	candidates := make([]UpstreamModelMetadata, 0)
+	contractModels := []string(nil)
 	missingMetadata := false
 	for i := range accounts {
 		account := &accounts[i]
@@ -165,21 +166,31 @@ func groupCodexModelMetadata(
 		if strings.TrimSpace(lookupModel) != modelID {
 			publicAlias = true
 		}
+		if platform == PlatformOpenAI {
+			requestModel := modelID
+			if upstreamModel != modelID {
+				requestModel = upstreamModel
+			}
+			lookupModel = resolveOpenAIAccountUpstreamModelAliasForRequest(account, requestModel, false)
+			contractModels = append(contractModels, lookupModel)
+		}
 		metadata, ok := account.GetUpstreamModelMetadata(lookupModel)
 		if !ok {
-			if explicitTargetsConflict {
-				return codexModelMetadataOverride{
-					reasoningConflict:       true,
-					inputModalitiesConflict: true,
-				}, true
-			}
 			missingMetadata = true
+		}
+		if platform == PlatformOpenAI {
+			metadata.SupportedReasoningLevels = qualifiedOpenAIReasoningLevels(lookupModel, metadata.SupportedReasoningLevels)
 		}
 		metadata.CodexToolCapabilities = accountCodexToolCapabilities(account, lookupModel)
 		candidates = append(candidates, metadata)
 	}
 	if len(candidates) == 0 {
 		return codexModelMetadataOverride{}, false
+	}
+	if explicitTargetsConflict && missingMetadata {
+		return codexModelMetadataOverride{
+			reasoningConflict: true, inputModalitiesConflict: true, reasoningContractModels: contractModels,
+		}, true
 	}
 	metadata := intersectUpstreamModelMetadata(modelID, candidates)
 	if missingMetadata {
@@ -191,6 +202,7 @@ func groupCodexModelMetadata(
 		metadata.DisplayName = modelID
 		metadata.Description = configuredCodexCustomDescription
 	}
+	metadata.reasoningContractModels = contractModels
 	return metadata, true
 }
 
