@@ -68,7 +68,11 @@ func TestGPT61CatalogContractLiveAndCached(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 				assertGPT61CatalogContract(t, manifest.Body)
-				require.Equal(t, "provider low", decodeCodexManifestModels(t, manifest.Body)[0]["supported_reasoning_levels"].([]any)[0].(map[string]any)["description"])
+				levels, ok := decodeCodexManifestModels(t, manifest.Body)[0]["supported_reasoning_levels"].([]any)
+				require.True(t, ok)
+				level, ok := levels[0].(map[string]any)
+				require.True(t, ok)
+				require.Equal(t, "provider low", level["description"])
 				var raw map[string]any
 				require.NoError(t, json.Unmarshal(manifest.upstreamSourceBody, &raw))
 				require.Contains(t, string(manifest.upstreamSourceBody), `"effort":"ultra"`)
@@ -134,7 +138,7 @@ func TestGPT61CatalogContractMixedTargetsAndComposite(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, effortsFromManifestModel(t, decodeCodexManifestModels(t, body)[0]))
 	routes := []CompositeModelRoute{{PublicModel: "public-sol", TargetPlatform: PlatformOpenAI, UpstreamModel: "gpt-6.1-sol", MatchType: CompositeRouteMatchExact, Endpoint: CompositeRouteEndpointResponses, Enabled: true}}
-	accounts[0].Credentials["model_mapping"].(map[string]any)["gpt-6.1-sol"] = "gpt-6.1-sol"
+	accounts[0].Credentials["model_mapping"] = map[string]any{"public-sol": "gpt-6.1-sol", "gpt-6.1-sol": "gpt-6.1-sol"}
 	body, err = buildCodexModelsManifestForAccounts(PlatformComposite, []string{"public-sol"}, accounts[:1], &Group{Platform: PlatformComposite}, routes, true)
 	require.NoError(t, err)
 	require.Equal(t, []string{"max", "high"}, effortsFromManifestModel(t, decodeCodexManifestModels(t, body)[0]))
