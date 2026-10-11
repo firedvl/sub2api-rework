@@ -28,11 +28,13 @@ func qualifyCodexModelReasoning(raw json.RawMessage, modelID string) (json.RawMe
 	if err := json.Unmarshal(raw, &model); err != nil {
 		return nil, err
 	}
+	request, _ := json.Marshal(map[string]json.RawMessage{"model": model["slug"]})
+	modelEffortValid := validateGPT61SolCompatRequest(request, modelID) == nil
 	levelsRaw, exists := model["supported_reasoning_levels"]
 	if !exists {
 		if defaultRaw, declared := model["default_reasoning_level"]; declared {
 			var effort string
-			if json.Unmarshal(defaultRaw, &effort) != nil || openai.ValidateGPT61SolReasoningEffort(modelID, effort) != nil {
+			if !modelEffortValid || json.Unmarshal(defaultRaw, &effort) != nil || openai.ValidateGPT61SolReasoningEffort(modelID, effort) != nil {
 				delete(model, "default_reasoning_level")
 				return json.Marshal(model)
 			}
@@ -45,7 +47,6 @@ func qualifyCodexModelReasoning(raw json.RawMessage, modelID string) (json.RawMe
 	}
 	qualified := make([]json.RawMessage, 0, len(levels))
 	efforts := make([]string, 0, len(levels))
-	modelEffortValid := validateGPT61SolCompatRequest([]byte(`{}`), modelID) == nil
 	for _, level := range levels {
 		var entry struct {
 			Effort string `json:"effort"`

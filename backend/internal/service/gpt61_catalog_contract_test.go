@@ -220,6 +220,17 @@ func TestGPT61CatalogContractPreservesOtherModels(t *testing.T) {
 	qualified, err := qualifyCodexModelReasoning(json.RawMessage(`{"slug":"gpt-6.1-sol","default_reasoning_level":"ultra","future":true}`), "gpt-6.1-sol")
 	require.NoError(t, err)
 	require.JSONEq(t, `{"slug":"gpt-6.1-sol","future":true}`, string(qualified))
+	for _, raw := range []string{
+		`{"slug":"gpt-6.1-sol-ultra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high"}]}`,
+		`{"slug":"gpt-6.1-sol-ultra","default_reasoning_level":"high"}`,
+	} {
+		qualified, err := qualifyCodexModelReasoning(json.RawMessage(raw), "gpt-6.1-sol")
+		require.NoError(t, err)
+		var model map[string]any
+		require.NoError(t, json.Unmarshal(qualified, &model))
+		require.Empty(t, model["supported_reasoning_levels"])
+		require.NotContains(t, model, "default_reasoning_level")
+	}
 }
 
 func TestGPT61CatalogContractSchedulerMergeQualifiesAddedAliases(t *testing.T) {
