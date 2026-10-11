@@ -167,10 +167,19 @@ func TestGPT61CatalogContractRawMappingCollisionAndMixedAccounts(t *testing.T) {
 		require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 		body, err := mergeRoutableCodexManifests([]codexAccountManifest{{account: account, manifest: manifest}}, nil)
 		require.NoError(t, err)
+		publicID := "gpt-6.1-sol"
 		if target == "gpt-6.1-sol" {
-			assertGPT61CatalogContract(t, body)
-		} else {
-			require.Contains(t, effortsFromManifestModel(t, decodeCodexManifestModels(t, body)[0]), "ultra")
+			publicID = "gpt-5.6-sol"
+		}
+		require.Equal(t, []string{publicID, "public-sol"}, codexManifestModelSlugs(t, body))
+		for _, model := range decodeCodexManifestModels(t, body) {
+			if target == "gpt-6.1-sol" {
+				entry, err := json.Marshal(map[string]any{"models": []any{model}})
+				require.NoError(t, err)
+				assertGPT61CatalogContract(t, entry)
+			} else {
+				require.Contains(t, effortsFromManifestModel(t, model), "ultra")
+			}
 		}
 	}
 	for _, reversed := range []bool{false, true} {
