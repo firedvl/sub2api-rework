@@ -53,7 +53,7 @@ func TestGatewayNativeGeminiResponsesErrorAfterHeartbeatIsTerminalSSE(t *testing
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
 	require.Contains(t, w.Body.String(), `"code":"invalid_request"`)
-	require.Contains(t, w.Body.String(), "Native Gemini accounts do not support")
+	require.Contains(t, w.Body.String(), "native Gemini accounts do not support")
 	require.NotContains(t, w.Body.String(), "response.completed")
 }
 

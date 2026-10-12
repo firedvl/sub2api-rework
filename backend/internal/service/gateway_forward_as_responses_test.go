@@ -32,7 +32,7 @@ func TestForwardAsResponses_RejectsNativeGeminiBeforeUpstream(t *testing.T) {
 			// credential lookup, request translation, and account-side changes.
 			result, err := (&GatewayService{}).ForwardAsResponses(context.Background(), c, account,
 				[]byte(fmt.Sprintf(`{"model":"gemini-3.1-pro-preview","input":"test","stream":%v}`, stream)), nil)
-			require.ErrorContains(t, err, "Native Gemini accounts do not support")
+			require.ErrorContains(t, err, "native Gemini accounts do not support")
 			require.Nil(t, result)
 			require.Equal(t, http.StatusBadRequest, w.Code)
 			require.Contains(t, w.Body.String(), `"code":"invalid_request_error"`)

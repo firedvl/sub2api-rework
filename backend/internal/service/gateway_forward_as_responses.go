@@ -21,7 +21,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrNativeGeminiResponsesUnsupported = errors.New("Native Gemini accounts do not support the Responses API; use Chat Completions or Messages")
+var ErrNativeGeminiResponsesUnsupported = errors.New("native Gemini accounts do not support the Responses API; use Chat Completions or Messages")
 
 // ForwardAsResponses accepts an OpenAI Responses API request body, converts it
 // to Anthropic Messages format, forwards to the Anthropic upstream, and converts
