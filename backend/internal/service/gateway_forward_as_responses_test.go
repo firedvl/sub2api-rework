@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/tidwall/gjson"
 	"io"
@@ -18,6 +19,42 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestForwardAsResponses_RejectsNativeGeminiBeforeUpstream(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey}
+			// A service without dependencies proves rejection precedes transport,
+			// credential lookup, request translation, and account-side changes.
+			result, err := (&GatewayService{}).ForwardAsResponses(context.Background(), c, account,
+				[]byte(fmt.Sprintf(`{"model":"gemini-3.1-pro-preview","input":"test","stream":%v}`, stream)), nil)
+			require.ErrorContains(t, err, "Native Gemini accounts do not support")
+			require.Nil(t, result)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Contains(t, w.Body.String(), `"code":"invalid_request_error"`)
+			require.NotContains(t, w.Body.String(), "response.completed")
+		})
+	}
+}
+
+func TestForwardAsResponses_NativeGeminiAfterHeartbeatLeavesTerminalErrorToHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": ping\n\n")
+	c.Writer.Flush()
+	_, err := (&GatewayService{}).ForwardAsResponses(context.Background(), c,
+		&Account{Platform: PlatformGemini, Type: AccountTypeAPIKey}, []byte(`{"stream":true}`), nil)
+	require.ErrorIs(t, err, ErrNativeGeminiResponsesUnsupported)
+	require.Equal(t, ": ping\n\n", w.Body.String())
+	require.False(t, IsResponseCommitted(c))
+}
 
 func TestAdaptResponsesClientToolsForAnthropic_FlattensNamespace(t *testing.T) {
 	t.Parallel()

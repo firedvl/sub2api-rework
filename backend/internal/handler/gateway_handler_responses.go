@@ -305,6 +305,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 
 		if err != nil {
+			if errors.Is(err, service.ErrNativeGeminiResponsesUnsupported) && c.Writer.Written() && !service.IsResponseCommitted(c) {
+				h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), true)
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				// Can't failover if streaming content already sent

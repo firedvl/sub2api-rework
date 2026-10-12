@@ -37,6 +37,26 @@ func TestGatewayEnsureForwardErrorResponse_WritesFallbackWhenNotWritten(t *testi
 	assert.Equal(t, "Upstream request failed", errorObj["message"])
 }
 
+func TestGatewayNativeGeminiResponsesErrorAfterHeartbeatIsTerminalSSE(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+	c.Header("Content-Type", "text/event-stream")
+	_, _ = c.Writer.WriteString(": ping\n\n")
+	c.Writer.Flush()
+	_, err := (&service.GatewayService{}).ForwardAsResponses(context.Background(), c,
+		&service.Account{Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey}, []byte(`{"stream":true}`), nil)
+	require.ErrorIs(t, err, service.ErrNativeGeminiResponsesUnsupported)
+	h := &GatewayHandler{}
+	h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), true)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
+	require.Contains(t, w.Body.String(), `"code":"invalid_request"`)
+	require.Contains(t, w.Body.String(), "Native Gemini accounts do not support")
+	require.NotContains(t, w.Body.String(), "response.completed")
+}
+
 // Writer 已写后 ensureForwardErrorResponse 必须把错误以 SSE 形式追加，
 // 而不是 silent EOF。非 /responses 路径走 legacy data:{"type":"error"} 分支。
 func TestGatewayEnsureForwardErrorResponse_AppendsSSEAfterWritten(t *testing.T) {
