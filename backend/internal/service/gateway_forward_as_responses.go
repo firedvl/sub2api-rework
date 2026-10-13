@@ -21,6 +21,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var ErrNativeGeminiResponsesUnsupported = errors.New("native Gemini accounts do not support the Responses API; use Chat Completions or Messages")
+
 // ForwardAsResponses accepts an OpenAI Responses API request body, converts it
 // to Anthropic Messages format, forwards to the Anthropic upstream, and converts
 // the response back to Responses format. This enables OpenAI Responses API
@@ -35,6 +37,13 @@ func (s *GatewayService) ForwardAsResponses(
 	body []byte,
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
+	if account.IsGemini() {
+		// Native Gemini has no Responses adapter; do not send Anthropic payloads.
+		if !c.Writer.Written() {
+			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", ErrNativeGeminiResponsesUnsupported.Error())
+		}
+		return nil, ErrNativeGeminiResponsesUnsupported
+	}
 	startTime := time.Now()
 
 	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)

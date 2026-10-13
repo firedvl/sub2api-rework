@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -229,6 +230,46 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 		billingCacheSvc.Stop()
 	}
 	return h, cleanup
+}
+
+func TestGatewayHandlerResponses_NativeGeminiRejectsBeforeUpstream(t *testing.T) {
+	for _, heartbeat := range []bool{false, true} {
+		t.Run(fmt.Sprintf("heartbeat=%v", heartbeat), func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			groupID := int64(2000)
+			group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformGemini, Status: service.StatusActive}
+			account := &service.Account{ID: 1000, Name: "native-gemini", Platform: service.PlatformGemini,
+				Type: service.AccountTypeAPIKey, Concurrency: 1, Status: service.StatusActive, Schedulable: true,
+				AccountGroups: []service.AccountGroup{{AccountID: 1000, GroupID: groupID}}}
+			h, cleanup := newTestGatewayHandler(t, group, []*service.Account{account})
+			defer cleanup()
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gemini-3.1-pro-preview","input":"test","stream":true}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
+			apiKey := &service.APIKey{ID: 3000, UserID: 4000, GroupID: &groupID, Status: service.StatusActive,
+				User: &service.User{ID: 4000, Concurrency: 10, Balance: 100}, Group: group}
+			c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 4000, Concurrency: 10})
+			if heartbeat {
+				c.Header("Content-Type", "text/event-stream")
+				_, _ = c.Writer.WriteString(": ping\n\n")
+				c.Writer.Flush()
+			}
+			h.Responses(c)
+			require.Contains(t, w.Body.String(), service.ErrNativeGeminiResponsesUnsupported.Error())
+			if heartbeat {
+				require.Equal(t, http.StatusOK, w.Code)
+				require.Equal(t, 1, strings.Count(w.Body.String(), "event: response.failed"))
+				require.Contains(t, w.Body.String(), `"code":"invalid_request"`)
+			} else {
+				require.Equal(t, http.StatusBadRequest, w.Code)
+				require.Contains(t, w.Body.String(), `"code":"invalid_request_error"`)
+			}
+			require.NotContains(t, w.Body.String(), "response.completed")
+		})
+	}
 }
 
 func TestGatewayHandlerResponses_AntigravityMixedToolsRejectBeforeUpstream(t *testing.T) {
