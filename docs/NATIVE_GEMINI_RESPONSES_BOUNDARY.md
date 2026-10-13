@@ -1,25 +1,26 @@
 # Native Gemini Responses boundary
 
-Native Gemini accounts support the existing Chat Completions and Anthropic
-Messages adapters. They do not have an OpenAI Responses adapter. Previously,
-`GatewayService.ForwardAsResponses` could send an Anthropic-shaped upstream
-request for a selected native Gemini account.
+Native Gemini API-key accounts now have a direct Responses adapter in
+`GeminiMessagesCompatService.ForwardAsResponses`. The Gateway Responses handler
+and Operator Assistant relay dispatch those accounts to native `generateContent`
+or `streamGenerateContent`. Neither path translates through Anthropic or
+Antigravity. See [the supported subset and verification limits](native-gemini-responses.md).
 
-The shared method now returns HTTP 400 `invalid_request_error` before request
-translation, credential lookup, or upstream transport. Both streaming and
-nonstreaming requests receive an explicit error. Anthropic API-key Responses
-and the separate Antigravity adapter keep their existing paths.
+`GatewayService.ForwardAsResponses` remains the Anthropic converter and rejects
+native Gemini accounts before translation, credential lookup, or transport. This
+protects callers from accidentally sending an Anthropic payload upstream; it does
+not describe API-key support through the native service. Gemini OAuth and
+subscription accounts remain unsupported for Responses.
 
-If an account-slot wait already emitted a streaming heartbeat, HTTP status is
-committed. The service leaves error framing to the handler, which uses its
-existing `response.failed` SSE writer. It never appends raw JSON to that stream.
+The native adapter reports its implemented protocol/streaming subset in preflight,
+while rejecting unsupported modalities, reasoning controls, stored continuation,
+and tools. Alias/catalog visibility does not qualify any model for inference or
+Codex. Live API-key and actual Codex tool/child acceptance remain required before
+optional Gemini routes are enabled. Consumer subscription tokens must not be
+reused for this API-key adapter.
 
-This guard does not implement Gemini Responses or qualify any Gemini model for
-Codex. Capability schema 2 continues to represent that unimplemented protocol
-as unknown. Alias/catalog visibility is neither authorization nor inference.
-An API-key Responses adapter needs a separate implementation and real Codex
-tool/child acceptance. Consumer subscription tokens must not be reused for it.
-
-The regression uses an unconfigured service and synthetic account, proving
-rejection before any upstream dependency is used. This task does not publish
-or deploy a Sub2API release or modify production configuration.
+Errors after slot-wait heartbeats produce an explicit terminal `response.failed`
+SSE event, preserving the committed HTTP status. Mocked tests cover the generic
+converter guard, native conversion, lifecycle, errors, usage, and API-key handler
+dispatch. This development change does not deploy a Sub2API release or modify
+production routes or accounts.

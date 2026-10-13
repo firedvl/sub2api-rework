@@ -147,6 +147,7 @@ docs/*
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/ARCHITECTURE.md
 !docs/CODEX_COMPATIBILITY.md
+!docs/native-gemini-responses.md
 !docs/CODEX_STANDALONE_SEARCH.md
 !docs/DEVELOPMENT.md
 !docs/ROADMAP.md
