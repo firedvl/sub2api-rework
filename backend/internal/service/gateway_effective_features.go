@@ -68,6 +68,14 @@ func gatewayAccountFeaturesWithMetadata(account *Account, upstreamModel, protoco
 		}}
 	}
 
+	nativeGeminiResponses := account.Platform == PlatformGemini && account.Type == AccountTypeAPIKey && protocol == CompositeRouteEndpointResponses
+	if nativeGeminiResponses {
+		result.Features["protocol"] = gatewayFeatureSupported
+		result.Features["streaming"] = gatewayFeatureSupported
+		for _, feature := range []string{"image_input", "audio_input", "reasoning", "web_search", "tool_discovery"} {
+			result.Features[feature] = gatewayFeatureUnsupported
+		}
+	}
 	modelMetadata, known := metadata[strings.TrimSpace(upstreamModel)]
 	if !known {
 		return result
@@ -82,7 +90,7 @@ func gatewayAccountFeaturesWithMetadata(account *Account, upstreamModel, protoco
 	if gatewayMetadataHasModality(modelMetadata, "text") {
 		result.Features["text_input"] = gatewayFeatureSupported
 	}
-	if gatewayMetadataHasModality(modelMetadata, "image") {
+	if !nativeGeminiResponses && gatewayMetadataHasModality(modelMetadata, "image") {
 		result.Features["image_input"] = gatewayFeatureSupported
 	}
 	if account.Platform == PlatformOpenAI && result.Features["image_input"] == gatewayFeatureSupported &&
@@ -92,19 +100,21 @@ func gatewayAccountFeaturesWithMetadata(account *Account, upstreamModel, protoco
 			result.Features["image_input"] = gatewayFeatureUnsupported
 		}
 	}
-	if modelMetadata.Reasoning != nil {
+	if !nativeGeminiResponses && modelMetadata.Reasoning != nil {
 		result.Features["reasoning"] = gatewayFeatureUnsupported
 		if *modelMetadata.Reasoning {
 			result.Features["reasoning"] = gatewayFeatureSupported
 		}
 	}
-	result.ReasoningEfforts = normalizeReasoningLevels(modelMetadata.SupportedReasoningLevels)
+	if !nativeGeminiResponses {
+		result.ReasoningEfforts = normalizeReasoningLevels(modelMetadata.SupportedReasoningLevels)
+	}
 	if account.Platform == PlatformOpenAI {
 		result.ReasoningEfforts = qualifiedOpenAIReasoningLevels(upstreamModel, result.ReasoningEfforts)
 	}
 	result.ContextWindow = modelMetadata.ContextWindow
 
-	if value, declared := gatewayCodexCapabilityBool(modelMetadata.CodexToolCapabilities, "supports_search_tool"); declared {
+	if value, declared := gatewayCodexCapabilityBool(modelMetadata.CodexToolCapabilities, "supports_search_tool"); declared && !nativeGeminiResponses {
 		result.Features["tool_discovery"] = gatewayFeatureUnsupported
 		if value {
 			result.Features["tool_discovery"] = gatewayFeatureSupported
@@ -145,7 +155,10 @@ func gatewayProtocolFeature(account *Account, protocol string) string {
 		return gatewayFeatureSupported
 	}
 	if account.Platform == PlatformGemini && protocol == CompositeRouteEndpointResponses {
-		return gatewayFeatureUnknown
+		if account.Type == AccountTypeAPIKey {
+			return gatewayFeatureSupported
+		}
+		return gatewayFeatureUnsupported
 	}
 	if account.Platform == PlatformAnthropic || account.Platform == PlatformGemini || account.Platform == PlatformAntigravity {
 		return gatewayFeatureSupported

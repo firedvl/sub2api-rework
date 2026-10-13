@@ -33,7 +33,7 @@ func (s *operatorAssistantReaderStub) ListAccountsForSchedulerScoreFilter(contex
 }
 
 func operatorAssistantTestService(reader *operatorAssistantReaderStub) *OperatorAssistantService {
-	service := NewOperatorAssistantService(reader, nil, nil, nil, nil, nil, BuildInfo{Version: "0.1.183-rework.12"}, nil)
+	service := NewOperatorAssistantService(reader, nil, nil, nil, nil, nil, nil, BuildInfo{Version: "0.1.183-rework.12"}, nil)
 	service.now = func() time.Time { return time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC) }
 	return service
 }

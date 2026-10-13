@@ -38,7 +38,7 @@ func (s *GatewayService) ForwardAsResponses(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	if account.IsGemini() {
-		// Native Gemini has no Responses adapter; do not send Anthropic payloads.
+		// Native Gemini belongs to GeminiMessagesCompatService; never send Anthropic payloads.
 		if !c.Writer.Written() {
 			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", ErrNativeGeminiResponsesUnsupported.Error())
 		}

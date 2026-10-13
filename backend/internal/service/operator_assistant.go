@@ -183,6 +183,7 @@ type OperatorAssistantService struct {
 	gateway     *GatewayService
 	openAI      *OpenAIGatewayService
 	antigravity *AntigravityGatewayService
+	gemini      *GeminiMessagesCompatService
 	buildInfo   BuildInfo
 	updater     operatorAssistantUpdater
 	relay       operatorAssistantRelay
@@ -197,12 +198,13 @@ func NewOperatorAssistantService(
 	gateway *GatewayService,
 	openAI *OpenAIGatewayService,
 	antigravity *AntigravityGatewayService,
+	gemini *GeminiMessagesCompatService,
 	buildInfo BuildInfo,
 	updater operatorAssistantUpdater,
 ) *OperatorAssistantService {
 	s := &OperatorAssistantService{
 		reader: reader, dashboard: dashboard, ops: ops, gateway: gateway,
-		openAI: openAI, antigravity: antigravity, buildInfo: buildInfo,
+		openAI: openAI, antigravity: antigravity, gemini: gemini, buildInfo: buildInfo,
 		updater: updater, now: time.Now, timeout: operatorAssistantTimeout,
 	}
 	s.relay = s.relayExistingGateway
@@ -216,9 +218,10 @@ func ProvideOperatorAssistantService(
 	gateway *GatewayService,
 	openAI *OpenAIGatewayService,
 	antigravity *AntigravityGatewayService,
+	gemini *GeminiMessagesCompatService,
 	buildInfo BuildInfo,
 ) *OperatorAssistantService {
-	return NewOperatorAssistantService(admin, dashboard, ops, gateway, openAI, antigravity, buildInfo, updaterclient.New())
+	return NewOperatorAssistantService(admin, dashboard, ops, gateway, openAI, antigravity, gemini, buildInfo, updaterclient.New())
 }
 
 func (s *OperatorAssistantService) Models(ctx context.Context) (OperatorAssistantModels, error) {
@@ -462,6 +465,22 @@ func (s *OperatorAssistantService) relayExistingGateway(ctx context.Context, c *
 	parsed, _ := ParseGatewayRequest(NewRequestBodyRef(body), "responses")
 	if parsed == nil {
 		parsed = &ParsedRequest{Model: candidate.Option.Model, Stream: true, Body: NewRequestBodyRef(body)}
+	}
+	if account.IsGemini() && account.Type == AccountTypeAPIKey {
+		if s.gemini == nil {
+			return errors.New("native Gemini compatibility relay is unavailable")
+		}
+		result, err := s.gemini.ForwardAsResponses(ctx, c, account, body)
+		if err != nil {
+			return err
+		}
+		if result.ResponseStatus == "failed" {
+			return errors.New("native Gemini generation failed")
+		}
+		if result.ClientDisconnect {
+			return errors.New("native Gemini response delivery was interrupted")
+		}
+		return nil
 	}
 	if account.Platform == PlatformAntigravity && account.Type == AccountTypeOAuth {
 		if s.antigravity == nil {

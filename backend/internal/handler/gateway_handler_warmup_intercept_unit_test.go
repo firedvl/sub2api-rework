@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -232,14 +233,14 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 	return h, cleanup
 }
 
-func TestGatewayHandlerResponses_NativeGeminiRejectsBeforeUpstream(t *testing.T) {
+func TestGatewayHandlerResponses_NativeGeminiOAuthRejectsBeforeUpstream(t *testing.T) {
 	for _, heartbeat := range []bool{false, true} {
 		t.Run(fmt.Sprintf("heartbeat=%v", heartbeat), func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			groupID := int64(2000)
 			group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformGemini, Status: service.StatusActive}
 			account := &service.Account{ID: 1000, Name: "native-gemini", Platform: service.PlatformGemini,
-				Type: service.AccountTypeAPIKey, Concurrency: 1, Status: service.StatusActive, Schedulable: true,
+				Type: service.AccountTypeOAuth, Concurrency: 1, Status: service.StatusActive, Schedulable: true,
 				AccountGroups: []service.AccountGroup{{AccountID: 1000, GroupID: groupID}}}
 			h, cleanup := newTestGatewayHandler(t, group, []*service.Account{account})
 			defer cleanup()
@@ -513,4 +514,56 @@ func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_ForcePlatform
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.True(t, strings.HasPrefix(resp["id"].(string), "msg_01"))
 	require.Equal(t, "claude-sonnet-4-5", resp["model"])
+}
+
+type nativeResponsesHandlerUpstream struct {
+	calls   int
+	request *http.Request
+}
+
+func (u *nativeResponsesHandlerUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	u.request = req
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"native handler OK"}]},"finishReason":"STOP"}],"modelVersion":"gemini-qualified","usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}`))}, nil
+}
+func (u *nativeResponsesHandlerUpstream) DoWithTLS(req *http.Request, p string, id int64, n int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, p, id, n)
+}
+func TestGatewayHandlerResponses_NativeGeminiAPIKeyDispatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(2000)
+	group := &service.Group{ID: groupID, Hydrated: true, Platform: service.PlatformGemini, Status: service.StatusActive}
+	account := &service.Account{ID: 1000, Name: "native-gemini", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Concurrency: 1, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "test-key", "model_mapping": map[string]any{"gemini-public": "gemini-qualified"}}, AccountGroups: []service.AccountGroup{{AccountID: 1000, GroupID: groupID}}}
+	h, cleanup := newTestGatewayHandler(t, group, []*service.Account{account})
+	defer cleanup()
+	upstream := &nativeResponsesHandlerUpstream{}
+	h.geminiCompatService = service.NewGeminiMessagesCompatService(nil, nil, nil, nil, nil, nil, upstream, nil, &config.Config{})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gemini-public","input":"test","store":false}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
+	apiKey := &service.APIKey{ID: 3000, UserID: 4000, GroupID: &groupID, Status: service.StatusActive, User: &service.User{ID: 4000, Concurrency: 10, Balance: 100}, Group: group}
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 4000, Concurrency: 10})
+	h.Responses(c)
+	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, "/v1beta/models/gemini-qualified:generateContent", upstream.request.URL.Path)
+	require.Equal(t, "test-key", upstream.request.Header.Get("x-goog-api-key"))
+	require.Equal(t, 200, w.Code)
+	var response struct {
+		Status string `json:"status"`
+		Model  string `json:"model"`
+		Usage  struct {
+			Input  int `json:"input_tokens"`
+			Output int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, "completed", response.Status)
+	require.Equal(t, "gemini-public", response.Model)
+	require.Equal(t, 10, response.Usage.Input)
+	require.Equal(t, 2, response.Usage.Output)
+	require.Contains(t, w.Body.String(), "native handler OK")
+	require.NotContains(t, w.Body.String(), "native Gemini accounts do not support")
 }

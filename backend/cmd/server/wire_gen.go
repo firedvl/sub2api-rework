@@ -193,7 +193,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
 	adminService := service.NewAdminService(configConfig, userRepository, adminGroupRepository, adminAccountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, userRPMCache, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, openAIGatewayService, affiliateService, compositeModelRouteRepository, compositeRouteResolver, channelService)
 	serviceBuildInfo := provideServiceBuildInfo(buildInfo)
-	operatorAssistantService := service.ProvideOperatorAssistantService(adminService, dashboardService, opsService, gatewayService, openAIGatewayService, antigravityGatewayService, serviceBuildInfo)
+	operatorAssistantService := service.ProvideOperatorAssistantService(adminService, dashboardService, opsService, gatewayService, openAIGatewayService, antigravityGatewayService, geminiMessagesCompatService, serviceBuildInfo)
 	operatorAssistantHandler := admin.NewOperatorAssistantHandler(operatorAssistantService)
 	adminUserHandler := admin.NewUserHandler(adminService, concurrencyService, serviceUserPlatformQuotaRepository, billingCache, totpService, userService, settingService)
 	groupCapacityService := service.NewGroupCapacityService(accountRepository, groupRepository, concurrencyService, sessionLimitCache, rpmCache)
