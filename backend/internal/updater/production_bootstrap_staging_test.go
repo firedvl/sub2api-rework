@@ -429,6 +429,7 @@ func TestProductionBootstrapPreservesUpdaterAccess(t *testing.T) {
 	} {
 		qualifyStagingRecovery(t, docker, compose, service, runner, targetImage, source)
 	}
+	qualifyStagingSameSchemaRollback(t, docker, compose, service, runner)
 	if dropIn, err := SystemdDropIn(policy); err != nil || !strings.Contains(string(dropIn), deploymentDirectory) || strings.Contains(string(dropIn), "/opt/sub2api-rework/deploy") {
 		t.Fatalf("deployment-specific systemd drop-in is invalid: %q, %v", dropIn, err)
 	}

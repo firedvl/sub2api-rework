@@ -30,7 +30,7 @@ const (
 	stagingDot7Version              = "0.2.3-rework.7"
 	stagingDot7Image                = "ghcr.io/firedvl/sub2api-rework@sha256:2b26950d90b21235697f5de1aca542ba8eadca1a29196da561fcd2b5d2c75aa5"
 	stagingDot7Revision             = "c3b8715c497bb54c8f18ce4e2fe24b644f576aa8"
-	stagingRecoveryCandidateVersion = "0.2.3-rework.8"
+	stagingRecoveryCandidateVersion = "0.2.3-rework.9"
 	stagingRecoveryCandidateImage   = "ghcr.io/firedvl/sub2api-rework:" + stagingRecoveryCandidateVersion
 	stagingLegacyPricingGroup       = "synthetic-dot6-max-multiplier"
 )
