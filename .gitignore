@@ -148,6 +148,7 @@ docs/*
 !docs/ARCHITECTURE.md
 !docs/CODEX_COMPATIBILITY.md
 !docs/native-gemini-responses.md
+!docs/provider-live-acceptance.md
 !docs/CODEX_STANDALONE_SEARCH.md
 !docs/DEVELOPMENT.md
 !docs/ROADMAP.md
