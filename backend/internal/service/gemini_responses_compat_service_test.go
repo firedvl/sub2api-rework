@@ -87,6 +87,13 @@ func TestNativeGeminiResponsesRejectUnsupportedRequests(t *testing.T) {
 	}
 }
 
+func TestNativeGeminiResponsesRejectNullInput(t *testing.T) {
+	payload, req, err := responsesToNativeGemini([]byte(`{"model":"gemini","input":null}`))
+	require.ErrorContains(t, err, "input must contain conversation content")
+	require.Nil(t, payload)
+	require.Nil(t, req)
+}
+
 func TestNativeGeminiResponsesRejectNullMessageContent(t *testing.T) {
 	for _, role := range []string{"user", "assistant", "system", "developer"} {
 		t.Run(role, func(t *testing.T) {

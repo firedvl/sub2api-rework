@@ -65,9 +65,9 @@ func responsesToNativeGemini(body []byte) ([]byte, *apicompat.ResponsesRequest, 
 		return nil, nil, fmt.Errorf("native Gemini Responses requires store=false and full conversation history")
 	}
 	var items []apicompat.ResponsesInputItem
-	var text string
-	if json.Unmarshal(req.Input, &text) == nil {
-		content, _ := json.Marshal(text)
+	var text *string
+	if json.Unmarshal(req.Input, &text) == nil && text != nil {
+		content, _ := json.Marshal(*text)
 		items = []apicompat.ResponsesInputItem{{Role: "user", Content: content}}
 	} else if err := json.Unmarshal(req.Input, &items); err != nil {
 		return nil, nil, fmt.Errorf("input must be text or an item array")
