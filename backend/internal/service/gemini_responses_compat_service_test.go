@@ -153,7 +153,7 @@ func TestNativeGeminiResponsesStreamLifecycle(t *testing.T) {
 data: {"candidates":[{"content":{"parts":[{"text":"world"},{"functionCall":{"id":"call_1","name":"lookup","args":{"q":"x"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3,"thoughtsTokenCount":2}}
 
 `
-	response, first, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse), "alias", "resp_test", time.Now())
+	response, first, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse), "alias", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	require.Len(t, response.Output, 3)
@@ -185,7 +185,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"world"},{"functionCall":{"id"
 func TestNativeGeminiResponsesStreamFailureAndCancellation(t *testing.T) {
 	for _, sse := range []string{`data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}` + "\n\n", "data: {broken\n\n", "data: {\"error\":{\"code\":500}}\n\n"} {
 		c, w := nativeGeminiTestContext()
-		_, _, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse), "gemini", "resp_test", time.Now())
+		_, _, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 		require.Error(t, err)
 		events := nativeGeminiTestEvents(t, w.Body.String())
 		require.Equal(t, "response.failed", events[len(events)-1].Type)
@@ -194,10 +194,10 @@ func TestNativeGeminiResponsesStreamFailureAndCancellation(t *testing.T) {
 	c, _ := nativeGeminiTestContext()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := streamNativeGeminiResponses(ctx, c, strings.NewReader("data: {}\n\n"), "gemini", "resp_test", time.Now())
+	_, _, err := streamNativeGeminiResponses(ctx, c, strings.NewReader("data: {}\n\n"), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.ErrorIs(t, err, context.Canceled)
 	c, w := nativeGeminiTestContext()
-	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader("data: {\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}]}\n\n"), "gemini", "resp_test", time.Now())
+	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader("data: {\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}]}\n\n"), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.Contains(t, w.Body.String(), "response.incomplete")
 }
@@ -341,7 +341,7 @@ func TestNativeGeminiResponsesPreservesLargeArgumentsAndRejectsDuplicateCalls(t 
 	require.ErrorContains(t, err, "duplicate")
 	c, w := nativeGeminiTestContext()
 	sse := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"c\",\"name\":\"f\",\"args\":{}}}]}}]}\n\n"
-	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse+sse), "gemini", "resp_test", time.Now())
+	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader(sse+sse), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.ErrorContains(t, err, "duplicate")
 	require.Equal(t, 1, strings.Count(w.Body.String(), `"type":"response.function_call_arguments.done"`))
 	require.Contains(t, w.Body.String(), "response.failed")
@@ -368,7 +368,7 @@ func TestNativeGeminiResponsesMalformedPartsFailClosed(t *testing.T) {
 		_, err := nativeGeminiResponse([]byte(raw), "gemini", "resp_test")
 		require.Error(t, err)
 		c, w := nativeGeminiTestContext()
-		_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader("data: "+raw+"\n\n"), "gemini", "resp_test", time.Now())
+		_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader("data: "+raw+"\n\n"), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 		require.Error(t, err)
 		require.NotContains(t, w.Body.String(), "response.completed")
 		require.Contains(t, w.Body.String(), "response.failed")
@@ -473,14 +473,14 @@ func TestNativeGeminiResponsesTerminalOnlyChunk(t *testing.T) {
 	text := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"complete text\"}]}}]}\n\n"
 	terminal := "data: {\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2}}\n\n"
 	c, w := nativeGeminiTestContext()
-	response, _, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(text+terminal), "gemini", "resp_test", time.Now())
+	response, _, err := streamNativeGeminiResponses(context.Background(), c, strings.NewReader(text+terminal), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.NoError(t, err)
 	require.Equal(t, "completed", response.Status)
 	require.Equal(t, "complete text", response.Output[0].Content[0].Text)
 	require.Equal(t, 2, response.Usage.OutputTokens)
 	require.Contains(t, w.Body.String(), "response.completed")
 	c, w = nativeGeminiTestContext()
-	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader(terminal), "gemini", "resp_test", time.Now())
+	_, _, err = streamNativeGeminiResponses(context.Background(), c, strings.NewReader(terminal), "gemini", "resp_test", time.Now(), apicompat.ResponsesClientToolMapping{})
 	require.Error(t, err)
 	require.Contains(t, w.Body.String(), "response.failed")
 	require.NotContains(t, w.Body.String(), "response.completed")

@@ -15,14 +15,53 @@ import (
 const geminiResponsesEnvelope = "gemini_part_v1_"
 
 func responsesToNativeGemini(body []byte) ([]byte, *apicompat.ResponsesRequest, error) {
+	adapted, _, err := adaptNativeGeminiNamespaces(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	body = adapted
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return nil, nil, err
 	}
-	allowed := map[string]bool{"model": true, "input": true, "instructions": true, "stream": true, "max_output_tokens": true, "temperature": true, "top_p": true, "tools": true, "tool_choice": true, "store": true, "previous_response_id": true}
+	allowed := map[string]bool{"model": true, "input": true, "instructions": true, "stream": true, "max_output_tokens": true, "temperature": true, "top_p": true, "tools": true, "tool_choice": true, "store": true, "previous_response_id": true, "include": true, "text": true, "parallel_tool_calls": true}
 	for key := range fields {
 		if !allowed[key] {
 			return nil, nil, fmt.Errorf("native Gemini Responses does not support %s", key)
+		}
+	}
+	if raw, exists := fields["include"]; exists {
+		var include []string
+		if json.Unmarshal(raw, &include) != nil {
+			return nil, nil, fmt.Errorf("include must be an array of supported fields")
+		}
+		for _, field := range include {
+			if field != "reasoning.encrypted_content" {
+				return nil, nil, fmt.Errorf("unsupported Gemini response include")
+			}
+		}
+	}
+	if raw, exists := fields["parallel_tool_calls"]; exists {
+		var parallel *bool
+		if json.Unmarshal(raw, &parallel) != nil || parallel == nil || !*parallel {
+			return nil, nil, fmt.Errorf("native Gemini Responses supports only parallel_tool_calls=true")
+		}
+	}
+	if raw, exists := fields["text"]; exists {
+		if err := nativeGeminiAllowedFields(raw, "format"); err != nil {
+			return nil, nil, err
+		}
+		var text struct {
+			Format json.RawMessage `json:"format"`
+		}
+		if json.Unmarshal(raw, &text) != nil || nativeGeminiAllowedFields(text.Format, "type") != nil {
+			return nil, nil, fmt.Errorf("native Gemini Responses supports only plain text format")
+		}
+		var format struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(text.Format, &format) != nil || format.Type != "text" {
+			return nil, nil, fmt.Errorf("native Gemini Responses supports only plain text format")
 		}
 	}
 	var rawTools []json.RawMessage
@@ -112,20 +151,14 @@ func responsesToNativeGemini(body []byte) ([]byte, *apicompat.ResponsesRequest, 
 				return nil, nil, fmt.Errorf("duplicate Gemini reasoning envelope")
 			}
 			seenEnvelopeIDs[envelope.CallID] = true
+			if err := validateNativeGeminiResponsePart(envelope.Part); err != nil {
+				return nil, nil, err
+			}
 			signature, ok := envelope.Part["thoughtSignature"].(string)
 			if !ok || signature == "" {
 				return nil, nil, fmt.Errorf("invalid Gemini signature")
 			}
-			for key := range envelope.Part {
-				if key != "thoughtSignature" && key != "functionCall" && key != "text" && key != "thought" {
-					return nil, nil, fmt.Errorf("unsupported Gemini reasoning envelope")
-				}
-			}
-			_, hasText := envelope.Part["text"].(string)
-			_, hasCall := envelope.Part["functionCall"].(map[string]any)
-			if hasText == hasCall {
-				return nil, nil, fmt.Errorf("invalid Gemini reasoning part")
-			}
+			_, hasText := envelope.Part["text"]
 			if hasText && envelope.Part["thought"] == true {
 				appendPart("model", envelope.Part)
 			} else {
@@ -340,15 +373,8 @@ func nativeGeminiResponse(raw []byte, model, responseID string) (*apicompat.Resp
 			if !ok {
 				return nil, fmt.Errorf("invalid Gemini part")
 			}
-			_, text := part["text"].(string)
-			_, call := part["functionCall"].(map[string]any)
-			if text == call {
-				return nil, fmt.Errorf("invalid Gemini part union")
-			}
-			for key := range part {
-				if key != "text" && key != "functionCall" && key != "thought" && key != "thoughtSignature" {
-					return nil, fmt.Errorf("unsupported Gemini part field")
-				}
+			if err := validateNativeGeminiResponsePart(part); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -369,15 +395,9 @@ func nativeGeminiResponse(raw []byte, model, responseID string) (*apicompat.Resp
 			response.Output = append(response.Output, apicompat.ResponsesOutput{Type: "message", ID: id, Role: "assistant", Status: "completed", Content: []apicompat.ResponsesContentPart{{Type: "output_text", Text: value}}})
 		} else if fc, ok := part["functionCall"].(map[string]any); ok {
 			name, _ := fc["name"].(string)
-			if name == "" {
-				return nil, fmt.Errorf("gemini function call omitted name")
-			}
 			args := fc["args"]
 			if args == nil {
 				args = map[string]any{}
-			}
-			if _, ok := args.(map[string]any); !ok {
-				return nil, fmt.Errorf("gemini function arguments must be an object")
 			}
 			arguments, _ := json.Marshal(args)
 			callID, _ := fc["id"].(string)
@@ -420,6 +440,58 @@ func nativeGeminiResponse(raw []byte, model, responseID string) (*apicompat.Resp
 	}
 	response.Usage = nativeGeminiResponsesUsage(body)
 	return response, nil
+}
+
+func validateNativeGeminiResponsePart(part map[string]any) error {
+	for key := range part {
+		if key != "text" && key != "functionCall" && key != "thought" && key != "thoughtSignature" {
+			return fmt.Errorf("unsupported Gemini part field %s", key)
+		}
+	}
+	_, hasText := part["text"]
+	_, hasCall := part["functionCall"]
+	if hasText == hasCall {
+		return fmt.Errorf("invalid Gemini part union")
+	}
+	if value, exists := part["thought"]; exists {
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("invalid Gemini thought flag")
+		}
+	}
+	if value, exists := part["thoughtSignature"]; exists {
+		if signature, ok := value.(string); !ok || signature == "" {
+			return fmt.Errorf("invalid Gemini signature")
+		}
+	}
+	if hasText {
+		if _, ok := part["text"].(string); !ok {
+			return fmt.Errorf("invalid Gemini text")
+		}
+		return nil
+	}
+	call, ok := part["functionCall"].(map[string]any)
+	if !ok || call == nil {
+		return fmt.Errorf("invalid Gemini function call")
+	}
+	for key := range call {
+		if key != "name" && key != "args" && key != "id" {
+			return fmt.Errorf("unsupported Gemini function call field %s", key)
+		}
+	}
+	if name, ok := call["name"].(string); !ok || name == "" {
+		return fmt.Errorf("gemini function call omitted name")
+	}
+	if value, exists := call["id"]; exists {
+		if id, ok := value.(string); !ok || id == "" {
+			return fmt.Errorf("invalid Gemini function call ID")
+		}
+	}
+	if value, exists := call["args"]; exists {
+		if args, ok := value.(map[string]any); !ok || args == nil {
+			return fmt.Errorf("gemini function arguments must be an object")
+		}
+	}
+	return nil
 }
 
 func nativeGeminiResponsesUsage(body map[string]any) *apicompat.ResponsesUsage {

@@ -23,7 +23,11 @@ func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c 
 	}
 	start := time.Now()
 	observer := beginUpstreamResponseModelObservation(c)
-	payload, req, err := responsesToNativeGemini(body)
+	adapted, clientTools, err := adaptNativeGeminiNamespaces(body)
+	if err != nil {
+		return nil, writeNativeGeminiResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	payload, req, err := responsesToNativeGemini(adapted)
 	if err != nil {
 		return nil, writeNativeGeminiResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
@@ -78,7 +82,7 @@ func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c 
 	var response *apicompat.ResponsesResponse
 	var firstTokenMs *int
 	if req.Stream {
-		response, firstTokenMs, err = streamNativeGeminiResponses(ctx, c, resp.Body, req.Model, responseID, start)
+		response, firstTokenMs, err = streamNativeGeminiResponses(ctx, c, resp.Body, req.Model, responseID, start, clientTools)
 	} else {
 		var raw []byte
 		raw, err = ReadUpstreamResponseBody(resp.Body, s.cfg, c, func(c *gin.Context) {
@@ -89,11 +93,28 @@ func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c 
 			response, err = nativeGeminiResponse(raw, req.Model, responseID)
 			if err == nil {
 				nativeGeminiRequireOutput(response)
+			} else {
+				var body map[string]any
+				if decodeOpenAIJSONUseNumber(raw, &body) == nil {
+					if usage := nativeGeminiResponsesUsage(body); usage != nil {
+						response = &apicompat.ResponsesResponse{ID: responseID, Object: "response", Model: req.Model, Status: "failed", Output: []apicompat.ResponsesOutput{}, Usage: usage,
+							Error: &apicompat.ResponsesError{Code: "upstream_error", Message: "Invalid Gemini response"}}
+						c.JSON(http.StatusBadGateway, response)
+						MarkResponseCommitted(c)
+					}
+				}
 			}
 		}
 		if err == nil {
-			c.JSON(http.StatusOK, response)
-		} else if !IsResponseCommitted(c) {
+			raw, err = json.Marshal(response)
+			if err == nil {
+				raw, _, err = apicompat.RestoreResponsesClientToolPayload(raw, clientTools)
+			}
+			if err == nil {
+				c.Data(http.StatusOK, "application/json", raw)
+			}
+		}
+		if err != nil && !IsResponseCommitted(c) {
 			_ = writeNativeGeminiResponsesError(c, http.StatusBadGateway, "upstream_error", "Invalid Gemini response")
 		}
 	}
@@ -118,7 +139,7 @@ func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c 
 	return &ForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Model: req.Model, UpstreamModel: mapped, UpstreamResponseModel: observedUpstreamResponseModel(c), UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c), Usage: usage, Stream: req.Stream, Duration: time.Since(start), FirstTokenMs: firstTokenMs, ClientDisconnect: clientDisconnect, ResponseStatus: response.Status}, nil
 }
 
-func streamNativeGeminiResponses(ctx context.Context, c *gin.Context, body io.Reader, model, id string, start time.Time) (result *apicompat.ResponsesResponse, firstToken *int, streamErr error) {
+func streamNativeGeminiResponses(ctx context.Context, c *gin.Context, body io.Reader, model, id string, start time.Time, clientTools apicompat.ResponsesClientToolMapping) (result *apicompat.ResponsesResponse, firstToken *int, streamErr error) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("X-Accel-Buffering", "no")
@@ -135,18 +156,31 @@ func streamNativeGeminiResponses(ctx context.Context, c *gin.Context, body io.Re
 		}
 	}()
 	sequence := 0
+	restorer := apicompat.NewResponsesClientToolStreamRestorer(clientTools)
 	emit := func(event apicompat.ResponsesStreamEvent) error {
 		event.SequenceNumber = sequence
 		sequence++
-		data, err := json.Marshal(event)
-		if err != nil {
-			return err
+		// Restoration mutates items; keep canonical names for terminal events and replay.
+		if event.Item != nil {
+			item := *event.Item
+			event.Item = &item
 		}
-		if _, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
-			writeFailed = true
-			return err
+		if event.Response != nil {
+			response := *event.Response
+			response.Output = append([]apicompat.ResponsesOutput(nil), event.Response.Output...)
+			event.Response = &response
 		}
-		c.Writer.Flush()
+		for _, restored := range restorer.Restore(event) {
+			data, err := json.Marshal(restored)
+			if err != nil {
+				return err
+			}
+			if _, err = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", restored.Type, data); err != nil {
+				writeFailed = true
+				return err
+			}
+			c.Writer.Flush()
+		}
 		return nil
 	}
 	if err := emit(apicompat.ResponsesStreamEvent{Type: "response.created", Response: response}); err != nil {
@@ -304,8 +338,19 @@ func writeNativeGeminiResponsesError(c *gin.Context, status int, code, message s
 }
 
 func nativeGeminiRequireOutput(response *apicompat.ResponsesResponse) {
-	if response.Status == "completed" && len(response.Output) == 0 {
-		response.Status = "failed"
-		response.Error = &apicompat.ResponsesError{Code: "upstream_error", Message: "Gemini response omitted output"}
+	if response.Status != "completed" {
+		return
 	}
+	for _, item := range response.Output {
+		if item.Type == "function_call" {
+			return
+		}
+		for _, content := range item.Content {
+			if item.Type == "message" && content.Text != "" {
+				return
+			}
+		}
+	}
+	response.Status = "failed"
+	response.Error = &apicompat.ResponsesError{Code: "upstream_error", Message: "Gemini response omitted output"}
 }

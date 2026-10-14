@@ -182,6 +182,9 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 	for _, item := range items {
 		switch {
+		case item.Type == "agent_message":
+			// V2 payloads may be encrypted; retaining only the text header loses the task.
+			return nil, nil, fmt.Errorf("anthropic Responses does not support agent_message; use qualified V1 task delivery")
 		case item.Role == "system" || item.Role == "developer":
 			text := extractTextFromContent(item.Content)
 			if text != "" {
