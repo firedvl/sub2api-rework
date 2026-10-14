@@ -191,10 +191,13 @@ func streamNativeGeminiResponses(ctx context.Context, c *gin.Context, body io.Re
 			break
 		}
 		var raw map[string]any
-		if json.Unmarshal([]byte(data), &raw) != nil {
+		if decodeOpenAIJSONUseNumber([]byte(data), &raw) != nil {
 			return fail(errors.New("invalid Gemini SSE payload"))
 		}
 		observer.ObserveGemini([]byte(data))
+		if usage := nativeGeminiResponsesUsage(raw); usage != nil {
+			response.Usage = usage
+		}
 		if raw["error"] != nil {
 			return fail(errors.New("gemini SSE upstream error"))
 		}
@@ -209,9 +212,6 @@ func streamNativeGeminiResponses(ctx context.Context, c *gin.Context, body io.Re
 		if len(chunk.Output) > 0 && first == nil {
 			elapsed := int(time.Since(start).Milliseconds())
 			first = &elapsed
-		}
-		if chunk.Usage != nil {
-			response.Usage = chunk.Usage
 		}
 		for _, item := range chunk.Output {
 			if item.Type == "function_call" {
