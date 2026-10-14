@@ -87,6 +87,18 @@ func TestNativeGeminiResponsesRejectUnsupportedRequests(t *testing.T) {
 	}
 }
 
+func TestNativeGeminiResponsesRejectNullMessageContent(t *testing.T) {
+	for _, role := range []string{"user", "assistant", "system", "developer"} {
+		t.Run(role, func(t *testing.T) {
+			body := []byte(`{"model":"gemini","input":[{"role":"user","content":"hello"},{"role":"` + role + `","content":null}]}`)
+			payload, req, err := responsesToNativeGemini(body)
+			require.ErrorContains(t, err, "invalid text content")
+			require.Nil(t, payload)
+			require.Nil(t, req)
+		})
+	}
+}
+
 func TestNativeGeminiResponsesTermination(t *testing.T) {
 	for _, tc := range []struct{ finish, status, reason string }{{"STOP", "completed", ""}, {"MAX_TOKENS", "incomplete", "max_output_tokens"}, {"SAFETY", "incomplete", "content_filter"}, {"MALFORMED_FUNCTION_CALL", "failed", ""}, {"", "failed", ""}} {
 		t.Run(tc.finish, func(t *testing.T) {
@@ -379,6 +391,63 @@ func TestNativeGeminiResponsesFailedStreamPreservesAccounting(t *testing.T) {
 		require.Contains(t, w.Body.String(), "response.failed")
 		require.NotContains(t, w.Body.String(), "response.completed")
 		require.True(t, IsResponseCommitted(c))
+	}
+}
+
+func TestNativeGeminiResponsesMalformedFramePreservesAccounting(t *testing.T) {
+	first := `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}`
+	last := `{"candidates":[{"finishReason":"STOP","content":{"parts":[42]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20}}`
+	upstream := &nativeGeminiResponsesUpstream{status: 200, response: "data: " + first + "\n\ndata: " + last + "\n\n"}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
+	c, w := nativeGeminiTestContext()
+	result, err := svc.ForwardAsResponses(context.Background(), c, account, []byte(`{"model":"gemini","input":"hi","stream":true}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "failed", result.ResponseStatus)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Equal(t, 20, result.Usage.OutputTokens)
+	require.True(t, IsResponseCommitted(c))
+	events := nativeGeminiTestEvents(t, w.Body.String())
+	terminal := events[len(events)-1]
+	require.Equal(t, "response.failed", terminal.Type)
+	require.Equal(t, "failed", terminal.Response.Status)
+	require.Equal(t, 20, terminal.Response.Usage.OutputTokens)
+	require.Len(t, terminal.Response.Output, 1)
+	require.Equal(t, "partial", terminal.Response.Output[0].Content[0].Text)
+	require.Equal(t, 1, strings.Count(w.Body.String(), `"type":"response.output_text.delta"`))
+	require.NotContains(t, w.Body.String(), "response.completed")
+}
+
+func TestNativeGeminiResponsesErrorFrameUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata        string
+		wantInput, wantOutput int
+	}{
+		{"empty", `{}`, 10, 2},
+		{"invalid strings", `{"promptTokenCount":"bad","candidatesTokenCount":"bad"}`, 10, 2},
+		{"fractional", `{"promptTokenCount":10,"candidatesTokenCount":1.5}`, 10, 2},
+		{"negative", `{"promptTokenCount":10,"candidatesTokenCount":-1}`, 10, 2},
+		{"null", `null`, 10, 2},
+		{"unrecognized counts", `{"totalTokenCount":12}`, 10, 2},
+		{"valid cumulative counts", `{"promptTokenCount":10,"candidatesTokenCount":20}`, 10, 20},
+		{"valid zero", `{"promptTokenCount":0,"candidatesTokenCount":0}`, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := `{"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2}}`
+			last := `{"error":{"code":500},"usageMetadata":` + tc.metadata + `}`
+			upstream := &nativeGeminiResponsesUpstream{status: 200, response: "data: " + first + "\n\ndata: " + last + "\n\n"}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}}
+			c, w := nativeGeminiTestContext()
+			result, err := svc.ForwardAsResponses(context.Background(), c, account, []byte(`{"model":"gemini","input":"hi","stream":true}`))
+			require.NoError(t, err)
+			require.Equal(t, "failed", result.ResponseStatus)
+			require.Equal(t, tc.wantInput, result.Usage.InputTokens)
+			require.Equal(t, tc.wantOutput, result.Usage.OutputTokens)
+			require.Contains(t, w.Body.String(), "response.failed")
+			require.NotContains(t, w.Body.String(), "response.completed")
+		})
 	}
 }
 

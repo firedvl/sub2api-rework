@@ -197,9 +197,10 @@ func responsesToNativeGemini(body []byte) ([]byte, *apicompat.ResponsesRequest, 
 				return nil, nil, fmt.Errorf("unsupported message role %q", role)
 			}
 			var parts []apicompat.ResponsesContentPart
-			if json.Unmarshal(item.Content, &text) == nil {
-				parts = []apicompat.ResponsesContentPart{{Type: "input_text", Text: text}}
-			} else if json.Unmarshal(item.Content, &parts) != nil {
+			var text *string
+			if json.Unmarshal(item.Content, &text) == nil && text != nil {
+				parts = []apicompat.ResponsesContentPart{{Type: "input_text", Text: *text}}
+			} else if json.Unmarshal(item.Content, &parts) != nil || parts == nil {
 				return nil, nil, fmt.Errorf("invalid text content")
 			}
 			for _, p := range parts {
@@ -417,14 +418,33 @@ func nativeGeminiResponse(raw []byte, model, responseID string) (*apicompat.Resp
 		response.Error = nil
 		response.IncompleteDetails = &apicompat.ResponsesIncompleteDetails{Reason: "content_filter"}
 	}
-	if usage, ok := body["usageMetadata"].(map[string]any); ok {
-		number := func(key string) int { n, _ := asInt(usage[key]); return max(n, 0) }
-		input := number("promptTokenCount")
-		thinking := number("thoughtsTokenCount")
-		output := number("candidatesTokenCount") + thinking
-		response.Usage = &apicompat.ResponsesUsage{InputTokens: input, OutputTokens: output, TotalTokens: input + output, InputTokensDetails: &apicompat.ResponsesInputTokensDetails{CachedTokens: number("cachedContentTokenCount")}, OutputTokensDetails: &apicompat.ResponsesOutputTokensDetails{ReasoningTokens: thinking}}
-	}
+	response.Usage = nativeGeminiResponsesUsage(body)
 	return response, nil
+}
+
+func nativeGeminiResponsesUsage(body map[string]any) *apicompat.ResponsesUsage {
+	usage, ok := body["usageMetadata"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	hasCounts := false
+	for _, key := range []string{"promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "cachedContentTokenCount"} {
+		if value, exists := usage[key]; exists {
+			n, valid := asInt(value)
+			if !valid || n < 0 {
+				return nil
+			}
+			hasCounts = true
+		}
+	}
+	if !hasCounts {
+		return nil
+	}
+	number := func(key string) int { n, _ := asInt(usage[key]); return max(n, 0) }
+	input := number("promptTokenCount")
+	thinking := number("thoughtsTokenCount")
+	output := number("candidatesTokenCount") + thinking
+	return &apicompat.ResponsesUsage{InputTokens: input, OutputTokens: output, TotalTokens: input + output, InputTokensDetails: &apicompat.ResponsesInputTokensDetails{CachedTokens: number("cachedContentTokenCount")}, OutputTokensDetails: &apicompat.ResponsesOutputTokensDetails{ReasoningTokens: thinking}}
 }
 
 func nativeGeminiAllowedFields(raw []byte, allowed ...string) error {
