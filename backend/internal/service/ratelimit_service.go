@@ -2007,6 +2007,7 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
+		s.samplePassiveUsageFromHeaders(ctx, account, headers)
 		return
 	}
 
@@ -2054,12 +2055,10 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 	// 窗口重置时清除旧的 utilization 和被动采样数据，避免残留上个窗口的数据
 	if windowEnd != nil && needInitWindow {
 		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
-			"session_window_utilization":      nil,
-			"passive_usage_7d_utilization":    nil,
-			"passive_usage_7d_reset":          nil,
-			"passive_usage_7d_oi_utilization": nil,
-			"passive_usage_7d_oi_reset":       nil,
-			"passive_usage_sampled_at":        nil,
+			"session_window_utilization":             nil,
+			"session_window_usage_reset":             nil,
+			"session_window_utilization_source":      nil,
+			"session_window_utilization_observed_at": nil,
 		})
 	}
 
@@ -2081,46 +2080,42 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 // samplePassiveUsageFromHeaders 从 Anthropic 响应头收集 5h/7d/7d_oi 的
 // utilization 与 reset 被动采样数据，合并为一次 Extra 写入。无数据时不写。
 func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, account *Account, headers http.Header) {
-	extraUpdates := make(map[string]any, 6)
-	// 5h utilization（0-1 小数），供 estimateSetupTokenUsage 使用
-	if utilStr := headers.Get("anthropic-ratelimit-unified-5h-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["session_window_utilization"] = util
-		}
-	}
-	// 7d utilization（0-1 小数）
-	if utilStr := headers.Get("anthropic-ratelimit-unified-7d-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["passive_usage_7d_utilization"] = util
-		}
-	}
-	// 7d reset timestamp
-	if resetStr := headers.Get("anthropic-ratelimit-unified-7d-reset"); resetStr != "" {
-		if ts, err := strconv.ParseInt(resetStr, 10, 64); err == nil {
-			if ts > 1e11 {
-				ts = ts / 1000
+	updates := make(map[string]any)
+	observed := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, item := range []struct{ header, util, reset string }{
+		{"5h", "session_window_utilization", "session_window_usage_reset"},
+		{"7d", "passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{"7d_oi", "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		resetChanged := false
+		if raw := headers.Get("anthropic-ratelimit-unified-" + item.header + "-reset"); raw != "" {
+			if ts, err := strconv.ParseInt(raw, 10, 64); err == nil && ts > 0 {
+				if ts > 1e11 {
+					ts /= 1000
+				}
+				previous, _ := claudeUsageNumber(account.Extra[item.reset])
+				if item.header == "5h" && previous == 0 && account.SessionWindowEnd != nil {
+					previous = float64(account.SessionWindowEnd.Unix())
+				}
+				resetChanged = previous > 0 && int64(previous) != ts
+				updates[item.reset] = ts
 			}
-			extraUpdates["passive_usage_7d_reset"] = ts
 		}
-	}
-	// 7d_oi (Fable 专属 7d 窗口) utilization（0-1 小数）
-	if utilStr := headers.Get("anthropic-ratelimit-unified-7d_oi-utilization"); utilStr != "" {
-		if util, err := strconv.ParseFloat(utilStr, 64); err == nil {
-			extraUpdates["passive_usage_7d_oi_utilization"] = util
-		}
-	}
-	// 7d_oi reset timestamp
-	if resetStr := headers.Get("anthropic-ratelimit-unified-7d_oi-reset"); resetStr != "" {
-		if ts, err := strconv.ParseInt(resetStr, 10, 64); err == nil {
-			if ts > 1e11 {
-				ts = ts / 1000
+		if util, ok := claudeUsageNumber(headers.Get("anthropic-ratelimit-unified-" + item.header + "-utilization")); ok {
+			updates[item.util] = util
+			updates[item.util+"_source"] = "passive"
+			updates[item.util+"_observed_at"] = observed
+			// A utilization-only sample cannot inherit an active observation's reset.
+			if _, ok := updates[item.reset]; !ok {
+				updates[item.reset] = nil
 			}
-			extraUpdates["passive_usage_7d_oi_reset"] = ts
+		} else if resetChanged {
+			updates[item.util], updates[item.util+"_source"], updates[item.util+"_observed_at"] = nil, nil, nil
 		}
 	}
-	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, account.ID, extraUpdates); err != nil {
+	if len(updates) > 0 {
+		updates["passive_usage_sampled_at"] = observed
+		if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 			slog.Warn("passive_usage_update_failed", "account_id", account.ID, "error", err)
 		}
 	}

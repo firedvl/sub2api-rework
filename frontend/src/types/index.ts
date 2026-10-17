@@ -1443,6 +1443,10 @@ export interface WindowStats {
 }
 
 export interface UsageProgress {
+  source?: 'passive' | 'active' | 'estimated'
+  observed_at?: string | null
+  stale?: boolean
+  estimated?: boolean
   utilization: number // Percentage (0-100+, 100 = 100%)
   resets_at: string | null
   remaining_seconds: number
@@ -1501,7 +1505,9 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
-  source?: 'passive' | 'active'
+  source?: 'passive' | 'active' | 'estimated' | 'mixed' | 'unavailable'
+  cached?: boolean
+  stale?: boolean
   updated_at: string | null
   five_hour: UsageProgress | null
   seven_day: UsageProgress | null

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +148,10 @@ type WindowStats struct {
 
 // UsageProgress 使用量进度
 type UsageProgress struct {
+	Source           string       `json:"source,omitempty"`
+	ObservedAt       *time.Time   `json:"observed_at,omitempty"`
+	Stale            bool         `json:"stale"`
+	Estimated        bool         `json:"estimated,omitempty"`
 	Utilization      float64      `json:"utilization"`            // 使用率百分比 (0-100+，100表示100%)
 	ResetsAt         *time.Time   `json:"resets_at"`              // 重置时间
 	RemainingSeconds int          `json:"remaining_seconds"`      // 距重置剩余秒数
@@ -181,6 +187,8 @@ type AICredit struct {
 
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
+	Cached             bool           `json:"cached,omitempty"`
+	Stale              bool           `json:"stale,omitempty"`
 	Source             string         `json:"source,omitempty"`               // "passive" or "active"
 	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`           // 更新时间
 	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
@@ -248,27 +256,15 @@ type UsageInfo struct {
 
 // ClaudeUsageWindow Anthropic /api/oauth/usage 返回的单个用量窗口
 type ClaudeUsageWindow struct {
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resets_at"`
+	Utilization *float64 `json:"utilization"`
+	ResetsAt    string   `json:"resets_at"`
 }
 
-// ClaudeUsageResponse Anthropic API返回的usage结构
+// Active API utilization is a percentage; passive header utilization is a fraction.
 type ClaudeUsageResponse struct {
-	FiveHour struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"five_hour"`
-	SevenDay struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day"`
-	SevenDaySonnet struct {
-		Utilization float64 `json:"utilization"`
-		ResetsAt    string  `json:"resets_at"`
-	} `json:"seven_day_sonnet"`
-	// Fable 专属 7d 窗口（对应响应头 7d_oi，claim 名为 seven_day_overage_included，
-	// 见 anthropic-ratelimit-unified-representative-claim 头）。上游 usage API
-	// 若不下发该字段，GetUsage 会用被动采样数据回填。
+	FiveHour                ClaudeUsageWindow `json:"five_hour"`
+	SevenDay                ClaudeUsageWindow `json:"seven_day"`
+	SevenDaySonnet          ClaudeUsageWindow `json:"seven_day_sonnet"`
 	SevenDayOverageIncluded ClaudeUsageWindow `json:"seven_day_overage_included"`
 }
 
@@ -389,84 +385,77 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 
 	// 只有oauth类型账号可以通过API获取usage（有profile scope）
 	if account.CanGetUsage() {
-		var apiResp *ClaudeUsageResponse
-
-		// 1. 检查缓存（成功响应 3 分钟 / 错误响应 1 分钟）
+		requestStarted := time.Now()
+		var snapshot *apiUsageCache
+		cachedResponse := false
 		if cached, ok := s.cache.apiCache.Load(accountID); ok {
-			if cache, ok := cached.(*apiUsageCache); ok {
-				age := time.Since(cache.timestamp)
-				if cache.err != nil && age < apiErrorCacheTTL {
-					// 负缓存命中：返回缓存的错误，避免重试风暴
-					return nil, cache.err
+			if entry, ok := cached.(*apiUsageCache); ok && !forceProbe {
+				age := time.Since(entry.timestamp)
+				if entry.err != nil && age < apiErrorCacheTTL {
+					return nil, entry.err
 				}
-				if cache.response != nil && age < apiCacheTTL {
-					apiResp = cache.response
+				if entry.response != nil && age < apiCacheTTL {
+					snapshot, cachedResponse = entry, true
 				}
 			}
 		}
-
-		// 2. 如果没有有效缓存，通过 singleflight 从 API 获取（防止并发击穿）
-		if apiResp == nil {
-			// 随机延迟：打散多账号并发请求，避免同一时刻大量相同 TLS 指纹请求
-			// 触发上游反滥用检测。延迟范围 0~800ms，仅在缓存未命中时生效。
+		if snapshot == nil {
 			jitter := time.Duration(rand.Int64N(int64(apiQueryMaxJitter)))
 			select {
 			case <-time.After(jitter):
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-
-			flightKey := fmt.Sprintf("usage:%d", accountID)
-			result, flightErr, _ := s.cache.apiFlight.Do(flightKey, func() (any, error) {
-				// 再次检查缓存（可能在等待 singleflight 期间被其他请求填充）
-				if cached, ok := s.cache.apiCache.Load(accountID); ok {
-					if cache, ok := cached.(*apiUsageCache); ok {
-						age := time.Since(cache.timestamp)
-						if cache.err != nil && age < apiErrorCacheTTL {
-							return nil, cache.err
-						}
-						if cache.response != nil && age < apiCacheTTL {
-							return cache.response, nil
+			for attempt := 0; attempt < 2; attempt++ {
+				result, flightErr, _ := s.cache.apiFlight.Do(fmt.Sprintf("usage:%d", accountID), func() (any, error) {
+					if cached, ok := s.cache.apiCache.Load(accountID); ok {
+						if entry, ok := cached.(*apiUsageCache); ok {
+							age := time.Since(entry.timestamp)
+							// A forced refresh may reuse only a fetch completed after this request began.
+							if !forceProbe || !entry.timestamp.Before(requestStarted) {
+								if entry.err != nil && age < apiErrorCacheTTL {
+									return nil, entry.err
+								}
+								if entry.response != nil && age < apiCacheTTL {
+									return entry, nil
+								}
+							}
 						}
 					}
-				}
-				resp, fetchErr := s.fetchOAuthUsageRaw(ctx, account)
-				if fetchErr != nil {
-					// 负缓存：缓存错误响应，防止后续请求重复触发 429
-					s.cache.apiCache.Store(accountID, &apiUsageCache{
-						err:       fetchErr,
-						timestamp: time.Now(),
-					})
-					return nil, fetchErr
-				}
-				// 缓存成功响应
-				s.cache.apiCache.Store(accountID, &apiUsageCache{
-					response:  resp,
-					timestamp: time.Now(),
+					response, err := s.fetchOAuthUsageRaw(ctx, account)
+					if err == nil && response == nil {
+						err = fmt.Errorf("empty Claude usage response")
+					}
+					entry := &apiUsageCache{response: response, err: err, timestamp: time.Now().UTC()}
+					s.cache.apiCache.Store(accountID, entry)
+					if err != nil {
+						return nil, err
+					}
+					s.syncActiveToPassive(ctx, account.ID, s.buildUsageInfo(response, &entry.timestamp))
+					return entry, nil
 				})
-				return resp, nil
-			})
-			if flightErr != nil {
-				return nil, flightErr
+				if flightErr != nil {
+					return nil, flightErr
+				}
+				snapshot = result.(*apiUsageCache)
+				if !forceProbe || !snapshot.timestamp.Before(requestStarted) {
+					break
+				}
+				// A refresh can join an older fetch while its persistence is still running.
+				snapshot = nil
 			}
-			apiResp, _ = result.(*ClaudeUsageResponse)
+			if snapshot == nil {
+				return nil, fmt.Errorf("Claude usage refresh did not produce a new observation")
+			}
 		}
-
-		// 3. 构建 UsageInfo（每次都重新计算 RemainingSeconds）
-		now := time.Now()
-		usage := s.buildUsageInfo(apiResp, &now)
-
-		// 4. 添加窗口统计（有独立缓存，1 分钟）
+		usage := s.buildUsageInfo(snapshot.response, &snapshot.timestamp)
+		usage.Cached = cachedResponse
 		s.addWindowStats(ctx, account, usage)
-
-		// 5. 将主动查询结果同步到被动缓存，下次 passive 加载即为最新值
-		s.syncActiveToPassive(ctx, account.ID, usage)
-
-		// 6. 上游 usage API 目前不一定下发 Fable 7d 窗口；缺失时回填被动采样
-		// （7d_oi 响应头）的数据，避免主动查询后 7d F 进度条丢失。
-		if usage.SevenDayFable == nil {
+		// Only the subscription-specific Fable window may fall back to a header sample.
+		if usage.SevenDayFable == nil && account.Extra["passive_usage_7d_oi_utilization_source"] != "active" {
 			usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
 		}
+		markClaudeUsageMetadata(usage)
 
 		s.tryClearRecoverableAccountError(ctx, account)
 		return usage, nil
@@ -485,7 +474,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 }
 
 // GetUsage 获取账号使用量
-// OAuth账号: 调用Anthropic API获取真实数据（需要profile scope），API响应缓存10分钟，窗口统计缓存1分钟
+// OAuth账号: 调用Anthropic API获取真实数据（需要profile scope），API响应缓存3分钟，窗口统计缓存1分钟
 // Setup Token账号: 根据session_window推算5h窗口，7d数据不可用（没有profile scope）
 // API Key账号: 不支持usage查询
 func (s *AccountUsageService) GetUsage(ctx context.Context, accountID int64, force ...bool) (*UsageInfo, error) {
@@ -597,24 +586,12 @@ func (s *AccountUsageService) getPassiveUsageForAccount(ctx context.Context, acc
 		return nil, fmt.Errorf("passive usage only supported for Anthropic OAuth/SetupToken accounts")
 	}
 
-	// 复用 estimateSetupTokenUsage 构建 5h 窗口（OAuth 和 SetupToken 逻辑一致）
 	info := s.estimateSetupTokenUsage(account)
-	info.Source = "passive"
-
-	// 设置采样时间
-	if raw, ok := account.Extra["passive_usage_sampled_at"]; ok {
-		if str, ok := raw.(string); ok {
-			if t, err := time.Parse(time.RFC3339, str); err == nil {
-				info.UpdatedAt = &t
-			}
-		}
-	}
-
-	// 构建 7d 窗口（从被动采样数据）
+	info.Cached = true
 	info.SevenDay = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_utilization", "passive_usage_7d_reset")
-
-	// 构建 7d Fable 窗口（从被动采样的 7d_oi 响应头数据）
+	info.SevenDaySonnet = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset")
 	info.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
+	markClaudeUsageMetadata(info)
 
 	// 添加窗口统计
 	s.addWindowStats(ctx, account, info)
@@ -644,59 +621,120 @@ func applySyntheticWindowStats(info *UsageInfo, extra map[string]any) {
 
 // buildPassiveUsageWindow 从 Extra 中的被动采样数据（utilization 为 0-1 小数、reset 为 Unix 秒）
 // 构建用量窗口，无数据时返回 nil。
+func claudeUsageNumber(raw any) (float64, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	var value float64
+	var err error
+	switch v := raw.(type) {
+	case float64:
+		value = v
+	case json.Number:
+		value, err = v.Float64()
+	case int:
+		value = float64(v)
+	case int64:
+		value = float64(v)
+	case string:
+		value, err = strconv.ParseFloat(v, 64)
+	default:
+		return 0, false
+	}
+	return value, err == nil && value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func buildPassiveUsageWindow(extra map[string]any, utilKey, resetKey string) *UsageProgress {
-	util := parseExtraFloat64(extra[utilKey])
-	resetRaw := parseExtraFloat64(extra[resetKey])
-	if util <= 0 && resetRaw <= 0 {
+	util, ok := claudeUsageNumber(extra[utilKey])
+	if !ok {
 		return nil
 	}
-	var resetAt *time.Time
-	var remaining int
-	if resetRaw > 0 {
-		t := time.Unix(int64(resetRaw), 0)
-		resetAt = &t
-		remaining = int(time.Until(t).Seconds())
-		if remaining < 0 {
-			remaining = 0
+	window := &UsageProgress{Utilization: util * 100, Source: "passive"}
+	if source, ok := extra[utilKey+"_source"].(string); ok && (source == "active" || source == "passive") {
+		window.Source = source
+	}
+	if raw, ok := extra[utilKey+"_observed_at"].(string); ok {
+		if observed, err := parseTime(raw); err == nil {
+			window.ObservedAt = &observed
+		}
+	} else if raw, ok := extra["passive_usage_sampled_at"].(string); ok {
+		window.Stale = true // Legacy snapshots cannot prove a per-window observation time.
+		if observed, err := parseTime(raw); err == nil {
+			window.ObservedAt = &observed
 		}
 	}
-	return &UsageProgress{
-		Utilization:      util * 100,
-		ResetsAt:         resetAt,
-		RemainingSeconds: remaining,
+	if reset, ok := claudeUsageNumber(extra[resetKey]); ok && reset > 0 {
+		t := time.Unix(int64(reset), 0)
+		window.ResetsAt = &t
+		window.RemainingSeconds = max(0, int(time.Until(t).Seconds()))
+	}
+	markClaudeWindowStale(window)
+	return window
+}
+
+func markClaudeWindowStale(window *UsageProgress) {
+	if window == nil {
+		return
+	}
+	window.Stale = window.Stale || window.ObservedAt == nil || time.Since(*window.ObservedAt) >= apiCacheTTL ||
+		(window.ResetsAt != nil && !time.Now().Before(*window.ResetsAt))
+}
+
+func markClaudeUsageMetadata(usage *UsageInfo) {
+	usage.Source = "unavailable"
+	for _, window := range []*UsageProgress{usage.FiveHour, usage.SevenDay, usage.SevenDaySonnet, usage.SevenDayFable} {
+		if window == nil {
+			continue
+		}
+		markClaudeWindowStale(window)
+		usage.Stale = usage.Stale || window.Stale
+		if usage.Source == "unavailable" {
+			usage.Source = window.Source
+		} else if usage.Source != window.Source {
+			usage.Source = "mixed"
+		}
+		if window.ObservedAt != nil && (usage.UpdatedAt == nil || window.ObservedAt.After(*usage.UpdatedAt)) {
+			usage.UpdatedAt = window.ObservedAt
+		}
 	}
 }
 
-// syncActiveToPassive 将主动查询的最新数据回写到 Extra 被动缓存，
-// 这样下次被动加载时能看到最新值。
+// Persist only newly fetched observations, preserving their upstream units and timestamp.
 func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) {
-	extraUpdates := make(map[string]any, 4)
-
-	if usage.FiveHour != nil {
-		extraUpdates["session_window_utilization"] = usage.FiveHour.Utilization / 100
+	observed := usage.UpdatedAt
+	if observed == nil {
+		now := time.Now().UTC()
+		observed = &now
 	}
-	if usage.SevenDay != nil {
-		extraUpdates["passive_usage_7d_utilization"] = usage.SevenDay.Utilization / 100
-		if usage.SevenDay.ResetsAt != nil {
-			extraUpdates["passive_usage_7d_reset"] = usage.SevenDay.ResetsAt.Unix()
+	updates := make(map[string]any)
+	for _, item := range []struct {
+		window      *UsageProgress
+		util, reset string
+	}{
+		{usage.FiveHour, "session_window_utilization", "session_window_usage_reset"},
+		{usage.SevenDay, "passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{usage.SevenDaySonnet, "passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset"},
+		{usage.SevenDayFable, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		if item.window == nil && item.util == "passive_usage_7d_oi_utilization" {
+			continue
 		}
-	}
-	if usage.SevenDayFable != nil {
-		extraUpdates["passive_usage_7d_oi_utilization"] = usage.SevenDayFable.Utilization / 100
-		if usage.SevenDayFable.ResetsAt != nil {
-			extraUpdates["passive_usage_7d_oi_reset"] = usage.SevenDayFable.ResetsAt.Unix()
+		updates[item.util], updates[item.reset] = nil, nil
+		updates[item.util+"_source"], updates[item.util+"_observed_at"] = nil, nil
+		if item.window == nil {
+			continue
 		}
-	}
-
-	if len(extraUpdates) > 0 {
-		extraUpdates["passive_usage_sampled_at"] = time.Now().UTC().Format(time.RFC3339)
-		if err := s.accountRepo.UpdateExtra(ctx, accountID, extraUpdates); err != nil {
-			slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
+		updates[item.util] = item.window.Utilization / 100
+		if item.window.ResetsAt != nil {
+			updates[item.reset] = item.window.ResetsAt.Unix()
 		}
+		updates[item.util+"_source"] = "active"
+		updates[item.util+"_observed_at"] = observed.UTC().Format(time.RFC3339Nano)
 	}
-
-	// 5h ResetsAt 必须回写到 SessionWindowEnd column，estimateSetupTokenUsage
-	// 读这个字段作为窗口结束时间；只塞 Extra 会让 UI 一直拿到上个窗口的过期时间。
+	updates["passive_usage_sampled_at"] = observed.UTC().Format(time.RFC3339Nano)
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
+		slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
+	}
 	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
 		if err := s.accountRepo.UpdateSessionWindowEnd(ctx, accountID, *usage.FiveHour.ResetsAt); err != nil {
 			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
@@ -1631,134 +1669,58 @@ func (s *AccountUsageService) tryClearRecoverableAccountError(ctx context.Contex
 
 // buildUsageInfo 构建UsageInfo
 func (s *AccountUsageService) buildUsageInfo(resp *ClaudeUsageResponse, updatedAt *time.Time) *UsageInfo {
-	info := &UsageInfo{
-		UpdatedAt: updatedAt,
+	info := &UsageInfo{UpdatedAt: updatedAt}
+	if resp == nil {
+		info.Source = "unavailable"
+		return info
 	}
-
-	// 5小时窗口 - 始终创建对象（即使 ResetsAt 为空）
-	info.FiveHour = &UsageProgress{
-		Utilization: resp.FiveHour.Utilization,
-	}
-	if resp.FiveHour.ResetsAt != "" {
-		if fiveHourReset, err := parseTime(resp.FiveHour.ResetsAt); err == nil {
-			info.FiveHour.ResetsAt = &fiveHourReset
-			info.FiveHour.RemainingSeconds = int(time.Until(fiveHourReset).Seconds())
-		} else {
-			log.Printf("Failed to parse FiveHour.ResetsAt: %s, error: %v", resp.FiveHour.ResetsAt, err)
+	build := func(raw ClaudeUsageWindow) *UsageProgress {
+		if raw.Utilization == nil {
+			return nil
 		}
-	}
-
-	// 7天窗口
-	if resp.SevenDay.ResetsAt != "" {
-		if sevenDayReset, err := parseTime(resp.SevenDay.ResetsAt); err == nil {
-			info.SevenDay = &UsageProgress{
-				Utilization:      resp.SevenDay.Utilization,
-				ResetsAt:         &sevenDayReset,
-				RemainingSeconds: int(time.Until(sevenDayReset).Seconds()),
-			}
-		} else {
-			log.Printf("Failed to parse SevenDay.ResetsAt: %s, error: %v", resp.SevenDay.ResetsAt, err)
-			info.SevenDay = &UsageProgress{
-				Utilization: resp.SevenDay.Utilization,
+		util, valid := claudeUsageNumber(*raw.Utilization)
+		if !valid {
+			return nil
+		}
+		window := &UsageProgress{Utilization: util, Source: "active", ObservedAt: updatedAt}
+		if raw.ResetsAt != "" {
+			if reset, err := parseTime(raw.ResetsAt); err == nil {
+				window.ResetsAt = &reset
+				window.RemainingSeconds = max(0, int(time.Until(reset).Seconds()))
+			} else {
+				window.Stale = true
 			}
 		}
+		markClaudeWindowStale(window)
+		return window
 	}
-
-	// 7天Sonnet窗口
-	if resp.SevenDaySonnet.ResetsAt != "" {
-		if sonnetReset, err := parseTime(resp.SevenDaySonnet.ResetsAt); err == nil {
-			info.SevenDaySonnet = &UsageProgress{
-				Utilization:      resp.SevenDaySonnet.Utilization,
-				ResetsAt:         &sonnetReset,
-				RemainingSeconds: int(time.Until(sonnetReset).Seconds()),
-			}
-		} else {
-			log.Printf("Failed to parse SevenDaySonnet.ResetsAt: %s, error: %v", resp.SevenDaySonnet.ResetsAt, err)
-			info.SevenDaySonnet = &UsageProgress{
-				Utilization: resp.SevenDaySonnet.Utilization,
-			}
-		}
-	}
-
-	// 7天Fable窗口（响应头 7d_oi 对应的窗口）
-	if fable := resp.SevenDayOverageIncluded; fable.ResetsAt != "" {
-		if fableReset, err := parseTime(fable.ResetsAt); err == nil {
-			info.SevenDayFable = &UsageProgress{
-				Utilization:      fable.Utilization,
-				ResetsAt:         &fableReset,
-				RemainingSeconds: int(time.Until(fableReset).Seconds()),
-			}
-		} else {
-			log.Printf("Failed to parse SevenDayFable.ResetsAt: %s, error: %v", fable.ResetsAt, err)
-			info.SevenDayFable = &UsageProgress{
-				Utilization: fable.Utilization,
-			}
-		}
-	}
-
+	info.FiveHour = build(resp.FiveHour)
+	info.SevenDay = build(resp.SevenDay)
+	info.SevenDaySonnet = build(resp.SevenDaySonnet)
+	info.SevenDayFable = build(resp.SevenDayOverageIncluded)
+	markClaudeUsageMetadata(info)
 	return info
 }
 
-// estimateSetupTokenUsage 根据session_window推算Setup Token账号的使用量
+// Header status alone is an estimate; expiry never proves a fresh zero measurement.
 func (s *AccountUsageService) estimateSetupTokenUsage(account *Account) *UsageInfo {
 	info := &UsageInfo{}
-
-	// 如果有session_window信息
-	if account.SessionWindowEnd != nil {
-		remaining := int(time.Until(*account.SessionWindowEnd).Seconds())
-		if remaining < 0 {
-			remaining = 0
-		}
-
-		// 优先使用响应头中存储的真实 utilization 值（0-1 小数，转为 0-100 百分比）
-		var utilization float64
-		var found bool
-		if stored, ok := account.Extra["session_window_utilization"]; ok {
-			switch v := stored.(type) {
-			case float64:
-				utilization = v * 100
-				found = true
-			case json.Number:
-				if f, err := v.Float64(); err == nil {
-					utilization = f * 100
-					found = true
-				}
-			}
-		}
-
-		// 如果没有存储的 utilization，回退到状态估算
-		if !found {
-			switch account.SessionWindowStatus {
-			case "rejected":
-				utilization = 100.0
-			case "allowed_warning":
-				utilization = 80.0
-			}
-		}
-
-		info.FiveHour = &UsageProgress{
-			Utilization:      utilization,
-			ResetsAt:         account.SessionWindowEnd,
-			RemainingSeconds: remaining,
-		}
-
-		// 窗口已过期（resetAt 在 now 之前）→ 额度已重置，归零；
-		// 与 Codex 分支 buildCodexUsageProgressFromExtra 保持一致，避免
-		// UI 在 active poll 没回写 SessionWindowEnd 时渲染矛盾状态。
-		if info.FiveHour.ResetsAt != nil && !time.Now().Before(*info.FiveHour.ResetsAt) {
-			info.FiveHour.Utilization = 0
-			info.FiveHour.ResetsAt = nil
-			info.FiveHour.RemainingSeconds = 0
-		}
-	} else {
-		// 没有窗口信息，返回空数据
-		info.FiveHour = &UsageProgress{
-			Utilization:      0,
-			RemainingSeconds: 0,
+	info.FiveHour = buildPassiveUsageWindow(account.Extra, "session_window_utilization", "session_window_usage_reset")
+	if info.FiveHour == nil && account.SessionWindowEnd != nil {
+		switch account.SessionWindowStatus {
+		case "rejected":
+			info.FiveHour = &UsageProgress{Utilization: 100, Source: "estimated", Estimated: true}
+		case "allowed_warning":
+			info.FiveHour = &UsageProgress{Utilization: 80, Source: "estimated", Estimated: true}
 		}
 	}
-
-	// Setup Token无法获取7d数据
+	if info.FiveHour != nil && info.FiveHour.ResetsAt == nil && account.Extra["session_window_utilization_source"] != "active" {
+		info.FiveHour.ResetsAt = account.SessionWindowEnd
+		if account.SessionWindowEnd != nil {
+			info.FiveHour.RemainingSeconds = max(0, int(time.Until(*account.SessionWindowEnd).Seconds()))
+		}
+	}
+	markClaudeUsageMetadata(info)
 	return info
 }
 

@@ -1021,6 +1021,21 @@ export default {
 	    }
 	  },
 	  autoResetCredit: {
+        triggerMode: 'Usage that can trigger a reset credit',
+        triggerOptions: {
+          '5h': '5-hour usage only',
+          '7d': 'Weekly usage only',
+          either: 'Either enabled threshold',
+          none: 'No usage triggers'
+        },
+        triggerHint: {
+          '5h': 'Reset credits will only be used when 5-hour usage reaches the selected threshold. Exhausting the weekly limit alone will not use a reset credit.',
+          '7d': 'Reset credits will only be used when weekly usage reaches the selected threshold. Exhausting the 5-hour limit alone will not use a reset credit.',
+          either: 'Whichever enabled threshold is reached first may trigger a reset credit.',
+          none: 'Both usage triggers are disabled. No usage threshold can use a reset credit.',
+          unchanged: 'Keep each account’s current usage triggers, including disabled triggers.',
+          off: 'Automatic reset-credit use is disabled.'
+        },
 	    title: 'Automatically use reset credits',
     hint: 'Only enabled usage windows can trigger a Reset Credit. Thresholds use the percentage of quota used.',
 	    window5h: '5-hour usage',
@@ -1032,6 +1047,7 @@ export default {
 	    example: '90% used means about 10% remaining. 100% used means none remaining; 0% used can trigger immediately when valid usage is reported.',
 	    thresholdInvalid: 'Automatic reset-credit thresholds must be between 0% and 100%.',
 	    review: {
+          modeCount: '{count} account(s): {mode}',
 	      title: 'Review automatic Reset Credit use',
 	      message: 'Confirm these settings before saving.',
 	      bulkMessage: 'Confirm the affected accounts and effective trigger settings before saving.',
@@ -1048,6 +1064,8 @@ export default {
 	  },
 	  autoWarmup: {
 	    title: 'Automatic warm-up',
+        claudeUnavailable: 'Warm-up: Unavailable',
+        claudeUnavailableReason: 'Claude warm-up is disabled. A supported gateway request that starts a subscription window without paid Extra usage has not been verified. No warm-up has been attempted.',
 	    hint: 'Sends a small Codex request after a recovered quota window. The global switch must also be enabled.',
 	    on: 'Warm-up: On',
 	    off: 'Warm-up: Off',
@@ -1750,6 +1768,14 @@ export default {
         noData: 'No usage data available for this account'
       },
       usageWindow: {
+        observationUnknown: 'Observation time unknown',
+        active: 'Upstream',
+        passive: 'Sampled',
+        estimated: 'Estimated',
+        cached: 'Cached',
+        stale: 'Stale — refresh needed',
+        unavailable: 'Usage unavailable',
+        observedAt: 'Last observed:',
         statsTitle: '5-Hour Window Usage Statistics',
         statsTitleDaily: 'Daily Usage Statistics',
         geminiProDaily: 'Pro',

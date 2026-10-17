@@ -543,6 +543,14 @@ export default {
         }
       },
       usageWindow: {
+        observationUnknown: '观测时间未知',
+        active: '上游查询',
+        passive: '采样',
+        estimated: '估算',
+        cached: '缓存',
+        stale: '已过期，需刷新',
+        unavailable: '用量不可用',
+        observedAt: '最近观测：',
         statsTitle: '5小时窗口用量统计',
         statsTitleDaily: '每日用量统计',
         geminiProDaily: 'Pro',
@@ -1124,6 +1132,21 @@ export default {
 	    }
 	  },
 	  autoResetCredit: {
+        triggerMode: '可触发重置额度的用量',
+        triggerOptions: {
+          '5h': '仅 5 小时用量',
+          '7d': '仅每周用量',
+          either: '任一已启用的阈值',
+          none: '不启用用量触发条件'
+        },
+        triggerHint: {
+          '5h': '仅当 5 小时用量达到所选阈值时才会使用重置额度。仅耗尽每周额度不会使用重置额度。',
+          '7d': '仅当每周用量达到所选阈值时才会使用重置额度。仅耗尽 5 小时额度不会使用重置额度。',
+          either: '任一已启用的阈值先达到时，都可能触发使用重置额度。',
+          none: '两个用量触发条件均已禁用。任何用量阈值都不会触发使用重置额度。',
+          unchanged: '保留每个账号当前的用量触发条件，包括已禁用的条件。',
+          off: '已禁用自动使用重置额度。'
+        },
 	    title: '自动使用重置卡',
 	    hint: '仅启用的用量窗口可触发重置卡；阈值按已用配额百分比计算。',
 	    window5h: '5 小时用量',
@@ -1135,6 +1158,7 @@ export default {
 	    example: '已用 90% 表示约剩余 10%；已用 100% 表示无剩余额度。已用 0% 在收到有效用量数据时即可触发。',
 	    thresholdInvalid: '自动使用重置卡阈值必须在 0% 到 100% 之间。',
 	    review: {
+          modeCount: '{count} 个账号：{mode}',
 	      title: '确认自动用重置卡设置',
 	      message: '保存前请确认以下设置。',
 	      bulkMessage: '保存前请确认受影响的账号和生效的触发设置。',
@@ -1151,6 +1175,8 @@ export default {
 	  },
 	  autoWarmup: {
 	    title: '自动预热',
+        claudeUnavailable: '预热：不可用',
+        claudeUnavailableReason: 'Claude 预热已禁用。目前没有受支持的网关请求能够保证在不产生额外付费使用量的情况下启动订阅窗口。尚未尝试任何预热请求。',
 	    hint: '配额窗口恢复后发送一个很小的 Codex 请求；还需要启用全局开关。',
 	    on: '预热：开',
 	    off: '预热：关',

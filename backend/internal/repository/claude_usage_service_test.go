@@ -52,9 +52,9 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_Success() {
 
 	resp, err := s.fetcher.FetchUsage(context.Background(), "at", "")
 	require.NoError(s.T(), err, "FetchUsage")
-	require.Equal(s.T(), 12.5, resp.FiveHour.Utilization, "FiveHour utilization mismatch")
-	require.Equal(s.T(), 34.0, resp.SevenDay.Utilization, "SevenDay utilization mismatch")
-	require.Equal(s.T(), 56.0, resp.SevenDaySonnet.Utilization, "SevenDaySonnet utilization mismatch")
+	require.Equal(s.T(), 12.5, *resp.FiveHour.Utilization, "FiveHour utilization mismatch")
+	require.Equal(s.T(), 34.0, *resp.SevenDay.Utilization, "SevenDay utilization mismatch")
+	require.Equal(s.T(), 56.0, *resp.SevenDaySonnet.Utilization, "SevenDaySonnet utilization mismatch")
 
 	// Assertions on captured request data
 	require.Equal(s.T(), "Bearer at", captured.authorization, "Authorization header mismatch")
@@ -75,7 +75,7 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_NonOK() {
 	_, err := s.fetcher.FetchUsage(context.Background(), "at", "")
 	require.Error(s.T(), err)
 	require.ErrorContains(s.T(), err, "status 401")
-	require.ErrorContains(s.T(), err, "nope")
+	require.NotContains(s.T(), err.Error(), "nope")
 }
 
 func (s *ClaudeUsageServiceSuite) TestFetchUsage_BadJSON() {
@@ -126,3 +126,42 @@ func (s *ClaudeUsageServiceSuite) TestFetchUsage_InvalidProxyReturnsError() {
 func TestClaudeUsageServiceSuite(t *testing.T) {
 	suite.Run(t, new(ClaudeUsageServiceSuite))
 }
+
+func TestClaudeUsageFetcherPreservesSanitizedMeasurements(t *testing.T) {
+	for _, sample := range []struct {
+		body    string
+		percent *float64
+	}{
+		{`{"five_hour":{"utilization":0.5,"resets_at":null},"seven_day":null}`, claudeFixturePercent(0.5)},
+		{`{"five_hour":{"utilization":0},"seven_day":{}}`, claudeFixturePercent(0)},
+		{`{"five_hour":{"utilization":null},"seven_day":null}`, nil},
+		{`{}`, nil},
+	} {
+		t.Run(sample.body, func(t *testing.T) {
+			server := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(sample.body))
+			}))
+			defer server.Close()
+			fetcher := &claudeUsageService{usageURL: server.URL, allowPrivateHosts: true}
+			result, err := fetcher.FetchUsage(context.Background(), "synthetic", "")
+			require.NoError(t, err)
+			require.Equal(t, sample.percent, result.FiveHour.Utilization)
+			require.Nil(t, result.SevenDay.Utilization)
+		})
+	}
+}
+
+func TestClaudeUsageFetcherDoesNotExposeUpstreamErrorBody(t *testing.T) {
+	server := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("synthetic-secret-bearing-body"))
+	}))
+	defer server.Close()
+	fetcher := &claudeUsageService{usageURL: server.URL, allowPrivateHosts: true}
+	_, err := fetcher.FetchUsage(context.Background(), "synthetic", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "401")
+	require.NotContains(t, err.Error(), "synthetic-secret")
+}
+func claudeFixturePercent(value float64) *float64 { return &value }

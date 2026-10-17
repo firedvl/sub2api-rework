@@ -39,7 +39,7 @@ func (r *sessionWindowSyncRepo) UpdateSessionWindowEnd(_ context.Context, id int
 	return nil
 }
 
-func TestEstimateSetupTokenUsage_ExpiredWindowZeroes(t *testing.T) {
+func TestEstimateSetupTokenUsage_ExpiredWindowRetainsStaleObservation(t *testing.T) {
 	t.Parallel()
 
 	past := time.Now().Add(-2 * time.Hour)
@@ -54,11 +54,11 @@ func TestEstimateSetupTokenUsage_ExpiredWindowZeroes(t *testing.T) {
 	if info.FiveHour == nil {
 		t.Fatal("expected non-nil FiveHour info")
 	}
-	if info.FiveHour.Utilization != 0 {
-		t.Fatalf("expected Utilization=0 for expired window, got %v", info.FiveHour.Utilization)
+	if info.FiveHour.Utilization != 53 {
+		t.Fatalf("expected historical Utilization=53 for expired window, got %v", info.FiveHour.Utilization)
 	}
-	if info.FiveHour.ResetsAt != nil {
-		t.Fatalf("expected ResetsAt=nil for expired window, got %v", info.FiveHour.ResetsAt)
+	if info.FiveHour.ResetsAt == nil || !info.FiveHour.Stale {
+		t.Fatalf("expected expired reset and stale metadata, got %v", info.FiveHour.ResetsAt)
 	}
 	if info.FiveHour.RemainingSeconds != 0 {
 		t.Fatalf("expected RemainingSeconds=0 for expired window, got %v", info.FiveHour.RemainingSeconds)

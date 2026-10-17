@@ -245,6 +245,50 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it.each([
+    ['5h', true, false], ['7d', false, true], ['either', true, true], ['none', false, false]
+  ] as const)('bulk %s writes independent flags without enabling automation', async (mode, fiveHour, weekly) => {
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
+      id, platform: 'openai', type: 'oauth', parent_account_id: null,
+      extra: { auto_reset_credit_enabled: false }
+    } as any))
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="bulk-auto-reset-trigger"]').setValue(mode)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
+      auto_reset_credit_5h_enabled: fiveHour,
+      auto_reset_credit_7d_enabled: weekly
+    }))
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]).not.toHaveProperty('auto_reset_credit_enabled')
+    wrapper.unmount()
+  })
+
+  it('Keep current preserves mixed flags and summarizes effective thresholds', async () => {
+    const targets = [
+      { id: 1, extra: { auto_reset_credit_enabled: false, auto_reset_credit_5h_enabled: false, auto_reset_credit_7d_enabled: true, auto_reset_credit_5h_threshold: 0, auto_reset_credit_7d_threshold: 1 } },
+      { id: 2, extra: { auto_reset_credit_enabled: true, auto_reset_credit_5h_enabled: true, auto_reset_credit_7d_enabled: false, auto_reset_credit_5h_threshold: 0.8995, auto_reset_credit_7d_threshold: 0 } }
+    ].map(account => ({ ...account, platform: 'openai', type: 'oauth', parent_account_id: null }))
+    vi.mocked(adminAPI.accounts.getById).mockImplementation(async id => targets.find(account => account.id === id) as any)
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }, true)
+    await wrapper.get('[data-testid="bulk-edit-auto-reset-credit-select"]').setValue('enabled')
+    await wrapper.get('[data-testid="bulk-auto-reset-trigger"]').setValue('either')
+    await wrapper.get('[data-testid="bulk-auto-reset-trigger"]').setValue('unchanged')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    for (const mode of ['5h', '7d']) {
+      expect(translate).toHaveBeenCalledWith('admin.accounts.autoResetCredit.review.modeCount', {
+        count: 1, mode: `admin.accounts.autoResetCredit.triggerHint.${mode}`
+      })
+    }
+    expect(translate).toHaveBeenCalledWith('admin.accounts.autoResetCredit.review.currentValues', { values: '89.95%' })
+    expect(translate).toHaveBeenCalledWith('admin.accounts.autoResetCredit.review.currentValues', { values: '100%' })
+    await wrapper.findAllComponents({ name: 'ConfirmDialog' }).at(-1)!.vm.$emit('confirm')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { auto_reset_credit_enabled: true })
+    wrapper.unmount()
+  })
+
   describe('Reset Credit review for any risky target', () => {
     const account = (id: number, enabled = true, threshold = 0.9) => ({
       id, platform: 'openai', type: 'oauth', parent_account_id: null,

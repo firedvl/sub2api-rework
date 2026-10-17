@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -94,8 +93,7 @@ func (s *claudeUsageService) FetchUsageWithOptions(ctx context.Context, opts *se
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		msg := fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(body))
+		msg := fmt.Sprintf("Claude usage API returned status %d", resp.StatusCode)
 		return nil, infraerrors.New(http.StatusInternalServerError, "UPSTREAM_ERROR", msg)
 	}
 

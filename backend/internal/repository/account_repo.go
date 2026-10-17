@@ -65,6 +65,10 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
+	"session_window_usage_reset":             {},
+	"session_window_utilization_source":      {},
+	"session_window_utilization_observed_at": {},
+
 	"codex_usage_updated_at":                    {},
 	"codex_credits_snapshot":                    {},
 	"codex_referral_snapshot":                   {},

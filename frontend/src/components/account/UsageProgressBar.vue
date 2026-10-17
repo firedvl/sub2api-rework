@@ -58,6 +58,13 @@
         {{ formatResetTime }}
       </span>
     </div>
+    <div v-if="provenance" class="mt-0.5 flex flex-wrap gap-x-1 text-[9px] text-gray-500" data-test="usage-provenance">
+      <span>{{ t(`admin.accounts.usageWindow.${provenanceSource}`) }}</span>
+      <span v-if="cached">{{ t('admin.accounts.usageWindow.cached') }}</span>
+      <span v-if="isStale">{{ t('admin.accounts.usageWindow.stale') }}</span>
+      <time v-if="observationTime" :datetime="provenance.observed_at || undefined">{{ observationTime }}</time>
+      <span v-else>{{ t('admin.accounts.usageWindow.observationUnknown') }}</span>
+    </div>
   </div>
 </template>
 
@@ -65,7 +72,7 @@
 import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import type { WindowStats } from '@/types'
+import type { UsageProgress, WindowStats } from '@/types'
 import { formatCompactNumber } from '@/utils/format'
 
 const props = withDefaults(
@@ -73,6 +80,9 @@ const props = withDefaults(
     label: string
     utilization: number // Percentage (0-100+)
     resetsAt?: string | null
+    provenance?: UsageProgress
+    source?: 'active' | 'passive' | 'estimated' | 'mixed' | 'unavailable'
+    cached?: boolean
     color: 'indigo' | 'emerald' | 'purple' | 'amber'
     windowStats?: WindowStats | null
     estimatedTotalCost?: number | null
@@ -96,11 +106,11 @@ const { pause: pauseClock, resume: resumeClock } = useIntervalFn(
   60_000,
   { immediate: false },
 )
-if (props.resetsAt) resumeClock()
+if (props.resetsAt || props.provenance) resumeClock()
 watch(
-  () => props.resetsAt,
-  (val) => {
-    if (val) {
+  () => [props.resetsAt, props.provenance?.observed_at],
+  () => {
+    if (props.resetsAt || props.provenance) {
       now.value = new Date()
       resumeClock()
     } else {
@@ -108,6 +118,25 @@ watch(
     }
   },
 )
+
+const hasUtilization = computed(() => typeof props.utilization === 'number' && Number.isFinite(props.utilization) && props.utilization >= 0)
+const isStale = computed(() => Boolean(props.provenance?.stale || (
+  props.provenance && (
+    !props.provenance.observed_at || !Number.isFinite(Date.parse(props.provenance.observed_at)) ||
+    now.value.getTime() - Date.parse(props.provenance.observed_at) >= 3 * 60_000 ||
+    (props.resetsAt && Date.parse(props.resetsAt) <= now.value.getTime())
+  )
+)))
+const provenanceSource = computed(() => {
+  if (!hasUtilization.value) return 'unavailable'
+  if (props.provenance?.estimated) return 'estimated'
+  const source = props.provenance?.source || props.source
+  return source === 'active' || source === 'passive' || source === 'estimated' ? source : 'unavailable'
+})
+const observationTime = computed(() => {
+  const observedAt = props.provenance?.observed_at
+  return observedAt && Number.isFinite(Date.parse(observedAt)) ? new Date(observedAt).toLocaleString() : null
+})
 
 // Label background colors
 const labelClass = computed(() => {
@@ -130,6 +159,7 @@ const labelSizeClass = computed(() =>
 
 // Progress bar color based on utilization
 const barClass = computed(() => {
+  if (!hasUtilization.value) return 'bg-gray-400'
   if (props.remainingCapacity) {
     if (props.utilization <= 20) {
       return 'bg-red-500'
@@ -149,6 +179,7 @@ const barClass = computed(() => {
 
 // Text color based on utilization
 const textClass = computed(() => {
+  if (!hasUtilization.value) return 'text-gray-400'
   if (props.remainingCapacity) {
     if (props.utilization <= 20) {
       return 'text-red-600 dark:text-red-400'
@@ -168,16 +199,18 @@ const textClass = computed(() => {
 
 // Bar width (capped at 100%)
 const barWidth = computed(() => {
-  return `${Math.min(Math.max(props.utilization, 0), 100)}%`
+  return hasUtilization.value ? `${Math.min(Math.max(props.utilization, 0), 100)}%` : '0%'
 })
 
-// Display percentage (cap at 999% for readability)
+// Claude retains fractional observations; other providers keep their existing display.
 const displayPercent = computed(() => {
-  const percent = Math.round(
-    props.remainingCapacity
-      ? Math.min(Math.max(props.utilization, 0), 100)
-      : props.utilization
-  )
+  if (!hasUtilization.value) return '—'
+  if (props.provenance) {
+    return `${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 12 }).format(props.utilization)}%`
+  }
+  const percent = Math.round(props.remainingCapacity
+    ? Math.min(Math.max(props.utilization, 0), 100)
+    : props.utilization)
   return percent > 999 ? '>999%' : `${percent}%`
 })
 
@@ -194,12 +227,13 @@ const formatResetTime = computed(() => {
   }
 
   const date = new Date(props.resetsAt)
+  if (!Number.isFinite(date.getTime())) return '—'
   const diffMs = date.getTime() - now.value.getTime()
 
   // resetsAt 已过期：utilization>0 说明后端窗口数据还没刷新（active poll 没回写），
   // 显示「待刷新」以区别于真正可用的「现在」。
   if (diffMs <= 0) {
-    return props.utilization > 0 ? t('usage.resetPending') : t('usage.resetNow')
+    return isStale.value || !hasUtilization.value || props.utilization > 0 ? t('usage.resetPending') : t('usage.resetNow')
   }
 
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60))

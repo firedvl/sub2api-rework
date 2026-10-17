@@ -35,3 +35,19 @@ func TestShouldEnqueueSchedulerOutboxForExtraUpdates_VisionQualificationEvidence
 		t.Fatal("qualification evidence must not enqueue scheduler work")
 	}
 }
+
+func TestClaudeUsageObservationMetadataIsSchedulerNeutral(t *testing.T) {
+	for _, key := range []string{
+		"session_window_usage_reset", "session_window_utilization_source", "session_window_utilization_observed_at",
+		"passive_usage_7d_utilization_source", "passive_usage_7d_utilization_observed_at",
+		"passive_usage_7d_oi_utilization_source", "passive_usage_7d_oi_utilization_observed_at",
+		"passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset", "passive_usage_7d_sonnet_utilization_source", "passive_usage_7d_sonnet_utilization_observed_at",
+	} {
+		if shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{key: "observation"}) {
+			t.Errorf("metadata %s must not enqueue scheduler work", key)
+		}
+	}
+	if !shouldEnqueueSchedulerOutboxForExtraUpdates(map[string]any{"account_scheduling_threshold": true, "session_window_utilization_observed_at": "observation"}) {
+		t.Fatal("real scheduling changes must still enqueue work")
+	}
+}

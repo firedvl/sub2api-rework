@@ -34,10 +34,11 @@
           data-testid="bulk-edit-auto-reset-credit-select"
           aria-labelledby="bulk-edit-auto-reset-credit-label"
         />
+        <label id="bulk-auto-reset-trigger-label" class="input-label mt-3">{{ t('admin.accounts.autoResetCredit.triggerMode') }}</label>
+        <Select v-model="autoResetCreditTrigger" :options="autoResetCreditTriggerOptions" :aria-label="t('admin.accounts.autoResetCredit.triggerMode')" aria-labelledby="bulk-auto-reset-trigger-label" data-testid="bulk-auto-reset-trigger" />
+        <p class="input-hint" data-testid="bulk-auto-reset-trigger-hint">{{ t(`admin.accounts.autoResetCredit.triggerHint.${autoResetCreditTrigger}`) }}</p>
         <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label id="bulk-auto-reset-5h-label" class="input-label">{{ t('admin.accounts.autoResetCredit.window5h') }}</label>
-            <Select v-model="autoResetCredit5hMode" :options="autoWarmupOptions" aria-labelledby="bulk-auto-reset-5h-label" data-testid="bulk-auto-reset-5h-mode" />
             <label for="bulk-edit-auto-reset-credit-5h" class="input-label">
               {{ t('admin.accounts.autoResetCredit.threshold5h') }}
             </label>
@@ -54,8 +55,6 @@
             />
           </div>
           <div>
-            <label id="bulk-auto-reset-7d-label" class="input-label">{{ t('admin.accounts.autoResetCredit.window7d') }}</label>
-            <Select v-model="autoResetCredit7dMode" :options="autoWarmupOptions" aria-labelledby="bulk-auto-reset-7d-label" data-testid="bulk-auto-reset-7d-mode" />
             <label for="bulk-edit-auto-reset-credit-7d" class="input-label">
               {{ t('admin.accounts.autoResetCredit.threshold7d') }}
             </label>
@@ -1580,7 +1579,7 @@
       </div>
       <div class="flex justify-between gap-4">
         <dt>{{ t('admin.accounts.autoResetCredit.review.trigger') }}</dt>
-        <dd>{{ t('admin.accounts.autoResetCredit.review.either') }}</dd>
+        <dd data-testid="bulk-auto-reset-review-trigger">{{ pendingAutoResetCreditReview.trigger }}</dd>
       </div>
       <p v-if="pendingAutoResetCreditReview.lowered" class="text-amber-700 dark:text-amber-300">
         {{ t('admin.accounts.autoResetCredit.review.lowered') }}
@@ -1795,6 +1794,18 @@ const autoWarmupMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCreditMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCredit5hMode = ref<AutoWarmupMode>('unchanged')
 const autoResetCredit7dMode = ref<AutoWarmupMode>('unchanged')
+const autoResetCreditTrigger = computed({
+  get: () => autoResetCredit5hMode.value === 'unchanged' && autoResetCredit7dMode.value === 'unchanged' ? 'unchanged'
+    : autoResetCredit5hMode.value === 'enabled' ? (autoResetCredit7dMode.value === 'enabled' ? 'either' : '5h')
+      : autoResetCredit7dMode.value === 'enabled' ? '7d' : 'none',
+  set: (mode: string) => {
+    autoResetCredit5hMode.value = mode === 'unchanged' ? 'unchanged' : mode === '5h' || mode === 'either' ? 'enabled' : 'disabled'
+    autoResetCredit7dMode.value = mode === 'unchanged' ? 'unchanged' : mode === '7d' || mode === 'either' ? 'enabled' : 'disabled'
+  }
+})
+const autoResetCreditTriggerOptions = computed(() => ['unchanged', '5h', '7d', 'either', 'none'].map((value) => ({
+  value, label: value === 'unchanged' ? t('admin.accounts.bulkEdit.noChange') : t(`admin.accounts.autoResetCredit.triggerOptions.${value}`)
+})))
 const autoResetCredit5hThreshold = ref('')
 const autoResetCredit7dThreshold = ref('')
 const autoResetCreditRate = (percent: string) => Number((Number(percent) / 100).toPrecision(15))
@@ -1813,6 +1824,7 @@ const showAutoResetCreditReview = ref(false)
 const pendingAutoResetCreditReview = ref<{
   updates: Record<string, unknown>
   affectedCount: number
+  trigger: string
   threshold5h: string
   threshold7d: string
   lowered: boolean
@@ -2361,6 +2373,7 @@ const isAutoResetCreditTarget = (account: Account) =>
 const formatAutoResetCreditPercent = (ratio: number) => Number((ratio * 100).toPrecision(14)).toString()
 
 const reviewThresholdLabel = (next: number | null, targets: Account[], key: 'auto_reset_credit_5h_threshold' | 'auto_reset_credit_7d_threshold') => {
+  if (targets.length === 0) return t('admin.accounts.autoResetCredit.review.ignored')
   if (next !== null) {
     return t('admin.accounts.autoResetCredit.review.usedAt', { value: formatAutoResetCreditPercent(next) })
   }
@@ -2414,11 +2427,20 @@ const needsAutoResetCreditReview = async (updates: Record<string, unknown>) => {
   }
   if (reviewedIDs.size === 0) return false
 
+  const effectiveEnabled = (account: Account) => autoResetCreditMode.value === 'unchanged' ? account.extra?.auto_reset_credit_enabled === true : autoResetCreditMode.value === 'enabled'
+  const effective5h = (account: Account) => autoResetCredit5hMode.value === 'unchanged' ? account.extra?.auto_reset_credit_5h_enabled !== false : autoResetCredit5hMode.value === 'enabled'
+  const effective7d = (account: Account) => autoResetCredit7dMode.value === 'unchanged' ? account.extra?.auto_reset_credit_7d_enabled !== false : autoResetCredit7dMode.value === 'enabled'
+  const modes = new Map<string, number>()
+  for (const account of targets) {
+    const mode = !effectiveEnabled(account) ? 'off' : effective5h(account) ? (effective7d(account) ? 'either' : '5h') : effective7d(account) ? '7d' : 'none'
+    modes.set(mode, (modes.get(mode) ?? 0) + 1)
+  }
   pendingAutoResetCreditReview.value = {
     updates,
+    trigger: Array.from(modes, ([mode, count]) => t('admin.accounts.autoResetCredit.review.modeCount', { count, mode: t(`admin.accounts.autoResetCredit.triggerHint.${mode}`) })).join(' '),
     affectedCount: targets.length,
-    threshold5h: autoResetCredit5hMode.value === 'disabled' ? t('admin.accounts.autoResetCredit.review.ignored') : reviewThresholdLabel(next5h, targets, 'auto_reset_credit_5h_threshold'),
-    threshold7d: autoResetCredit7dMode.value === 'disabled' ? t('admin.accounts.autoResetCredit.review.ignored') : reviewThresholdLabel(next7d, targets, 'auto_reset_credit_7d_threshold'),
+    threshold5h: reviewThresholdLabel(next5h, targets.filter((account) => effectiveEnabled(account) && effective5h(account)), 'auto_reset_credit_5h_threshold'),
+    threshold7d: reviewThresholdLabel(next7d, targets.filter((account) => effectiveEnabled(account) && effective7d(account)), 'auto_reset_credit_7d_threshold'),
     lowered
   }
   return true
