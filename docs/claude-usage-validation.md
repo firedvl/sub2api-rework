@@ -44,6 +44,8 @@ Build output included the existing large-chunk and stale Browserslist-data warni
 
 An independent correctness reviewer identified scheduler metadata classification, mixed-window stale labels, and a forced-refresh/persistence race; all three were fixed and covered by regression checks. Both correctness and security reviewers confirmed the follow-up reset-only-header fix: an unknown previous reset cannot attach an old percentage to a newly observed cycle.
 
+Codex Security completed a diff scan of all 28 changed files in `98f82045..cdc2f2ab` with zero reportable findings. It separately reviewed all three follow-up files in `cdc2f2ab..2a026734` and found no additional security concerns. The reviewers inspected source; the implementation team executed the tests listed above.
+
 Claude warm-up remains unavailable: no sender or opt-in setting was added because a supported subscription-only operation with a no-paid-overflow guarantee was not established. No live account usage was compared with Claude's official page, no canary ran, and no real credentials, quotas, reset credits, or billing settings were changed. Full repository integration tests and real-provider behavior were not run.
 
 See [behavior, comparison procedure, deployment, and rollback](claude-usage-and-reset-triggers.md). Deployment, merge, and tagging remain outside this delivery.
