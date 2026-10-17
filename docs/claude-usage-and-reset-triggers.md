@@ -24,7 +24,7 @@ The response identifies each window's source and observation time. Cached reads 
 
 ## Compare with Claude's usage page
 
-No live canary or account comparison is authorized by this task. Tests use synthetic responses and must not be described as a comparison with a real account.
+The implementation used synthetic responses. Final acceptance on 2026-10-17 separately authorized a bounded read-only comparison; its results and remaining limits are recorded in [validation](claude-usage-validation.md). Synthetic tests must not be described as a comparison with a real account.
 
 For a later authorized comparison:
 
@@ -37,7 +37,7 @@ For a later authorized comparison:
 
 Automatic redemption remains limited to eligible OpenAI OAuth parent accounts. The master switch and existing independent `auto_reset_credit_5h_enabled` / `auto_reset_credit_7d_enabled` flags retain their meaning. Missing historical window flags keep their existing defaults; explicit `false` flags stay disabled. Thresholds remain fractions in storage and percentages in the editor.
 
-The editor offers 5-hour only, weekly only, or either enabled threshold. Weekly-only ignores 5-hour exhaustion. The reverse holds for 5-hour-only. Either may redeem when the first enabled threshold is reached. The pre-save review describes the effective selection. Bulk keep-current preserves each account's flags, including mixed selections.
+The editor offers 5-hour only, weekly only, or either enabled threshold. Weekly-only ignores 5-hour exhaustion. The reverse holds for 5-hour-only. Either may redeem when the first enabled threshold is reached. The pre-save review describes the effective selection. Bulk keep-current preserves each account's flags, including mixed selections. Saved both-disabled flags remain visible as "No usage triggers"; this is a disabled display option. Use the master switch to disable automation.
 
 The existing backend performs the decision and retains its credit availability, expiry, idempotency, locking, audit, and post-reset checks. UI controls do not grant permission to redeem for a disabled window. No automatic Claude redemption is added.
 
