@@ -172,6 +172,15 @@ func TestClaudePassivePerWindowObservationAndRollover(t *testing.T) {
 	last := repo.updateExtraCalls[len(repo.updateExtraCalls)-1].Updates
 	require.Contains(t, last, "passive_usage_7d_utilization")
 	require.Nil(t, last["passive_usage_7d_utilization"])
+
+	// Without a known prior reset, the old percentage cannot identify this cycle.
+	account.Extra = map[string]any{"passive_usage_7d_utilization": 0.8}
+	svc.UpdateSessionWindow(t.Context(), account, headers)
+	last = repo.updateExtraCalls[len(repo.updateExtraCalls)-1].Updates
+	for _, key := range []string{"passive_usage_7d_utilization", "passive_usage_7d_utilization_source", "passive_usage_7d_utilization_observed_at"} {
+		require.Contains(t, last, key)
+		require.Nil(t, last[key], "reset-only headers cannot assign an old measurement to a new window")
+	}
 }
 
 type claudeBlockingPersistenceRepo struct {

@@ -2097,7 +2097,7 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 				if item.header == "5h" && previous == 0 && account.SessionWindowEnd != nil {
 					previous = float64(account.SessionWindowEnd.Unix())
 				}
-				resetChanged = previous > 0 && int64(previous) != ts
+				resetChanged = int64(previous) != ts
 				updates[item.reset] = ts
 			}
 		}
