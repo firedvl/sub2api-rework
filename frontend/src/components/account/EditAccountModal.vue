@@ -3663,7 +3663,7 @@ const autoResetCreditTrigger = computed({
   }
 })
 const autoResetCreditTriggerOptions = computed(() => ['5h', '7d', 'either', 'none'].map((value) => ({
-  value, label: t(`admin.accounts.autoResetCredit.triggerOptions.${value}`)
+  value, label: t(`admin.accounts.autoResetCredit.triggerOptions.${value}`), disabled: value === 'none'
 })))
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)

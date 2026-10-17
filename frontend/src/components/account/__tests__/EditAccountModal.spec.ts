@@ -112,7 +112,7 @@ const SelectStub = defineComponent({
       :value="modelValue"
       @change="$emit('update:modelValue', $event.target.value)"
     >
-      <option v-for="option in options" :key="option.value" :value="option.value">
+      <option v-for="option in options" :key="option.value" :value="option.value" :disabled="option.disabled">
         {{ option.label }}
       </option>
     </select>
@@ -1808,6 +1808,7 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     account.extra = { auto_reset_credit_enabled: false, auto_reset_credit_5h_enabled: false, auto_reset_credit_7d_enabled: false }
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="auto-reset-credit-enabled"]').trigger('click')
+    expect(wrapper.get('[data-testid="auto-reset-credit-trigger"] option[value="none"]').attributes('disabled')).toBeDefined()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock).not.toHaveBeenCalled()
     expect((wrapper.get('[data-testid="auto-reset-credit-trigger"]').element as HTMLSelectElement).value).toBe('none')

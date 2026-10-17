@@ -183,6 +183,23 @@ func TestClaudePassivePerWindowObservationAndRollover(t *testing.T) {
 	}
 }
 
+func TestClaudePassiveUtilizationOnlyDoesNotInheritActiveReset(t *testing.T) {
+	past := time.Now().UTC().Add(-time.Hour)
+	repo := &claudeAccuracyRepo{account: &Account{ID: 42, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{}}}
+	svc := &AccountUsageService{accountRepo: repo, usageLogRepo: &usageBatchLogRepoStub{}, cache: &UsageCache{}}
+	svc.syncActiveToPassive(t.Context(), 42, &UsageInfo{FiveHour: &UsageProgress{Utilization: 80, ResetsAt: &past}})
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.1")
+	newRateLimitServiceForTest(repo).UpdateSessionWindow(t.Context(), repo.account, headers)
+	usage, err := svc.GetPassiveUsage(t.Context(), 42)
+	require.NoError(t, err)
+	require.Equal(t, 10.0, usage.FiveHour.Utilization)
+	require.Equal(t, "passive", usage.FiveHour.Source)
+	require.NotNil(t, usage.FiveHour.ObservedAt)
+	require.Nil(t, usage.FiveHour.ResetsAt, "a new sample without a reset cannot inherit the active observation's cycle")
+	require.False(t, usage.FiveHour.Stale)
+}
+
 type claudeBlockingPersistenceRepo struct {
 	AccountRepository
 	started chan struct{}

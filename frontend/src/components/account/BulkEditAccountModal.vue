@@ -1803,7 +1803,7 @@ const autoResetCreditTrigger = computed({
     autoResetCredit7dMode.value = mode === 'unchanged' ? 'unchanged' : mode === '7d' || mode === 'either' ? 'enabled' : 'disabled'
   }
 })
-const autoResetCreditTriggerOptions = computed(() => ['unchanged', '5h', '7d', 'either', 'none'].map((value) => ({
+const autoResetCreditTriggerOptions = computed(() => ['unchanged', '5h', '7d', 'either'].map((value) => ({
   value, label: value === 'unchanged' ? t('admin.accounts.bulkEdit.noChange') : t(`admin.accounts.autoResetCredit.triggerOptions.${value}`)
 })))
 const autoResetCredit5hThreshold = ref('')

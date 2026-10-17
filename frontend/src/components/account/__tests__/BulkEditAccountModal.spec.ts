@@ -246,13 +246,14 @@ describe('BulkEditAccountModal', () => {
   })
 
   it.each([
-    ['5h', true, false], ['7d', false, true], ['either', true, true], ['none', false, false]
+    ['5h', true, false], ['7d', false, true], ['either', true, true]
   ] as const)('bulk %s writes independent flags without enabling automation', async (mode, fiveHour, weekly) => {
     vi.mocked(adminAPI.accounts.getById).mockImplementation(async (id: number) => ({
       id, platform: 'openai', type: 'oauth', parent_account_id: null,
       extra: { auto_reset_credit_enabled: false }
     } as any))
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    expect(wrapper.find('[data-testid="bulk-auto-reset-trigger"] option[value="none"]').exists()).toBe(false)
     await wrapper.get('[data-testid="bulk-auto-reset-trigger"]').setValue(mode)
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()

@@ -1714,7 +1714,7 @@ func (s *AccountUsageService) estimateSetupTokenUsage(account *Account) *UsageIn
 			info.FiveHour = &UsageProgress{Utilization: 80, Source: "estimated", Estimated: true}
 		}
 	}
-	if info.FiveHour != nil && info.FiveHour.ResetsAt == nil && account.Extra["session_window_utilization_source"] != "active" {
+	if info.FiveHour != nil && info.FiveHour.ResetsAt == nil && (info.FiveHour.Estimated || account.Extra["session_window_utilization_source"] == nil) {
 		info.FiveHour.ResetsAt = account.SessionWindowEnd
 		if account.SessionWindowEnd != nil {
 			info.FiveHour.RemainingSeconds = max(0, int(time.Until(*account.SessionWindowEnd).Seconds()))
