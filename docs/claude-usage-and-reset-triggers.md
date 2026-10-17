@@ -22,6 +22,8 @@ Missing, null, invalid, and negative measurements are unavailable. An explicit u
 
 The response identifies each window's source and observation time. Cached reads retain that time. Passive and active observations remain distinct when persisted, and partial responses must not refresh older windows' timestamps. A forced refresh requests current usage through the existing authenticated account path; a failed refresh must remain visible rather than appearing as a fresh observation.
 
+Concurrent reset-only responses compare the cycle against the stored row when merging metadata. They cannot erase a newer measurement for that same cycle. Status-only window initialization also preserves a concurrent measurement whose recorded reset is still in the future. New measurements replace the percentage, reset, source, and observation time together. The account page rejects older passive responses after accepting a newer active refresh, including its fleet summary and local cache.
+
 ## Compare with Claude's usage page
 
 The implementation used synthetic responses. Final acceptance on 2026-10-17 separately authorized a bounded read-only comparison; its results and remaining limits are recorded in [validation](claude-usage-validation.md). Synthetic tests must not be described as a comparison with a real account.

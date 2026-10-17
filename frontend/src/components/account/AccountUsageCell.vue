@@ -743,6 +743,7 @@ const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
+let usageRequestToken = 0
 const claudeObservedAt = computed(() => {
   const observedAt = usageInfo.value?.updated_at
   if (!observedAt || !Number.isFinite(Date.parse(observedAt))) return null
@@ -1432,6 +1433,7 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     requestParentBatchUsage({ force: options?.bypassCache === true })
     return
   }
+  const requestToken = ++usageRequestToken
 
   // Check cache
   if (!options?.bypassCache) {
@@ -1451,17 +1453,17 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 			? adminAPI.accounts.getUsage(props.account.id, options.source, options.bypassCache === true)
 			: adminAPI.accounts.getUsage(props.account.id)
     const result = await enqueueUsageRequest(props.account, fetchFn)
-    if (!unmounted.value) {
+    if (!unmounted.value && requestToken === usageRequestToken) {
       usageInfo.value = result
       _usageCache.set(props.account.id, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
-    if (!unmounted.value) {
+    if (!unmounted.value && requestToken === usageRequestToken) {
       error.value = t('common.error')
       console.error('Failed to load usage:', e)
     }
   } finally {
-    if (!unmounted.value) loading.value = false
+    if (!unmounted.value && requestToken === usageRequestToken) loading.value = false
   }
 }
 
@@ -1517,18 +1519,20 @@ const attachVisibilityObserver = () => {
 
 const loadActiveUsage = async () => {
   if (activeQueryLoading.value) return
+  const requestToken = ++usageRequestToken
   activeQueryLoading.value = true
   error.value = null
   try {
     const result = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
-    if (!unmounted.value) {
+    if (!unmounted.value && requestToken === usageRequestToken) {
       usageInfo.value = result
       _usageCache.set(props.account.id, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
-    if (!unmounted.value) error.value = t('common.error')
+    if (!unmounted.value && requestToken === usageRequestToken) error.value = t('common.error')
     console.error('Failed to load active usage:', e)
   } finally {
+    if (!unmounted.value && requestToken === usageRequestToken) loading.value = false
     activeQueryLoading.value = false
   }
 }

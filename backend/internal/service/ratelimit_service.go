@@ -2087,17 +2087,13 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 		{"7d", "passive_usage_7d_utilization", "passive_usage_7d_reset"},
 		{"7d_oi", "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
 	} {
-		resetChanged := false
+		hasReset := false
 		if raw := headers.Get("anthropic-ratelimit-unified-" + item.header + "-reset"); raw != "" {
 			if ts, err := strconv.ParseInt(raw, 10, 64); err == nil && ts > 0 {
 				if ts > 1e11 {
 					ts /= 1000
 				}
-				previous, _ := claudeUsageNumber(account.Extra[item.reset])
-				if item.header == "5h" && previous == 0 && account.SessionWindowEnd != nil {
-					previous = float64(account.SessionWindowEnd.Unix())
-				}
-				resetChanged = int64(previous) != ts
+				hasReset = true
 				updates[item.reset] = ts
 			}
 		}
@@ -2109,7 +2105,7 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 			if _, ok := updates[item.reset]; !ok {
 				updates[item.reset] = nil
 			}
-		} else if resetChanged {
+		} else if hasReset {
 			updates[item.util], updates[item.util+"_source"], updates[item.util+"_observed_at"] = nil, nil, nil
 		}
 	}

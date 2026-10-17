@@ -1726,6 +1726,26 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('5h|65')
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.unavailable')
   })
+  it('keeps active Claude usage when an older passive request resolves later', async () => {
+    let resolvePassive!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolvePassive = resolve }))
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 3992, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    expect(getUsage).toHaveBeenCalledWith(3992, 'passive', false)
+    const fresh = { five_hour: { utilization: 50, resets_at: null, source: 'active' } }
+    getUsage.mockResolvedValueOnce(fresh)
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!.trigger('click')
+    await flushPromises()
+    resolvePassive({ five_hour: { utilization: 25, resets_at: null, source: 'passive' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    expect(wrapper.text()).not.toContain('25%')
+    expect(wrapper.emitted('usage-loaded')?.at(-1)).toEqual([fresh])
+    wrapper.unmount()
+  })
+
   it('allows forced Claude refresh from unavailable data and failed requests', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {

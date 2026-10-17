@@ -829,6 +829,7 @@ const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
 const menu = reactive<{show:boolean, acc:Account|null, pos:{top:number, left:number}|null}>({ show: false, acc: null, pos: null })
 const menuTrigger = ref<HTMLElement | null>(null)
+let menuTriggerRect: DOMRect | null = null
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
@@ -1015,7 +1016,14 @@ const applyUsageBatchState = (
 }
 
 const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) => {
-  if (usageBatchByAccountId.value[String(accountID)] === usage) return
+  const key = String(accountID)
+  if (usageBatchByAccountId.value[key] === usage) return
+  usageBatchRequestTokenByAccountId.value[key] = ++usageBatchRequestToken
+  pendingUsageBatchIds.delete(accountID)
+  usageBatchLoadingByAccountId.value[key] = false
+  usageBatchCache.set(accountID, { data: usage, ts: Date.now() })
+  fleetUsageByAccountId.value[key] = usage
+  fleetUsageErrorByAccountId.value[key] = null
   setUsageBatchState(accountID, usage, null)
 }
 
@@ -1436,6 +1444,11 @@ const loadFleetCapacity = async (forceUsage = false) => {
     const nextFleetErrors: Record<string, string | null> = {}
     for (const accountID of usageAccountIDs) {
       const key = String(accountID)
+      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== usageRequestTokens[key]) {
+        nextFleetUsage[key] = usageBatchByAccountId.value[key] ?? previousFleetUsage[key] ?? null
+        nextFleetErrors[key] = usageBatchErrorByAccountId.value[key] ?? null
+        continue
+      }
       const error = errors[key] ?? null
       nextFleetUsage[key] = usage[key] ?? (error ? previousFleetUsage[key] ?? null : null)
       nextFleetErrors[key] = error
@@ -2251,6 +2264,7 @@ const openMenu = (a: Account, e: MouseEvent) => {
   if (target) {
     menuTrigger.value = target
     const rect = target.getBoundingClientRect()
+    menuTriggerRect = rect
     const menuWidth = 200
     const padding = 8
     const viewportWidth = window.innerWidth
@@ -2276,6 +2290,7 @@ const openMenu = (a: Account, e: MouseEvent) => {
 
     menu.pos = { top, left }
   } else {
+    menuTriggerRect = null
     menu.pos = { top: e.clientY, left: e.clientX - 200 }
   }
 
@@ -2980,7 +2995,11 @@ const proxyExpiryText = (p: AccountProxy): string => {
 // 表格滚动时关闭行操作菜单，并让顶部工具菜单继续贴紧触发按钮。
 const handleScroll = (event: Event) => {
   if (event.target instanceof Element && event.target.closest('.action-menu-content')) return
-  menu.show = false
+  if (menu.show) {
+    const rect = menuTrigger.value?.getBoundingClientRect()
+    // A scroll queued before opening must not dismiss a menu whose trigger has not moved.
+    if (!rect || !menuTriggerRect || rect.top !== menuTriggerRect.top || rect.left !== menuTriggerRect.left) menu.show = false
+  }
   if (showAccountToolsDropdown.value) updateAccountToolsDropdownPosition()
 }
 

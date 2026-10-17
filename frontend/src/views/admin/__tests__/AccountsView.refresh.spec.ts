@@ -124,7 +124,7 @@ const mountView = () => {
       AppLayout: { template: '<div><slot /></div>' },
       DataTable: {
         props: ['data'],
-        template: '<div data-test="technical-rows"><span v-for="row in data" :key="row.id">{{ row.name }}</span></div>',
+        template: '<div data-test="technical-rows"><div v-for="row in data" :key="row.id"><span>{{ row.name }}</span><slot name="cell-usage" :row="row" /></div></div>',
       },
       AccountTableActions: AccountTableActionsStub,
       AccountTableFilters: true,
@@ -227,6 +227,24 @@ describe('admin AccountsView refresh behavior', () => {
   afterEach(() => {
     mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
     vi.useRealTimers()
+  })
+
+  it('keeps direct active usage when an older fleet batch resolves later', async () => {
+    let resolveBatch!: (result: unknown) => void
+    getBatchUsage.mockReturnValueOnce(new Promise(resolve => { resolveBatch = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getBatchUsage).toHaveBeenCalledTimes(1)
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    const fresh = { ...makeUsage(50), source: 'active' as const }
+    cell.vm.$emit('usage-loaded', fresh)
+    await flushPromises()
+    expect(cell.props('batchedUsage')).toEqual(fresh)
+
+    resolveBatch({ usage: { '1': { ...makeUsage(25), source: 'passive' } }, errors: {} })
+    await flushPromises()
+    expect(cell.props('batchedUsage')).toEqual(fresh)
+    expect(cell.props('batchedUsageLoading')).toBe(false)
   })
 
   it('replaces manual live data without remounting and prevents duplicate clicks', async () => {

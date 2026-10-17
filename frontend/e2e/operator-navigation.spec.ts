@@ -1731,6 +1731,27 @@ test.describe('operator console navigation', () => {
     await expect(proxyMenu).toBeHidden()
   })
 
+  test('keeps the row menu open for a queued scroll and closes it when its trigger moves', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await page.goto('/admin/accounts?view=technical')
+
+    const trigger = page.locator('.operator-account-table .operator-table-row-action').filter({ hasText: 'More' }).first()
+    await trigger.click()
+    const menu = page.locator('.action-menu-content')
+    await expect(menu).toBeVisible()
+
+    const table = page.locator('.operator-account-table .table-wrapper')
+    const triggerBefore = await trigger.boundingBox()
+    await table.evaluate((element) => element.dispatchEvent(new Event('scroll')))
+    expect(await trigger.boundingBox()).toEqual(triggerBefore)
+    await expect(menu).toBeVisible()
+    await expect(menu.locator('.operator-menu-item').first()).toBeEnabled()
+
+    await page.locator('main.operator-main').evaluate((element) => { element.scrollTop += 100 })
+    await expect.poll(async () => (await trigger.boundingBox())?.y).not.toBe(triggerBefore!.y)
+    await expect(menu).toBeHidden()
+  })
+
   test('uses neutral Create, Edit, and Bulk Edit dialog surfaces and callouts', async ({ page }) => {
     test.setTimeout(60_000)
     await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
