@@ -1838,6 +1838,26 @@ describe('AccountUsageCell', () => {
     wrapper.unmount()
   })
 
+  it('keeps an unmanaged Claude Query active across a passive manual-refresh token', async () => {
+    getUsage.mockResolvedValueOnce({ five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 4301, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    await flushPromises()
+    let resolveQuery!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveQuery = resolve }))
+    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
+    await query.trigger('click')
+    await wrapper.setProps({ manualRefreshToken: 1 })
+    expect(getUsage).toHaveBeenCalledTimes(2)
+    resolveQuery({ five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    expect(query.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('allows forced Claude refresh from unavailable data and failed requests', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {

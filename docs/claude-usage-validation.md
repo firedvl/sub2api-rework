@@ -20,6 +20,8 @@ Executed recovery checks: full Vitest 354 files / 2,830 tests passed before fina
 
 Independent source review closed the effective-weekly and observation-clock findings and the pending-account Query boundary. Regression tests prove account A cannot populate account B's cache, error or loading state, and an older delayed five-second batch cannot replace an active result. Final release state is recorded when its gates finish; the historical acceptance results in the remainder of this document describe the previous `.9` release.
 
+Production-build browser acceptance then exposed a mobile-only overlap: an unmanaged passive refresh could advance the active Query's request token and leave Query disabled. A failing regression reproduced the extra passive request; passive loads now skip while Query is pending. All 57 usage-cell tests passed after this one-guard correction. The built frontend is regenerated before the final browser run.
+
 Baseline: `98f82045baace339ed47975aa5fec1ebdf881f4d` (`origin/main` when work began). Feature branch: `codex/claude-usage-reset-triggers`.
 
 ## Executed checks

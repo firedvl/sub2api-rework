@@ -1436,7 +1436,7 @@ const syncManagedUsageState = () => {
 }
 
 const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean }) => {
-  if (!shouldFetchUsage.value) return
+  if (!shouldFetchUsage.value || activeQueryLoading.value) return
   if (isBatchManaged.value) {
     requestParentBatchUsage({ force: options?.bypassCache === true })
     return
