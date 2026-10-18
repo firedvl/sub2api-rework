@@ -1,5 +1,7 @@
 # Safe Release Updates
 
+M21 deployed `0.2.3-rework.11` from `ec84acdba727b2b0f36a630fffcf926a379e7470` through updater 1.1.6, operation `upd-041c96472c5f7d8be09e0920`. Schema remains 251. The recorded application-only rollback is `.10`, digest `sha256:7c276b3cd58e48c8095d46d8d439c5d6f7f6b8ad10968c273e5b73e9748202f2`; it was not executed. All 37 historical backups were retained byte-for-byte and the new pre-install snapshot makes 38. Follow the normal verified prepare/install and rollback procedures below; never replace containers directly. [M21 acceptance](M21_ACCEPTANCE.md) records the canonical manifest/image and preservation evidence. Code deployment creates no API pool and activates no local schedule.
+
 ## Architecture And Trust Boundaries
 
 The update system has three independent layers:
