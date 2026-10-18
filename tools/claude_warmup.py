@@ -27,6 +27,11 @@ WARNING = ('No request-scoped paid-overflow guarantee exists. Account billing se
 GUARD = 5 * 3600
 FRESH = 180
 STATE_ROOT = Path.home() / ".claude-warmup-state"
+QUALIFIED_CLIENT_VERSION = '2.1.300'
+
+
+class UnqualifiedClientVersion(ValueError):
+    pass
 
 
 def stamp(value):
@@ -176,9 +181,15 @@ def identity(result):
 
 
 def auth(env, directory, binary='claude'):
-    result = subprocess.run([binary, '--safe-mode', '--settings', '{"forceLoginMethod":"claudeai"}',
+    env = dict(env, CLAUDE_CODE_SAFE_MODE='1')
+    version = subprocess.run([binary, '--version'], env=env, cwd=directory,
+                             capture_output=True, text=True, timeout=15)
+    if version.returncode or version.stdout.strip() != QUALIFIED_CLIENT_VERSION + ' (Claude Code)':
+        raise UnqualifiedClientVersion('Native client requires qualification')
+    result = subprocess.run([binary, '--settings', '{"forceLoginMethod":"claudeai"}',
                              '--setting-sources', '', 'auth', 'status', '--json'],
-                            env=env, cwd=directory, capture_output=True, text=True, timeout=15)
+                            env=env, cwd=directory,
+                            capture_output=True, text=True, timeout=15)
     if result.returncode:
         raise ValueError('Native authentication status failed')
     return identity(json.loads(result.stdout))
@@ -275,12 +286,13 @@ def handle_signals(function):
 
 @handle_signals
 def dispatch(env, directory, cancelled, binary='claude', _interrupted=lambda: False):
-    command = [binary, '--safe-mode', '--settings', '{"forceLoginMethod":"claudeai"}',
+    command = [binary, '--settings', '{"forceLoginMethod":"claudeai"}',
                '--setting-sources', '', '-p', 'Reply only OK.', '--model', 'haiku',
                '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
                '--max-turns', '1', '--no-session-persistence', '--output-format', 'json',
                '--disable-slash-commands', '--permission-mode', 'dontAsk']
-    env = dict(env, CLAUDE_CODE_MAX_OUTPUT_TOKENS='16', CLAUDE_CODE_MAX_RETRIES='0', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1')
+    env = dict(env, CLAUDE_CODE_SAFE_MODE='1', CLAUDE_CODE_MAX_OUTPUT_TOKENS='16',
+               CLAUDE_CODE_MAX_RETRIES='0', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1')
     # Spool bounded-duration output to private temporary files; never persist raw output in state.
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
         child = None
@@ -350,6 +362,9 @@ def tick(path, name, execute=False, now=None):
                 actual = auth(env, directory, config['claude_binary'])
                 if actual != p['identity_digest']:
                     raise ValueError('Identity mismatch')
+            except UnqualifiedClientVersion:
+                db.execute('UPDATE profiles SET last_failure=? WHERE name=?', ('unqualified_client_version', key))
+                return {'skipped': 'unqualified_client_version'}
             except (OSError, ValueError, subprocess.SubprocessError):
                 db.execute('UPDATE profiles SET last_failure=? WHERE name=?', ('auth_preflight_failed', key))
                 return {'skipped': 'auth_preflight_failed'}

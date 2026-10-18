@@ -308,12 +308,24 @@ class WarmupTests(unittest.TestCase):
     def test_auth_contract_no_inference_and_native_default(self):
         env = w.profile_environment(self.root, 'personal', native_default=True)
         self.assertNotIn('CLAUDE_CONFIG_DIR', env)
-        with patch.object(w.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(AUTH))) as run:
+        with patch.object(w.subprocess, 'run', side_effect=[
+                subprocess.CompletedProcess([], 0, w.QUALIFIED_CLIENT_VERSION + ' (Claude Code)'),
+                subprocess.CompletedProcess([], 0, json.dumps(AUTH))]) as run:
             self.assertEqual(w.auth(env, self.parent), w.identity(AUTH))
             command = run.call_args.args[0]
             self.assertEqual(command[-3:], ['auth', 'status', '--json'])
             self.assertEqual(command[command.index('--setting-sources') + 1], '')
+            self.assertEqual(run.call_args.kwargs['env']['CLAUDE_CODE_SAFE_MODE'], '1')
             self.assertNotIn('-p', command)
+
+    def test_unqualified_client_fails_before_auth_or_inference(self):
+        with patch.object(w.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '2.1.299 (Claude Code)')) as run:
+            with self.assertRaises(w.UnqualifiedClientVersion):
+                w.auth({}, self.parent)
+            self.assertEqual(run.call_count, 1)
+        with patch.object(w, 'auth', side_effect=w.UnqualifiedClientVersion), patch.object(w, 'dispatch') as dispatch:
+            self.assertEqual(w.tick(self.path, 'personal', True, NOW)['skipped'], 'unqualified_client_version')
+            dispatch.assert_not_called()
 
     def test_dispatch_contract_and_result_validation(self):
         child = unittest.mock.Mock()
@@ -321,7 +333,8 @@ class WarmupTests(unittest.TestCase):
         child.poll.return_value = 0
         def spawn(command, **kwargs):
             self.assertNotIn('--bare', command)
-            self.assertIn('--safe-mode', command)
+            self.assertNotIn('--safe-mode', command)
+            self.assertEqual(kwargs['env']['CLAUDE_CODE_SAFE_MODE'], '1')
             self.assertEqual(kwargs['env']['CLAUDE_CODE_MAX_RETRIES'], '0')
             self.assertEqual(kwargs['env']['CLAUDE_CODE_MAX_OUTPUT_TOKENS'], '16')
             kwargs['stdout'].write(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False}).encode())

@@ -1,6 +1,6 @@
 # Local Claude subscription warm-up companion
 
-`tools/claude_warmup.py` runs the unmodified official Claude Code CLI with native subscription authentication. It is disabled by default. It does not use gateway credentials, copy credentials, sign in, redeem credits, change account billing settings, install schedules, or fall back to API billing.
+`tools/claude_warmup.py` runs the unmodified official Claude Code CLI with native subscription authentication. It is disabled by default. It does not use gateway credentials, copy credentials, sign in, redeem credits, change account billing settings, install schedules, or configure an API billing fallback. Native identity checks reject reported API-key and cloud-provider authentication before dispatch; the remaining authentication race is described below.
 
 **There is no documented request-scoped guarantee against paid overflow.** You must first disable extra usage in the official account UI and explicitly acknowledge that account settings can change. The acknowledgement expires after 24 hours. This is an operator attestation, not a verified billing control or permission to spend credits. A tiny prompt and requested output limit do not constitute a hard cost cap.
 
@@ -8,7 +8,7 @@ A completed request is recorded as `request_completed_reset_unverified`. Neither
 
 ## Initialize and select native authentication
 
-Requires Python 3.9+ with IANA timezone data, and an installed official Claude Code supporting the documented flags below. Run initialization in an existing private parent directory; the new companion directory is created with mode 700. No inference occurs:
+Requires Python 3.9+ with IANA timezone data and the qualified official Claude Code **2.1.300**. Binding and each execution check the version before authentication; other versions report `unqualified_client_version` and cannot dispatch. Run the native contracts and review their results before qualifying a different version. Run initialization in an existing private parent directory; the new companion directory is created with mode 700. No inference occurs:
 
 ```sh
 python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" init personal \
@@ -20,7 +20,7 @@ The generated configuration stores the absolute official CLI executable path (`c
 Choose one authentication source by editing this private JSON file:
 
 - Existing default native login: set `profiles.personal.native_default` to `true`. This leaves official authentication storage untouched, including its permissions, and does not create isolated account directories.
-- Existing isolated login: leave `native_default` false. The existing root, named profile and its `anthropic` directory must be private directories created through [the account launcher](CLAUDE_CODE_ACCOUNTS.md). This companion never signs in or copies the default login.
+- Existing isolated login: leave `native_default` false. The existing root, named profile and its `anthropic` directory must be private directories created through the account launcher below. This companion never signs in or copies the default login.
 
 Bind the selected account using only the official status command:
 
@@ -30,6 +30,21 @@ python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" statu
 ```
 
 Binding and every execution require `loggedIn: true`, `authMethod: claude.ai`, `apiProvider: firstParty`, a recognized Pro/Max/Team/Enterprise subscription, an email identity, and no API-key source reported by native status. Only a SHA256 digest of the normalized identity is stored; no email, token, raw CLI output or provider response is stored in companion state. A digest is a binding identifier, not anonymization against someone who already knows possible email addresses. Switching native accounts requires binding again. Binding a different identity disables that profile and clears its billing attestation and quota observation; authorize the new account explicitly.
+
+### Separate official accounts
+
+`tools/claude_accounts.py` provides explicit manual selection. These commands open the official login flow only when you request `init` or `login`; never run them merely to test an existing authenticated account:
+
+```sh
+python3 tools/claude_accounts.py init personal
+python3 tools/claude_accounts.py init work
+python3 tools/claude_accounts.py status personal
+python3 tools/claude_accounts.py run work
+```
+
+Each named profile has its own `CLAUDE_CONFIG_DIR`, history and `ANTHROPIC_CONFIG_DIR`. The launcher removes inherited provider/routing variables and excludes project/local settings. Native authentication storage, selected user authentication settings and managed policy remain trusted. Verify the intended account using the official client's status before submitting a prompt. The helper never copies credentials, chooses another account automatically or pools subscription tokens.
+
+The default root is `~/.claude-accounts`; `--root /private/path` precedes the command. Its parent must exist. POSIX roots/profiles must be owned by the current user with mode 700; direct symlinks are refused. Windows uses the existing per-user ACLs and Python launcher `py -3` in place of `python3`. Actual two-account Keychain and Windows execution acceptance remain unverified; offline isolation tests do not establish those live outcomes.
 
 ## Explicit authorization and quota modes
 
@@ -75,6 +90,8 @@ python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" disab
 ```
 
 The request uses `claude -p 'Reply only OK.'`, model `haiku`, one turn, JSON output, disabled session persistence, empty tools, safe mode, and strict empty MCP configuration. Provider-routing/authentication environment variables are removed before native profile selection. Empty `--setting-sources` excludes user/project/local settings, including user `settings.env` authentication overrides; native authentication storage remains available. Safe mode disables customizations while managed policy remains trusted. `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16` requests a small response; `CLAUDE_CODE_MAX_RETRIES=0` disables the client's configured request retries. This never uses `--bare`, which excludes subscription OAuth authentication. Managed policy remains trusted; this helper is not a sandbox. Authentication is checked immediately before dispatch, but an external account or billing change can still race native launch; the attestation and identity check are not an atomic provider billing guarantee.
+
+Safe mode uses the documented `CLAUDE_CODE_SAFE_MODE=1` environment setting. Installed 2.1.300 advertised `--safe-mode` in the existing profile but rejected that flag in a fresh synthetic profile; its documented environment equivalent passed the same loopback contract. Detected command or authentication failures stop the attempt. Unqualified client versions are refused rather than assuming an older client honors the environment setting.
 
 Requests run in a private empty temporary working directory. A 60-second deadline, SIGTERM/SIGHUP/SIGINT, or a cancellation/disable change terminates the owned child process group (on Windows, its process tree). Cancelling cannot undo a request already accepted upstream, so the outcome remains unknown. SIGKILL, power loss, and kernel termination cannot run process cleanup; the durable attempt guard still suppresses automatic resend on restart. The subprocess's input is closed and no permissions are bypassed.
 
@@ -123,6 +140,8 @@ Unregister-ScheduledTask -TaskName 'local.claude-warmup.personal' -Confirm:$fals
 Disable the profile before uninstalling schedules to cancel any running child. Leave `~/.claude-warmup-state/state.sqlite3` in place when re-enabling or moving configuration: deleting it discards the account-wide attempt guard. Existing companion state files next to older configurations are not used by this version; after upgrading, wait at least five hours since any prior attempt before enabling it. Windows file privacy inherits the current user's directory ACLs; provision a private user directory, not a shared location.
 
 ## Verification and official contracts
+
+Local acceptance on 2026-10-18 passed all 38 tests: 26 scheduler tests, ten profile-isolation tests and two installed-client loopback contracts. Independent security/correctness findings were fixed. A read-only native status bind, disabled tick and generated plist syntax check passed. No native jobs were installed and no subscription inference, credit redemption, billing setting or authentication change was performed. Native macOS scheduling registration, Windows execution, two-account live isolation and verified window activation remain untested.
 
 Synthetic tests do not use live provider inference or install schedules:
 
