@@ -1,5 +1,23 @@
 # M20 validation and release decision
 
+## Recovery update, 2026-10-18
+
+This update supersedes the original “Unsupported execution” conclusion below. A separate [local official-client companion](CLAUDE_WARMUP.md) now provides real scheduling code with disabled defaults, native identity binding, identity-bound billing acknowledgement, conservative durable account guards across processes/config files, cancellation, restart suppression and generated launchd/systemd/Task Scheduler files. It neither collects gateway subscription tokens nor claims machine-verified billing or quota-window attribution. The original validation tables remain the historical PR300 baseline; follow-up results appear here as completed.
+
+The API-only route now preserves cancellation, returns observed partial usage and closes the upstream body without retry/failover after cancellation. Independent correctness review found no remaining material defect in that patch. Legacy/OpenAI detachment remains unchanged. Provider-side work and final charges cannot be proven from a client disconnect.
+
+Independent scheduler reviews found and drove fixes for account rebinding retaining old billing evidence, mutable authorization during preflight, orphaned children after ordinary shutdown signals and duplicate claims across configuration files. Tests use synthetic identities, child processes and loopback providers. A read-only bind/status check against the existing official Pro login and a disabled tick passed; generated macOS plist syntax passed `plutil -lint`. No inference, login change, billing acknowledgement, credit redemption or native scheduler installation was performed.
+
+The Claude usage regression is isolated on `codex/claude-usage-recovery`, based on main. Its capacity projection discarded freshness metadata, and its active-result publication could lose a Query result to passive refresh. The separate fix preserves per-window evidence and errors, corrects aggregates and adds Capacity Query. M20's higher-risk live authentication and paid API acceptance do not gate that independent correction.
+
+Executed follow-up checks: ordinary Go 51 packages, unit-tag 62 and integration-tag 51 passed; affected vet and server build passed. Disposable PostgreSQL/Redis checks passed account observation-merge cases and all five OpenAI durable warm-up repository tests. The full frontend run passed 354 files / 2,830 tests; the final usage-boundary six-file run passed 117 tests, and the final companion localization/availability checks passed five tests. Full ESLint and frontend build passed; final rebuild/race checks run against the reviewed revision before release.
+
+All 39 Python/client checks passed. The installed official client 2.1.300 completed six real Read-tool roundtrips against disposable local files through seven loopback Messages calls, preserving about 97 KB of history and observed thinking/context/cache fields. Midstream process termination closed the socket without replay. Separate exact companion-command tests observed the 16-token setting, empty tools and no retry after a synthetic 503. These tests deliberately use synthetic API authentication to inspect protocol behavior; they do not prove live subscription inference, billing or window activation. Read-only native subscription status was separately verified.
+
+Independent final review found no remaining material code defect at the changed cancellation and companion boundaries. Managed policy/native authentication storage remain trusted. Authentication or billing settings can change between preflight and dispatch. A local ledger covers one machine and OS user, not other devices. Hard termination and local socket closure cannot prove provider-side work stopped. These limits are documented rather than treated as passed live acceptance.
+
+The exact ChatGPT conversation received a sanitized consultation through its existing browser UI; [handoff](CODEX_CHATGPT_HANDOFF.md) distinguishes the advisory response from code review and user authorization. M20 remains a draft until real two-account native isolation, Windows execution and an explicitly authorized API failover/billing canary meet their acceptance requirements. No paid inference, billing setting, credit redemption, authentication mutation or installed schedule was used to turn those gaps into a claimed pass.
+
 Validation date: 2026-10-17 (America/Los_Angeles). Baseline: `cef33f7b0768d6cd67df4d72beb32191b2c8d60e`, current `origin/main` when the branch was prepared. Candidate branch: `codex/m20-claude-code-accounts`.
 
 ## Implemented

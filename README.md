@@ -12,8 +12,9 @@ Provider behavior can differ by account type and upstream transport. See
 known limitations.
 
 [Claude Code account modes](docs/CLAUDE_CODE_ACCOUNTS.md) documents separate native
-subscription logins, explicit API-key-only routing, billing limits and why
-automatic subscription warm-up remains unavailable.
+subscription logins, explicit API-key-only routing and billing limits. The separate
+[local warm-up companion](docs/CLAUDE_WARMUP.md) schedules the official client with
+disabled defaults, native identity binding and explicit billing acknowledgement.
 
 ## Status
 

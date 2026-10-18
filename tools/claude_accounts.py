@@ -31,6 +31,25 @@ def private_directory(path, create):
             raise ValueError(f"Directory must belong to the current user: {path}")
 
 
+def profile_environment(root, name, create=False, native_default=False):
+    """Select native credential isolation without reading or copying credentials."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+        raise ValueError("profile must be a safe identifier of 1–64 letters, digits, underscores or hyphens")
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith(BLOCKED_PREFIXES)}
+    if native_default:
+        return env
+    root = Path(root).expanduser().absolute()
+    if root.resolve() == (Path.home() / ".claude").resolve():
+        raise ValueError("The shared ~/.claude directory cannot be used as the profile root")
+    profile = root / name
+    for directory in (root, profile, profile / "anthropic"):
+        private_directory(directory, create)
+    env["CLAUDE_CONFIG_DIR"] = str(profile)
+    env["ANTHROPIC_CONFIG_DIR"] = str(profile / "anthropic")
+    return env
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -39,7 +58,7 @@ def main(argv=None):
             "copies credentials. Each launch retains your real HOME and current project "
             "directory. Profile user settings and managed policy remain trusted; this "
             "is not a sandbox or a guarantee against paid usage. Configure billing in "
-            "your Claude account. Automatic warm-up is unsupported."
+            "your Claude account. For optional local warm-up use tools/claude_warmup.py; it is disabled by default."
         ),
     )
     parser.add_argument("--root", type=Path, default=Path.home() / ".claude-accounts",
@@ -48,25 +67,14 @@ def main(argv=None):
     parser.add_argument("profile", help="Explicit profile name: letters, digits, underscores or hyphens")
     args = parser.parse_args(argv)
     if args.command == "warmup":
-        print("Automatic warm-up is disabled: no supported request-scoped guarantee "
+        print("This legacy warmup command is disabled; use tools/claude_warmup.py for the optional local companion. There is no supported request-scoped guarantee "
               "against paid overflow is available. No request was sent.", file=sys.stderr)
         return 2
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", args.profile):
         parser.error("profile must be a safe identifier of 1–64 letters, digits, underscores or hyphens")
-    root = args.root.expanduser().absolute()
-    profile = root / args.profile
     try:
-        if root.resolve() == (Path.home() / ".claude").resolve():
-            raise ValueError("The shared ~/.claude directory cannot be used as the profile root")
-        create = args.command in ("init", "login")
-        private_directory(root, create)
-        private_directory(profile, create)
-        anthropic_config = profile / "anthropic"
-        private_directory(anthropic_config, create)
-        env = {key: value for key, value in os.environ.items()
-               if not key.upper().startswith(BLOCKED_PREFIXES)}
-        env["CLAUDE_CONFIG_DIR"] = str(profile)
-        env["ANTHROPIC_CONFIG_DIR"] = str(anthropic_config)
+        env = profile_environment(args.root, args.profile, args.command in ("init", "login"))
+        profile = Path(env["CLAUDE_CONFIG_DIR"])
         command = ["claude", "--settings", '{"forceLoginMethod":"claudeai"}',
                    "--setting-sources", "user"]
         if args.command in ("init", "login"):

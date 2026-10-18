@@ -1065,7 +1065,7 @@ export default {
 	  autoWarmup: {
 	    title: 'Automatic warm-up',
         claudeUnavailable: 'Warm-up: Unavailable',
-        claudeUnavailableReason: 'Automatic subscription warm-up is unavailable. Provider rules prohibit third-party services from collecting or routing users’ subscription credentials, and no supported request-level safeguard against paid overflow has been established. No warm-up has been attempted.',
+        claudeUnavailableReason: 'Gateway subscription warm-up is unavailable. Use the separate local official Claude Code companion described in the Claude warm-up guide. Its native profile, opt-ins, billing acknowledgment and status stay on your computer; this gateway cannot enable or inspect them. Local request completion does not verify a new quota window.',
         claudeAPIBilling: 'API-key requests incur API charges. They do not start or replenish a Claude subscription window. Automatic warm-up is unavailable.',
 	    hint: 'Sends a small Codex request after a recovered quota window. The global switch must also be enabled.',
 	    on: 'Warm-up: On',

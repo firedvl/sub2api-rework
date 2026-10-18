@@ -580,7 +580,7 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	if !stream {
+	if !stream || IsAnthropicAPIOnly(ctx) {
 		return ctx, func() {}
 	}
 	return context.WithoutCancel(ctx), func() {}

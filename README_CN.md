@@ -21,8 +21,9 @@
 
 ## ⚠️ 重要提醒
 
-Claude Code 的独立原生账号、仅 API 密钥路由、计费边界和不可用的自动订阅预热，见
-[M20 账号说明](docs/CLAUDE_CODE_ACCOUNTS.md)。测试连接会消耗真实使用量。
+Claude Code 的独立原生账号、仅 API 密钥路由和计费边界，见
+[M20 账号说明](docs/CLAUDE_CODE_ACCOUNTS.md)。[本地预热工具](docs/CLAUDE_WARMUP.md)
+通过官方客户端调度，默认关闭，需绑定原生身份并明确确认计费风险。测试连接会消耗真实使用量。
 
 使用本项目前，请务必仔细阅读以下内容：
 

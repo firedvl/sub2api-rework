@@ -21,7 +21,8 @@ describe('provider warm-up availability', () => {
       props: { account, globalEnabled: true, details: true }
     })
     expect(wrapper.get('[data-testid="claude-auto-warmup-unavailable"]').text()).toContain('Warm-up: Unavailable')
-    expect(wrapper.text()).toContain('No warm-up has been attempted.')
+    expect(wrapper.text()).toContain('separate local official Claude Code companion')
+    expect(wrapper.text()).toContain('this gateway cannot enable or inspect them')
     expect(wrapper.text()).not.toContain('Succeeded')
     expect(wrapper.find('button').exists()).toBe(false)
     expect(wrapper.find('dl').exists()).toBe(false)

@@ -1176,7 +1176,7 @@ export default {
 	  autoWarmup: {
 	    title: '自动预热',
         claudeUnavailable: '预热：不可用',
-        claudeUnavailableReason: '自动订阅预热不可用。提供商禁止第三方服务收集或路由用户的订阅凭据，且尚无受支持的请求级保障可防止额外付费。尚未尝试任何预热请求。',
+        claudeUnavailableReason: '网关订阅预热不可用。请使用 Claude 预热指南中的独立本地官方 Claude Code 配套工具。原生配置、启用开关、计费确认和状态保留在您的电脑上，网关无法启用或查看。请求完成不代表已验证新的配额窗口。',
         claudeAPIBilling: 'API 密钥请求会产生 API 费用，不会启动或补充 Claude 订阅窗口。自动预热不可用。',
 	    hint: '配额窗口恢复后发送一个很小的 Codex 请求；还需要启用全局开关。',
 	    on: '预热：开',

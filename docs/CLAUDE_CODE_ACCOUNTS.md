@@ -1,6 +1,6 @@
 # Claude Code accounts and warm-up (M20)
 
-M20 adds an explicit API-key-only Messages endpoint and a local launcher for separate official Claude Code logins. Automatic subscription warm-up remains unavailable. Neither an API response nor a completed CLI process proves that a subscription window advanced.
+M20 adds an explicit API-key-only Messages endpoint and a local launcher for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced.
 
 ## Provider contract, checked 2026-10-17
 
@@ -40,13 +40,17 @@ py -3 tools/claude_accounts.py run work
 
 Windows uses inherited per-user ACLs rather than POSIX mode checks. Keep the profile root in a private user directory. No server dashboard can inspect or change these local logins.
 
-## Automatic warm-up: unavailable
+## Automatic warm-up: local official-client companion
 
-No subscription inference worker, schedule, retry loop, global switch or account switch is installed. `warmup PROFILE` exits with status 2 before creating directories or starting a child. The admin account editor/table shows unavailable for Anthropic accounts; API-key accounts explain that API requests are separately billed and do not start a subscription quota window.
+Use [the companion guide](CLAUDE_WARMUP.md) for configuration, native scheduling files, identity binding, dry runs, status and cancellation. The gateway never collects local subscription credentials or controls this scheduler. The original launcher's `warmup PROFILE` command continues refusing execution and points to the separate companion.
 
-This is an execution refusal, not a disabled-but-runnable scheduler. Missing resets, expired five-hour windows, exhausted weekly limits, contradictory observations, process restarts and concurrent invocations all remain unable to dispatch a warm-up. Schedule/timezone/model, attempt history, cancellation, backoff and verified reset advancement are not offered when execution has no supported safety contract. Existing OpenAI automation keeps its own controls, durable claims, PostgreSQL advisory locking, Redis coordination and provider eligibility checks; M20 does not expand them to Claude.
+The companion uses documented official headless execution, safe mode, no tools or MCP servers, a fixed prompt, one turn, a 16-output-token setting, zero configured CLI retries and a 60-second deadline. These settings reduce work; they are not a hard spending guarantee. Native default authentication is an explicit option; otherwise it uses the launcher's isolated native profiles. A status-only preflight checks the selected subscription identity before dispatch. Authentication storage and managed machine policy remain trusted, and native authentication can change between preflight and execution.
 
-The existing Claude usage refresh is a read-only HTTP observation through the legacy account path. It records each window's source, observation time and stale/reset state. It is not a documented first-party automation contract and cannot authorize a warm-up. A later reset timestamp alone does not prove which request caused it. Whether an included five-hour window can be newly activated while weekly allowance is exhausted remains **unverified**; paid credits may permit requests after either limit. No live experiment was made.
+Global and per-profile switches default off. An identity-bound acknowledgement that usage credits were disabled expires after 24 hours. This is an operator assertion, not programmatic billing verification or authorization for paid inference. Rebinding clears billing/quota evidence and disables execution. The default observed-reset mode requires a recent manual official-UI reading; unknown/stale/exhausted evidence skips execution. A separate, explicitly enabled unverified scheduling mode supports unattended daily slots without claiming quota awareness. It retains a conservative five-hour guard after any attempt, including failure, cancellation or an unknown outcome.
+
+The canonical local SQLite ledger coordinates concurrent profiles and config files for the same bound identity on one machine and OS user. It records a dispatch claim before launching the client, so a crash cannot automatically resend. Catchable shutdown signals terminate the owned process group; hard kills and provider-side cancellation cannot be guaranteed. No reset credits are redeemed. Existing OpenAI automation retains its separate controls and implementation.
+
+The gateway's legacy OAuth usage observation is not a documented first-party automation contract and cannot authorize companion execution. Routines are an alternative first-party subscription scheduler in research preview, but their documented interface does not provide a reset/billing preflight. Both paths can consume included usage or enabled paid credits. Request completion is recorded separately from manually observed reset advancement, with attribution unverified. No live warm-up experiment was made.
 
 ## Mode B: API-billed gateway routing
 
@@ -111,13 +115,13 @@ A manual Claude test now needs `message_start`, a terminal `message_delta.stop_r
 | Thinking and prompt caching | Native fields retained with existing model/beta validation; usage parser tracks cache/thinking tokens |
 | Models/mapping | Existing model admission/account mapping; explicit endpoint has no model discovery route |
 | Context management | Preserved when required beta capabilities are present; existing sanitizers can remove unsupported fields |
-| Cancellation | Client can disconnect; existing streaming path may continue draining upstream for usage accounting, so inference/spend may continue |
+| Cancellation | Explicit API-only route closes upstream on cancellation/write failure and records observed partial usage; provider final billing can exceed that partial record. Legacy routes retain their drain behavior |
 | Authentication/version | Official 2.1.300 flags checked offline; explicit API policy never selects subscription/cloud accounts; legacy version/client admission still applies |
 | Rate-limit metadata | Existing configured safe response-header filter applies; not every upstream header is exposed by default |
 | Failover/recovery | Existing bounded error classification/cooldowns; synthetic API-only exclusions/reset recovery; never switch after emitted content |
 | Usage/billing | Selected account and downstream user/key attribution retained; observed spend limits are soft |
 | Long coding sessions | No new session lifetime limit; live long-running behavior, real rate limits and account switching remain untested |
-| Subscription warm-up/pooling | Unsupported and unavailable; no inference or credential pooling added |
+| Subscription warm-up/pooling | Local official-client scheduling is opt-in and disabled by default; no subscription credential pooling or gateway warm-up |
 | Native login isolation | Offline subprocess/directory checks plus official contract; real two-account login/Keychain/Windows acceptance pending |
 
 See [M20 validation](M20_VALIDATION.md) for exact executed checks and review outcomes. Synthetic tests do not prove live provider access, subscription activation, actual billing or every feature of the current client. The installed-client loopback check verifies the requests observed by its stub; it does not measure or enforce all network egress.
