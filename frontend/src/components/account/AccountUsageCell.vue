@@ -7,6 +7,9 @@
         (account.type === 'oauth' || account.type === 'setup-token')
       "
     >
+      <div v-if="displayQueryError" role="alert" class="text-xs text-amber-600 dark:text-amber-400" data-test="claude-active-query-error">
+        {{ displayQueryError }}
+      </div>
       <!-- Loading state -->
       <div v-if="loading" class="space-y-1.5">
         <!-- OAuth: 3 rows, Setup Token: 1 row -->
@@ -713,6 +716,7 @@ const props = withDefaults(
     todayStatsLoading?: boolean
     manualRefreshToken?: number
     batchedUsage?: AccountUsageInfo | null
+    queryError?: string | null
     batchedUsageError?: string | null
     batchedUsageLoading?: boolean
     requestBatchedUsage?: ((account: Account, options?: { force?: boolean }) => void) | null
@@ -722,6 +726,7 @@ const props = withDefaults(
     todayStatsLoading: false,
     manualRefreshToken: 0,
     batchedUsage: null,
+    queryError: undefined,
     batchedUsageError: null,
     batchedUsageLoading: false,
     requestBatchedUsage: null
@@ -731,6 +736,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'account-updated': [account: Account]
   'usage-loaded': [usage: AccountUsageInfo]
+  'usage-query-error': [error: string | null]
 }>()
 
 const { t } = useI18n()
@@ -742,6 +748,8 @@ onBeforeUnmount(() => { unmounted.value = true })
 const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
+const activeQueryError = ref<string | null>(null)
+const displayQueryError = computed(() => props.queryError === undefined ? activeQueryError.value : props.queryError)
 const usageInfo = ref<AccountUsageInfo | null>(null)
 let usageRequestToken = 0
 const claudeObservedAt = computed(() => {
@@ -1421,7 +1429,7 @@ const requestParentBatchUsage = (options?: { force?: boolean }) => {
 }
 
 const syncManagedUsageState = () => {
-  if (!isBatchManaged.value) return
+  if (!isBatchManaged.value || activeQueryLoading.value) return
   usageInfo.value = props.batchedUsage ?? null
   error.value = props.batchedUsageError ?? null
   loading.value = props.batchedUsageLoading === true
@@ -1433,11 +1441,13 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     requestParentBatchUsage({ force: options?.bypassCache === true })
     return
   }
+  const requestAccount = props.account
+  const accountID = requestAccount.id
   const requestToken = ++usageRequestToken
 
   // Check cache
   if (!options?.bypassCache) {
-    const cached = _usageCache.get(props.account.id)
+    const cached = _usageCache.get(accountID)
     if (cached && Date.now() - cached.ts < USAGE_CACHE_TTL) {
       usageInfo.value = { ...cached.data, cached: true }
       loading.value = false
@@ -1450,12 +1460,12 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 
   try {
 		const fetchFn = () => options?.source
-			? adminAPI.accounts.getUsage(props.account.id, options.source, options.bypassCache === true)
-			: adminAPI.accounts.getUsage(props.account.id)
-    const result = await enqueueUsageRequest(props.account, fetchFn)
+			? adminAPI.accounts.getUsage(accountID, options.source, options.bypassCache === true)
+			: adminAPI.accounts.getUsage(accountID)
+    const result = await enqueueUsageRequest(requestAccount, fetchFn)
     if (!unmounted.value && requestToken === usageRequestToken) {
       usageInfo.value = result
-      _usageCache.set(props.account.id, { data: result, ts: Date.now() })
+      _usageCache.set(accountID, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
     if (!unmounted.value && requestToken === usageRequestToken) {
@@ -1519,21 +1529,30 @@ const attachVisibilityObserver = () => {
 
 const loadActiveUsage = async () => {
   if (activeQueryLoading.value) return
+  const accountID = props.account.id
   const requestToken = ++usageRequestToken
   activeQueryLoading.value = true
   error.value = null
   try {
-    const result = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    const result = await adminAPI.accounts.getUsage(accountID, 'active', true)
     if (!unmounted.value && requestToken === usageRequestToken) {
       usageInfo.value = result
-      _usageCache.set(props.account.id, { data: result, ts: Date.now() })
+      _usageCache.set(accountID, { data: result, ts: Date.now() })
+      activeQueryError.value = result.error || null
+      emit('usage-query-error', activeQueryError.value)
+      emit('usage-loaded', result)
     }
   } catch (e: any) {
-    if (!unmounted.value && requestToken === usageRequestToken) error.value = t('common.error')
+    if (!unmounted.value && requestToken === usageRequestToken) {
+      activeQueryError.value = t('common.error')
+      emit('usage-query-error', activeQueryError.value)
+    }
     console.error('Failed to load active usage:', e)
   } finally {
-    if (!unmounted.value && requestToken === usageRequestToken) loading.value = false
-    activeQueryLoading.value = false
+    if (!unmounted.value && requestToken === usageRequestToken) {
+      loading.value = false
+      activeQueryLoading.value = false
+    }
   }
 }
 
@@ -1678,7 +1697,7 @@ watch(
 watch(
   () => [props.batchedUsage, props.batchedUsageError, props.batchedUsageLoading] as const,
   ([usage, batchError, batchLoading]) => {
-    if (isBatchManaged.value || batchLoading || batchError) return
+    if (isBatchManaged.value || batchLoading || batchError || activeQueryLoading.value) return
     usageInfo.value = usage ?? null
     if (usage) _usageCache.set(props.account.id, { data: usage, ts: Date.now() })
     else _usageCache.delete(props.account.id)
@@ -1703,11 +1722,22 @@ watch(
     ) {
       return
     }
-    if (!managed || !shouldFetchUsage.value) return
-    syncManagedUsageState()
-    requestParentBatchUsage()
+    usageRequestToken++
+    activeQueryLoading.value = false
+    activeQueryError.value = null
+    error.value = null
+    loading.value = false
+    usageInfo.value = null
+    pendingAutoLoad.value = false
+    if (!shouldFetchUsage.value) return
+    if (managed) {
+      syncManagedUsageState()
+      requestParentBatchUsage()
+    } else {
+      requestAutoLoad(isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined)
+    }
   },
-  { flush: 'post' }
+  { flush: 'sync' }
 )
 
 watch(openAIUsageRefreshKey, (nextKey, prevKey) => {

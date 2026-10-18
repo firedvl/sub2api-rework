@@ -179,7 +179,10 @@
                 data-testid="stats-account-capacity-window"
               >
                 <div class="stats-window-row-heading">
-                  <strong>{{ window.label }}</strong>
+                  <strong>
+                    {{ window.label }}
+                    <small v-if="window.current === false">{{ t(window.estimated ? 'admin.accounts.usageWindow.estimated' : 'admin.accounts.usageWindow.stale') }}</small>
+                  </strong>
                   <strong :class="capacityTone(window.remainingPercent)">{{ remainingLabel(window.remainingPercent) }}</strong>
                 </div>
                 <div
@@ -286,7 +289,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Select from '@/components/common/Select.vue'
@@ -372,15 +376,23 @@ interface ProviderDetail extends OperatorProviderCapacity {
   longWindows: OperatorWindowCapacity[]
   modelWindows: OperatorWindowCapacity[]
 }
+const now = ref(new Date())
+useIntervalFn(() => { now.value = new Date() }, 60_000)
+watch(
+  () => [props.accounts, props.usageByAccountId, props.errorsByAccountId],
+  () => { now.value = new Date() },
+  { deep: true, flush: 'sync' },
+)
 const providers = computed(() => buildProviderCapacity(
   props.accounts,
   props.usageByAccountId,
   props.errorsByAccountId,
+  now.value,
 ))
 const summaries = computed(() => providers.value.flatMap((provider) => provider.accounts))
-const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value))
+const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value, now.value))
 const providerDetails = computed<ProviderDetail[]>(() => providers.value.map((provider) => {
-  const windows = buildWindowCapacities(provider.accounts)
+  const windows = buildWindowCapacities(provider.accounts, now.value)
   return {
     ...provider,
     windows,
@@ -518,7 +530,10 @@ const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapac
   const reset = window.resetsAt
     ? t('admin.dashboard.capacity.resets', { time: formatReset(window.resetsAt) })
     : t('admin.dashboard.capacity.resetUnknown')
-  return `${providerLabel(platform)} ${window.label}: ${formatPercent(window.remainingPercent)}% ${t('admin.stats.capacity.normalizedRemaining')}. ${reset}`
+  const provenance = window.current === false
+    ? t(window.estimated ? 'admin.accounts.usageWindow.estimated' : 'admin.accounts.usageWindow.stale')
+    : ''
+  return `${providerLabel(platform)} ${window.label}: ${formatPercent(window.remainingPercent)}% ${t('admin.stats.capacity.normalizedRemaining')}. ${provenance} ${reset}`
 }
 </script>
 

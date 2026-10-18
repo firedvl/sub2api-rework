@@ -7,6 +7,11 @@ export interface OperatorCapacityWindow {
   remainingPercent: number
   resetsAt: string | null
   kind: 'provider' | 'spend'
+  source?: UsageProgress['source']
+  observedAt?: string | null
+  stale?: boolean
+  estimated?: boolean
+  current?: boolean
 }
 
 export type OperatorAccountHealth =
@@ -115,6 +120,7 @@ const PROGRESS_WINDOWS: Array<[keyof AccountUsageInfo, string]> = [
 ]
 
 function finiteNumber(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
@@ -222,14 +228,30 @@ function addProgressWindow(
   key: string,
   label: string,
   progress: UsageProgress | null | undefined,
+  claude: boolean,
+  now: Date,
 ): void {
   if (!progress) return
+  if (claude && (typeof progress.utilization !== 'number' || !Number.isFinite(progress.utilization) || progress.utilization < 0)) return
+  const observedAt = progress.observed_at ? Date.parse(progress.observed_at) : Number.NaN
+  const resetAt = progress.resets_at ? Date.parse(progress.resets_at) : null
+  const stale = Boolean(progress.stale || !Number.isFinite(observedAt)
+    || observedAt > now.getTime() || now.getTime() - observedAt >= 3 * 60_000
+    || (resetAt !== null && (!Number.isFinite(resetAt) || resetAt <= now.getTime())))
+  const estimated = Boolean(progress.estimated || progress.source === 'estimated')
   addWindow(windows, {
     key,
     label,
     remainingPercent: remainingFromUsed(progress.utilization),
     resetsAt: progress.resets_at,
     kind: 'provider',
+    ...(claude ? {
+      source: progress.source,
+      observedAt: progress.observed_at,
+      stale,
+      estimated,
+      current: !stale && !estimated && (progress.source === 'active' || progress.source === 'passive'),
+    } : {}),
   })
 }
 
@@ -254,7 +276,7 @@ export function normalizeAccountCapacity(
 
   if (usage) {
     for (const [key, label] of PROGRESS_WINDOWS) {
-      addProgressWindow(windows, String(key), label, usage[key] as UsageProgress | null | undefined)
+      addProgressWindow(windows, String(key), label, usage[key] as UsageProgress | null | undefined, account.platform === 'anthropic', now)
     }
 
     for (const [model, quota] of Object.entries(usage.antigravity_quota ?? {})) {
@@ -336,7 +358,10 @@ export function normalizeAccountCapacity(
     })
   }
 
-  const remainingValues = windows.map((window) => window.remainingPercent)
+  const currentWindows = windows.filter((window) => window.current !== false)
+  const remainingValues = currentWindows.map((window) => window.remainingPercent)
+  const incompleteClaudeQuota = account.platform === 'anthropic' && supportsBatchAccountUsage(account)
+    && !['five_hour', 'seven_day'].every((key) => currentWindows.some((window) => window.key === key))
   const credentials = account.credentials ?? {}
   const usageError = error?.trim() || usage?.forbidden_reason?.trim() || usage?.error?.trim() || null
   const baseHealth = accountHealth(account, now)
@@ -370,7 +395,7 @@ export function normalizeAccountCapacity(
     health,
     groups: (account.groups ?? []).map((group) => group.name).filter(Boolean),
     windows,
-    lowestRemaining: remainingValues.length ? Math.min(...remainingValues) : null,
+    lowestRemaining: !incompleteClaudeQuota && remainingValues.length ? Math.min(...remainingValues) : null,
     error: derivedUsageHealth?.reason ?? usageError,
   }
 }
@@ -404,7 +429,7 @@ export function classifyOperatorAccount(
     }
   }
 
-  const exhaustedWindow = windows.find((window) => window.remainingPercent === 0)
+  const exhaustedWindow = windows.find((window) => window.current !== false && window.remainingPercent === 0)
   if (exhaustedWindow) {
     return {
       status: 'limited',
@@ -450,7 +475,7 @@ export function summarizeOperatorQuota(summary: OperatorAccountCapacity): string
 
   const visible = windows.slice(0, 2)
   const summaryText = visible
-    .map((window) => `${window.label} ${compactPercent(window.remainingPercent)}%`)
+    .map((window) => `${window.label} ${compactPercent(window.remainingPercent)}%${window.current === false ? (window.estimated ? ' (estimated)' : ' (historical)') : ''}`)
     .join(' · ')
   return windows.length > visible.length
     ? `${summaryText} · +${windows.length - visible.length} more`
@@ -517,7 +542,7 @@ export function aggregateNormalizedCapacity(
   )
   const nextReset = knownAccounts
     .flatMap((summary) => summary.windows.filter((window) => (
-      window.remainingPercent === summary.lowestRemaining && isFuture(window.resetsAt, now)
+      window.current !== false && window.remainingPercent === summary.lowestRemaining && isFuture(window.resetsAt, now)
     )))
     .sort((left, right) => (
       new Date(left.resetsAt as string).getTime() - new Date(right.resetsAt as string).getTime()
@@ -592,9 +617,10 @@ export function buildWindowCapacities(
   return Array.from(windowsByKey.entries()).map(([key, definition]) => {
     const known = capacityAccounts.flatMap((summary) => {
       const window = summary.windows.find((candidate) => candidate.key === key)
-      if (!window) return []
+      if (!window || window.current === false) return []
       if (key !== 'five_hour') return [{ summary, window }]
-      const weekly = summary.windows.find((candidate) => candidate.key === 'seven_day')
+      const weekly = summary.windows.find((candidate) => candidate.key === 'seven_day' && candidate.current !== false)
+      if (!weekly && summary.account.platform === 'anthropic') return []
       if (!weekly || weekly.remainingPercent >= window.remainingPercent) return [{ summary, window }]
       return [{
         summary,

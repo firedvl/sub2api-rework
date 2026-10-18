@@ -16,6 +16,14 @@ These facts do not establish a safe gateway warm-up API. Revisit only with expli
 
 ## Usage observations
 
+### Capacity-view recovery, 2026-10-18
+
+The Capacity view now carries the same per-window source, observation time and stale/estimated state as the Technical view. It keeps historical values visible with a warning, excludes them from current provider/pool totals, and requires both current five-hour and overall weekly observations for effective Claude capacity. A current weekly observation remains visible when five-hour data is unavailable. Local clocks age observations without querying the provider; the existing three-minute freshness rule has up to one minute of display-update tolerance.
+
+The account row now offers a read-only Query in Capacity view. A successful active Query publishes its result before a passive batch can replace local state. A failed Query remains visible through passive refresh and Capacity/Technical navigation until a successful Query clears it. The ordinary account-list batch continues reading persisted observations; its force flag does not turn Claude fleet refresh into repeated upstream polling.
+
+The batch service also serializes missing-account errors with worker errors. A mixed batch previously triggered concurrent map writes under the race detector. These changes add no migration, account setting or upstream inference request.
+
 Claude's active OAuth usage API supplies percentage points. Passive response headers supply fractions, which the gateway converts once to percentage points. A value of `0.5` from the active API means 0.5%; a passive fraction of `0.5` means 50%. Do not guess units from the magnitude of the value.
 
 Missing, null, invalid, and negative measurements are unavailable. An explicit upstream zero is a measurement; an absent field is not. A window past its reset time retains its last observation marked stale until a new observation arrives. Local request costs cannot determine the subscription usage percentage.

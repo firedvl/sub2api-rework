@@ -245,7 +245,7 @@
         <OperatorCapacityOverview
           :accounts="fleetAccounts"
           :usage-by-account-id="fleetUsageByAccountId"
-          :errors-by-account-id="fleetUsageErrorByAccountId"
+          :errors-by-account-id="{ ...fleetUsageErrorByAccountId, ...capacityUsageQueryErrors }"
           :loading="fleetLoading"
           :error="fleetError"
           :status="operatorStatus"
@@ -256,6 +256,16 @@
             <AutoWarmupStatus :account="account" :global-enabled="globalAutoWarmupEnabled" details />
           </template>
           <template #account-actions="{ account }">
+            <button
+              v-if="account.platform === 'anthropic' && supportsBatchAccountUsage(account)"
+              type="button"
+              class="operator-account-row-action"
+              :aria-label="`${t('admin.accounts.usageWindow.activeQuery')} ${account.name}`"
+              :disabled="capacityUsageRefreshing[String(account.id)]"
+              @click="refreshCapacityUsage(account)"
+            >
+              {{ t('admin.accounts.usageWindow.activeQuery') }}
+            </button>
             <button
               type="button"
               class="operator-account-row-action"
@@ -455,11 +465,13 @@
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
               :batched-usage="usageBatchByAccountId[String(row.id)] ?? null"
+              :query-error="capacityUsageQueryErrors[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
               :batched-usage-loading="usageBatchLoadingByAccountId[String(row.id)] === true"
               :request-batched-usage="isDesktopViewport ? queueBatchedUsage : null"
               @account-updated="handleAccountUpdated"
               @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
+              @usage-query-error="handleUsageQueryError(row.id, $event)"
             />
           </template>
           <template #cell-proxy="{ row }">
@@ -1025,6 +1037,30 @@ const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) =>
   fleetUsageByAccountId.value[key] = usage
   fleetUsageErrorByAccountId.value[key] = null
   setUsageBatchState(accountID, usage, null)
+}
+
+const capacityUsageQueryErrors = ref<Record<string, string>>({})
+const handleUsageQueryError = (accountID: number, error: string | null) => {
+  const key = String(accountID)
+  if (error) capacityUsageQueryErrors.value[key] = error
+  else delete capacityUsageQueryErrors.value[key]
+}
+const capacityUsageRefreshing = ref<Record<string, boolean>>({})
+const refreshCapacityUsage = async (account: Account) => {
+  const key = String(account.id)
+  if (capacityUsageRefreshing.value[key]) return
+  capacityUsageRefreshing.value[key] = true
+  try {
+    const usage = await adminAPI.accounts.getUsage(account.id, 'active', true)
+    handleAccountUsageLoaded(account.id, usage)
+    handleUsageQueryError(account.id, usage.error || null)
+  } catch (error) {
+    const message = extractApiErrorMessage(error, t('common.error'))
+    handleUsageQueryError(account.id, message)
+    appStore.showError(message)
+  } finally {
+    capacityUsageRefreshing.value[key] = false
+  }
 }
 
 const flushQueuedUsageBatch = async () => {
