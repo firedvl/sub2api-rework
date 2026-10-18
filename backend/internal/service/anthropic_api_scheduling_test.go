@@ -18,6 +18,9 @@ func TestAnthropicAPIOnlyScheduling(t *testing.T) {
 			repo.accounts[0].Type = AccountTypeOAuth
 			repo.accounts[1].Type = AccountTypeAPIKey
 			repo.accounts[1].Credentials["api_key"] = "synthetic"
+			for i := range repo.accounts {
+				repo.accounts[i].AccountGroups = []AccountGroup{{AccountID: repo.accounts[i].ID, GroupID: f.groupID}}
+			}
 			if sticky {
 				f.cache.sessionBindings["api-session"] = 1
 			}
