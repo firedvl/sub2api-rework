@@ -1724,6 +1724,78 @@ describe('AccountUsageCell', () => {
 
     await wrapper.setProps({ batchedUsageError: null })
     expect(wrapper.text()).not.toContain('5h|65')
-    expect(wrapper.text()).toContain('-')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.unavailable')
   })
+  it('keeps active Claude usage when an older passive request resolves later', async () => {
+    let resolvePassive!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolvePassive = resolve }))
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 3992, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    expect(getUsage).toHaveBeenCalledWith(3992, 'passive', false)
+    const fresh = { five_hour: { utilization: 50, resets_at: null, source: 'active' } }
+    getUsage.mockResolvedValueOnce(fresh)
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!.trigger('click')
+    await flushPromises()
+    resolvePassive({ five_hour: { utilization: 25, resets_at: null, source: 'passive' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    expect(wrapper.text()).not.toContain('25%')
+    expect(wrapper.emitted('usage-loaded')?.at(-1)).toEqual([fresh])
+    wrapper.unmount()
+  })
+
+  it('allows forced Claude refresh from unavailable data and failed requests', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3991, platform: 'anthropic', type: 'oauth' }),
+        requestBatchedUsage: vi.fn(), batchedUsage: null,
+      },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    const refresh = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.unavailable')
+    getUsage.mockRejectedValueOnce(new Error('upstream unavailable'))
+    await refresh.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('common.error')
+    expect(refresh.attributes('disabled')).toBeUndefined()
+    getUsage.mockResolvedValueOnce({
+      source: 'active', updated_at: '2026-10-17T10:00:00Z',
+      five_hour: { utilization: 0.9, resets_at: null, source: 'active', observed_at: '2026-10-17T10:00:00Z' },
+    })
+    await refresh.trigger('click')
+    await flushPromises()
+    expect(getUsage).toHaveBeenLastCalledWith(3991, 'active', true)
+    expect(wrapper.text()).toContain('0.9%')
+    expect(wrapper.text()).not.toContain('common.error')
+    expect(wrapper.get('[data-test="claude-usage-observed"] time').attributes('datetime')).toBe('2026-10-17T10:00:00Z')
+    wrapper.unmount()
+  })
+
+  it('does not apply aggregate staleness to a fresh active window beside stale passive Fable data', () => {
+    const observedAt = new Date().toISOString()
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3992, platform: 'anthropic', type: 'oauth' }),
+        requestBatchedUsage: vi.fn(),
+        batchedUsage: {
+          source: 'mixed', stale: true, updated_at: observedAt,
+          five_hour: { utilization: 29, source: 'active', observed_at: observedAt, resets_at: null, remaining_seconds: 0 },
+          seven_day: null, seven_day_sonnet: null,
+          seven_day_fable: { utilization: 67, source: 'passive', stale: true, observed_at: observedAt, resets_at: null, remaining_seconds: 0 },
+        },
+      },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    const provenanceRows = wrapper.findAll('[data-test="usage-provenance"]')
+    expect(provenanceRows).toHaveLength(2)
+    expect(provenanceRows[0].text()).toContain('admin.accounts.usageWindow.active')
+    expect(provenanceRows[0].text()).not.toContain('admin.accounts.usageWindow.stale')
+    expect(provenanceRows[1].text()).toContain('admin.accounts.usageWindow.passive')
+    expect(provenanceRows[1].text()).toContain('admin.accounts.usageWindow.stale')
+    wrapper.unmount()
+  })
+
 })

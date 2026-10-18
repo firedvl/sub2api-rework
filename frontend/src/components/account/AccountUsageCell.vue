@@ -30,21 +30,24 @@
       </div>
 
       <!-- Error state -->
-      <div v-else-if="error" class="text-xs text-red-500">
+      <div v-else-if="error && !usageInfo" class="text-xs text-red-500">
         {{ error }}
       </div>
 
       <!-- Usage data -->
       <div v-else-if="usageInfo" class="space-y-1">
         <!-- API error (degraded response) -->
-        <div v-if="usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
-          {{ usageInfo.error }}
+        <div v-if="error || usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="error || usageInfo.error">
+          {{ error || usageInfo.error }}
         </div>
         <!-- 5h Window -->
         <UsageProgressBar
           v-if="usageInfo.five_hour"
           label="5h"
           :utilization="usageInfo.five_hour.utilization"
+          :provenance="usageInfo.five_hour"
+          :cached="usageInfo.cached"
+          :source="usageInfo.five_hour.source || usageInfo.source"
           :resets-at="usageInfo.five_hour.resets_at"
           :window-stats="usageInfo.five_hour.window_stats"
           color="indigo"
@@ -55,6 +58,9 @@
           v-if="usageInfo.seven_day"
           label="7d"
           :utilization="usageInfo.seven_day.utilization"
+          :provenance="usageInfo.seven_day"
+          :cached="usageInfo.cached"
+          :source="usageInfo.seven_day.source || usageInfo.source"
           :resets-at="usageInfo.seven_day.resets_at"
           color="emerald"
         />
@@ -64,6 +70,9 @@
           v-if="usageInfo.seven_day_sonnet"
           label="7d S"
           :utilization="usageInfo.seven_day_sonnet.utilization"
+          :provenance="usageInfo.seven_day_sonnet"
+          :cached="usageInfo.cached"
+          :source="usageInfo.seven_day_sonnet.source || usageInfo.source"
           :resets-at="usageInfo.seven_day_sonnet.resets_at"
           color="purple"
         />
@@ -73,24 +82,27 @@
           v-if="usageInfo.seven_day_fable"
           label="7d F"
           :utilization="usageInfo.seven_day_fable.utilization"
+          :provenance="usageInfo.seven_day_fable"
+          :cached="usageInfo.cached"
+          :source="usageInfo.seven_day_fable.source || usageInfo.source"
           :resets-at="usageInfo.seven_day_fable.resets_at"
           color="amber"
         />
 
+        <div v-if="!usageInfo.five_hour && !usageInfo.seven_day && !usageInfo.seven_day_sonnet && !usageInfo.seven_day_fable" class="text-[10px] text-gray-500">
+          {{ t('admin.accounts.usageWindow.unavailable') }}
+        </div>
+        <div v-if="claudeObservedAt" class="text-[10px] text-gray-500" data-test="claude-usage-observed">
+          {{ t('admin.accounts.usageWindow.observedAt') }} <time :datetime="usageInfo.updated_at || undefined">{{ claudeObservedAt }}</time>
+        </div>
       </div>
 
       <div v-else class="space-y-1">
-        <div class="text-xs text-gray-400">-</div>
+        <div class="text-xs text-gray-400">{{ t('admin.accounts.usageWindow.unavailable') }}</div>
       </div>
       <!-- Keep one instance across usage states so reset queries survive usage loading. -->
       <ClaudeResetCreditsCell :account="account" class="mt-1" @redeemed="loadActiveUsage">
-        <template v-if="usageInfo" #pre-actions>
-          <span
-            v-if="usageInfo.source === 'passive'"
-            class="text-[9px] text-gray-400 dark:text-gray-500 italic"
-          >
-            {{ t('admin.accounts.usageWindow.passiveSampled') }}
-          </span>
+        <template #pre-actions>
           <button
             type="button"
             class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
@@ -731,6 +743,12 @@ const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
+let usageRequestToken = 0
+const claudeObservedAt = computed(() => {
+  const observedAt = usageInfo.value?.updated_at
+  if (!observedAt || !Number.isFinite(Date.parse(observedAt))) return null
+  return new Date(observedAt).toLocaleString()
+})
 watch(usageInfo, (usage) => {
   if (usage) emit('usage-loaded', usage)
 })
@@ -1415,12 +1433,13 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
     requestParentBatchUsage({ force: options?.bypassCache === true })
     return
   }
+  const requestToken = ++usageRequestToken
 
   // Check cache
   if (!options?.bypassCache) {
     const cached = _usageCache.get(props.account.id)
     if (cached && Date.now() - cached.ts < USAGE_CACHE_TTL) {
-      usageInfo.value = cached.data
+      usageInfo.value = { ...cached.data, cached: true }
       loading.value = false
       return
     }
@@ -1434,17 +1453,17 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 			? adminAPI.accounts.getUsage(props.account.id, options.source, options.bypassCache === true)
 			: adminAPI.accounts.getUsage(props.account.id)
     const result = await enqueueUsageRequest(props.account, fetchFn)
-    if (!unmounted.value) {
+    if (!unmounted.value && requestToken === usageRequestToken) {
       usageInfo.value = result
       _usageCache.set(props.account.id, { data: result, ts: Date.now() })
     }
   } catch (e: any) {
-    if (!unmounted.value) {
+    if (!unmounted.value && requestToken === usageRequestToken) {
       error.value = t('common.error')
       console.error('Failed to load usage:', e)
     }
   } finally {
-    if (!unmounted.value) loading.value = false
+    if (!unmounted.value && requestToken === usageRequestToken) loading.value = false
   }
 }
 
@@ -1499,12 +1518,21 @@ const attachVisibilityObserver = () => {
 }
 
 const loadActiveUsage = async () => {
+  if (activeQueryLoading.value) return
+  const requestToken = ++usageRequestToken
   activeQueryLoading.value = true
+  error.value = null
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    const result = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    if (!unmounted.value && requestToken === usageRequestToken) {
+      usageInfo.value = result
+      _usageCache.set(props.account.id, { data: result, ts: Date.now() })
+    }
   } catch (e: any) {
+    if (!unmounted.value && requestToken === usageRequestToken) error.value = t('common.error')
     console.error('Failed to load active usage:', e)
   } finally {
+    if (!unmounted.value && requestToken === usageRequestToken) loading.value = false
     activeQueryLoading.value = false
   }
 }

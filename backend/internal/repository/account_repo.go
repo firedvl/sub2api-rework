@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	"strconv"
 	"strings"
@@ -65,6 +66,10 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
+	"session_window_usage_reset":             {},
+	"session_window_utilization_source":      {},
+	"session_window_utilization_observed_at": {},
+
 	"codex_usage_updated_at":                    {},
 	"codex_credits_snapshot":                    {},
 	"codex_referral_snapshot":                   {},
@@ -3056,6 +3061,27 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	for _, window := range []struct{ util, reset string }{
+		{"session_window_utilization", "session_window_usage_reset"},
+		{"passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		if value, present := updates[window.util]; !present || value != nil {
+			continue
+		}
+		condition := fmt.Sprintf("extra->'%s' = $1::jsonb->'%s'", window.reset, window.reset)
+		if updates[window.reset] == nil {
+			if window.util != "session_window_utilization" || updates["passive_usage_sampled_at"] != nil {
+				continue
+			}
+			// Status-only initialization may clear expired evidence, never a concurrent current-cycle sample.
+			condition = "CASE WHEN jsonb_typeof(extra->'session_window_usage_reset') = 'number' THEN (extra->>'session_window_usage_reset')::numeric > EXTRACT(EPOCH FROM NOW()) ELSE FALSE END"
+		}
+		// Compare against the locked row, not an in-flight request's stale account snapshot.
+		preserve := fmt.Sprintf("CASE WHEN %s THEN jsonb_build_object('%s', extra->'%s', '%s', extra->'%s', '%s_source', extra->'%s_source', '%s_observed_at', extra->'%s_observed_at') ELSE '{}'::jsonb END",
+			condition, window.reset, window.reset, window.util, window.util, window.util, window.util, window.util, window.util)
+		extraExpression += " || " + preserve
+	}
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}

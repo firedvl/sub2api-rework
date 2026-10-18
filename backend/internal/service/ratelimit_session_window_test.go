@@ -403,8 +403,8 @@ func TestUpdateSessionWindow_SamplesFable7dOiHeaders(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
-	// 5h 窗口重置时应连同清除 7d_oi 被动采样数据，与 7d 行为一致。
+func TestUpdateSessionWindow_PreservesFable7dOiOnFiveHourReset(t *testing.T) {
+	// Five-hour rollover must preserve independent weekly observations.
 	resetUnix := time.Now().Add(3 * time.Hour).Unix()
 
 	repo := &sessionWindowMockRepo{}
@@ -417,13 +417,11 @@ func TestUpdateSessionWindow_ClearsFable7dOiOnWindowReset(t *testing.T) {
 
 	svc.UpdateSessionWindow(context.Background(), account, headers)
 
-	if len(repo.updateExtraCalls) != 1 {
-		t.Fatalf("expected 1 UpdateExtra (clear) call, got %d", len(repo.updateExtraCalls))
-	}
-	clearUpdates := repo.updateExtraCalls[0].Updates
-	for _, key := range []string{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"} {
-		if val, present := clearUpdates[key]; !present || val != nil {
-			t.Errorf("expected %s cleared to nil on window reset, got present=%v val=%v", key, present, val)
+	for _, call := range repo.updateExtraCalls {
+		for _, key := range []string{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"} {
+			if _, present := call.Updates[key]; present {
+				t.Errorf("five-hour rollover must preserve %s", key)
+			}
 		}
 	}
 }

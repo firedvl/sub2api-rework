@@ -1693,6 +1693,52 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 
 // --- UpdateExtra ---
 
+func (s *AccountRepoSuite) TestUpdateExtra_ClaudeResetOnlyPreservesConcurrentSameCycleSample() {
+	for _, window := range []struct{ util, reset string }{
+		{"session_window_utilization", "session_window_usage_reset"},
+		{"passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		reset := time.Now().Add(time.Hour).Unix()
+		observed := time.Now().UTC().Format(time.RFC3339Nano)
+		account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "concurrent-reset", Extra: map[string]any{
+			window.util: 0.9, window.reset: reset, window.util + "_source": "active", window.util + "_observed_at": observed,
+		}})
+		updates := map[string]any{window.reset: reset, window.util: nil, window.util + "_source": nil, window.util + "_observed_at": nil}
+		s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, updates))
+		got, err := s.repo.GetByID(s.ctx, account.ID)
+		s.Require().NoError(err)
+		s.Require().Equal(0.9, got.Extra[window.util], "same-cycle reset-only response cannot erase another request's sample")
+		s.Require().Equal(observed, got.Extra[window.util+"_observed_at"])
+		s.Require().Equal("active", got.Extra[window.util+"_source"])
+		if window.util == "session_window_utilization" {
+			clear := map[string]any{window.reset: nil, window.util: nil, window.util + "_source": nil, window.util + "_observed_at": nil}
+			s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, clear))
+			got, err = s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(0.9, got.Extra[window.util], "status-only initialization cannot erase concurrent current evidence")
+			s.Require().Equal(float64(reset), got.Extra[window.reset])
+			clear["passive_usage_sampled_at"] = observed
+			s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, clear))
+			got, err = s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Nil(got.Extra[window.util], "a fresh active response with a missing measurement must remain unavailable")
+			s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{window.util: 0.9, window.reset: reset - 7200}))
+			delete(clear, "passive_usage_sampled_at")
+			s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, clear))
+			got, err = s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Nil(got.Extra[window.util], "status-only initialization still clears expired evidence")
+		}
+		updates[window.reset] = reset + 3600
+		s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, updates))
+		got, err = s.repo.GetByID(s.ctx, account.ID)
+		s.Require().NoError(err)
+		s.Require().Nil(got.Extra[window.util], "different cycle must discard the previous sample")
+		s.Require().Nil(got.Extra[window.util+"_observed_at"])
+	}
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_MergesFields() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:  "acc-extra",

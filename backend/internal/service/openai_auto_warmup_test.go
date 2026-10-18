@@ -365,6 +365,7 @@ func TestAssessOpenAIAutoWarmupWindowRequiresFreshPrimaryWindow(t *testing.T) {
 		mutate    func(*Account, *OpenAIQuotaUsage)
 		recovered bool
 	}{
+		{name: "Claude OAuth never uses OpenAI warmup", mutate: func(a *Account, u *OpenAIQuotaUsage) { a.Platform = PlatformAnthropic }},
 		{name: "timestamp jitter", mutate: func(a *Account, u *OpenAIQuotaUsage) {
 			a.Extra["codex_5h_reset_at"] = now.Add(5*time.Hour - 30*time.Second).Format(time.RFC3339)
 		}},

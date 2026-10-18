@@ -2535,12 +2535,11 @@
             />
           </button>
         </div>
+        <label id="auto-reset-credit-trigger-label" class="input-label">{{ t('admin.accounts.autoResetCredit.triggerMode') }}</label>
+        <Select v-model="autoResetCreditTrigger" :options="autoResetCreditTriggerOptions" :disabled="!autoResetCreditEnabled" :aria-label="t('admin.accounts.autoResetCredit.triggerMode')" aria-labelledby="auto-reset-credit-trigger-label" data-testid="auto-reset-credit-trigger" />
+        <p class="input-hint" data-testid="auto-reset-credit-trigger-hint">{{ t(`admin.accounts.autoResetCredit.triggerHint.${autoResetCreditTrigger}`) }}</p>
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.window5h') }}</label>
-              <Toggle v-model="autoResetCredit5hEnabled" :disabled="!autoResetCreditEnabled" :aria-label="t('admin.accounts.autoResetCredit.window5h')" data-testid="auto-reset-credit-5h-enabled" />
-            </div>
             <label for="auto-reset-credit-5h-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
             <input
               id="auto-reset-credit-5h-threshold"
@@ -2555,10 +2554,6 @@
             />
           </div>
           <div>
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.window7d') }}</label>
-              <Toggle v-model="autoResetCredit7dEnabled" :disabled="!autoResetCreditEnabled" :aria-label="t('admin.accounts.autoResetCredit.window7d')" data-testid="auto-reset-credit-7d-enabled" />
-            </div>
             <label for="auto-reset-credit-7d-threshold" class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
             <input
               id="auto-reset-credit-7d-threshold"
@@ -2604,6 +2599,11 @@
         <p v-if="autoWarmupLastAttemptDetails" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt-details">
           {{ autoWarmupLastAttemptDetails }}
         </p>
+      </div>
+
+      <div v-if="account?.platform === 'anthropic' && account?.type === 'oauth'" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-2" data-testid="claude-auto-warmup-status">
+        <h3 class="input-label">{{ t('admin.accounts.autoWarmup.title') }}</h3>
+        <AutoWarmupStatus :account="account" details />
       </div>
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
@@ -3135,7 +3135,7 @@
       </div>
       <div class="flex justify-between gap-4">
         <dt>{{ t('admin.accounts.autoResetCredit.review.trigger') }}</dt>
-        <dd>{{ t('admin.accounts.autoResetCredit.review.either') }}</dd>
+        <dd>{{ t(`admin.accounts.autoResetCredit.triggerHint.${autoResetCreditTrigger}`) }}</dd>
       </div>
       <p v-if="pendingAutoResetCreditReview.lowered" class="text-amber-700 dark:text-amber-300">
         {{ t('admin.accounts.autoResetCredit.review.lowered') }}
@@ -3655,6 +3655,16 @@ const autoPause7dDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hEnabled = ref(true)
 const autoResetCredit7dEnabled = ref(true)
+const autoResetCreditTrigger = computed({
+  get: () => autoResetCredit5hEnabled.value ? (autoResetCredit7dEnabled.value ? 'either' : '5h') : (autoResetCredit7dEnabled.value ? '7d' : 'none'),
+  set: (mode: string) => {
+    autoResetCredit5hEnabled.value = mode === '5h' || mode === 'either'
+    autoResetCredit7dEnabled.value = mode === '7d' || mode === 'either'
+  }
+})
+const autoResetCreditTriggerOptions = computed(() => ['5h', '7d', 'either', 'none'].map((value) => ({
+  value, label: t(`admin.accounts.autoResetCredit.triggerOptions.${value}`), disabled: value === 'none'
+})))
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
 const autoResetCredit5hOriginalRate = ref(1)

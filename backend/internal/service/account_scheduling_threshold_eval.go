@@ -294,10 +294,14 @@ func anthropicThresholdCandidates(account *Account) []*accountSchedulingThreshol
 
 	var candidates []*accountSchedulingThresholdCandidate
 	if usedPercent := utilizationAsPercent(account.Extra["session_window_utilization"]); usedPercent > 0 {
+		until := cloneTimePtr(account.SessionWindowEnd)
+		if reset, recorded := account.Extra["session_window_usage_reset"]; recorded || account.Extra["session_window_utilization_source"] != nil {
+			until = parseSchedulingResetAt(reset)
+		}
 		candidates = append(candidates, &accountSchedulingThresholdCandidate{
 			window:      "5h",
 			usedPercent: usedPercent,
-			until:       cloneTimePtr(account.SessionWindowEnd),
+			until:       until,
 		})
 	}
 	if usedPercent := utilizationAsPercent(account.Extra["passive_usage_7d_utilization"]); usedPercent > 0 {

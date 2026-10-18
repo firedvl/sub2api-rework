@@ -112,7 +112,7 @@ const SelectStub = defineComponent({
       :value="modelValue"
       @change="$emit('update:modelValue', $event.target.value)"
     >
-      <option v-for="option in options" :key="option.value" :value="option.value">
+      <option v-for="option in options" :key="option.value" :value="option.value" :disabled="option.disabled">
         {{ option.label }}
       </option>
     </select>
@@ -1758,7 +1758,7 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     updateAccountMock.mockResolvedValue(account)
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="auto-reset-credit-enabled"]').trigger('click')
-    await wrapper.get('[data-testid="auto-reset-credit-5h-enabled"]').trigger('click')
+    await wrapper.get('[data-testid="auto-reset-credit-trigger"]').setValue('7d')
     await wrapper.get('[data-testid="auto-reset-credit-7d-threshold"]').setValue('0')
     expect(wrapper.get('[data-testid="auto-reset-credit-5h-threshold"]').attributes('disabled')).toBeDefined()
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -1774,9 +1774,45 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
 
     account.extra = updateAccountMock.mock.calls[0]?.[1]?.extra
     const reloaded = mountModal(account)
-    expect(reloaded.get('[data-testid="auto-reset-credit-5h-enabled"]').attributes('aria-checked')).toBe('false')
+    expect((reloaded.get('[data-testid="auto-reset-credit-trigger"]').element as HTMLSelectElement).value).toBe('7d')
     expect((reloaded.get('[data-testid="auto-reset-credit-7d-threshold"]').element as HTMLInputElement).value).toBe('0')
     reloaded.unmount()
+  })
+
+  it.each([
+    ['5h', true, false, true],
+    ['7d', false, true, true],
+    ['either', true, true, true],
+    ['none', false, false, false]
+  ] as const)('preserves persisted %s trigger flags and exact boundary thresholds', async (mode, fiveHour, weekly, enabled) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = {
+      auto_reset_credit_enabled: enabled,
+      auto_reset_credit_5h_enabled: fiveHour,
+      auto_reset_credit_7d_enabled: weekly,
+      auto_reset_credit_5h_threshold: 0,
+      auto_reset_credit_7d_threshold: 1
+    }
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="auto-reset-credit-trigger"]').element as HTMLSelectElement).value).toBe(mode)
+    expect(wrapper.get('[data-testid="auto-reset-credit-trigger-hint"]').text()).toBe(`admin.accounts.autoResetCredit.triggerHint.${mode}`)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject(account.extra)
+    wrapper.unmount()
+  })
+
+  it('requires an explicit trigger when enabling saved both-disabled settings', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { auto_reset_credit_enabled: false, auto_reset_credit_5h_enabled: false, auto_reset_credit_7d_enabled: false }
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="auto-reset-credit-enabled"]').trigger('click')
+    expect(wrapper.get('[data-testid="auto-reset-credit-trigger"] option[value="none"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect((wrapper.get('[data-testid="auto-reset-credit-trigger"]').element as HTMLSelectElement).value).toBe('none')
+    wrapper.unmount()
   })
 
   it('round-trips configured threshold precision without confirmation or rounding', async () => {

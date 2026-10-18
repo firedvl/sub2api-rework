@@ -17,7 +17,7 @@ func TestClaudeUsageResponse_FableWindowDecoding(t *testing.T) {
 }`
 		var resp ClaudeUsageResponse
 		require.NoError(t, json.Unmarshal([]byte(raw), &resp))
-		require.Equal(t, 56.0, resp.SevenDayOverageIncluded.Utilization)
+		require.Equal(t, 56.0, *resp.SevenDayOverageIncluded.Utilization)
 		require.Equal(t, "2026-07-08T03:00:00Z", resp.SevenDayOverageIncluded.ResetsAt)
 	})
 
@@ -25,7 +25,7 @@ func TestClaudeUsageResponse_FableWindowDecoding(t *testing.T) {
 		raw := `{"five_hour": {"utilization": 12.0, "resets_at": "2026-07-03T10:00:00Z"}}`
 		var resp ClaudeUsageResponse
 		require.NoError(t, json.Unmarshal([]byte(raw), &resp))
-		require.Zero(t, resp.SevenDayOverageIncluded.Utilization)
+		require.Nil(t, resp.SevenDayOverageIncluded.Utilization)
 		require.Empty(t, resp.SevenDayOverageIncluded.ResetsAt)
 	})
 }
@@ -36,9 +36,9 @@ func TestBuildUsageInfo_SevenDayFable(t *testing.T) {
 
 	resetAt := now.Add(72 * time.Hour).UTC().Truncate(time.Second)
 	var resp ClaudeUsageResponse
-	resp.FiveHour.Utilization = 10
+	resp.FiveHour.Utilization = claudeTestPercent(10)
 	resp.SevenDayOverageIncluded = ClaudeUsageWindow{
-		Utilization: 88,
+		Utilization: claudeTestPercent(88),
 		ResetsAt:    resetAt.Format(time.RFC3339),
 	}
 
@@ -51,7 +51,7 @@ func TestBuildUsageInfo_SevenDayFable(t *testing.T) {
 
 	// 无 Fable 数据时不应创建窗口
 	var empty ClaudeUsageResponse
-	empty.FiveHour.Utilization = 10
+	empty.FiveHour.Utilization = claudeTestPercent(10)
 	info = svc.buildUsageInfo(&empty, &now)
 	require.Nil(t, info.SevenDayFable)
 }
@@ -117,3 +117,5 @@ func TestSyncActiveToPassive_WritesFableExtras(t *testing.T) {
 		t.Fatal("expected UpdateExtra to be called with fable extras")
 	}
 }
+
+func claudeTestPercent(value float64) *float64 { return &value }

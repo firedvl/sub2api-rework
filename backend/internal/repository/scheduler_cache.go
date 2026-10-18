@@ -973,6 +973,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	keys := []string{
 		"session_window_utilization",
+		"session_window_usage_reset",
+		"session_window_utilization_source",
 		"passive_usage_7d_utilization",
 		"passive_usage_7d_reset",
 		"passive_usage_7d_oi_utilization",

@@ -91,3 +91,35 @@ func TestSchedulerCacheAnthropicThresholdMetadataAndRefresh(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedulerCacheAnthropicObservationCycle(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	predicted, observedReset := now.Add(5*time.Hour), now.Add(time.Hour)
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 8, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeSingle}
+	account := service.Account{ID: 3, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, SessionWindowEnd: &predicted,
+		Extra: map[string]any{"session_window_utilization": 0.95, "session_window_usage_reset": observedReset.Unix(), "session_window_utilization_source": "passive"},
+	}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+	for _, missingReset := range []bool{false, true} {
+		if missingReset {
+			account.Extra["session_window_usage_reset"] = nil
+		}
+		require.NoError(t, cache.SetAccount(ctx, &account))
+		accounts, hit, err := cache.GetSnapshot(ctx, bucket)
+		require.NoError(t, err)
+		require.True(t, hit)
+		require.Len(t, accounts, 1)
+		require.Equal(t, "passive", accounts[0].Extra["session_window_utilization_source"])
+		decision := service.EvaluateAccountSchedulingThreshold(accounts[0], map[string]int{service.PlatformAnthropic: 90}, now)
+		require.Equal(t, !missingReset, decision.ShouldPause)
+		if !missingReset {
+			require.True(t, observedReset.Equal(*decision.Until))
+			require.False(t, service.EvaluateAccountSchedulingThreshold(accounts[0], map[string]int{service.PlatformAnthropic: 90}, observedReset).ShouldPause)
+		}
+	}
+}

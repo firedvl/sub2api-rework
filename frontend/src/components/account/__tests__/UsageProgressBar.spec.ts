@@ -210,4 +210,65 @@ describe('UsageProgressBar', () => {
     expect(percent.classes()).toContain('w-[32px]')
     expect(percent.classes()).toContain('text-right')
   })
+  it.each([undefined, null, -1, Number.NaN, Number.POSITIVE_INFINITY])('never renders missing or invalid utilization %s as zero', (utilization) => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: utilization as unknown as number, color: 'indigo' }
+    })
+    expect(wrapper.text()).toContain('—')
+    expect(wrapper.text()).not.toContain('0%')
+    expect(wrapper.get('.h-1\\.5 > div').attributes('style')).not.toContain('NaN')
+  })
+
+  it.each([0.0001, 0.1, 0.9, 1000])('preserves the observed percentage %s', (utilization) => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization, color: 'indigo', provenance: { utilization, resets_at: null, remaining_seconds: 0 } }
+    })
+    expect(wrapper.text()).toContain(`${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 12 }).format(utilization)}%`)
+  })
+
+  it('keeps an expired sampled observation visible and marks it stale, including observed zero', async () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '5h', utilization: 53, color: 'indigo', cached: true,
+        resetsAt: '2026-03-16T22:00:00Z',
+        provenance: { source: 'passive', observed_at: '2026-03-16T21:00:00Z', utilization: 53, resets_at: null, remaining_seconds: 0 },
+      }
+    })
+    expect(wrapper.text()).toContain('53%')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.passive')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.cached')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.stale')
+    expect(wrapper.get('time').attributes('datetime')).toBe('2026-03-16T21:00:00Z')
+    await wrapper.setProps({ utilization: 0 })
+    expect(wrapper.text()).toContain('usage.resetPending')
+    expect(wrapper.text()).not.toContain('usage.resetNow')
+  })
+
+  it('marks a sampled observation stale after three minutes even without a reset', async () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '5h', utilization: 29, color: 'indigo',
+        provenance: { utilization: 29, source: 'passive', observed_at: '2026-03-17T00:00:00Z', resets_at: null, remaining_seconds: 0 },
+      }
+    })
+    expect(wrapper.text()).not.toContain('admin.accounts.usageWindow.stale')
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.stale')
+    expect(wrapper.text()).toContain('29%')
+  })
+
+  it('displays passive conversion without floating point artifacts', () => {
+    const utilization = 28.999999999999996
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization, color: 'indigo', provenance: { utilization, resets_at: null, remaining_seconds: 0 } }
+    })
+    expect(wrapper.text()).toContain('29%')
+    expect(wrapper.text()).not.toContain('999999')
+  })
+
+  it('preserves rounding and capped labels for other providers', () => {
+    const wrapper = mount(UsageProgressBar, { props: { label: 'Req', utilization: 1000, color: 'indigo' } })
+    expect(wrapper.text()).toContain('>999%')
+  })
+
 })
