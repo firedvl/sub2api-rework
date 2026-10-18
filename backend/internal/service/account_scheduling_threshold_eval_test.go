@@ -117,7 +117,7 @@ func TestEvaluateAccountSchedulingThreshold_AnthropicUsesObservationCycle(t *tes
 			decision := EvaluateAccountSchedulingThreshold(account, map[string]int{PlatformAnthropic: 90}, now)
 			require.Equal(t, tc.pause, decision.ShouldPause)
 			if tc.pause {
-				require.Equal(t, tc.until, *decision.Until)
+				require.True(t, tc.until.Equal(*decision.Until))
 			}
 		})
 	}

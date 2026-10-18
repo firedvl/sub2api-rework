@@ -118,7 +118,7 @@ func TestSchedulerCacheAnthropicObservationCycle(t *testing.T) {
 		decision := service.EvaluateAccountSchedulingThreshold(accounts[0], map[string]int{service.PlatformAnthropic: 90}, now)
 		require.Equal(t, !missingReset, decision.ShouldPause)
 		if !missingReset {
-			require.Equal(t, observedReset, *decision.Until)
+			require.True(t, observedReset.Equal(*decision.Until))
 			require.False(t, service.EvaluateAccountSchedulingThreshold(accounts[0], map[string]int{service.PlatformAnthropic: 90}, observedReset).ShouldPause)
 		}
 	}
