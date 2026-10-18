@@ -126,3 +126,48 @@ The approved release path publishes an immutable GHCR image and release manifest
 For a later accepted same-schema `.9` rollout, the exact application rollback target is the retained `.8` digest above with schema 251 intact. Before installing, verify the new updater backup and the application/Redis/configuration recovery artifacts. Preserve historical backups. The currently recorded older `.7` rollback requires its documented schema249 recovery procedure; do not start `.7` against schema251. No new rollback artifacts were needed or created because installation never began, and no recovery operation ran.
 
 Local logs, initial browser traces, screenshots, baseline comparison, and the removed diagnostic fixture are retained under `.codex/acceptance/pr297-20261017/`. They contain synthetic test data or sanitized observations. The production backup tree was not cleaned up.
+
+## Recovery acceptance — 2026-10-17
+
+The prior blocked attempt above is historical. Recovery code is qualified through `8d3c31e0560a1099d35a3a36574fc96aa5463741`; the acceptance-record commit changes documentation only. PR merge and deployment are recorded separately after completion.
+
+### Defects and fixes
+
+The account menu closed on a scroll event queued before its opening click. Added usage metadata increased row height and made that timing reproducible. The menu now closes when its trigger moves. The maintained regression fails on the archived candidate and passes with the fix; the original semantic flow and the new test each passed three repetitions. Real scrolling still closes the menu.
+
+The Redis subscriber fixture repeatedly published while waiting for readiness, then stopped draining a capacity-one callback channel. It now waits for `PUBSUB NUMSUB` and publishes once, retaining delivery and cancellation assertions. The SQL timing fixture incorrectly assumed application time must exceed scheduling-inflated database sleeps. It now verifies the measured application gap and that open-row lifetime does not advance DB timing. A mutant that counts whole row lifetime fails the revised test. Both defects reproduce with unchanged-main fixtures; the fixed checks passed 100 repetitions and 20 race repetitions. The previous latest-usage query hang did not reproduce on either branch, so no speculative query change was made.
+
+Review found additional races: an older passive response could replace a forced refresh, and reset-only headers could clear a newer same-cycle measurement using an old account snapshot. Request tokens protect the component, row cache, batch owner, and fleet summary. Atomic row updates compare the stored cycle before preserving or clearing a sample. Scheduling now consumes the observation's reset, including through scheduler projections; stale status-only predictions cannot extend the pause. Missing/expired observation resets do not authorize a pause, and legacy fallback remains.
+
+### Final local checks
+
+All checks used local tools and synthetic fixtures, except the separately described read-only comparison. No assertions were disabled or weakened, and no timeout was increased to manufacture acceptance.
+
+| Check | Result |
+| --- | --- |
+| Full unit | `TMPDIR=/tmp GOMAXPROCS=4 go test -p 2 -tags=unit ./... -count=1` passed; service 193.875s |
+| Full integration | `TMPDIR=/tmp GOMAXPROCS=4 go test -p 2 -tags=integration ./... -count=1 -timeout=600s` passed with disposable PostgreSQL/Redis; repository 89.292s, service 142.102s |
+| Focused race | Usage/cache, manual Claude reset, automatic OpenAI reset/warm-up, scheduling cycle and scheduler cache tests passed; service 4.958s, repository 3.088s |
+| Frontend | 354 Vitest files, 2,810 tests passed; full ESLint, TypeScript and production build passed |
+| Chromium | All 179 supported tests passed in 2.9 minutes, including responsive layouts, menus, dialogs, keyboard flows, usage refresh and reset-credit safety |
+| Backend | Embedded release build and vet passed; module tidy reported no diff; binary reports `8d3c31e` and `vcs.modified=false` |
+| Release/deployment contracts | Both GoReleaser configurations, release ordering/source checks, five Gateway examples/four serialized responses, Compose security/resources/Gateway environment and Caddy checks passed |
+| Reviews | Independent correctness review covers `98f82045..8d3c31e`; no material findings remain. Security scans `ca0bd2fc-9bac-445c-ba20-c59ca0a737d6`, `ea070154-c228-4786-b3b9-885dac23476e`, and `660ea40e-8018-48a9-9a62-6b2a1ce85299`, plus the final test-only addendum, cover the complete change with zero reportable or deferred findings |
+
+Earlier recovery runs remain in the evidence: a full Chromium run under heavy concurrent compilation had two unfinished Vite-module failures, and concurrent Go runs collided with schema-loader temporary files and a test rename during editing. These runs were rejected. Frozen-source checks passed after separating the conflicting work. The green Chromium run uses the original timeouts and assertions. Frontend files did not change after that run.
+
+### Isolated current-account comparison
+
+A candidate service harness ran on the VPS with the existing sole Anthropic OAuth account's credential kept in remote process memory. The real usage fetcher issued one metadata GET; persistence was a no-op in memory, and window statistics were synthetic zero values. A synthetic self-check first verified percentage units, absent weekly data and cache timestamps. No production inference, credit redemption, account setting, credential or billing write occurred.
+
+At `2026-10-18T01:56:53.874864131Z` (October 17 locally), the provider and candidate service both returned session 28% and weekly 28%. Their reset instants matched exactly: `2026-10-18T05:19:59.822573Z` and `2026-10-20T03:59:59.822596Z`. Sonnet and overage-included windows were absent; neither became zero. The cache read retained the original observation timestamp and made no second provider request.
+
+An official-page refresh afterward showed session 30% and weekly 28%, with resets at Saturday 10:20 PM and Monday 9:00 PM America/Los_Angeles. Usage credits were off. The session advanced two percentage points between observations, so exact simultaneous session equality is not claimed. Weekly usage and minute-level reset displays agree. This harness verifies the candidate service and live metadata; deployed-dashboard acceptance is a separate check.
+
+### Publisher and production preflight
+
+The local GitHub OAuth credential still returns GHCR 403 because it lacks package scopes. That is not the release workflow's publishing identity. The existing approved workflow uses its own repository-scoped `GITHUB_TOKEN` with `packages: write`, and published `.8` successfully. The repository is public and all release jobs use standard `ubuntu-latest` runners; [GitHub documents those runners as free](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Local acceptance ran before publication; no paid Actions are authorized. No broader credential or alternate registry is needed.
+
+Production preflight confirmed `.8`/`c066ff09`, image digest `sha256:da3f32d69e04a8c2ae5ece8da023ab4f131e15d11031eed1a99f39cc410f5604`, schema251, healthy idle updater1.1.6, public health/frontend HTTP200, nine existing accounts and all35 protected backup directories. Recorded PostgreSQL and environment backup checksums matched. Account credentials, scheduling/routing, trigger settings, billing settings, configuration and backup inventory hashes were captured for comparison. The authenticated production browser session is available without a new login. The release adds no migration beyond schema251; application-only rollback from `.9` must use the recorded `.8` image, never `.7` against schema251.
+
+Recovery logs, traces, sanitized observations and local checks are retained under `.codex/acceptance/pr297-recovery-20261017/`. Claude warm-up remains unavailable. Automatic Claude redemption remains disabled; synthetic tests cover weekly-only, 5-hour-only, either threshold, unavailable evidence, concurrent consumption, idempotency and audit behavior.
