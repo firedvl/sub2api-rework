@@ -311,17 +311,28 @@ async function openNeutralOperatorSelect(page: Page, trigger: Locator) {
 async function operatorTokens(page: Page) {
   return page.locator('.operator-console').evaluate((element) => {
     const style = getComputedStyle(element)
-    return {
-      background: style.getPropertyValue('--operator-background').trim(),
-      card: style.getPropertyValue('--operator-card').trim(),
-      border: style.getPropertyValue('--operator-border').trim(),
-      borderSubtle: style.getPropertyValue('--operator-border-subtle').trim(),
-      muted: style.getPropertyValue('--operator-muted').trim(),
-      mutedForeground: style.getPropertyValue('--operator-muted-foreground').trim(),
-      foreground: style.getPropertyValue('--operator-foreground').trim(),
-      focus: style.getPropertyValue('--operator-focus').trim(),
-      track: style.getPropertyValue('--operator-track').trim(),
+    const probe = document.createElement('span')
+    probe.hidden = true
+    element.append(probe)
+    // Compare browser-serialized colors even when production CSS minifies decimals.
+    const color = (property: string) => {
+      probe.style.color = style.getPropertyValue(property)
+      return getComputedStyle(probe).color
     }
+    const tokens = {
+      background: color('--operator-background'),
+      card: color('--operator-card'),
+      border: color('--operator-border'),
+      borderSubtle: color('--operator-border-subtle'),
+      muted: color('--operator-muted'),
+      mutedForeground: color('--operator-muted-foreground'),
+      foreground: color('--operator-foreground'),
+      focus: color('--operator-focus'),
+      track: color('--operator-track'),
+      success: color('--operator-success-fill'),
+    }
+    probe.remove()
+    return tokens
   })
 }
 
@@ -1508,20 +1519,17 @@ test.describe('operator console navigation', () => {
     await expect(disabledSwitch).toHaveAttribute('aria-label', /Scheduling disabled: /)
     await expect(enabledSwitch).toHaveText('')
     await expect(disabledSwitch).toHaveText('')
+    const switchTokens = await operatorTokens(page)
     const switchColors = await page.evaluate(() => {
-      const root = document.querySelector('.operator-console') as HTMLElement
       const enabled = document.querySelector('.operator-scheduling-switch[aria-checked="true"]') as HTMLElement
       const disabled = document.querySelector('.operator-scheduling-switch[aria-checked="false"]') as HTMLElement
-      const rootStyle = getComputedStyle(root)
       return {
-        success: rootStyle.getPropertyValue('--operator-success-fill').trim(),
-        track: rootStyle.getPropertyValue('--operator-track').trim(),
         enabled: getComputedStyle(enabled).backgroundColor,
         disabled: getComputedStyle(disabled).backgroundColor,
       }
     })
-    expect(switchColors.enabled).toBe(switchColors.success)
-    expect(switchColors.disabled).toBe(switchColors.track)
+    expect(switchColors.enabled).toBe(switchTokens.success)
+    expect(switchColors.disabled).toBe(switchTokens.track)
 
     const secondTechnicalRow = page.locator('.operator-account-table .table-body tr[data-index="1"]')
     expect(await secondTechnicalRow.evaluate((element) => getComputedStyle(element).borderTopColor))

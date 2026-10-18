@@ -1,5 +1,31 @@
 # Local validation: Claude usage and reset triggers
 
+## Recovery investigation, 2026-10-18
+
+Recovery branch `codex/claude-usage-recovery` starts from main `cef33f7b0768d6cd67df4d72beb32191b2c8d60e`, separately from M20 PR300. The candidate version is `0.2.3-rework.10`, schema 251, updater minimum 1.1.6. It includes no local warm-up dispatcher or API-only routing feature.
+
+Three defects were reproduced before correction:
+
+1. `operatorCapacity.ts` dropped source, timestamp and stale/estimate fields. An expired 96% five-hour observation became current 4% remaining in account, provider and pool displays. The live Capacity view reproduced this; Technical correctly warned that the same observation was stale.
+2. A passive batch could replace an active Query result before the component's asynchronous watcher published it. On production, a Query persisted 50% five-hour and 46% weekly usage at `2026-10-18T17:51:13.117516145Z`, while the open table retained the previous day's 96%/37%. Reload then displayed the persisted result. Active success now publishes synchronously; failures persist across view changes and passive refreshes.
+3. Mixed missing/unsupported account batches wrote the errors map concurrently. The new race regression reported a data race and fatal concurrent map writes before the two-line mutex fix; the batch race tests then passed uncached.
+
+Independent review found two additional gaps, both corrected: stale/missing weekly evidence could still authorize an effective five-hour aggregate, and a new observation could appear to come from the future between cached clock ticks. Regression tests cover both.
+
+Bounded read-only live observations used the existing authenticated dashboard and official Claude Usage page. No inference, login change, reset or billing mutation was made. A direct provider GET at `2026-10-18T18:05:13.606860Z` reported 72% five-hour and 49% overall weekly, resetting at `2026-10-18T22:09:59.553504Z` and `2026-10-20T03:59:59.553524Z`. Sonnet and Opus weekly windows were null. The official page shortly beforehand showed 65%/48%, resets Sunday 3:10 PM and Monday 9 PM America/Los_Angeles, with usage credits off. Earlier reads were 60%/47% and 50%/46%; concurrent account use changed usage between observations. This establishes compatible units/reset windows and the stale-display failure, not an exact simultaneous percentage comparison or provider certification.
+
+Production preflight verified `.9` / `8cd67822c5023fc1d330fbaa2d136b38cad4d842`, healthy image digest `sha256:1f87963d3811234d9720e54231c489586361293ec9b8cb3c25191e4dfab74089`, nine accounts, schema 251 and updater 1.1.6. All 36 existing backup directories remain. The updater records `.8` as its prior rollback; before a `.10` installation it must create a new backup and record `.9` as the application rollback. An older schema image must never replace the application against schema 251.
+
+Executed recovery checks: full Vitest 354 files / 2,830 tests passed before final account-reuse guards; the final affected six-file suite passed 117 tests. Full ESLint, TypeScript/build, batch race regressions and disposable PostgreSQL/Redis tests passed. The database run exercised account observation merges and all five OpenAI durable warm-up repository cases. Parent M20 ordinary/unit/integration suites passed 51/62/51 packages; the standalone branch also runs its own unit and focused race gates. The initial Chromium run passed 173/181 cases; controlled baseline comparison and final affected reruns distinguish fixture/startup failures from branch regressions. No failed run is counted as a pass.
+
+Independent source review closed the effective-weekly and observation-clock findings and the pending-account Query boundary. Regression tests prove account A cannot populate account B's cache, error or loading state, and an older delayed five-second batch cannot replace an active result. Final release state is recorded when its gates finish; the historical acceptance results in the remainder of this document describe the previous `.9` release.
+
+Production-build browser acceptance then exposed a mobile-only overlap: an unmanaged passive refresh could advance the active Query's request token and leave Query disabled. A failing regression reproduced the extra passive request; passive loads now skip while Query is pending. All 57 usage-cell tests passed after this one-guard correction. The built frontend is regenerated before the final browser run.
+
+The standalone full unit-tag suite passed all 62 packages. Parent affected-package race checks passed five packages, and standalone Claude/batch race regressions passed uncached. Vet, embedded build and the four release/updater contract packages passed. The native embedded artifact reports the reviewed source revision with `vcs.modified=false` and serves the matching compiled frontend. Disposable staging verified ordinary admin login, health/version, five exact frontend asset hashes, safe synthetic active/passive usage, missing/zero/decimal percentages, expiry, weekly preservation through five-hour rollover and mixed missing-account batch errors; account settings were unchanged.
+
+Development-server browser failures were compared with unchanged main. Cold module loading reproduced blank/loading failures on the baseline; a built-frontend preview removed those startup failures. Production minification also shortened CSS color decimals; browser tests now compare browser-serialized colors on both sides while retaining exact equality. Application CSS and assertions were not weakened. A fresh complete browser run uses the final built frontend.
+
 Baseline: `98f82045baace339ed47975aa5fec1ebdf881f4d` (`origin/main` when work began). Feature branch: `codex/claude-usage-reset-triggers`.
 
 ## Executed checks

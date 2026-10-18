@@ -45,6 +45,74 @@ const usage = (overrides: Partial<AccountUsageInfo>): AccountUsageInfo => ({
 })
 
 describe('operator capacity normalization', () => {
+  it('keeps stale Claude observations out of current capacity and exhaustion status', () => {
+    const now = new Date('2026-10-18T12:00:00Z')
+    const summary = normalizeAccountCapacity(account(1, { platform: 'anthropic' }), usage({
+      five_hour: { utilization: 100, source: 'active', observed_at: '2026-10-18T11:59:00Z', stale: true, resets_at: '2026-10-18T11:00:00Z', remaining_seconds: 0 },
+      seven_day: { utilization: 37, source: 'passive', observed_at: '2026-10-18T11:59:00Z', resets_at: '2026-10-20T00:00:00Z', remaining_seconds: 1000 },
+    }), null, now)
+    expect(summary.windows[0]).toMatchObject({ source: 'active', observedAt: '2026-10-18T11:59:00Z', stale: true, current: false })
+    expect(summary.lowestRemaining).toBeNull()
+    expect(classifyOperatorAccount(summary).status).toBe('active')
+    expect(buildNormalizedPoolCapacity([summary], now)).toMatchObject({ knownCount: 0, unknownCount: 1, remainingPercent: null })
+    expect(buildWindowCapacities([summary], now)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'five_hour', knownCount: 0, remainingPercent: null }),
+      expect.objectContaining({ key: 'seven_day', knownCount: 1, remainingPercent: 63 }),
+    ]))
+  })
+
+  it('keeps fresh weekly capacity independent when the Claude five-hour window is missing', () => {
+    const now = new Date('2026-10-18T12:00:00Z')
+    const summary = normalizeAccountCapacity(account(1, { platform: 'anthropic' }), usage({
+      seven_day: { utilization: 37, source: 'active', observed_at: '2026-10-18T11:59:00Z', resets_at: null, remaining_seconds: 0 },
+    }), null, now)
+    expect(summary.lowestRemaining).toBeNull()
+    expect(buildWindowCapacities([summary], now)).toEqual([
+      expect.objectContaining({ key: 'seven_day', knownCount: 1, remainingPercent: 63 }),
+    ])
+  })
+
+  it.each(['stale', 'missing'] as const)('keeps effective Claude five-hour capacity unknown with %s weekly usage', (weeklyState) => {
+    const now = new Date('2026-10-18T12:00:00Z')
+    const summary = normalizeAccountCapacity(account(1, { platform: 'anthropic' }), usage({
+      five_hour: { utilization: 10, source: 'active', observed_at: '2026-10-18T11:59:00Z', resets_at: '2026-10-18T17:00:00Z', remaining_seconds: 18000 },
+      seven_day: weeklyState === 'missing' ? null : {
+        utilization: 100, source: 'passive', observed_at: '2026-10-18T11:59:00Z', stale: true, resets_at: '2026-10-20T00:00:00Z', remaining_seconds: 1000,
+      },
+    }), null, now)
+    expect(summary.lowestRemaining).toBeNull()
+    expect(classifyOperatorAccount(summary).status).toBe('active')
+    expect(buildWindowCapacities([summary], now)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'five_hour', knownCount: 0, unknownCount: 1, remainingPercent: null }),
+    ]))
+  })
+
+  it.each([null, '', ' ', false, true, -1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid Claude utilization %s', (value) => {
+    const summary = normalizeAccountCapacity(account(1, { platform: 'anthropic' }), usage({
+      five_hour: { utilization: value as number, source: 'active', observed_at: '2026-10-18T11:59:00Z', resets_at: null, remaining_seconds: 0 },
+    }), null, new Date('2026-10-18T12:00:00Z'))
+    expect(summary.windows).toHaveLength(0)
+    expect(summary.lowestRemaining).toBeNull()
+  })
+
+  it.each([
+    { observed_at: undefined },
+    { observed_at: 'invalid' },
+    { observed_at: '2026-10-18T11:57:00Z' },
+    { observed_at: '2026-10-18T12:01:00Z' },
+    { observed_at: '2026-10-18T11:59:00Z', estimated: true },
+    { observed_at: '2026-10-18T11:59:00Z', source: 'estimated' as const },
+    { observed_at: '2026-10-18T11:59:00Z', resets_at: 'invalid' },
+    { observed_at: '2026-10-18T11:59:00Z', resets_at: '2026-10-18T11:59:59Z' },
+  ])('excludes unverified Claude windows %j', (metadata) => {
+    const summary = normalizeAccountCapacity(account(1, { platform: 'anthropic' }), usage({
+      five_hour: { utilization: 100, source: 'active', resets_at: null, remaining_seconds: 0, ...metadata },
+    }), null, new Date('2026-10-18T12:00:00Z'))
+    expect(summary.lowestRemaining).toBeNull()
+    expect(classifyOperatorAccount(summary).status).toBe('active')
+    expect(buildWindowCapacities([summary])[0]?.knownCount).toBe(0)
+  })
+
   it('applies operator status precedence to session and model restrictions', () => {
     const now = new Date('2026-08-25T18:00:00Z')
     const activeModelLimit = {
@@ -336,7 +404,10 @@ describe('operator capacity normalization', () => {
       {
         '1': usage({ five_hour: { utilization: 20, resets_at: null, remaining_seconds: null } }),
         '2': usage({ five_hour: { utilization: 40, resets_at: null, remaining_seconds: null } }),
-        '3': usage({ five_hour: { utilization: 90, resets_at: null, remaining_seconds: null } }),
+        '3': usage({
+          five_hour: { utilization: 90, source: 'active', observed_at: new Date().toISOString(), resets_at: null, remaining_seconds: null },
+          seven_day: { utilization: 20, source: 'active', observed_at: new Date().toISOString(), resets_at: null, remaining_seconds: null },
+        }),
       },
     )
     const pool = buildNormalizedPoolCapacity(providers.flatMap((provider) => provider.accounts))

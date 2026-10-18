@@ -92,7 +92,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -126,10 +127,18 @@ const capacityError = ref(false)
 let capacityLoadSeq = 0
 
 const hasGatewayTraffic = computed(() => (stats.value?.rpm ?? 0) > 0 || (stats.value?.tpm ?? 0) > 0)
+const now = ref(new Date())
+useIntervalFn(() => { now.value = new Date() }, 60_000)
+watch(
+  [capacityAccounts, capacityUsageByAccountId, capacityUsageErrorByAccountId],
+  () => { now.value = new Date() },
+  { deep: true, flush: 'sync' },
+)
 const capacitySummaries = computed(() => buildProviderCapacity(
   capacityAccounts.value,
   capacityUsageByAccountId.value,
   capacityUsageErrorByAccountId.value,
+  now.value,
 ).flatMap((provider) => provider.accounts))
 const accountStatusCounts = computed(() => capacitySummaries.value.reduce<Record<OperatorAccountStatus, number>>(
   (counts, summary) => {

@@ -190,6 +190,24 @@ func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 	}
 }
 
+func TestAccountUsageService_GetUsageBatch_ConcurrentMissingAccounts(t *testing.T) {
+	var accounts []Account
+	var ids []int64
+	for id := int64(1); id <= 200; id++ {
+		ids = append(ids, id)
+		if id%2 == 0 {
+			accounts = append(accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey})
+		}
+	}
+	svc := &AccountUsageService{accountRepo: &stubOpenAIAccountRepo{accounts: accounts}, cache: NewUsageCache()}
+	for range 10 {
+		usage, failures, err := svc.GetUsageBatch(t.Context(), ids, false)
+		if err != nil || len(usage) != 0 || len(failures) != len(ids) {
+			t.Fatalf("mixed missing/unsupported batch: usage=%d failures=%d err=%v", len(usage), len(failures), err)
+		}
+	}
+}
+
 type usageErrorAccountRepo struct {
 	stubOpenAIAccountRepo
 	clearCalls int
