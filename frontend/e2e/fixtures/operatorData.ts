@@ -386,6 +386,9 @@ const todayStats = {
 
 const usageProgress = (utilization: number, resetsAt: string) => ({
   utilization,
+  source: 'passive',
+  observed_at: OPERATOR_FIXTURE_NOW,
+  stale: false,
   resets_at: resetsAt,
   remaining_seconds: 7200,
 })

@@ -1746,6 +1746,118 @@ describe('AccountUsageCell', () => {
     wrapper.unmount()
   })
 
+  it('publishes active Claude results immediately before passive parent state can overwrite them', async () => {
+    let resolveActive!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveActive = resolve }))
+    const oldUsage = { updated_at: '2026-10-17T00:00:00Z', five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } }
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 3993, platform: 'anthropic', type: 'oauth' }),
+        requestBatchedUsage: vi.fn(), batchedUsage: oldUsage,
+      },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
+    await query.trigger('click')
+    await wrapper.setProps({ batchedUsageLoading: true })
+    const fresh = { updated_at: '2026-10-18T00:00:00Z', five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } }
+    resolveActive(fresh)
+    await Promise.resolve()
+    expect(wrapper.emitted('usage-loaded')?.at(-1)).toEqual([fresh])
+    await wrapper.setProps({ batchedUsage: fresh, batchedUsageLoading: false })
+    expect(wrapper.text()).toContain('50%')
+    expect(wrapper.text()).not.toContain('96%')
+    wrapper.unmount()
+  })
+
+  it.each(['resolve', 'reject'] as const)('isolates a reused Claude row from a previous account Query %s', async (outcome) => {
+    let resolveA!: (usage: unknown) => void
+    let rejectA!: (error: Error) => void
+    let resolveB!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise((resolve, reject) => { resolveA = resolve; rejectA = reject }))
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveB = resolve }))
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ id: 4101, platform: 'anthropic', type: 'oauth' }),
+        requestBatchedUsage: vi.fn(), batchedUsage: null,
+      },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
+    await query.trigger('click')
+    await wrapper.setProps({ account: makeAccount({ id: 4102, platform: 'anthropic', type: 'oauth' }) })
+    expect(query.attributes('disabled')).toBeUndefined()
+    await query.trigger('click')
+    expect(getUsage).toHaveBeenLastCalledWith(4102, 'active', true)
+    const usageA = { five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } }
+    if (outcome === 'resolve') resolveA(usageA)
+    else rejectA(new Error('account A failed'))
+    await flushPromises()
+    expect(query.attributes('disabled')).toBeDefined()
+    expect(wrapper.emitted('usage-loaded')).toBeUndefined()
+    expect(wrapper.emitted('usage-query-error')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('96%')
+    expect(wrapper.text()).not.toContain('common.error')
+    const usageB = { five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } }
+    resolveB(usageB)
+    await flushPromises()
+    expect(wrapper.emitted('usage-loaded')?.at(-1)).toEqual([usageB])
+    expect(wrapper.text()).toContain('50%')
+    expect(query.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not cache a previous account passive result under a reused row identity', async () => {
+    let resolveA!: (usage: unknown) => void
+    let resolveB!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveA = resolve }))
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveB = resolve }))
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 4201, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    await wrapper.setProps({ account: makeAccount({ id: 4202, platform: 'anthropic', type: 'oauth' }) })
+    await flushPromises()
+    expect(getUsage).toHaveBeenLastCalledWith(4202, 'passive', false)
+    resolveA({ five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } })
+    await flushPromises()
+    expect(wrapper.emitted('usage-loaded')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('96%')
+    getUsage.mockResolvedValueOnce({ five_hour: { utilization: 40, resets_at: null, remaining_seconds: 0 } })
+    const cacheProbe = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 4202, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(3)
+    expect(cacheProbe.text()).not.toContain('96%')
+    cacheProbe.unmount()
+    resolveB({ five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    wrapper.unmount()
+  })
+
+  it('keeps an unmanaged Claude Query active across a passive manual-refresh token', async () => {
+    getUsage.mockResolvedValueOnce({ five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 4301, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    await flushPromises()
+    let resolveQuery!: (usage: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise(resolve => { resolveQuery = resolve }))
+    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
+    await query.trigger('click')
+    await wrapper.setProps({ manualRefreshToken: 1 })
+    expect(getUsage).toHaveBeenCalledTimes(2)
+    resolveQuery({ five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('50%')
+    expect(query.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('allows forced Claude refresh from unavailable data and failed requests', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {
@@ -1760,6 +1872,12 @@ describe('AccountUsageCell', () => {
     await refresh.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('common.error')
+    expect(wrapper.emitted('usage-query-error')?.at(-1)).toEqual(['common.error'])
+    await wrapper.setProps({ batchedUsageLoading: true })
+    await wrapper.setProps({ batchedUsageLoading: false, batchedUsage: {
+      updated_at: '2026-10-01T00:00:00Z', five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 },
+    } })
+    expect(wrapper.get('[data-test="claude-active-query-error"]').text()).toContain('common.error')
     expect(refresh.attributes('disabled')).toBeUndefined()
     getUsage.mockResolvedValueOnce({
       source: 'active', updated_at: '2026-10-17T10:00:00Z',
@@ -1770,6 +1888,7 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenLastCalledWith(3991, 'active', true)
     expect(wrapper.text()).toContain('0.9%')
     expect(wrapper.text()).not.toContain('common.error')
+    expect(wrapper.emitted('usage-query-error')?.at(-1)).toEqual([null])
     expect(wrapper.get('[data-test="claude-usage-observed"] time').attributes('datetime')).toBe('2026-10-17T10:00:00Z')
     wrapper.unmount()
   })

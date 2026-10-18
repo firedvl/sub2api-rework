@@ -164,17 +164,21 @@
                   </small>
                 </div>
                 <div class="operator-capacity-account-quota" :title="quotaDetail(summary)">
+                  <span v-if="summary.account.platform === 'anthropic' && summary.error" role="alert" class="operator-capacity-account-error">{{ summary.error }}</span>
                   <template v-if="summary.windows.length">
                     <div v-if="modelWindowCount(summary) > 1" class="operator-capacity-model-summary">
                       <strong>{{ summarizeOperatorQuota(summary) }}</strong>
                       <span>{{ modelLimitDetail(summary) }}</span>
                     </div>
                     <div v-for="window in accountRowWindows(summary)" :key="window.key" class="operator-capacity-row-window">
-                      <span :title="window.label">{{ window.label }}</span>
+                      <span :title="window.label">
+                        {{ window.label }}
+                        <small v-if="window.current === false">{{ t(window.estimated ? 'admin.accounts.usageWindow.estimated' : 'admin.accounts.usageWindow.stale') }}</small>
+                      </span>
                       <div
                         class="operator-capacity-row-track"
                         role="progressbar"
-                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}`"
+                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}${window.current === false ? ` · ${t(window.estimated ? 'admin.accounts.usageWindow.estimated' : 'admin.accounts.usageWindow.stale')}` : ''}`"
                         aria-valuemin="0"
                         aria-valuemax="100"
                         :aria-valuenow="Math.round(window.remainingPercent)"
@@ -261,7 +265,7 @@
                       <div
                         class="operator-capacity-track"
                         role="progressbar"
-                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}`"
+                        :aria-label="`${window.label} ${percentLabel(window.remainingPercent)}${window.current === false ? ` · ${t(window.estimated ? 'admin.accounts.usageWindow.estimated' : 'admin.accounts.usageWindow.stale')}` : ''}`"
                         aria-valuemin="0"
                         aria-valuemax="100"
                         :aria-valuenow="Math.round(window.remainingPercent)"
@@ -270,6 +274,12 @@
                           :class="capacityTone(window.remainingPercent)"
                           :style="{ width: `${window.remainingPercent}%` }"
                         />
+                      </div>
+                      <div v-if="window.source !== undefined || window.current === false" class="operator-capacity-window-detail" data-testid="capacity-window-provenance">
+                        <span>{{ t(`admin.accounts.usageWindow.${window.estimated ? 'estimated' : window.source || 'unavailable'}`) }}</span>
+                        <span v-if="window.stale">{{ t('admin.accounts.usageWindow.stale') }}</span>
+                        <time v-if="window.observedAt && Number.isFinite(Date.parse(window.observedAt))" :datetime="window.observedAt">{{ formatReset(window.observedAt) }}</time>
+                        <span v-else>{{ t('admin.accounts.usageWindow.observationUnknown') }}</span>
                       </div>
                       <div class="operator-capacity-window-detail">
                         <span>{{ t('admin.dashboard.capacity.used', { value: formatPercent(100 - window.remainingPercent) }) }}</span>
@@ -312,7 +322,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Select from '@/components/common/Select.vue'
@@ -353,10 +364,18 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ retry: [] }>()
 const { t } = useI18n()
+const now = ref(new Date())
+useIntervalFn(() => { now.value = new Date() }, 60_000)
+watch(
+  () => [props.accounts, props.usageByAccountId, props.errorsByAccountId],
+  () => { now.value = new Date() },
+  { deep: true, flush: 'sync' },
+)
 const allProviders = computed(() => buildProviderCapacity(
   props.accounts,
   props.usageByAccountId,
   props.errorsByAccountId,
+  now.value,
 ))
 const summaries = computed(() => allProviders.value.flatMap((provider) => provider.accounts))
 const statusCounts = computed(() => summaries.value.reduce<Record<OperatorAccountStatus, number>>((counts, summary) => {
@@ -381,10 +400,10 @@ const providers = computed(() => allProviders.value.flatMap((provider) => {
   return accounts.length ? [{
     ...provider,
     accounts,
-    ...aggregateNormalizedCapacity(accounts),
+    ...aggregateNormalizedCapacity(accounts, now.value),
   }] : []
 }))
-const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value))
+const normalizedPool = computed(() => buildNormalizedPoolCapacity(summaries.value, now.value))
 const accountCount = computed(() => props.totalCount ?? props.accounts.length)
 const poolTitleId = 'operator-account-pool-title'
 const PROVIDER_COLLAPSE_STORAGE_KEY = 'operator-capacity-collapsed-providers'

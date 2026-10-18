@@ -62,6 +62,50 @@ describe('OperatorCapacityOverview', () => {
     vi.useRealTimers()
   })
 
+  it('retains Claude provenance and expires current capacity while the page remains open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T12:00:00Z'))
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: {
+        accounts: [account(1, { platform: 'anthropic' })],
+        usageByAccountId: {
+          '1': {
+            ...usage(96),
+            five_hour: { utilization: 96, source: 'active', observed_at: '2026-10-18T12:00:00Z', resets_at: '2026-10-18T12:01:00Z', remaining_seconds: 60 },
+            seven_day: { utilization: 37, source: 'passive', observed_at: '2026-10-18T12:00:00Z', resets_at: '2026-10-20T12:00:00Z', remaining_seconds: 172800 },
+          },
+        },
+      },
+      global: { stubs: { LoadingSpinner: true, RouterLink: true } },
+    })
+    const provider = wrapper.get('[data-testid="provider-toggle-anthropic"]')
+    expect(provider.text()).toContain('admin.dashboard.capacity.knownCount:1')
+    expect(wrapper.text()).not.toContain('admin.accounts.usageWindow.stale')
+    await wrapper.get('.operator-capacity-details-toggle').trigger('click')
+    expect(wrapper.get('[data-testid="capacity-window-provenance"] time').attributes('datetime')).toBe('2026-10-18T12:00:00Z')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(provider.text()).toContain('admin.dashboard.capacity.knownCount:0')
+    expect(wrapper.text()).toContain('admin.accounts.usageWindow.stale')
+    expect(wrapper.text()).toContain('63%')
+    expect(wrapper.get('[data-testid="account-capacity-row"]').attributes('data-status')).toBe('active')
+    wrapper.unmount()
+  })
+
+  it('accepts a newly queried Claude observation between freshness clock ticks', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T12:00:00Z'))
+    const wrapper = mount(OperatorCapacityOverview, {
+      props: { accounts: [account(1, { platform: 'anthropic' })] },
+      global: { stubs: { LoadingSpinner: true, RouterLink: true } },
+    })
+    await vi.advanceTimersByTimeAsync(10_000)
+    const observation = { utilization: 50, source: 'active' as const, observed_at: '2026-10-18T12:00:10Z', resets_at: null, remaining_seconds: 0 }
+    await wrapper.setProps({ usageByAccountId: { '1': { ...usage(50), five_hour: observation, seven_day: observation } } })
+    expect(wrapper.get('[data-testid="provider-toggle-anthropic"]').text()).toContain('admin.dashboard.capacity.knownCount:1')
+    expect(wrapper.text()).not.toContain('admin.accounts.usageWindow.stale')
+    wrapper.unmount()
+  })
+
   it('groups accounts by provider and persists collapsed sections for the session', async () => {
     const wrapper = mount(OperatorCapacityOverview, {
       props: {

@@ -247,6 +247,28 @@ describe('admin AccountsView refresh behavior', () => {
     expect(cell.props('batchedUsageLoading')).toBe(false)
   })
 
+  it('keeps Claude Query data when a delayed older auto-refresh batch completes', async () => {
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    serverAccount = makeAccount({ platform: 'anthropic' })
+    const wrapper = mountView()
+    await flushPromises()
+    let resolveBatch!: (result: unknown) => void
+    getBatchUsage.mockReturnValueOnce(new Promise(resolve => { resolveBatch = resolve }))
+    const previousBatchCalls = getBatchUsage.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flushPromises()
+    expect(getBatchUsage.mock.calls.length).toBe(previousBatchCalls + 1)
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    const fresh = { ...makeUsage(50), source: 'active' as const }
+    cell.vm.$emit('usage-loaded', fresh)
+    await flushPromises()
+    resolveBatch({ usage: { '1': { ...makeUsage(96), source: 'passive' } }, errors: {} })
+    await flushPromises()
+    expect(cell.props('batchedUsage')).toEqual(fresh)
+    expect(cell.props('batchedUsageLoading')).toBe(false)
+    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1']).toEqual(fresh)
+  })
+
   it('replaces manual live data without remounting and prevents duplicate clicks', async () => {
     const wrapper = mountView()
     await flushPromises()
