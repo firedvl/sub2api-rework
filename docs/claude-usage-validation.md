@@ -1,5 +1,7 @@
 # Local validation: Claude usage and reset triggers
 
+Final recovery acceptance: **`.10` deployed and healthy**, schema 251, updater 1.1.6. See [the completion report](M20_COMPLETION_REPORT.md) for the immutable image/revision, 181 passing compiled-browser cases, 20 staging checks, live active 100%/52% reading, preserved nine accounts/37 backups, exact rollback target and remaining official-page comparison gap. Historical sections below retain the earlier `.9` acceptance record.
+
 ## Recovery investigation, 2026-10-18
 
 Recovery branch `codex/claude-usage-recovery` starts from main `cef33f7b0768d6cd67df4d72beb32191b2c8d60e`, separately from M20 PR300. The candidate version is `0.2.3-rework.10`, schema 251, updater minimum 1.1.6. It includes no local warm-up dispatcher or API-only routing feature.
