@@ -22,6 +22,10 @@ Independent source review closed the effective-weekly and observation-clock find
 
 Production-build browser acceptance then exposed a mobile-only overlap: an unmanaged passive refresh could advance the active Query's request token and leave Query disabled. A failing regression reproduced the extra passive request; passive loads now skip while Query is pending. All 57 usage-cell tests passed after this one-guard correction. The built frontend is regenerated before the final browser run.
 
+The standalone full unit-tag suite passed all 62 packages. Parent affected-package race checks passed five packages, and standalone Claude/batch race regressions passed uncached. Vet, embedded build and the four release/updater contract packages passed. The native embedded artifact reports the reviewed source revision with `vcs.modified=false` and serves the matching compiled frontend. Disposable staging verified ordinary admin login, health/version, five exact frontend asset hashes, safe synthetic active/passive usage, missing/zero/decimal percentages, expiry, weekly preservation through five-hour rollover and mixed missing-account batch errors; account settings were unchanged.
+
+Development-server browser failures were compared with unchanged main. Cold module loading reproduced blank/loading failures on the baseline; a built-frontend preview removed those startup failures. Production minification also shortened CSS color decimals; browser tests now compare browser-serialized colors on both sides while retaining exact equality. Application CSS and assertions were not weakened. A fresh complete browser run uses the final built frontend.
+
 Baseline: `98f82045baace339ed47975aa5fec1ebdf881f4d` (`origin/main` when work began). Feature branch: `codex/claude-usage-reset-triggers`.
 
 ## Executed checks
