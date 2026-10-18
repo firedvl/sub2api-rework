@@ -1,6 +1,6 @@
 # Claude Code accounts and warm-up
 
-M20 adds an explicit API-key-only Messages endpoint and a local launcher for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced.
+Release `.11` delivers the explicit API-key-only Messages endpoint and local tools for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced. [M21 acceptance](M21_ACCEPTANCE.md) records the deployed revision and remaining live proof.
 
 ## Provider contract, checked 2026-10-17
 

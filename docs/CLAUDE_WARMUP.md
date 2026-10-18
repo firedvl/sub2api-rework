@@ -158,6 +158,8 @@ Disable the profile before uninstalling schedules to cancel any running child. L
 
 ## Verification and official contracts
 
+M21 passed 46 Python/client tests (31 warm-up, 11 profile and four installed-client loopbacks), plus the official client through the actual Go gateway and 27 full-server staging checks. Generated hashed plist syntax passed. Final read-only inspection found no registered local warm-up jobs, no default companion config, and the existing acceptance profile disabled. These results do not establish real subscription inference, two-account Keychain isolation or Windows execution. See [M21 acceptance](M21_ACCEPTANCE.md) for final source, deployment and proof limits. The following M20 counts are historical.
+
 Local acceptance on 2026-10-18 passed all 38 tests: 26 scheduler tests, ten profile-isolation tests and two installed-client loopback contracts. Independent security/correctness findings were fixed. A read-only native status bind, disabled tick and generated plist syntax check passed. No native jobs were installed and no subscription inference, credit redemption, billing setting or authentication change was performed. Native macOS scheduling registration, Windows execution, two-account live isolation and verified window activation remain untested.
 
 Synthetic tests do not use live provider inference or install schedules:

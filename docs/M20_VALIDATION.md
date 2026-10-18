@@ -1,6 +1,6 @@
 # M20 validation and release decision
 
-[M21 acceptance](M21_ACCEPTANCE.md) supersedes the historical draft/release gates below for the next milestone. The current task authorizes a dormant release after final synthetic, review and operational gates pass; actual paid activation, login changes and schedule installation remain separately gated.
+[M21 acceptance](M21_ACCEPTANCE.md) supersedes the historical draft/release gates below. PR300 merged and `.11` deployed after final synthetic, review and operational gates passed. Actual paid activation, login changes and schedule installation remain separately gated.
 
 ## Recovery update, 2026-10-18
 

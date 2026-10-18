@@ -1,5 +1,7 @@
 # M21 Claude Code acceptance
 
+**Completed and deployed:** [PR300](https://github.com/firedvl/sub2api-rework/pull/300) merged, and `0.2.3-rework.11` is healthy in production. API activation and native inference remain gated; no API-key pool or native schedule was enabled.
+
 Started 2026-10-18 from `0de38b6f247578476c6c6371521655cb4c02caae`, branch `codex/m20-claude-code-accounts`, PR [#300](https://github.com/firedvl/sub2api-rework/pull/300). Starting main was `ede1b4a931a4e90443e73540e59487b3330a1f6c`; it was already an ancestor of the branch. GitHub reported the draft mergeable. PR301 usage recovery, PR302 native companion and PR303 acceptance documentation were reconciled without outstanding conflicts or duplicate companion implementations.
 
 Production preflight verified `.10`, application `33badf364d01a025740158b15e54ebf88b10aa41`, schema 251, healthy idle updater 1.1.6 and public/container health. Nine accounts remained: six OpenAI OAuth, one Anthropic OAuth, one Gemini OAuth and one Antigravity OAuth. There was no Anthropic API-key pool. All 37 historical backup directories were present. Baseline preservation hashes and updater state are retained locally under ignored `.codex/m21-*` artifacts; no credential values are included in this report.
@@ -72,13 +74,45 @@ Implementation commit: `b49bd25db53f74a02772a63bf9d002706a4047d6`. Fixture follo
 | Browser | All 185 compiled-frontend Chromium tests passed, including mobile/desktop, keyboard/focus, usage ordering/errors/navigation and account warnings |
 | Native/client | All 46 Python/client tests passed: 31 warm-up, 11 profiles and four installed-client loopbacks; generated hashed plist passed `plutil -lint` |
 
-Local raw outputs use `.codex/m21-*.log`; production release results follow after publication/installation. Failed attempts remain evidence: pnpm 11 tried automatic dependency reconciliation against the existing pnpm 9 installation; verification instead invokes installed canonical package executables without modifying dependencies. The old-client long-session qualification refused 2.1.142; the same assertions passed with the qualified absolute 2.1.300 executable. A preferred local-Qwen assignment was unavailable because its configured host did not resolve; the configured native test specialist completed the same bounded task. Superseded concurrent Go compilations were stopped before rerunning the frozen checks; none was counted as a pass.
+Local raw outputs use `.codex/m21-*.log`. Final broad checks ran after the embedded-prefix fix at `c9cb265b6df99871d5c84de14ce833c14d7355f6`; five-target integrity included the new embedded-web/route gate. The API race suite passed all five packages after the group-fixture correction, with the unchanged API core; the final embedded-web race also passed. Some ordinary/full-suite checks reused valid Go test cache; affected race checks were uncached. Exact-clean embedded staging passed all 27 checks, including database-backed downstream authentication, A429→B, affinity, token counting, invalid-key rejection, credential/cookie isolation and persisted selected-account/downstream usage IDs. All owned staging containers, server processes and synthetic secret configuration were removed.
+
+Failed attempts remain evidence: pnpm 11 tried automatic dependency reconciliation against the existing pnpm 9 installation; verification instead invokes installed canonical package executables without modifying dependencies. The old-client long-session qualification refused 2.1.142; the same assertions passed with the qualified absolute 2.1.300 executable. A preferred local-Qwen assignment was unavailable because its configured host did not resolve; the configured native test specialist completed the same bounded task. Superseded concurrent Go compilations were stopped before rerunning frozen checks; none was counted as a pass.
 
 The first final unit/race run exposed missing group relationships in an old synthetic fixture. The three-line fixture correction retains all selection/recovery assertions. Additional full-server staging then caught the embedded-prefix defect that the handler-only fixture could not see. The later count-tokens staging failure was a fixture URL parser treating `?beta=true` as part of the path; normal URL parsing preserves the exact token-count assertion. Initial failures and cleanup evidence remain in local artifacts.
 
 ### Live usage comparison
 
 At `2026-10-18T22:33:23Z`, one read-only production Query measured 30% five-hour usage and 56% overall weekly usage. The authenticated official usage page read about 16 seconds later showed the same 30%/56%, session reset 8:10 PM, weekly reset Monday 9:00 PM, and usage credits off. Capacity displayed 70%/44% remaining with effective aggregate 44%; Query re-enabled. Technical navigation retained 30%/56%, `Upstream Cached` and the original 3:33:23 PM source timestamp through passive refreshes. No inference, reset-credit action or billing change occurred. This closes M20's exact final official-page comparison gap for the `.10` baseline; readings are seconds apart, not an atomic provider snapshot.
+
+After `.11` deployment, another read-only Query at `2026-10-18T23:21:06Z` returned 54% session / 59% weekly usage. The official page shortly afterward also showed 54%/59% with the same displayed reset times and usage credits off. Capacity showed 46%/41% remaining and aggregate 41%; Technical retained the values, `Upstream Cached` labels and 4:21:06 PM observation time. Query re-enabled and all nine accounts rendered. Readings changed between the earlier and later observations; no inference was initiated for verification.
+
+## Repository and production delivery
+
+| Item | Final evidence |
+| --- | --- |
+| Starting repository SHA | `0de38b6f247578476c6c6371521655cb4c02caae` |
+| Starting main | `ede1b4a931a4e90443e73540e59487b3330a1f6c`, already incorporated |
+| Implementation / fixture / embedded fix | `b49bd25db53f74a02772a63bf9d002706a4047d6` / `05a207882f18a36b42da8a0d3580072e8fca3afc` / `c9cb265b6df99871d5c84de14ce833c14d7355f6` |
+| PR300 | Merged `2026-10-18T22:53:30Z`; application merge `ec84acdba727b2b0f36a630fffcf926a379e7470` has exactly the final qualified head's tree |
+| Release | [`v0.2.3-rework.11`](https://github.com/firedvl/sub2api-rework/releases/tag/v0.2.3-rework.11), immutable tag at the application merge |
+| Publisher | [Run 39174210088](https://github.com/firedvl/sub2api-rework/actions/runs/39174210088), all four jobs succeeded on the established public-repository Ubuntu publisher |
+| Image digest | `sha256:d13bc3ffaff1e0ae021baaec0694b7c3e510ca0575e1d100f9d5718d8807be83` |
+| Canonical manifest checksum | `sha256:af8aa661a8a72201598d3c63ac83b889354f78b44b6de6e5134e3ce6fead06db` |
+| Artifact verification | Shared Go manifest contract passed; VPS digest, source/revision labels and Linux/amd64 identity matched; frontend/backend came from the same publisher revision |
+| Prepare | `upd-1c8d6dc374a6d4b695ddddcb`, succeeded with `.10` still running |
+| Install | `upd-041c96472c5f7d8be09e0920`, started `23:18:00Z`, succeeded `23:18:29Z` on 2026-10-18 |
+| Updater / schema | Updater 1.1.6, healthy/idle; schema 251 unchanged; no migration files changed |
+| Service health | Application, PostgreSQL and Redis healthy; local/public health passed; application has no Docker socket; post-start logs had zero error-level or panic records during observation |
+| Route checks | New Messages/count-tokens and existing Messages/Responses paths return JSON 401 without a key; no embedded HTML interception |
+| Existing activity | At least eight naturally occurring OpenAI requests were observed after installation; no inference canary was generated. Anthropic read-only usage Query succeeded |
+| Preservation | All nine accounts, credential hashes, configuration, automation flags, settings, groups/assignments, Compose files, updater policy and environment excluding image pin matched the final pre-install snapshot |
+| Backups | All 185 files in 37 historical backups matched their pre-install SHA256 values; new backup makes 38 total; new database/environment/Compose checksums passed |
+| Rollback readiness | Updater records `.10`, source schema 251, digest `sha256:7c276b3cd58e48c8095d46d8d439c5d6f7f6b8ad10968c273e5b73e9748202f2`; verified, not executed |
+| Native activation | No registered warm-up jobs; default companion config absent; existing acceptance config global/profile switches remain false |
+
+Credential and settings digests changed during the long publication interval before install. The recently updated setting was the existing `claude_code_client_version_synced` record. A new immediate pre-install baseline was captured; every credential and setting hash matched after installation. No credential values were exported, accounts logged out, billing setting changed, reset credit redeemed or paid API pool created. The updater performed the application replacement and protected backup; no direct replacement or database restore bypassed it.
+
+Documentation-only acceptance commits may follow the immutable application tag on main. Their PR and final repository SHA are identified in the task's final delivery summary; they do not change the running image. The M20 profile, usage and warm-up implementations were retained rather than replaced. [Account setup](CLAUDE_CODE_ACCOUNTS.md), [local setup/status commands](CLAUDE_WARMUP.md), [updater/rollback procedure](UPDATER.md) and [ChatGPT handoff](CODEX_CHATGPT_HANDOFF.md) reflect the delivered boundary.
 
 ## Remaining proof and authorization
 
