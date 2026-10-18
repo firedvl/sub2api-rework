@@ -1,5 +1,15 @@
 # M20 recovery consultation — 2026-10-18
 
+## M21 follow-up prepared 2026-10-18
+
+Exact question: does authoritative API-only account validation at candidate, final admission and every pre-forward credential boundary adequately separate dormant code release from paid activation, given mutable credentials/group membership and partial-spend uncertainty?
+
+Relevant baseline: `0de38b6f247578476c6c6371521655cb4c02caae`, PR300; code in `anthropic_api_policy.go`, `gateway_scheduling.go`, `gateway_profit_control.go`, `gateway_anthropic_passthrough.go` and `gateway_count_tokens.go`. [M21 acceptance](M21_ACCEPTANCE.md) records final code and verification. Independent reviewers reproduced stale authorization when the optional profit gate was absent, permanent-error retries, stale cooldown selection and membership revocation. The fix uses canonical repository reads, fails closed on changes to credentials/transport/concurrency, rechecks group membership and limits retry classification. It ignores ordinary usage/LRU timestamp changes. New isolated official-client-through-Go-gateway tests cover failover, tools, affinity, count-tokens, attribution and socket cancellation. Native setup remains disabled and credentials remain official-client-owned.
+
+Uncertainty: canonical reads cannot atomically revoke an already accepted network request. Observed partial usage is not final provider spend. No supported personal quota preflight was found. Paid API activation, two live native accounts, Windows execution and actual warm-up remain unverified. No new ChatGPT response is claimed in M21; prior M20 advice below remains advisory. A copy-ready message requires no credentials, private logs or source upload:
+
+> Review this M21 boundary: an explicit Anthropic API-only route now rereads the canonical account during candidate checks, final slot admission, and before every forwarding attempt. It rejects non-API authentication, removed group membership, inactive/cooldown state, and credential/endpoint/auth-scheme/proxy/concurrency changes without treating ordinary usage timestamps as revocation. Synthetic official2.1.300 → Go gateway → loopback provider tests cover A429→B, Read tool cycles, affinity, header isolation, count-tokens, usage IDs and partial-output cancellation without replay. Production has no Anthropic API-key pool; deployment creates none. Native warm-up stays disabled/uninstalled with identity-bound expiring risk acknowledgement and unverified quota scheduling. Identify any remaining correctness or security proof needed for dormant code deployment, separately from paid activation. Do not authorize inference, billing changes, credential mutation or schedule activation.
+
 Baseline: PR [#300](https://github.com/firedvl/sub2api-rework/pull/300), `46fc1ea527fa55fe99bd93ffeec239a2f2f3b120`; main `cef33f7b0768d6cd67df4d72beb32191b2c8d60e`. Follow-up implementation is being validated separately from that baseline.
 
 ## Delivery and response

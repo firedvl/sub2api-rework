@@ -1157,6 +1157,16 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 	if account == nil || !allowsAnthropicAPIAccount(ctx, account) {
 		return false
 	}
+	if IsAnthropicAPIOnly(ctx) {
+		if s.accountRepo == nil {
+			return false
+		}
+		current, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || !allowsAnthropicAPIAccount(ctx, current) || !current.IsSchedulable() || !s.anthropicAPIAccountInRequestGroup(ctx, current) || !s.isModelSupportedByAccountWithContext(ctx, current, requestedModel) {
+			return false
+		}
+		return current.IsSchedulableForModelWithContext(ctx, requestedModel)
+	}
 	return account.IsSchedulableForModelWithContext(ctx, requestedModel)
 }
 

@@ -77,7 +77,7 @@ func TestAnthropicAPIOnlyCancellationBeforeHeaders(t *testing.T) {
 		}
 		return nil, req.Context().Err()
 	}}
-	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: &anthropicAPIAdmissionRepo{account: newAnthropicAPIKeyAccountForTest()}}
 	result, err := svc.forwardAnthropicAPIKeyPassthrough(ctx, c, newAnthropicAPIKeyAccountForTest(), []byte(`{"model":"x","stream":true}`), "x", "x", true, time.Now())
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, result)
@@ -107,7 +107,7 @@ func TestAnthropicAPIOnlyCancellationAfterUsage(t *testing.T) {
 			upstream := &anthropicCancellationUpstream{do: func(*http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: body}, nil
 			}}
-			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: &anthropicAPIAdmissionRepo{account: newAnthropicAPIKeyAccountForTest()}}
 			var result *ForwardResult
 			var err error
 			done := make(chan struct{})
@@ -154,7 +154,7 @@ func TestAnthropicAPIOnlyCanceledResponseDoesNotRetry(t *testing.T) {
 		cancel()
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: body}, nil
 	}}
-	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: &anthropicAPIAdmissionRepo{account: newAnthropicAPIKeyAccountForTest()}}
 	done := make(chan struct{})
 	var result *ForwardResult
 	var err error

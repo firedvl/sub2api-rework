@@ -403,9 +403,74 @@ class WarmupTests(unittest.TestCase):
             self.assertFalse(w.schedules(self.path, 'personal', output)['installed'])
             process.assert_not_called()
         self.assertEqual(len(list(output.iterdir())), 4)
-        self.assertIn('--execute', (output / 'local.claude-warmup.personal.service').read_text())
+        self.assertIn('--execute', (output / (w.schedule_label(self.path, 'personal') + '.service')).read_text())
         with self.assertRaises(ValueError):
             w.schedules(self.path, 'personal', output)
+
+    def test_schedule_labels_separate_configs_and_canonicalize_aliases(self):
+        other = self.parent / 'other.json'
+        w.write_config(other, self.config)
+        self.assertNotEqual(w.schedule_label(self.path, 'personal'), w.schedule_label(other, 'personal'))
+        alias = self.parent / 'alias.json'
+        alias.symlink_to(self.path)
+        self.assertEqual(w.schedule_label(self.path, 'personal'), w.schedule_label(alias, 'personal'))
+
+    def test_status_freshness_expiry_skip_and_scheduler_errors(self):
+        with patch.object(w.subprocess, 'run', side_effect=OSError):
+            current = w.status(self.path, 'personal', NOW)
+            self.assertTrue(current['observation_fresh'])
+            self.assertEqual(current['billing_acknowledgment_expires_at'], w.iso(NOW + 86400))
+            self.assertIsNone(current['scheduler']['installed'])
+            stale = w.status(self.path, 'personal', NOW + 181)
+            self.assertFalse(stale['observation_fresh'])
+            self.assertEqual(stale['observation_age_seconds'], 181)
+            self.p['enabled'] = False
+            self.p['billing_acknowledged_at'] = 'invalid'
+            self.save()
+            self.assertEqual(w.tick(self.path, 'personal', True, NOW)['skipped'], 'disabled')
+            current = w.status(self.path, 'personal', NOW)
+            self.assertEqual(current['last_skip_reason'], 'disabled')
+            self.assertEqual(current['last_check'], w.iso(NOW))
+            self.assertIsNone(current['billing_acknowledgment_expires_at'])
+
+    def test_setup_previews_disabled_config_without_native_execution(self):
+        self.path.unlink()
+        with patch('builtins.input', side_effect=['personal', 'UTC', '08:00,14:00', 'scheduled_unverified', 'y']), patch.object(
+                w, 'scheduler_status', return_value={'installed': False}), patch.object(w, 'auth') as auth, patch.object(w, 'dispatch') as dispatch:
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = w.setup(self.path, self.root, Path('/synthetic/claude'))
+        config, p = w.load(self.path, 'personal')
+        self.assertFalse(config['enabled'])
+        self.assertFalse(p['enabled'])
+        self.assertFalse(p['allow_unverified_schedule'])
+        self.assertIsNone(p['billing_acknowledged_at'])
+        self.assertIsNone(p['identity_digest'])
+        self.assertEqual(p['slots'], ['08:00', '14:00'])
+        self.assertEqual(len(result['schedule_preview']), 4)
+        self.assertEqual(result['dry_run']['skipped'], 'disabled')
+        self.assertFalse(self.state_root.exists())
+        auth.assert_not_called()
+        dispatch.assert_not_called()
+
+    def test_setup_refuses_invalid_input_and_does_not_confuse_default_profile(self):
+        self.path.unlink()
+        w.profile_environment(self.root, 'native-default', True)
+        with patch('builtins.input', side_effect=['native-default', '', '', '', 'y']), patch.object(w, 'scheduler_status'), contextlib.redirect_stdout(io.StringIO()):
+            w.setup(self.path, self.root, Path('/synthetic/claude'))
+        self.assertFalse(w.load(self.path, 'native-default')[1]['native_default'])
+        before = self.path.read_bytes()
+        for values in (['personal', 'UTC', '25:00'], ['+default', 'native-default'], ['personal', 'UTC', '', 'bad']):
+            with self.subTest(values=values), patch('builtins.input', side_effect=values), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(ValueError):
+                w.setup(self.path, self.root, Path('/synthetic/claude'))
+            self.assertEqual(self.path.read_bytes(), before)
+
+    def test_declined_setup_reports_unchanged_and_keeps_existing_enabled_state(self):
+        before = self.path.read_bytes()
+        with patch('builtins.input', side_effect=['personal', '', '', '', 'n']), contextlib.redirect_stdout(io.StringIO()):
+            result = w.setup(self.path, self.root, Path('/synthetic/claude'))
+        self.assertEqual(result, {'saved': False, 'configuration': 'unchanged'})
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertTrue(w.load(self.path, 'personal')[1]['enabled'])
 
     def test_observed_advancement_not_attributed(self):
         with patch.object(w.time, 'time', return_value=NOW):

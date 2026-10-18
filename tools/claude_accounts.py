@@ -50,6 +50,20 @@ def profile_environment(root, name, create=False, native_default=False):
     return env
 
 
+def list_profiles(root):
+    """List initialized directories without inspecting native credentials."""
+    root = Path(root).expanduser().absolute()
+    if not root.exists() and not root.is_symlink():
+        return []
+    private_directory(root, False)
+    profiles = []
+    for entry in sorted(root.iterdir()):
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", entry.name) and entry.is_dir():
+            profile_environment(root, entry.name)
+            profiles.append(entry.name)
+    return profiles
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -63,12 +77,24 @@ def main(argv=None):
     )
     parser.add_argument("--root", type=Path, default=Path.home() / ".claude-accounts",
                         help="Existing parent location for private profile directories (default: ~/.claude-accounts)")
-    parser.add_argument("command", choices=("init", "login", "status", "run", "warmup"))
-    parser.add_argument("profile", help="Explicit profile name: letters, digits, underscores or hyphens")
+    parser.add_argument("command", choices=("list", "init", "login", "status", "run", "warmup"))
+    parser.add_argument("profile", nargs="?", help="Explicit profile name: letters, digits, underscores or hyphens")
     args = parser.parse_args(argv)
+    if args.command == "list":
+        if args.profile is not None:
+            parser.error("list does not take a profile")
+        try:
+            names = list_profiles(args.root)
+            print("\n".join(names) if names else "No isolated profiles configured; the official default login is separate.")
+            return 0
+        except (OSError, ValueError) as exc:
+            print(f"claude-accounts: {exc}", file=sys.stderr)
+            return 1
+    if args.profile is None:
+        parser.error("an explicit profile is required")
     if args.command == "warmup":
         print("This legacy warmup command is disabled; use tools/claude_warmup.py for the optional local companion. There is no supported request-scoped guarantee "
-              "against paid overflow is available. No request was sent.", file=sys.stderr)
+              "against paid overflow. No request was sent.", file=sys.stderr)
         return 2
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", args.profile):
         parser.error("profile must be a safe identifier of 1–64 letters, digits, underscores or hyphens")

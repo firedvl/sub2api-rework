@@ -8,6 +8,15 @@ A completed request is recorded as `request_completed_reset_unverified`. Neither
 
 ## Initialize and select native authentication
 
+For routine setup without editing JSON:
+
+```sh
+python3 tools/claude_accounts.py list
+python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" setup
+```
+
+The wizard lists existing isolated profiles. Select `+default` to bind the existing official default login under a separate name. It asks for an IANA timezone, daily `HH:MM` times and scheduling mode, explains billing acknowledgement, then previews all four scheduler files and performs a disabled dry-run. Saving disables the selected profile and leaves unverified scheduling unauthorized. It never binds an identity, logs in, acknowledges billing, installs a job or sends inference. Declining Save leaves existing settings unchanged, including any previously enabled profile. Use `--root` and `--claude` after `setup` to select explicit paths.
+
 Requires Python 3.9+ with IANA timezone data and the qualified official Claude Code **2.1.300**. Binding and each execution check the version before authentication; other versions report `unqualified_client_version` and cannot dispatch. Run the native contracts and review their results before qualifying a different version. Run initialization in an existing private parent directory; the new companion directory is created with mode 700. No inference occurs:
 
 ```sh
@@ -16,6 +25,8 @@ python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" init 
 ```
 
 The generated configuration stores the absolute official CLI executable path (`claude_binary`). Supply `--claude /absolute/path/to/claude` if it is absent from your interactive PATH. Update the path after moving the executable.
+
+Multiple installations can resolve different versions: M21 found `/usr/local/bin/claude` at 2.1.142 while the selected fnm installation was 2.1.300. Qualify and save the absolute intended executable; another installation is not automatically trusted.
 
 Choose one authentication source by editing this private JSON file:
 
@@ -45,6 +56,8 @@ python3 tools/claude_accounts.py run work
 Each named profile has its own `CLAUDE_CONFIG_DIR`, history and `ANTHROPIC_CONFIG_DIR`. The launcher removes inherited provider/routing variables and excludes project/local settings. Native authentication storage, selected user authentication settings and managed policy remain trusted. Verify the intended account using the official client's status before submitting a prompt. The helper never copies credentials, chooses another account automatically or pools subscription tokens.
 
 The default root is `~/.claude-accounts`; `--root /private/path` precedes the command. Its parent must exist. POSIX roots/profiles must be owned by the current user with mode 700; direct symlinks are refused. Windows uses the existing per-user ACLs and Python launcher `py -3` in place of `python3`. Actual two-account Keychain and Windows execution acceptance remain unverified; offline isolation tests do not establish those live outcomes.
+
+`list` reads only profile directory structure. `status PROFILE` invokes the official client's read-only identity/authentication report. `run PROFILE` is the explicit switch; the helper keeps no global active selection and never logs out another profile. Inside a launched client, `/status` identifies the account for that process. Inspect or disable warm-up with the companion's `status PROFILE` or `disable PROFILE` commands.
 
 ## Explicit authorization and quota modes
 
@@ -101,6 +114,8 @@ A slot is due for ten minutes after its local time. Nonexistent DST times are sk
 
 ## Generate native schedules; install manually
 
+`status PROFILE` reports enabled state, mode, next configured slot, last attempt/completion/outcome, last scheduler check and skip reason, quota observation age/freshness, and billing acknowledgement expiration. A next slot is a scheduled opportunity, not an eligibility promise. Scheduler inspection reports `installed: null` when the native query is unavailable or fails; generation alone never establishes whether a job already exists. Reset attribution remains `unverified`, including after a completed request.
+
 Generation writes four files into a new private directory. It never registers or enables a schedule:
 
 ```sh
@@ -110,12 +125,14 @@ python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" sched
 
 Each native schedule checks due slots every minute using absolute Python, script, configuration and CLI paths. Keep the repository/script path available. Enabling a native schedule does not bypass disabled configuration or expired acknowledgements.
 
+Job labels and filenames include a hash of the canonical configuration path, for example `local.claude-warmup.personal.012345abcdef`. Use the exact `label` printed by `schedule` or `status` below in place of `LABEL`. Different configurations no longer overwrite each other's jobs. Before upgrading an older manually installed job, explicitly disable/uninstall its old `local.claude-warmup.personal` label; the new status query inspects only the new label. M21's local schedules remain uninstalled.
+
 macOS, after reviewing the generated plist:
 
 ```sh
-launchctl bootstrap "gui/$(id -u)" "$HOME/.claude-warmup/schedule-personal/local.claude-warmup.personal.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/.claude-warmup/schedule-personal/LABEL.plist"
 # Uninstall:
-launchctl bootout "gui/$(id -u)/local.claude-warmup.personal"
+launchctl bootout "gui/$(id -u)/LABEL"
 ```
 
 Linux, after reviewing the generated user service and timer:
@@ -124,17 +141,17 @@ Linux, after reviewing the generated user service and timer:
 mkdir -p "$HOME/.config/systemd/user"
 cp "$HOME/.claude-warmup/schedule-personal/"*.service "$HOME/.claude-warmup/schedule-personal/"*.timer "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
-systemctl --user enable --now local.claude-warmup.personal.timer
+systemctl --user enable --now LABEL.timer
 # Uninstall:
-systemctl --user disable --now local.claude-warmup.personal.timer
-rm "$HOME/.config/systemd/user/local.claude-warmup.personal.service" "$HOME/.config/systemd/user/local.claude-warmup.personal.timer"
+systemctl --user disable --now LABEL.timer
+rm "$HOME/.config/systemd/user/LABEL.service" "$HOME/.config/systemd/user/LABEL.timer"
 systemctl --user daemon-reload
 ```
 
-Windows: review and explicitly run the generated `local.claude-warmup.personal.ps1` in PowerShell to register a task for the current user. Use the matching Windows Python/config/script paths when generating on Windows. Remove it with:
+Windows: review and explicitly run the generated `LABEL.ps1` in PowerShell to register a task for the current user. Use the matching Windows Python/config/script paths when generating on Windows. Remove it with:
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'local.claude-warmup.personal' -Confirm:$false
+Unregister-ScheduledTask -TaskName 'LABEL' -Confirm:$false
 ```
 
 Disable the profile before uninstalling schedules to cancel any running child. Leave `~/.claude-warmup-state/state.sqlite3` in place when re-enabling or moving configuration: deleting it discards the account-wide attempt guard. Existing companion state files next to older configurations are not used by this version; after upgrading, wait at least five hours since any prior attempt before enabling it. Windows file privacy inherits the current user's directory ACLs; provision a private user directory, not a shared location.
@@ -153,3 +170,5 @@ python3 -m unittest discover -s tools -p 'test_claude_accounts.py'
 The native contract tests use a loopback-only synthetic API endpoint and an isolated fake HOME. The exact warm-up flags test deliberately calls dispatch directly with a synthetic API key, bypassing the production subscription gate only within the test. It verifies the 16-token request setting, empty tools and no retry after a synthetic 503; it does not establish live subscription billing, a hard cost cap, or reset behavior. Read-only official auth status with empty settings sources was also verified against the installed client; no live inference was run.
 
 Official references: [CLI reference](https://code.claude.com/docs/en/cli-reference), [authentication](https://code.claude.com/docs/en/authentication), [environment variables](https://code.claude.com/docs/en/env-vars), and [headless usage](https://code.claude.com/docs/en/headless). [Routines](https://code.claude.com/docs/en/routines) do not provide the actual-reset and billing preflight contract this companion requires, so scheduling remains local and explicit.
+
+M21 rechecked these contracts on 2026-10-18. Routines are a cloud research preview, consume subscription usage and may consume metered usage credits. The [Usage and Cost Admin API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) reports organizational API usage, not personal subscription remaining quota. No supported personal machine-readable quota/reset/billing preflight was found. See [M21 acceptance](M21_ACCEPTANCE.md) for current test evidence and limits.

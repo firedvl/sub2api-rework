@@ -90,9 +90,10 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
 	startTime := time.Now()
-	if !allowsAnthropicAPIAccount(ctx, account) {
+	account, err = s.revalidateAnthropicAPIAccount(ctx, account)
+	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"type": "error", "error": gin.H{"type": "permission_error", "message": "This endpoint only permits Anthropic API-key accounts"}})
-		return nil, fmt.Errorf("anthropic API-only authentication policy denied account")
+		return nil, err
 	}
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")

@@ -1,5 +1,7 @@
 # M20 recovery and production acceptance — 2026-10-18
 
+M21 continues this baseline. See [M21 acceptance](M21_ACCEPTANCE.md) for authoritative admission fixes, current-client-through-gateway synthetic acceptance, guided disabled setup, independent reviews and the next release decision. The M20 records below describe their original completed revisions; later M21 authorization separates dormant code deployment from paid operational activation.
+
 Claude usage recovery is deployed as **0.2.3-rework.10**. The local official-client scheduling companion is merged on `main`, disabled by default. The API-pooling portion of M20 remains in draft pending live acceptance. No inference, reset-credit redemption, billing change, credential copying or native scheduler installation was used to complete this work.
 
 ## A. Claude usage regression

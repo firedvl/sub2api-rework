@@ -1,4 +1,4 @@
-# Claude Code accounts and warm-up (M20)
+# Claude Code accounts and warm-up
 
 M20 adds an explicit API-key-only Messages endpoint and a local launcher for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced.
 
@@ -19,6 +19,7 @@ From this repository on macOS or Linux:
 ```sh
 python3 tools/claude_accounts.py init personal
 python3 tools/claude_accounts.py init work
+python3 tools/claude_accounts.py list
 python3 tools/claude_accounts.py status work
 python3 tools/claude_accounts.py run work
 ```
@@ -96,6 +97,10 @@ Normal downstream authentication, group assignment, model allowlists, request si
 
 API-only affinity uses a reserved namespace. Legacy session IDs starting with that namespace are escaped to prevent a caller-controlled collision. Existing affinity, cooldown, rate-limit recovery, priority, concurrency admission, bounded retries and account failover are reused. A quota-exhausted API pool returns an error; it does not try OAuth. Once response data is written, a failed stream cannot silently move to another account. Usage records retain the selected upstream account ID and the original downstream user/key attribution.
 
+M21 rechecks authoritative account state during candidate admission, final slot admission and before every wire attempt. Missing/read-failed, reclassified, disabled, rate-limited or removed-from-group accounts fail closed. Credential/model/endpoint/authentication-scheme, proxy or concurrency changes require a new selection. Routine usage/LRU timestamps do not invalidate authorization. Permanent client errors such as 404, 413 and 422 are not retried even under custom error-code settings. Transient same-account retries remain bounded; failover never substitutes an authentication mode or model.
+
+Usage and cost totals record observed gateway usage. After a disconnect, that record can omit provider work performed later; it is not guaranteed final upstream spend. Local limits are soft and require provider-side spending controls. Cancellation completeness is not persisted as a separate usage-log field.
+
 The endpoint forces the existing Anthropic API-key passthrough without changing saved account settings. It skips legacy mock warm-up/suggestion interception, web-search emulation and Bedrock channel rewriting. Client authentication and cookies are removed before the selected account's upstream authentication is applied. Existing trusted operator header overrides remain an administrative capability. No fabricated official-client fingerprint is added by this route.
 
 ## Manual Test Connection
@@ -128,10 +133,10 @@ See [M20 validation](M20_VALIDATION.md) for exact executed checks and review out
 
 ## Staging, release and rollback
 
-Read-only preflight on 2026-10-17 verified production `.9`, revision `8cd67822c5023fc1d330fbaa2d136b38cad4d842`, image digest `sha256:1f87963d3811234d9720e54231c489586361293ec9b8cb3c25191e4dfab74089`, database migration 251, healthy updater 1.1.6 and public health. No account, credential, billing, assignment, credit, backup, service or release setting was changed.
+M21 started from healthy `.10`, application revision `33badf364d01a025740158b15e54ebf88b10aa41`, image digest `sha256:7c276b3cd58e48c8095d46d8d439c5d6f7f6b8ad10968c273e5b73e9748202f2`, schema 251 and updater 1.1.6. Nine existing accounts and 37 backups were present; no Anthropic API-key account existed.
 
-This candidate has no migration, version bump or production opt-in mutation. Stage matching frontend/backend from the reviewed commit with synthetic accounts and loopback upstreams. Verify API-only admission, quota/error recovery, auth replacement and UI warnings. Retain existing OpenAI regression gates. Real native logins, paid API canaries, quota observations and failover require separate explicit acceptance authorization; never redeem reset credits to complete a test.
+The API-only endpoint requires no migration or saved-route mutation. Code deployment is separate from activation: it creates no API accounts, changes no existing routing or billing configuration, and installs no warm-up schedule. Use matching frontend/backend from the reviewed revision, synthetic staging and the full release gates. Actual API activation requires authorized API accounts, model access and provider spending controls; live paid acceptance remains separately gated. Never redeem reset credits to complete a test.
 
-Do not merge, publish or deploy without release authorization. On approval, follow [the host updater procedure](UPDATER.md) and immutable manifest/image checks; preserve every existing backup. Recheck the actual deployed baseline immediately before rollout. For an unchanged schema 251, retain the exact `.9` application digest above as this candidate's application rollback target. Do not use an older schema-249 image with the current database.
+The M21 task authorizes release after independent reviews and local/synthetic gates pass. Follow [the host updater procedure](UPDATER.md), immutable manifest/image checks and [M21 acceptance](M21_ACCEPTANCE.md); preserve every existing backup. Recheck production immediately before rollout. With unchanged schema 251, `.10` and its digest above are the next release's application rollback target. Do not use an older schema-249 image with the current database.
 
-Rolling back to `.9` removes the new endpoint. API clients must then stop or fail closed; do not silently replace their base URL with `/v1` because that loses the API-only guarantee. Profile data stays local and the official client remains usable through documented direct commands. Do not restore the database, change accounts, copy credentials or redeem credits as an application rollback.
+Rolling back to `.10` removes the new endpoint. API clients must then stop or fail closed; do not silently replace their base URL with `/v1` because that loses the API-only guarantee. Profile data stays local and the official client remains usable through documented direct commands. Do not restore the database, change accounts, copy credentials or redeem credits as an application rollback.

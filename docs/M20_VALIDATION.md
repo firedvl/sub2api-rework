@@ -1,5 +1,7 @@
 # M20 validation and release decision
 
+[M21 acceptance](M21_ACCEPTANCE.md) supersedes the historical draft/release gates below for the next milestone. The current task authorizes a dormant release after final synthetic, review and operational gates pass; actual paid activation, login changes and schedule installation remain separately gated.
+
 ## Recovery update, 2026-10-18
 
 This update supersedes the original “Unsupported execution” conclusion below. The separate [local official-client companion](CLAUDE_WARMUP.md) was merged independently in [PR302](https://github.com/firedvl/sub2api-rework/pull/302), merge `f4a62722aaa1594d66831b62be23f1a16b6578db`. It provides real scheduling code with disabled defaults, native identity binding, identity-bound billing acknowledgement, conservative durable account guards across processes/config files, cancellation, restart suppression and generated launchd/systemd/Task Scheduler files. It neither collects gateway subscription tokens nor claims machine-verified billing or quota-window attribution. The original validation tables remain the historical PR300 baseline; follow-up results appear here as completed.

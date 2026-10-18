@@ -29,6 +29,20 @@ type anthropicAPIHandlerUpstream struct {
 	bodies      [][]byte
 }
 
+type anthropicAPIHandlerAccountRepo struct {
+	service.AccountRepository
+	accounts []*service.Account
+}
+
+func (r *anthropicAPIHandlerAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
+	for _, account := range r.accounts {
+		if account.ID == id {
+			return account, nil
+		}
+	}
+	return nil, fmt.Errorf("synthetic account not found")
+}
+
 func (u *anthropicAPIHandlerUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -87,7 +101,7 @@ func TestGatewayMessagesAnthropicAPIOnly(t *testing.T) {
 				channels:       []service.Channel{{ID: 74, Status: service.StatusActive, GroupIDs: []int64{groupID}, FeaturesConfig: map[string]any{"bedrock_cc_compat": true}}},
 				groupPlatforms: map[int64]string{groupID: service.PlatformAnthropic},
 			}, nil, nil, nil, nil)
-			gateway := service.NewGatewayService(nil, &fakeGroupRepo{group: group}, usageRepo, nil, nil, nil, nil, nil, cfg,
+			gateway := service.NewGatewayService(&anthropicAPIHandlerAccountRepo{accounts: accounts}, &fakeGroupRepo{group: group}, usageRepo, nil, nil, nil, nil, nil, cfg,
 				service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: accounts}, nil, nil, nil, nil),
 				nil, service.NewBillingService(cfg, nil), rateLimits, nil, nil, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil,
 				channels, nil, nil, nil, nil)

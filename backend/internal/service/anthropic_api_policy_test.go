@@ -2,16 +2,31 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type anthropicAPIAdmissionRepo struct {
+	AccountRepository
+	account *Account
+	err     error
+	reads   int
+}
+
+func (r *anthropicAPIAdmissionRepo) GetByID(context.Context, int64) (*Account, error) {
+	r.reads++
+	return r.account, r.err
+}
 
 func TestAnthropicAPIOnlyRejectsOtherAuthenticationBeforeForwarding(t *testing.T) {
 	ctx := WithAnthropicAPIOnly(context.Background())
@@ -61,6 +76,7 @@ func TestAnthropicAPIOnlyForcesProtocolPassthrough(t *testing.T) {
 		}}
 		svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 		account := newAnthropicAPIKeyAccountForTest()
+		svc.accountRepo = &anthropicAPIAdmissionRepo{account: account}
 		account.Extra = nil // The dedicated endpoint must not depend on a saved passthrough toggle.
 		parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-6"}
 		if countTokens {
@@ -77,6 +93,107 @@ func TestAnthropicAPIOnlyForcesProtocolPassthrough(t *testing.T) {
 		require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
 		require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-stainless-lang"))
 		require.Nil(t, account.Extra)
+	}
+}
+
+func TestAnthropicAPIOnlyAuthoritativeAdmissionAndForward(t *testing.T) {
+	for _, mutation := range []string{"oauth", "platform", "key", "concurrency", "disabled", "missing", "read_error"} {
+		for _, boundary := range []string{"admission", "messages", "count_tokens", "token"} {
+			t.Run(mutation+"/"+boundary, func(t *testing.T) {
+				selected := newAnthropicAPIKeyAccountForTest()
+				current := *selected
+				repo := &anthropicAPIAdmissionRepo{account: &current}
+				switch mutation {
+				case "oauth":
+					current.Type = AccountTypeOAuth
+				case "platform":
+					current.Platform = PlatformAntigravity
+				case "key":
+					current.Credentials = map[string]any{"api_key": "replaced"}
+				case "concurrency":
+					current.Concurrency++
+				case "disabled":
+					current.Schedulable = false
+				case "missing":
+					repo.account = nil
+				case "read_error":
+					repo.err = errors.New("synthetic read failure")
+				}
+				upstream := &anthropicHTTPUpstreamRecorder{}
+				svc := &GatewayService{accountRepo: repo, httpUpstream: upstream}
+				ctx := WithAnthropicAPIOnly(t.Context())
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				switch boundary {
+				case "admission":
+					_, vetoed, reason := svc.GatewayProfitControlVetoLatest(ctx, selected)
+					require.True(t, vetoed, "default group without profit control must refresh canonical state")
+					require.Equal(t, "anthropic_api_auth_policy", reason)
+				case "messages":
+					_, err := svc.Forward(ctx, c, selected, nil)
+					require.Error(t, err)
+				case "count_tokens":
+					require.Error(t, svc.ForwardCountTokens(ctx, c, selected, nil))
+				case "token":
+					_, _, err := svc.GetAccessToken(ctx, selected)
+					require.Error(t, err)
+				}
+				require.Equal(t, 1, repo.reads)
+				require.Nil(t, upstream.lastReq)
+			})
+		}
+	}
+}
+
+func TestAnthropicAPIOnlyAdmitsUsageUpdates(t *testing.T) {
+	selected := newAnthropicAPIKeyAccountForTest()
+	current := *selected
+	current.UpdatedAt = time.Now()
+	current.LastUsedAt = &current.UpdatedAt
+	current.Extra = map[string]any{"quota_used": 10, "session_window_utilization": .2}
+	svc := &GatewayService{accountRepo: &anthropicAPIAdmissionRepo{account: &current}}
+	latest, vetoed, _ := svc.GatewayProfitControlVetoLatest(WithAnthropicAPIOnly(t.Context()), selected)
+	require.False(t, vetoed, "ordinary usage and LRU writes are not configuration changes")
+	require.Same(t, &current, latest)
+}
+
+func TestAnthropicAPIOnlyRechecksGroupMembership(t *testing.T) {
+	selected := newAnthropicAPIKeyAccountForTest()
+	selected.AccountGroups = []AccountGroup{{AccountID: selected.ID, GroupID: 42}}
+	current := *selected
+	current.AccountGroups = nil
+	svc := &GatewayService{accountRepo: &anthropicAPIAdmissionRepo{account: &current}}
+	ctx := WithAnthropicAPIOnly(context.WithValue(t.Context(), ctxkey.Group, &Group{ID: 42, Platform: PlatformAnthropic}))
+	_, vetoed, _ := svc.GatewayProfitControlVetoLatest(ctx, selected)
+	require.True(t, vetoed)
+	_, _, err := svc.GetAccessToken(ctx, selected)
+	require.Error(t, err)
+	require.False(t, svc.isAccountSchedulableForModelSelection(ctx, selected, "claude-sonnet-4-6"))
+	current.AccountGroups = selected.AccountGroups
+	_, vetoed, _ = svc.GatewayProfitControlVetoLatest(ctx, selected)
+	require.False(t, vetoed)
+}
+
+func TestAnthropicAPIOnlyRetryClassification(t *testing.T) {
+	for _, code := range []int{400, 404, 413, 422, 503} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			account := newAnthropicAPIKeyAccountForTest()
+			account.Credentials["custom_error_codes_enabled"] = true
+			account.Credentials["custom_error_codes"] = []any{float64(401), float64(403), float64(429), float64(500)}
+			upstream := &anthropicCancellationUpstream{do: func(req *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: code, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"message":"synthetic"}}`))}, nil
+			}}
+			svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: &anthropicAPIAdmissionRepo{account: account}}
+			ctx := WithAnthropicAPIOnly(t.Context())
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/anthropic-api/v1/messages", nil).WithContext(ctx)
+			_, err := svc.forwardAnthropicAPIKeyPassthrough(ctx, c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
+			require.Error(t, err)
+			if code == 503 {
+				require.Equal(t, maxRetryAttempts, upstream.attempts)
+			} else {
+				require.Equal(t, 1, upstream.attempts)
+			}
+		})
 	}
 }
 

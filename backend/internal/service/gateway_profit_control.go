@@ -78,10 +78,14 @@ func (s *GatewayService) resolveProfitControlGroup(ctx context.Context, groupID 
 // fail-open to preserve availability, but are observable.
 func (s *GatewayService) GatewayProfitControlVetoLatest(ctx context.Context, selected *Account) (*Account, bool, string) {
 	latest, vetoed, reason := profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
-	if !allowsAnthropicAPIAccount(ctx, latest) {
+	current, err := s.revalidateAnthropicAPIAccount(ctx, latest)
+	if err != nil {
 		return latest, true, "anthropic_api_auth_policy"
 	}
-	return latest, vetoed, reason
+	if IsAnthropicAPIOnly(ctx) {
+		vetoed, reason = openAIProfitControlVetoReason(ctx, current)
+	}
+	return current, vetoed, reason
 }
 
 func profitControlVetoLatest(ctx context.Context, selected *Account, snapshot *SchedulerSnapshotService) (*Account, bool, string) {
