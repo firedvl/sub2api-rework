@@ -24,6 +24,8 @@ The response identifies each window's source and observation time. Cached reads 
 
 Concurrent reset-only responses compare the cycle against the stored row when merging metadata. They cannot erase a newer measurement for that same cycle. Status-only window initialization also preserves a concurrent measurement whose recorded reset is still in the future. New measurements replace the percentage, reset, source, and observation time together. The account page rejects older passive responses after accepting a newer active refresh, including its fleet summary and local cache.
 
+Scheduling thresholds use the reset attached to the measurement. A later predicted session end cannot extend a pause for that observation. Missing or expired observation resets do not authorize a threshold pause; older records without observation metadata retain their existing session-window fallback.
+
 ## Compare with Claude's usage page
 
 The implementation used synthetic responses. Final acceptance on 2026-10-17 separately authorized a bounded read-only comparison; its results and remaining limits are recorded in [validation](claude-usage-validation.md). Synthetic tests must not be described as a comparison with a real account.

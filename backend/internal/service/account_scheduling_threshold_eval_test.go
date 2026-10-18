@@ -96,6 +96,33 @@ func TestEvaluateAccountSchedulingThreshold_AnthropicIgnoresExpiredFiveHourWindo
 	require.True(t, wantUntil.Equal(*decision.Until))
 }
 
+func TestEvaluateAccountSchedulingThreshold_AnthropicUsesObservationCycle(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	predicted := now.Add(5 * time.Hour)
+	reset := now.Add(time.Hour)
+	for _, tc := range []struct {
+		name  string
+		extra map[string]any
+		pause bool
+		until time.Time
+	}{
+		{"legacy", map[string]any{}, true, predicted},
+		{"measured", map[string]any{"session_window_usage_reset": reset.Unix(), "session_window_utilization_source": "passive"}, true, reset},
+		{"expired", map[string]any{"session_window_usage_reset": now.Add(-time.Second).Unix(), "session_window_utilization_source": "active"}, false, time.Time{}},
+		{"unknown", map[string]any{"session_window_usage_reset": nil, "session_window_utilization_source": "passive"}, false, time.Time{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.extra["session_window_utilization"] = 0.95
+			account := &Account{Platform: PlatformAnthropic, SessionWindowEnd: &predicted, Extra: tc.extra}
+			decision := EvaluateAccountSchedulingThreshold(account, map[string]int{PlatformAnthropic: 90}, now)
+			require.Equal(t, tc.pause, decision.ShouldPause)
+			if tc.pause {
+				require.Equal(t, tc.until, *decision.Until)
+			}
+		})
+	}
+}
+
 func TestEvaluateAnthropicFableSchedulingThreshold_UsesAccountOverrideWithoutPausingAccount(t *testing.T) {
 	t.Parallel()
 
