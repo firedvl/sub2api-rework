@@ -171,3 +171,30 @@ The local GitHub OAuth credential still returns GHCR 403 because it lacks packag
 Production preflight confirmed `.8`/`c066ff09`, image digest `sha256:da3f32d69e04a8c2ae5ece8da023ab4f131e15d11031eed1a99f39cc410f5604`, schema251, healthy idle updater1.1.6, public health/frontend HTTP200, nine existing accounts and all35 protected backup directories. Recorded PostgreSQL and environment backup checksums matched. Account credentials, scheduling/routing, trigger settings, billing settings, configuration and backup inventory hashes were captured for comparison. The authenticated production browser session is available without a new login. The release adds no migration beyond schema251; application-only rollback from `.9` must use the recorded `.8` image, never `.7` against schema251.
 
 Recovery logs, traces, sanitized observations and local checks are retained under `.codex/acceptance/pr297-recovery-20261017/`. Claude warm-up remains unavailable. Automatic Claude redemption remains disabled; synthetic tests cover weekly-only, 5-hour-only, either threshold, unavailable evidence, concurrent consumption, idempotency and audit behavior.
+
+## Production acceptance — 2026-10-17
+
+PR #297 merged at `8cd67822c5023fc1d330fbaa2d136b38cad4d842`. Release `v0.2.3-rework.9` and its image retain that exact application commit. PR #298, merged at `359d0354f390b3d52093e982d4b9ce2b19245e82`, repairs release tooling only; it does not replace the qualified tag or image.
+
+The first approved publication run, `39089591222`, passed qualification, frontend build, cross-platform binary integrity and GHCR publication. Manifest creation then failed: an apostrophe added to rollback prose broke the shell's quoted jq program. PR #298 removes it, checks every release shell step with `bash -n`, and adds an opt-in manifest-only retry. Independent correctness and security reviews passed for both changed files; security scan `d607d4aa-a4c4-4b9d-ae82-56094e1bca46` reports zero findings. Repair run `39090724086` passed every gate, skipped GoReleaser, verified the existing image and uploaded the missing canonical manifest. No image or release tag was replaced.
+
+| Item | Accepted value |
+| --- | --- |
+| Previous production | `0.2.3-rework.8`, `c066ff092042455e81759e9b154bfaaa92ddedbb` |
+| New production | `0.2.3-rework.9`, `8cd67822c5023fc1d330fbaa2d136b38cad4d842` |
+| New immutable image digest | `sha256:1f87963d3811234d9720e54231c489586361293ec9b8cb3c25191e4dfab74089` |
+| Canonical manifest asset SHA256 | `79744271f648ca91c9c33aa4eb0f26a7f73245e42e5cc92ebaec545cfdd808de` |
+| Updater prepare | `upd-f5a66a349d5d145687c76998`, succeeded |
+| Updater install | `upd-71312b8f0bdfb91b9b547415`, succeeded at `2026-10-18T02:49:49Z` (October 17 locally) |
+| Database/updater | Schema251 unchanged; updater1.1.6 healthy and idle |
+| Health | Application, PostgreSQL and Redis healthy; local/public health, frontend and public settings HTTP200 |
+
+The VPS pulled the digest and verified version, source and revision labels before installation. A network-disabled disposable container confirmed the published executable's version. The downloaded manifest matched the captured digest and application commit and passed `TestReleaseManifestFromEnvironment`. Only then did the host updater prepare and install it through its existing Unix socket. Backend and frontend come from the same qualified image. PostgreSQL and Redis containers retained their original start times; no persistent volume was recreated.
+
+The actual authenticated production dashboard was reloaded at `https://gateway.fdvl.net/`. Before refresh, the Claude cell showed **Usage unavailable**, rather than the old false0%. One active Query returned **96% five-hour and37% overall weekly**, with Upstream labels and observation time `2026-10-18T02:54:11.845635823Z`. A fresh official Claude-page refresh agreed at96%/37%, with resets at Saturday10:20PM and Monday9:00PM America/Los_Angeles. Persisted fractions were0.96 and0.37; reset seconds were1792300799 and1792468799. Sonnet was unavailable and did not become0%. The page reported no console errors. No duplicate account or reconnection was needed.
+
+The production OpenAI reset-credit editor exposed 5-hour only, weekly only and either threshold. An unsaved draft selected weekly-only and displayed the exact required warning. Cancel discarded the draft. Backend eligibility, unavailable/stale evidence, concurrency, idempotency and audit behavior were tested synthetically; no real credit was redeemed. Manual Claude reset controls remain present, and Claude warm-up displays Unavailable.
+
+Post-install hashes matched the immediate pre-install baseline for all nine accounts, credentials, scheduling/routing, group membership, trigger settings, billing-related settings, both Compose files and updater policy. The environment changed only its expected image pin. All35 historical backup directories remain, plus the new updater backup (36total). The new52,328,431-byte PostgreSQL dump and environment copy match their recorded checksums. A separate private maintenance backup preserves application configuration/content and a verified consistent Redis snapshot. The updater records `.8` with its original immutable digest and source schema251 as the rollback target; rollback readiness was checked, but no rollback was needed or executed.
+
+Post-install backend logs showed no panic/fatal/error-level entries. Existing OpenAI traffic completed31 logged HTTP200 responses; the agent sent no inference. Claude routing configuration remained unchanged, and its authenticated live usage query passed. Paid inference and live credit consumption were deliberately excluded, so those behaviors are not claimed as live acceptance. No paid Actions ran. The manifest-only repair and all release jobs used standard runners on this public repository.
