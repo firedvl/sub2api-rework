@@ -90,6 +90,10 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
 	startTime := time.Now()
+	if !allowsAnthropicAPIAccount(ctx, account) {
+		c.JSON(http.StatusForbidden, gin.H{"type": "error", "error": gin.H{"type": "permission_error", "message": "This endpoint only permits Anthropic API-key accounts"}})
+		return nil, fmt.Errorf("anthropic API-only authentication policy denied account")
+	}
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
@@ -128,11 +132,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	beginUpstreamResponseModelObservation(c)
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
-	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
+	if account != nil && !IsAnthropicAPIOnly(ctx) && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
 		return s.handleWebSearchEmulation(ctx, c, account, parsed)
 	}
 
-	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
+	if account != nil && (IsAnthropicAPIOnly(ctx) || account.IsAnthropicAPIKeyPassthroughEnabled()) {
 		passthroughBody := parsed.Body.Bytes()
 		passthroughModel := parsed.Model
 		if passthroughModel != "" {

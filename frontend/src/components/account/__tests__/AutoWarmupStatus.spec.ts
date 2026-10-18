@@ -6,7 +6,9 @@ import AutoWarmupStatus from '../AutoWarmupStatus.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => {
   const messages = en.admin.accounts.autoWarmup
-  return key.endsWith('.claudeUnavailableReason') ? messages.claudeUnavailableReason : messages.claudeUnavailable
+  if (key.endsWith('.claudeUnavailableReason')) return messages.claudeUnavailableReason
+  if (key.endsWith('.claudeAPIBilling')) return messages.claudeAPIBilling
+  return messages.claudeUnavailable
 } }) }))
 
 describe('provider warm-up availability', () => {
@@ -23,5 +25,13 @@ describe('provider warm-up availability', () => {
     expect(wrapper.text()).not.toContain('Succeeded')
     expect(wrapper.find('button').exists()).toBe(false)
     expect(wrapper.find('dl').exists()).toBe(false)
+  })
+
+  it('labels API usage separately from subscription windows', () => {
+    const account = { platform: 'anthropic', type: 'apikey' } as Account
+    const wrapper = mount(AutoWarmupStatus, { props: { account, details: true } })
+    expect(wrapper.text()).toContain('API-key requests incur API charges')
+    expect(wrapper.text()).toContain('do not start or replenish a Claude subscription window')
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 })

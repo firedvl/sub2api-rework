@@ -11,6 +11,10 @@ Provider behavior can differ by account type and upstream transport. See
 [Codex compatibility](docs/CODEX_COMPATIBILITY.md) for tested boundaries and
 known limitations.
 
+[Claude Code account modes](docs/CLAUDE_CODE_ACCOUNTS.md) documents separate native
+subscription logins, explicit API-key-only routing, billing limits and why
+automatic subscription warm-up remains unavailable.
+
 ## Status
 
 | Area | Status | Notes |

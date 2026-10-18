@@ -1065,7 +1065,8 @@ export default {
 	  autoWarmup: {
 	    title: 'Automatic warm-up',
         claudeUnavailable: 'Warm-up: Unavailable',
-        claudeUnavailableReason: 'Claude warm-up is disabled. A supported gateway request that starts a subscription window without paid Extra usage has not been verified. No warm-up has been attempted.',
+        claudeUnavailableReason: 'Automatic subscription warm-up is unavailable. Provider rules prohibit third-party services from collecting or routing users’ subscription credentials, and no supported request-level safeguard against paid overflow has been established. No warm-up has been attempted.',
+        claudeAPIBilling: 'API-key requests incur API charges. They do not start or replenish a Claude subscription window. Automatic warm-up is unavailable.',
 	    hint: 'Sends a small Codex request after a recovered quota window. The global switch must also be enabled.',
 	    on: 'Warm-up: On',
 	    off: 'Warm-up: Off',
@@ -1671,6 +1672,7 @@ export default {
       reAuthorizedSuccess: 'Account re-authorized successfully',
       // Test Modal
       testAccountConnection: 'Test Account Connection',
+      testUsageWarning: 'This sends a real inference request and can consume subscription allowance, paid usage credits, or API-billed tokens. A completed response does not verify that a new quota window started.',
       errorPrefix: 'Error: {message}',
       imagePreviewAlt: 'Test image {index}',
       imageLightboxAlt: 'Image preview',

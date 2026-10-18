@@ -77,7 +77,11 @@ func (s *GatewayService) resolveProfitControlGroup(ctx context.Context, groupID 
 // the latest scheduler snapshot. Snapshot read failures are deliberately
 // fail-open to preserve availability, but are observable.
 func (s *GatewayService) GatewayProfitControlVetoLatest(ctx context.Context, selected *Account) (*Account, bool, string) {
-	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	latest, vetoed, reason := profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	if !allowsAnthropicAPIAccount(ctx, latest) {
+		return latest, true, "anthropic_api_auth_policy"
+	}
+	return latest, vetoed, reason
 }
 
 func profitControlVetoLatest(ctx context.Context, selected *Account, snapshot *SchedulerSnapshotService) (*Account, bool, string) {

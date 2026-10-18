@@ -18,6 +18,10 @@ import (
 // ForwardCountTokens 转发 count_tokens 请求到上游 API
 // 特点：不记录使用量、仅支持非流式响应
 func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) error {
+	if !allowsAnthropicAPIAccount(ctx, account) {
+		s.countTokensError(c, http.StatusForbidden, "permission_error", "This endpoint only permits Anthropic API-key accounts")
+		return fmt.Errorf("anthropic API-only authentication policy denied account")
+	}
 	if parsed == nil {
 		s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return fmt.Errorf("parse request: empty request")
@@ -49,7 +53,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 	}
 
-	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
+	if account != nil && (IsAnthropicAPIOnly(ctx) || account.IsAnthropicAPIKeyPassthroughEnabled()) {
 		passthroughBody := parsed.Body.Bytes()
 		if reqModel := parsed.Model; reqModel != "" {
 			if mappedModel := account.GetMappedModel(reqModel); mappedModel != reqModel {

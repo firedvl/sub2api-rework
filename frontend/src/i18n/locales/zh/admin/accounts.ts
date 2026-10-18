@@ -1176,7 +1176,8 @@ export default {
 	  autoWarmup: {
 	    title: '自动预热',
         claudeUnavailable: '预热：不可用',
-        claudeUnavailableReason: 'Claude 预热已禁用。目前没有受支持的网关请求能够保证在不产生额外付费使用量的情况下启动订阅窗口。尚未尝试任何预热请求。',
+        claudeUnavailableReason: '自动订阅预热不可用。提供商禁止第三方服务收集或路由用户的订阅凭据，且尚无受支持的请求级保障可防止额外付费。尚未尝试任何预热请求。',
+        claudeAPIBilling: 'API 密钥请求会产生 API 费用，不会启动或补充 Claude 订阅窗口。自动预热不可用。',
 	    hint: '配额窗口恢复后发送一个很小的 Codex 请求；还需要启用全局开关。',
 	    on: '预热：开',
 	    off: '预热：关',
@@ -1770,6 +1771,7 @@ export default {
       reAuthorizedSuccess: '账号重新授权成功',
       // Test Modal
       testAccountConnection: '测试账号连接',
+      testUsageWarning: '此操作会发送真实推理请求，可能消耗订阅额度、付费使用量或 API 计费 token。响应完成并不代表已验证新的额度窗口启动。',
       errorPrefix: '错误：{message}',
       imagePreviewAlt: '测试图片 {index}',
       imageLightboxAlt: '图片预览',

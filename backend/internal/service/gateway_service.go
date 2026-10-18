@@ -1254,6 +1254,9 @@ func (s *GatewayService) hashContent(content string) string {
 
 // GetAccessToken 获取账号凭证
 func (s *GatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
+	if !allowsAnthropicAPIAccount(ctx, account) {
+		return "", "", errors.New("anthropic API-only authentication policy denied account")
+	}
 	switch account.Type {
 	case AccountTypeOAuth, AccountTypeSetupToken:
 		// Both oauth and setup-token use OAuth token flow

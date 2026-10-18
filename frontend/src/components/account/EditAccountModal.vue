@@ -2601,7 +2601,7 @@
         </p>
       </div>
 
-      <div v-if="account?.platform === 'anthropic' && account?.type === 'oauth'" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-2" data-testid="claude-auto-warmup-status">
+      <div v-if="account?.platform === 'anthropic'" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-2" data-testid="claude-auto-warmup-status">
         <h3 class="input-label">{{ t('admin.accounts.autoWarmup.title') }}</h3>
         <AutoWarmupStatus :account="account" details />
       </div>

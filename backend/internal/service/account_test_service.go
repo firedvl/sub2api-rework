@@ -331,7 +331,6 @@ func createTestPayload(modelID string) (map[string]any, error) {
 }
 
 // TestAccountConnection tests an account's connection by sending a test request
-// All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
 // mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
 // opts is optional media (image/audio data URLs for real generation / STT).
@@ -511,7 +510,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
-		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/v1/messages?beta=true"
+		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/v1/messages"
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -523,10 +522,18 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	// Create Claude Code style payload (same for all account types)
-	payload, err := createTestPayload(testModelID)
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create test payload")
+	payload := map[string]any{
+		"model":      testModelID,
+		"messages":   []map[string]any{{"role": "user", "content": "hi"}},
+		"max_tokens": 16,
+		"stream":     true,
+	}
+	if account.IsOAuth() {
+		var err error
+		payload, err = createTestPayload(testModelID)
+		if err != nil {
+			return s.sendErrorAndEnd(c, "Failed to create test payload")
+		}
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -542,17 +549,14 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	// Apply Claude Code client headers
-	for key, value := range claude.DefaultHeaders() {
-		req.Header.Set(key, value)
-	}
-
 	// Set authentication header
 	if account.IsOAuth() {
+		for key, value := range claude.DefaultHeaders() {
+			req.Header.Set(key, value)
+		}
 		req.Header.Set("anthropic-beta", claude.DefaultBetaHeader)
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	} else {
-		req.Header.Set("anthropic-beta", claude.APIKeyBetaHeader)
 		// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，
 		// 其余保持 extra/default 行为。
 		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetBaseURL())
@@ -2787,15 +2791,16 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 // processClaudeStream processes the SSE stream from Claude API
 func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader) error {
 	reader := bufio.NewReader(body)
+	seenStart := false
+	seenTerminalDelta := false
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-				return nil
-			}
+		if err != nil && err != io.EOF {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Stream read error: %s", err.Error()))
+		}
+		if err == io.EOF && line == "" {
+			return s.sendErrorAndEnd(c, "Claude stream ended before native message completion")
 		}
 
 		line = strings.TrimSpace(line)
@@ -2805,25 +2810,59 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 
 		jsonStr := sseDataPrefix.ReplaceAllString(line, "")
 		if jsonStr == "[DONE]" {
-			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
-			return nil
+			return s.sendErrorAndEnd(c, "Claude stream ended before native message completion")
 		}
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-			continue
+			return s.sendErrorAndEnd(c, "Invalid Claude stream event JSON")
 		}
 
 		eventType, _ := data["type"].(string)
+		if eventType == "" {
+			return s.sendErrorAndEnd(c, "Invalid Claude stream event type")
+		}
 
 		switch eventType {
+		case "message_start":
+			if seenStart {
+				return s.sendErrorAndEnd(c, "Unexpected Claude message_start event")
+			}
+			message, ok := data["message"].(map[string]any)
+			if !ok || message["type"] != "message" {
+				return s.sendErrorAndEnd(c, "Invalid Claude message_start event")
+			}
+			seenStart = true
 		case "content_block_delta":
-			if delta, ok := data["delta"].(map[string]any); ok {
-				if text, ok := delta["text"].(string); ok {
-					s.sendEvent(c, TestEvent{Type: "content", Text: text})
+			if !seenStart || seenTerminalDelta {
+				return s.sendErrorAndEnd(c, "Unexpected Claude content delta event")
+			}
+			delta, ok := data["delta"].(map[string]any)
+			if !ok {
+				return s.sendErrorAndEnd(c, "Invalid Claude content delta event")
+			}
+			if text, ok := delta["text"].(string); ok {
+				s.sendEvent(c, TestEvent{Type: "content", Text: text})
+			}
+		case "message_delta":
+			if !seenStart || seenTerminalDelta {
+				return s.sendErrorAndEnd(c, "Unexpected Claude message_delta event")
+			}
+			delta, ok := data["delta"].(map[string]any)
+			if !ok {
+				return s.sendErrorAndEnd(c, "Invalid Claude message_delta event")
+			}
+			if raw := delta["stop_reason"]; raw != nil {
+				stopReason, ok := raw.(string)
+				if !ok || strings.TrimSpace(stopReason) == "" {
+					return s.sendErrorAndEnd(c, "Invalid Claude stop reason")
 				}
+				seenTerminalDelta = true
 			}
 		case "message_stop":
+			if !seenStart || !seenTerminalDelta {
+				return s.sendErrorAndEnd(c, "Claude stream stopped before native message completion")
+			}
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		case "error":
