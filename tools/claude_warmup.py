@@ -20,7 +20,7 @@ import tempfile
 import time
 from zoneinfo import ZoneInfo
 
-from claude_accounts import private_directory, profile_environment
+from claude_accounts import list_profiles, private_directory, profile_environment
 
 WARNING = ('No request-scoped paid-overflow guarantee exists. Account billing settings may change. '
            'Completion does not prove a quota reset. No credits are authorized or redeemed by this tool.')
@@ -215,6 +215,7 @@ def state(path, create=True):
     db.execute('CREATE TABLE IF NOT EXISTS identities (digest TEXT PRIMARY KEY, last_attempt REAL NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS slots (profile TEXT, occurrence TEXT, preflights INTEGER, '
                'checked REAL, dispatched INTEGER DEFAULT 0, PRIMARY KEY(profile, occurrence))')
+    db.execute('CREATE TABLE IF NOT EXISTS checks (profile TEXT PRIMARY KEY, checked REAL NOT NULL, reason TEXT)')
     return db
 
 
@@ -226,18 +227,67 @@ def ensure(db, name):
     db.execute('INSERT OR IGNORE INTO profiles(name) VALUES (?)', (name,))
 
 
+def schedule_label(path, name):
+    return 'local.claude-warmup.' + name + '.' + state_key(path, name)[:12]
+
+
+def scheduler_status(path, name):
+    label = schedule_label(path, name)
+    if sys.platform == 'darwin':
+        command = ['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}']
+    elif sys.platform == 'linux':
+        command = ['systemctl', '--user', 'show', label + '.timer', '--property=LoadState', '--value']
+    elif os.name == 'nt':
+        command = [str(Path(os.environ['SystemRoot']) / 'System32' / 'schtasks.exe'), '/Query', '/TN', label]
+    else:
+        return {'label': label, 'installed': None, 'inspection': 'unsupported_platform'}
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return {'label': label, 'installed': None, 'inspection': 'query_failed'}
+    if result.returncode == 0:
+        installed = result.stdout.strip() != 'not-found'
+    elif sys.platform == 'darwin' and 'Could not find service' in result.stderr:
+        installed = False
+    else:
+        return {'label': label, 'installed': None, 'inspection': 'query_failed'}
+    return {'label': label, 'installed': installed, 'inspection': 'queried'}
+
+
 def status(path, name, now):
     config, p = load(path, name)
     db = state(path, False)
     row = db.execute('SELECT * FROM profiles WHERE name=?', (state_key(path, name),)).fetchone() if db else None
+    checked = db.execute('SELECT * FROM checks WHERE profile=?', (state_key(path, name),)).fetchone() if db else None
     result = dict(row) if row else {}
     if db:
         db.close()
     next_slot = occurrence(p, now, True)
+    observed = p.get('observation')
+    observation_age = None
+    observation_fresh = False
+    if observed:
+        try:
+            observation_age = now - stamp(observed['observed_at'])
+            observation(observed, now)
+            observation_fresh = observed.get('identity_digest') == p.get('identity_digest')
+        except (KeyError, TypeError, ValueError):
+            pass
+    ack_expiration = None
+    if p.get('billing_acknowledged_at'):
+        try:
+            ack_expiration = iso(stamp(p['billing_acknowledged_at']) + 86400)
+        except (TypeError, ValueError):
+            pass
     result.update(profile=name, enabled=config['enabled'] and p['enabled'], mode=p['mode'],
                   last_attempt=iso(result.get('last_attempt')), last_completed=iso(result.get('last_completed')),
                   last_failure=result.get('last_failure'), next_schedule=iso(next_slot[0]) if next_slot else None,
                   observation=p.get('observation'), billing_warning=WARNING,
+                  observation_age_seconds=observation_age, observation_fresh=observation_fresh,
+                  billing_acknowledgment_expires_at=ack_expiration,
+                  scheduler=scheduler_status(path, name),
+                  last_check=iso(checked['checked']) if checked else None,
+                  last_skip_reason=checked['reason'] if checked else None,
                   verification=gate(config, p, now) or 'preflight_required',
                   quota_awareness='manual_official_ui' if p['mode'] == 'observed_reset' else 'unverified',
                   reset_attribution='unverified')
@@ -327,6 +377,19 @@ def dispatch(env, directory, cancelled, binary='claude', _interrupted=lambda: Fa
 
 
 def tick(path, name, execute=False, now=None):
+    result = attempt(path, name, execute, now)
+    if execute:
+        db = state(path)
+        try:
+            db.execute('INSERT INTO checks(profile,checked,reason) VALUES (?,?,?) '
+                       'ON CONFLICT(profile) DO UPDATE SET checked=excluded.checked,reason=excluded.reason',
+                       (state_key(path, name), time.time() if now is None else now, result.get('skipped')))
+        finally:
+            db.close()
+    return result
+
+
+def attempt(path, name, execute=False, now=None):
     live_clock = now is None
     now = time.time() if live_clock else now
     config, p = load(path, name)
@@ -410,7 +473,7 @@ def schedules(path, name, output):
     private_directory(output, True)
     command = [str(Path(sys.executable).resolve()), str(Path(__file__).resolve()),
                '--config', str(path.resolve()), 'tick', name, '--execute']
-    label = 'local.claude-warmup.' + name
+    label = schedule_label(path, name)
     filenames = [label + suffix for suffix in ('.plist', '.service', '.timer', '.ps1')]
     if any((output / filename).exists() or (output / filename).is_symlink() for filename in filenames):
         raise ValueError('Schedule output already exists; use a new private directory')
@@ -432,7 +495,74 @@ def schedules(path, name, output):
         'Register-ScheduledTask -TaskName ' + ps(label) + ' -Action $action -Trigger $trigger\n')
     for filename in filenames:
         (output / filename).chmod(0o600)
-    return {'generated': str(output), 'installed': False, 'billing_warning': WARNING}
+    return {'generated': str(output), 'label': label, 'installed': False, 'billing_warning': WARNING}
+
+
+def initial_profile(zone):
+    return {'enabled': False, 'mode': 'observed_reset', 'timezone': zone, 'slots': ['08:00'],
+            'native_default': False, 'allow_unverified_schedule': False, 'billing_mode': 'unverified',
+            'billing_acknowledged_at': None, 'identity_digest': None, 'observation': None}
+
+
+def setup(path, root, binary):
+    """Prepare disabled settings and preview schedules; never authenticate or infer."""
+    config = None
+    if path.exists() or path.is_symlink():
+        private_directory(path.parent, False)
+        private_file(path)
+        config = json.loads(path.read_text())
+        root = Path(config['profile_root'])
+        binary = config['claude_binary']
+    names = sorted(set(list_profiles(root)) | (set(config['profiles']) if config else set()))
+    print('Profiles (+default selects the existing official default login; no login is changed):')
+    print('\n'.join(names))
+    name = input('Select profile: ').strip()
+    use_default = name == '+default'
+    if use_default:
+        name = input('Name for default-login binding [native-default]: ').strip() or 'native-default'
+        if name in names and not (config and config['profiles'].get(name, {}).get('native_default')):
+            raise ValueError('Name already belongs to an isolated profile; choose a different binding name')
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', name):
+            raise ValueError('Invalid binding name')
+    elif name not in names:
+        raise ValueError('Select a listed profile')
+    if config and name in config['profiles']:
+        _, previous = load(path, name)
+        p = dict(previous)
+    else:
+        p = initial_profile('UTC')
+        p['native_default'] = use_default
+    zone = input(f'Timezone [{p["timezone"]}]: ').strip() or p['timezone']
+    ZoneInfo(zone)
+    slots = input(f'Daily times, comma separated [{",".join(p["slots"])}]: ').strip()
+    slots = sorted(set(s.strip() for s in slots.split(','))) if slots else p['slots']
+    if not slots or any(not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', s) for s in slots):
+        raise ValueError('Use daily HH:MM times')
+    print('observed_reset requires a fresh manual official-UI observation; it is not automated quota verification.\n'
+          'scheduled_unverified has no trustworthy reset/billing preflight and may consume paid usage credits.\n' + WARNING)
+    mode = input(f'Mode [{p["mode"]}]: ').strip() or p['mode']
+    if mode not in ('observed_reset', 'scheduled_unverified'):
+        raise ValueError('Unknown scheduling mode')
+    p.update(enabled=False, timezone=zone, slots=slots, mode=mode, allow_unverified_schedule=False)
+    print('Saving will disable this profile. Before any later activation, bind the intended native identity, inspect billing in the official UI,\n'
+          'then acknowledge with acknowledge-billing PROFILE --credits-disabled --acknowledge-no-overflow-guarantee.\n'
+          'That acknowledgement expires after 24 hours and is not a zero-overage guarantee.')
+    if input('Save disabled configuration and preview schedules? [y/N]: ').strip().casefold() != 'y':
+        return {'saved': False, 'configuration': 'unchanged'}
+    if config is None:
+        if binary is None:
+            raise ValueError('Install official Claude Code or provide --claude')
+        config = {'enabled': False, 'claude_binary': str(Path(binary).expanduser().absolute()),
+                  'profile_root': str(root.expanduser().absolute()), 'profiles': {}}
+    config['profiles'][name] = p
+    private_directory(path.parent, True)
+    write_config(path, config)
+    with tempfile.TemporaryDirectory(prefix='schedule-preview-', dir=path.parent) as directory:
+        output = Path(directory)
+        schedules(path, name, output)
+        preview = {file.name: file.read_text() for file in sorted(output.iterdir())}
+    return {'saved': True, 'enabled': False, 'profile': name, 'scheduler': scheduler_status(path, name),
+            'schedule_preview': preview, 'dry_run': tick(path, name), 'billing_warning': WARNING}
 
 
 def main(argv=None):
@@ -444,6 +574,9 @@ def main(argv=None):
     init.add_argument('--root', type=Path, required=True)
     init.add_argument('--claude', type=Path, default=shutil.which('claude'))
     init.add_argument('--timezone', default='America/Los_Angeles')
+    wizard = commands.add_parser('setup', help='Interactive disabled setup; no login, inference or scheduler installation')
+    wizard.add_argument('--root', type=Path, default=Path.home() / '.claude-accounts')
+    wizard.add_argument('--claude', type=Path, default=shutil.which('claude'))
     for verb in ('bind', 'acknowledge-billing', 'observe', 'status', 'tick', 'disable', 'cancel', 'schedule'):
         sub = commands.add_parser(verb)
         sub.add_argument('profile')
@@ -474,10 +607,10 @@ def main(argv=None):
                 raise ValueError('Install official Claude Code or supply --claude absolute binary path')
             private_directory(path.parent, True)
             write_config(path, {'enabled': False, 'claude_binary': str(Path(args.claude).expanduser().absolute()), 'profile_root': str(args.root.expanduser().absolute()), 'profiles': {
-                args.profile: {'enabled': False, 'mode': 'observed_reset', 'timezone': args.timezone, 'slots': ['08:00'],
-                               'native_default': False, 'allow_unverified_schedule': False, 'billing_mode': 'unverified',
-                               'billing_acknowledged_at': None, 'identity_digest': None, 'observation': None}}})
+                args.profile: initial_profile(args.timezone)}})
             result = {'initialized': True, 'enabled': False, 'billing_warning': WARNING}
+        elif args.command == 'setup':
+            result = setup(path, args.root, args.claude)
         elif args.command == 'tick':
             result = tick(path, args.profile, args.execute)
         elif args.command == 'status':
@@ -526,7 +659,7 @@ def main(argv=None):
                 result = {'cancel_requested': True, 'disabled': args.command == 'disable'}
         print(json.dumps(result, allow_nan=False))
         return 0
-    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, EOFError, sqlite3.Error, subprocess.SubprocessError) as exc:
         # Deliberately omit exception text: native output and account data must not leak.
         print(json.dumps({'error': 'Local configuration or native operation failed', 'kind': type(exc).__name__}), file=sys.stderr)
         return 1

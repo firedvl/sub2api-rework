@@ -2,6 +2,10 @@
 
 ## Claude warm-up is unavailable
 
+M20 adds [native account launchers and explicit API-key-only routing](CLAUDE_CODE_ACCOUNTS.md).
+It retains the unavailable subscription warm-up boundary and distinguishes manual
+inference completion from quota-window advancement.
+
 The account table and editor report Claude OAuth warm-up as unavailable. This change adds no Claude warm-up sender, scheduler, global setting, or account opt-in. It cannot spend subscription allowance or Extra usage on a warm-up. OpenAI warm-up keeps its existing opt-in controls and scheduler.
 
 Starting a window requires upstream activity; reading usage is not proof that a window started. The gateway has no verified, supported subscription-window activation operation with a request-scoped guarantee against paid overflow. A low-token Messages request is still inference and cannot provide that guarantee from a cached usage snapshot.

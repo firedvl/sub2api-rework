@@ -191,6 +191,7 @@ frontend/test-results/
 frontend/blob-report/
 aicodex
 output/
+__pycache__/
 .codegraph/
 
 # Vitest / Vite cache at repo root

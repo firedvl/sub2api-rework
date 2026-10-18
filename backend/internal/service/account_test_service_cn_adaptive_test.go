@@ -62,7 +62,11 @@ func adaptiveCNAnthropicTestResponse() *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader(`data: {"type":"content_block_delta","delta":{"text":"anthropic ok"}}
+		Body: io.NopCloser(strings.NewReader(`data: {"type":"message_start","message":{"type":"message","role":"assistant","content":[],"stop_reason":null}}
+
+data: {"type":"content_block_delta","delta":{"text":"anthropic ok"}}
+
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
 
 data: {"type":"message_stop"}
 

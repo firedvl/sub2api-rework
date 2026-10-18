@@ -650,11 +650,11 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		// Request for existing static file
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
 		assert.Empty(t, w.Header().Get("Cache-Control"))
 
 		entries, err := fs.ReadDir(server.distFS, "assets")
@@ -676,6 +676,27 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, assetWriter.Code)
 		assert.Equal(t, staticAssetsCacheControl, assetWriter.Header().Get("Cache-Control"))
 	})
+}
+
+func TestEmbeddedFrontendPreservesAnthropicAPIAuthentication(t *testing.T) {
+	server, err := NewFrontendServer(&mockSettingsProvider{settings: map[string]string{}})
+	require.NoError(t, err)
+	for name, middleware := range map[string]gin.HandlerFunc{"settings": server.Middleware(), "legacy": ServeEmbeddedFrontend()} {
+		for _, path := range []string{"/anthropic-api/v1/messages", "/anthropic-api/v1/messages/count_tokens"} {
+			t.Run(name+path, func(t *testing.T) {
+				router := gin.New()
+				router.Use(middleware)
+				router.POST(path, func(c *gin.Context) {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "synthetic authentication required"})
+				})
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
+				require.Equal(t, http.StatusUnauthorized, response.Code)
+				require.Contains(t, response.Header().Get("Content-Type"), "application/json")
+				require.NotContains(t, response.Body.String(), "<!doctype html>")
+			})
+		}
+	}
 }
 
 func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
@@ -735,11 +756,11 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		router.Use(middleware)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
 	})
 
 	t.Run("serves_index_html_for_root", func(t *testing.T) {

@@ -6,6 +6,9 @@
     @close="handleClose"
   >
     <div class="space-y-4">
+      <p class="text-sm text-amber-700 dark:text-amber-300" role="note" data-testid="test-usage-warning">
+        {{ t('admin.accounts.testUsageWarning') }}
+      </p>
       <!-- Account Info Card -->
       <div
         v-if="account"

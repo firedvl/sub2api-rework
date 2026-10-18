@@ -45,6 +45,12 @@ func RegisterGatewayRoutes(
 	// 保证校验发生在合成路由改写与调度之前，且只看客户端书写的模型名。
 	groupModelAllowlist := middleware.GroupModelAllowlist()
 
+	// Explicit API billing mode never dispatches to subscription or other providers.
+	anthropicAPI := r.Group("/anthropic-api/v1")
+	anthropicAPI.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, requireGroupAnthropic, anthropicAPIOnly())
+	anthropicAPI.POST("/messages", h.Gateway.Messages)
+	anthropicAPI.POST("/messages/count_tokens", h.Gateway.CountTokens)
+
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI, service.PlatformGrok,
@@ -537,6 +543,20 @@ func RegisterGatewayRoutes(
 		antigravityV1Beta.POST("/models/*modelAction", h.Gateway.GeminiV1BetaModels)
 	}
 
+}
+
+func anthropicAPIOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		apiKey, ok := middleware.GetAPIKeyFromContext(c)
+		if !ok || apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformAnthropic {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"type": "error", "error": gin.H{
+				"type": "permission_error", "message": "This endpoint requires an Anthropic group and API-key upstream accounts; API usage is billed separately from subscriptions",
+			}})
+			return
+		}
+		c.Request = c.Request.WithContext(service.WithAnthropicAPIOnly(c.Request.Context()))
+		c.Next()
+	}
 }
 
 func dispatchCodexModelsGateway(c *gin.Context, openAIHandler, generatedHandler gin.HandlerFunc) {

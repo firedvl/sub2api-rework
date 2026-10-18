@@ -293,7 +293,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionHash := service.ScopeAnthropicAPISession(c.Request.Context(), h.gatewayService.GenerateSessionHash(parsedReq))
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
 	reqLog.Info("sticky.session_hash_generated",
@@ -396,7 +396,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
+			if !service.IsAnthropicAPIOnly(c.Request.Context()) && account.IsInterceptWarmupEnabled() {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
@@ -745,7 +745,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			)
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
+			if !service.IsAnthropicAPIOnly(c.Request.Context()) && account.IsInterceptWarmupEnabled() {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
@@ -906,9 +906,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 			// Bedrock CC 兼容：清理 body 专有字段 + 过滤 anthropic-beta header，适用于所有转发路径
-			if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-				return
+			if !service.IsAnthropicAPIOnly(c.Request.Context()) {
+				if err := attemptParsedReq.ReplaceBody(h.gatewayService.ApplyBedrockCCCompat(c, attemptParsedReq.Body.Bytes(), attemptParsedReq.Model, account, apiKey.GroupID)); err != nil {
+					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+					return
+				}
 			}
 			attemptBody := attemptParsedReq.Body.Bytes()
 
@@ -2260,7 +2262,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionHash := service.ScopeAnthropicAPISession(c.Request.Context(), h.gatewayService.GenerateSessionHash(parsedReq))
 
 	// 选择支持该模型的账号
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)

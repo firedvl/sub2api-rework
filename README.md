@@ -11,10 +11,10 @@ Provider behavior can differ by account type and upstream transport. See
 [Codex compatibility](docs/CODEX_COMPATIBILITY.md) for tested boundaries and
 known limitations.
 
-The [local Claude companion](docs/CLAUDE_WARMUP.md) selects separate official
-Claude Code profiles and can schedule the unmodified client. Scheduling starts
-disabled and requires native identity binding and an explicit billing
-acknowledgement. It does not give the gateway subscription credentials.
+[Claude Code account modes](docs/CLAUDE_CODE_ACCOUNTS.md) documents separate native
+subscription logins, explicit API-key-only routing and billing limits. The separate
+[local warm-up companion](docs/CLAUDE_WARMUP.md) schedules the official client with
+disabled defaults, native identity binding and explicit billing acknowledgement.
 
 ## Status
 

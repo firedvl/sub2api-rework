@@ -13,6 +13,8 @@ git diff --exit-code >/dev/null
 git diff --cached --exit-code >/dev/null
 [[ "$(git rev-parse --verify HEAD^{commit})" == "$expected_sha" ]]
 
+(cd backend && go test -tags='unit embed' ./internal/web ./internal/server/routes)
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do

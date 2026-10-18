@@ -66,6 +66,15 @@ class ClaudeAccountsTests(unittest.TestCase):
         self.assertFalse(self.root.exists())
         self.process.assert_not_called()
 
+    def test_list_is_read_only_and_does_not_authenticate(self):
+        with contextlib.redirect_stdout(self.stdout):
+            self.assertEqual(claude_accounts.main(['--root', str(self.root), 'list']), 0)
+        self.assertFalse(self.root.exists())
+        for name in ('work', 'personal'):
+            claude_accounts.profile_environment(self.root, name, True)
+        self.assertEqual(claude_accounts.list_profiles(self.root), ['personal', 'work'])
+        self.process.assert_not_called()
+
     def test_unsafe_names_and_passthrough_are_rejected(self):
         for name in ("../other", "a/b", ".", "..", "a.b", "a b", "a\\b", "-a", "a" * 65):
             with self.subTest(name=name), self.assertRaises(SystemExit):

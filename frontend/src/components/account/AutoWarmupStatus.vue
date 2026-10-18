@@ -8,9 +8,9 @@
       <div v-if="nextAt"><dt class="inline">{{ t('admin.accounts.autoWarmup.nextEligibleAt') }}: </dt><dd class="inline">{{ formatTime(nextAt) }}</dd></div>
     </dl>
   </div>
-  <div v-else-if="account.platform === 'anthropic' && account.type === 'oauth'" class="min-w-0 text-xs text-gray-600 dark:text-gray-300" data-testid="claude-auto-warmup-unavailable">
+  <div v-else-if="account.platform === 'anthropic'" class="min-w-0 text-xs text-gray-600 dark:text-gray-300" data-testid="claude-auto-warmup-unavailable">
     <span>{{ t('admin.accounts.autoWarmup.claudeUnavailable') }}</span>
-    <p v-if="details" class="mt-1">{{ t('admin.accounts.autoWarmup.claudeUnavailableReason') }}</p>
+    <p v-if="details" class="mt-1">{{ t(account.type === 'apikey' ? 'admin.accounts.autoWarmup.claudeAPIBilling' : 'admin.accounts.autoWarmup.claudeUnavailableReason') }}</p>
   </div>
 </template>
 
