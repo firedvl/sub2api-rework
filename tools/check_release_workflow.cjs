@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const eslint = require.resolve('eslint', { paths: [path.join(root, 'frontend')] });
 const yaml = require(require.resolve('js-yaml', { paths: [path.dirname(eslint)] }));
@@ -36,6 +37,20 @@ function check(workflow) {
   }
 }
 check(release);
+for (const [jobName, job] of Object.entries(release.jobs)) {
+  for (const step of job.steps) {
+    if (!step.run) continue;
+    const syntax = spawnSync('bash', ['-n'], { input: step.run, encoding: 'utf8' });
+    assert.equal(syntax.status, 0, `${jobName}/${step.name}: ${syntax.stderr}`);
+  }
+}
+assert.equal(release.on.workflow_dispatch.inputs.manifest_only.default, false);
+assert.equal(release.jobs.release.steps.find(s => s.name === 'Run GoReleaser').if,
+  "${{ github.event.inputs.manifest_only != 'true' }}");
+const manifestStep = release.jobs.release.steps.find(s => s.name === 'Create and validate immutable release manifest');
+assert.equal(manifestStep.if, undefined, 'manifest repair must retain image and contract validation');
+assert(manifestStep.run.includes('org.opencontainers.image.revision'));
+assert(manifestStep.run.includes('TestReleaseManifestFromEnvironment'));
 // Prove the guard rejects both edges whose removal could recreate the incident.
 for (const [job, dependency] of [['release-integrity', 'build-frontend'], ['release', 'release-integrity']]) {
   const broken = structuredClone(release);

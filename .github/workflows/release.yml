@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      manifest_only:
+        description: 'Validate the existing qualified image and upload its missing manifest without republishing images'
+        required: false
+        type: boolean
+        default: false
 
 # 环境变量：合并 workflow_dispatch 输入和 repository variable
 # tag push 触发时读取 vars.SIMPLE_RELEASE，workflow_dispatch 时使用输入参数
@@ -259,6 +264,7 @@ jobs:
         run: echo "owner=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
+        if: ${{ github.event.inputs.manifest_only != 'true' }}
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
@@ -334,7 +340,7 @@ jobs:
                 rework: $rework_notes,
                 compatibility: "Approved after release qualification checks.",
                 migrations: ("Supports schema migrations " + ($migration_min | tostring) + " through " + ($migration_max | tostring) + "."),
-                rollback: "For an unchanged schema, use the host updater's application-only rollback to the recorded source image. Never run .7 against schema251. Updater 1.1.6 quiesces writers before the pre-update snapshot. Automatic database restore is allowed only before candidate exposure. After candidate exposure, a schema rollback requires updater 1.1.6 two-stage rescue recovery to the recorded source snapshot and exact source image; preserve the verified rescue backup, including post-upgrade writes."
+                rollback: "For an unchanged schema, use application-only rollback through the host updater to the recorded source image. Never run .7 against schema251. Updater 1.1.6 quiesces writers before the pre-update snapshot. Automatic database restore is allowed only before candidate exposure. After candidate exposure, a schema rollback requires updater 1.1.6 two-stage rescue recovery to the recorded source snapshot and exact source image; preserve the verified rescue backup, including post-upgrade writes."
               }
             }' > release-manifest.json
 
