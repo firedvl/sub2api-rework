@@ -1,5 +1,17 @@
 # M20 recovery consultation — 2026-10-18
 
+## M22 follow-up awaiting browser access
+
+The user requested continued report/review/prompt exchanges until the desired features are delivered. Draft [PR305](https://github.com/firedvl/sub2api-rework/pull/305), initially at `c9b6c8f76bc1bdd89113c52df52c4a822b654b4d`, contains the completed M22 offline implementation and acceptance report.
+
+No follow-up message has been delivered in this turn. The native Computer Use tool used earlier for Brave is absent from the available tools. Supported browser discovery exposed only the in-app browser and MCP Apps; the app's thread inventory did not expose the exact ChatGPT conversation. No unofficial endpoints, browser cookies, credential extraction or alternate conversation were used. The user was asked to restore the existing Computer Use integration.
+
+While access was unavailable, Codex completed disposable .11/schema252 compatibility checks and added the evidence to [M22 acceptance](M22_ACCEPTANCE.md). Production, credentials, billing and schedules remain unchanged. No new ChatGPT advice or operational authorization is claimed.
+
+Copy-ready next consultation:
+
+> Review draft PR305 and docs/M22_ACCEPTANCE.md on its branch. M22 now persists nullable usage observation completeness across SQL/DTO/UI/exports without changing charges, and provides truly read-only native readiness diagnostics. Correctness/security findings were fixed. Final checks passed: 62 unit-tag and 51 ordinary Go packages, full repository integration, four race packages, 2,851 frontend tests, 10 compiled Chromium cases, 52 Python/client tests and 35 full-server staging checks. An added 50-check disposable test shows the old .11 app can read/write schema252 while preserving complete/partial rows and leaving its own new rows unknown. Ordinary host-updater rollback still blocks schema advancement; do not infer rollback permission. Production remains healthy .11/schema251 with nine accounts; no paid inference, login, billing or schedule changes occurred. Identify only concrete remaining defects or offline requirements, distinguish them from already passed evidence, and provide the smallest next prompt. List operator choices separately: release/migration approval, intended warm-up profile/mode/timezone/schedule and risk acknowledgement, authorized API accounts/model/budget/request count, second native login and Windows access. Do not invent or grant those authorizations, request a broad rewrite, or claim a feature activated merely because code exists.
+
 ## M22 consultation delivered and received
 
 At the user's explicit request, Codex pasted the M21 completion report into the existing authenticated “Rerun Gateway Test” conversation in Brave and received a completed response. The message contained public revision/release/test evidence and proof limits; no credentials, cookies, private account identifiers or secret logs were sent. ChatGPT said it reviewed PR300, PR304 and the public M21 report, without independently rerunning tests or inspecting production.

@@ -28,6 +28,8 @@ Migration `252_usage_observation_completeness.sql` adds a nullable boolean witho
 
 Production remains schema 251. Release metadata is unchanged, so this branch is **not a qualified release**. A separate release decision must review migration 252, update the approved schema range and complete the normal updater/rollback gates. No production migration was run.
 
+An additional disposable compatibility run passed 50 checks. The locally qualified M22 implementation first created schema252 and complete/partial/unknown observations. The clean M21 `.11` binary at `c9cb265b6df99871d5c84de14ce833c14d7355f6`—whose application tree matches released merge `ec84acdba727b2b0f36a630fffcf926a379e7470`—then started against that database, passed health/authenticated usage reads and synthetic API failover/token-count writes, and left every existing usage row unchanged by hash. Its new records stored null completeness. This is local application compatibility evidence, not a production rollback exercise or general schema guarantee. The updater still blocks ordinary application rollback after migration advancement; the documented rescue/recovery procedure and a separate release decision remain required. All owned containers, processes and synthetic configuration were removed.
+
 ## Local readiness
 
 ```sh
@@ -65,6 +67,7 @@ Qualified implementation commit: `f9ffcad4a236c91e1bdd1120f14e7cff9ffc2ad4`. The
 | Compiled Chromium | 10 affected cases passed: mobile/desktop completeness labels, keyboard tooltip behavior, small-cost precision, export snapshot and Claude usage regressions |
 | Python/client | 52 passed: 37 warm-up, 11 profile and four installed official-client loopback contracts |
 | Full-server staging | 35 checks passed against actual disposable schema 252, authenticated routes, SQL billing records and an owned loopback provider |
+| Existing .11 compatibility | 50 disposable checks passed across M22 schema252 → existing .11 reads/writes; complete/partial evidence preserved, old writes unknown; no production rollback |
 | Independent review | Correctness and targeted security review found no unresolved material findings after counter/sequence fixes |
 
 Staging verified A429→B failover/affinity, original account/user/key attribution, count-tokens, invalid downstream authentication and credential/cookie isolation. It then canceled after partial output while the synthetic provider continued: the gateway stored eight observed input tokens, no final output tokens and `usage_observation_complete=false`. Successful responses stored true; a historical fixture stored null with unchanged tokens/cost. Authenticated owner and admin APIs exposed the same tri-state values. No paid/provider request occurred. All owned containers, server processes and synthetic secret configuration were removed afterward.
