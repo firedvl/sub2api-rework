@@ -3,12 +3,72 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAnthropicAPIOnlyAffinityIsolatesAllSharedSources(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata string
+		system         any
+	}{
+		{"legacy metadata", "user_" + strings.Repeat("a", 64) + "_account__session_123e4567-e89b-12d3-a456-426614174000", nil},
+		{"JSON metadata", `{"device_id":"synthetic-device","account_uuid":"","session_id":"shared-session"}`, nil},
+		{"cache control", "", []any{map[string]any{"type": "text", "text": "shared system", "cache_control": map[string]any{"type": "ephemeral"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLoadAwareRestrictionFixture(t, false, nil, nil)
+			ctx := WithAnthropicAPIOnly(context.Background())
+			first := mustParseSessionHashRequest(t, anthropicSessionBody(tc.system, []any{msg("user", "hello")}, tc.metadata), &SessionContext{APIKeyID: 1, ClientIP: "192.0.2.1", UserAgent: "first"})
+			other := mustParseSessionHashRequest(t, anthropicSessionBody(tc.system, []any{msg("user", "hello")}, tc.metadata), &SessionContext{APIKeyID: 2, ClientIP: "192.0.2.2", UserAgent: "second"})
+			raw := f.svc.GenerateSessionHash(first)
+			require.NotEmpty(t, raw)
+			require.Equal(t, raw, f.svc.GenerateSessionHash(other), "these sources intentionally preserve legacy shared hashes")
+			key := ScopeAnthropicAPISession(ctx, raw, first.SessionContext.APIKeyID)
+			otherKey := ScopeAnthropicAPISession(ctx, f.svc.GenerateSessionHash(other), other.SessionContext.APIKeyID)
+			require.NotEqual(t, key, otherKey)
+			require.NoError(t, f.svc.BindStickySession(ctx, &f.groupID, key, 1))
+			id, err := f.svc.GetCachedSessionAccountID(ctx, &f.groupID, otherKey)
+			require.ErrorContains(t, err, "not found")
+			require.Zero(t, id, "another authenticated key must not read the binding")
+			next := mustParseSessionHashRequest(t, anthropicSessionBody(tc.system, []any{msg("user", "hello"), msg("assistant", "hi"), msg("user", "continue")}, tc.metadata), &SessionContext{APIKeyID: 1, ClientIP: "192.0.2.3", UserAgent: "updated"})
+			nextKey := ScopeAnthropicAPISession(ctx, f.svc.GenerateSessionHash(next), next.SessionContext.APIKeyID)
+			require.Equal(t, key, nextKey, "same-key multi-turn affinity survives IP and client changes")
+			id, err = f.svc.GetCachedSessionAccountID(ctx, &f.groupID, nextKey)
+			require.NoError(t, err)
+			require.Equal(t, int64(1), id)
+		})
+	}
+}
+
+func TestGenerateSessionHashLogsDoNotExposeSessionMaterial(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	svc := &GatewayService{}
+	for _, metadata := range []string{`{"device_id":"private-device","session_id":"private-session"}`, "private-invalid-metadata"} {
+		svc.GenerateSessionHash(&ParsedRequest{MetadataUserID: metadata})
+	}
+	for _, secret := range []string{"private-device", "private-session", "private-invalid-metadata"} {
+		require.NotContains(t, logs.String(), secret)
+	}
+	require.Contains(t, logs.String(), "sticky.hash_source")
+	require.Contains(t, logs.String(), "sticky.hash_metadata_parse_failed")
+	for _, raw := range []string{"short", "private-session\ncontrol", "anthropic-api:1:session", "anthropic-api:2:session"} {
+		require.Len(t, shortSessionHash(raw), 8)
+		require.NotEqual(t, raw[:min(8, len(raw))], shortSessionHash(raw))
+		require.Equal(t, shortSessionHash(raw), shortSessionHash(raw))
+	}
+	require.NotEqual(t, shortSessionHash("anthropic-api:1:session"), shortSessionHash("anthropic-api:2:session"))
+}
 
 func mustParseSessionHashRequest(t *testing.T, body string, ctx *SessionContext) *ParsedRequest {
 	t.Helper()

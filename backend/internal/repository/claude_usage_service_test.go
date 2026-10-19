@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -165,3 +168,22 @@ func TestClaudeUsageFetcherDoesNotExposeUpstreamErrorBody(t *testing.T) {
 	require.NotContains(t, err.Error(), "synthetic-secret")
 }
 func claudeFixturePercent(value float64) *float64 { return &value }
+
+func TestClaudeUsageFetcherRetainsRetryAfterWithoutErrorBody(t *testing.T) {
+	for _, value := range []string{"600", time.Now().Add(10 * time.Minute).UTC().Format(http.TimeFormat)} {
+		t.Run(value, func(t *testing.T) {
+			server := newLocalTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", value)
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte("fixture-secret-body"))
+			}))
+			defer server.Close()
+			fetcher := &claudeUsageService{usageURL: server.URL, allowPrivateHosts: true}
+			_, err := fetcher.FetchUsage(t.Context(), "synthetic", "")
+			var limited *service.ClaudeUsageRateLimitError
+			require.ErrorAs(t, err, &limited)
+			require.Greater(t, time.Until(limited.RetryAt), 9*time.Minute)
+			require.NotContains(t, err.Error(), "fixture-secret")
+		})
+	}
+}

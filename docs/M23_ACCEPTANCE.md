@@ -1,0 +1,67 @@
+# M23 Claude routing and usage refresh
+
+M23 retains M21's API-only gateway and canonical scheduler. It connects fleet Refresh to eligible Claude usage queries, isolates API-only affinity by downstream key, and adds synthetic client and routing coverage. This is draft-PR work; no release, production deployment, account activation or paid inference is authorized.
+
+## Baseline and implementation matrix
+
+Read-only production preflight on 2026-10-19 verified `0.2.3-rework.12`, application `40c1f7b4adb62b18b1317f8c6b9e10e30e8c1704`, schema 252 and healthy idle updater 1.1.6. All nine accounts remain: six OpenAI OAuth, one Anthropic OAuth, one Gemini OAuth and one Antigravity OAuth. No Anthropic API-key pool exists. Work starts from clean main `6fbc185a1` on `codex/m23-unified-claude-routing-refresh`.
+
+| Classification at entry | Capability | M23 result |
+| --- | --- | --- |
+| Supported and previously verified | API-only Messages/count_tokens, priority/load/slots, model admission, bounded failover, authoritative revalidation, attribution | Reuse M21 implementation and extend tests |
+| Implemented but inadequately integrated | Active Claude usage query, three-minute cache, singleflight, filtered fleet batch | Normal Refresh forces active eligible observations; Auto Refresh queries when due |
+| Defective | Batch `force=true` always chooses passive Anthropic usage | Eligible OAuth now follows the active path; unsupported types remain passive/unavailable |
+| Defective | Native metadata/cache content affinity does not include downstream key | API-only namespace contains authenticated key ID and digest; both entrypoints use it |
+| Defective | Raw session/metadata values in scheduler diagnostics | Replace with presence flags or digest prefixes; keep account/exclusion/failover diagnostics |
+| Missing proof | Equivalent-account concurrency/distribution, CLI Edit/resume/model switch/interactive status/process cancellation | Add real-handler loopback contracts and qualified official-client checks |
+| Blocked by provider contract | Subscription-token pooling and personal reset/billing guarantees | Preserve isolated native subscription profiles; add no token pool or warm-up activation |
+| Blocked by accounts/authorization | Real API-key pool acceptance, provider billing and paid canary | Operator must supply authorized keys/models/spending controls and separately authorize bounded inference |
+
+## Routing and authentication
+
+The path remains official Claude Code → API-only routes → normal downstream-key/group/model authentication → canonical load-aware scheduler → authoritative account admission → API-key passthrough → response handling → selected-account/original-user/key usage attribution. Route authentication and full-server tests complement handler tests that inject a synthetic principal.
+
+The scheduler filters by priority, optional configured reset preference, effective load and least-recent use, with random tie selection. Load factor weights effective capacity; actual slots enforce concurrency. Independent sessions can distribute, while a bound session prefers its current authorized model-compatible account. Disablement, group removal, model incompatibility, credential/endpoint/proxy changes and cooldown are checked again at existing admission/wire boundaries. Exhaustion fails closed and never falls back to subscription OAuth or the legacy mixed-auth route.
+
+API-only affinity hashes the native session identity with its authenticated downstream key identity. The existing group boundary remains. Missing key identity disables API affinity. Legacy namespace escaping and behavior remain. Existing API-only bindings rebind once after this cache-key change. A failover can lose upstream-local prompt cache benefits; the CLI still sends conversation history.
+
+Only native Anthropic API-key accounts serve `/anthropic-api/v1/messages` and `/anthropic-api/v1/messages/count_tokens`. OAuth, SetupToken, other platforms and cloud credential types remain excluded. Transient failover obeys budgets/cancellation; permanent invalid requests are not retried, and emitted stream output prevents replay. Usage logs retain the original downstream user/key and selected upstream account. Complete/incomplete/unknown observations describe gateway evidence, not guaranteed final provider charges.
+
+## Unified usage refresh
+
+The separate Query dependency came from `GetUsageBatch` unconditionally taking the passive Anthropic branch even when forced. Batch `force=false` now uses eligible OAuth's existing three-minute active cache and refreshes when due; `force=true` bypasses successful observations. Eligibility requires Anthropic OAuth, an access token, non-disabled/non-synthetic state and `user:profile` when scope metadata exists. Legacy imports with no saved scope metadata preserve their previous query behavior. SetupToken stays passive; API keys have no subscription window.
+
+Account-specific and batch callers share one in-flight fetch per account. A canceled waiter returns promptly without canceling another waiter's observation; shared work has a 30-second bound. Fleet batches retain six workers and existing fetch jitter. Periodic failures back off 1/2/4/8/16 minutes plus jitter. Provider 429 Retry-After, including HTTP dates, is never bypassed by manual force. A manual retry may bypass other error delays.
+
+Successful observations are persisted before being published. Per-window timestamps and sources remain independent. Partial active responses preserve unrelated historical windows without renewing their timestamps, including legacy global samples. Explicit zero remains a measurement; missing weekly data remains unavailable or historical. Database writes compare observation time against the locked account row so delayed passive writes cannot replace newer active evidence. A guarded session-window-end write prevents a rejected old observation from moving its separate reset field. Old observations remain visible alongside refresh errors; stale data cannot increase available capacity.
+
+Capacity and Technical now share the same fleet observations/errors on mobile and desktop. Per-account request order and observation time protect Query/batch/list/navigation races. Manual Refresh waits for fleet work and reports partial failure. Auto Refresh uses non-forced fleet batches, even when local status ticks every five seconds. Query remains optional. English/Chinese help explains this behavior; primary Refresh has an accessible label and Query has a visible keyboard focus ring.
+
+## Provider and client contract
+
+Official documentation checked 2026-10-19: [legal/authentication rules](https://code.claude.com/docs/en/legal-and-compliance), [authentication](https://code.claude.com/docs/en/authentication), [gateway overview](https://code.claude.com/docs/en/llm-gateway), [connection setup](https://code.claude.com/docs/en/llm-gateway-connect), and [protocol](https://code.claude.com/docs/en/llm-gateway-protocol). API keys may be managed for the owner's authorized users; this does not permit subscription credential pooling. A gateway credential is necessary in addition to the base URL. The protocol requires preserving applicable Messages fields, version/beta headers, stream events and optional token-count behavior.
+
+[The account guide](CLAUDE_CODE_ACCOUNTS.md) supplies copy-ready macOS/PowerShell setup, one-group/one-downstream-key configuration, `/status` checks, model mapping, diagnostics and billing distinctions. Use `https://gateway.fdvl.net/anthropic-api` with one explicitly selected downstream credential. The `--bare` API-key launcher excludes native OAuth/Keychain/config discovery. Native subscription launchers retain their separate profiles and remove gateway variables. No logout or credential change is part of setup.
+
+## Verification ledger
+
+Completed at the first implementation commit:
+
+| Gate | Evidence |
+| --- | --- |
+| Ordinary Go | All 51 packages with tests passed; latest affected repository rerun passed |
+| Database | Full repository integration passed against disposable PostgreSQL/Redis; focused ordering/reset tests and fractional observation timestamps passed |
+| Frontend | 354 files / 2,861 tests passed; TypeScript, full ESLint, locale completeness and production build passed |
+| Compiled browser | 12 Chromium tests passed at 390/1280px: normal/automatic fleet refresh, failures, timestamps, cross-view state, account-type warnings and client URLs |
+| Independent frontend inspection | 320px keyboard activation/pending state, reduced motion, long-content reflow and visible Query focus verified |
+| Earlier focused routing checks | API-only policy/revalidation, cross-key metadata/cache affinity, legacy behavior and session log redaction passed; final integrated unit/race gates still running |
+
+Unit-tag Go with the explicit official CLI, affected race checks, vet/lint, final full-server synthetic staging and delivery evidence will be appended after those gates finish. No pending gate is counted as passed.
+
+Independent correctness review found and fixed missing local statistics on a reconstructed five-hour window, renewal of legacy timestamps and the separate session-reset ordering race. Independent security investigation/review confirmed the cross-key affinity defect and found four additional raw-session failure logs; all are included in the fix. Independent integration work expanded the actual-handler/official-client fixtures. The optional local Qwen worker was unavailable because its configured host did not resolve; the configured native fallbacks completed those bounded assignments.
+
+## Live limits and release decision
+
+Synthetic fixtures cannot establish real key/model access, actual upstream quotas, prompt-cache hit continuity, final billing, hours-long durability or provider-side cancellation. Native Windows and live multi-account subscription login acceptance are not claimed. This assignment changes no schema, release version, billing controls, account credentials or warm-up switches.
+
+Before live activation, create at least two authorized Anthropic API-key accounts in one Anthropic group, configure allowed models, priorities/load/concurrency and provider spending controls, then issue one downstream group-bound key. Inspect Claude Code `/status` and separately authorize a bounded paid canary covering multi-account requests and recorded attribution. Merge, artifact publication and production rollout require a separate release decision under the updater's schema-252 gates.

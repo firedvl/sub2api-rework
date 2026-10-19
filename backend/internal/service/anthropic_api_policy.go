@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"reflect"
@@ -62,10 +63,13 @@ func (s *GatewayService) revalidateAnthropicAPIAccount(ctx context.Context, sele
 	return current, nil
 }
 
-// ScopeAnthropicAPISession keeps API-only affinity separate from legacy sessions.
-func ScopeAnthropicAPISession(ctx context.Context, hash string) string {
+// ScopeAnthropicAPISession isolates API-only affinity by authenticated downstream key.
+func ScopeAnthropicAPISession(ctx context.Context, hash string, apiKeyID int64) string {
 	if IsAnthropicAPIOnly(ctx) && hash != "" {
-		return "anthropic-api:" + hash
+		if apiKeyID <= 0 {
+			return ""
+		}
+		return fmt.Sprintf("anthropic-api:%d:%x", apiKeyID, sha256.Sum256([]byte(hash)))
 	}
 	if strings.HasPrefix(hash, "anthropic-api:") {
 		return "legacy:" + hash

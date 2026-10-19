@@ -1333,6 +1333,11 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 }
 
 func accountResetAtSortExpression(extra, key string) string {
+	timestamp := accountObservationTimeExpression(extra, key)
+	return "(CASE WHEN " + timestamp + " > CURRENT_TIMESTAMP THEN " + timestamp + " END)"
+}
+
+func accountObservationTimeExpression(extra, key string) string {
 	value := "(" + extra + " ->> '" + key + "')"
 	validRFC3339 := "'^([0-9]{3}[1-9]|[0-9]{2}[1-9][0-9]|[0-9][1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?(Z|[+-](0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)$'"
 	year := "substring(" + value + " from 1 for 4)::int"
@@ -1342,7 +1347,7 @@ func accountResetAtSortExpression(extra, key string) string {
 	timestamp := value + "::timestamptz"
 	return "(CASE WHEN " + value + " ~ " + validRFC3339 +
 		" THEN CASE WHEN " + day + " <= " + lastDay +
-		" THEN CASE WHEN " + timestamp + " > CURRENT_TIMESTAMP THEN " + timestamp + " END END END)"
+		" THEN " + timestamp + " END END)"
 }
 
 func upstreamBillingRateSortExpression(extra string) string {
@@ -2959,12 +2964,18 @@ func (r *accountRepository) UpdateSessionWindow(ctx context.Context, id int64, s
 }
 
 func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64, end time.Time) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
-		SetSessionWindowEnd(end).
-		Save(ctx)
+	// The active observation may have lost an ordering race since its Extra write.
+	result, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+		"UPDATE accounts SET session_window_end = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL AND extra->'session_window_usage_reset' = to_jsonb($3::bigint)", id, end, end.Unix())
 	if err != nil {
 		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return nil
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue session window end update failed: account=%d err=%v", id, err)
@@ -3065,7 +3076,18 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		{"session_window_utilization", "session_window_usage_reset"},
 		{"passive_usage_7d_utilization", "passive_usage_7d_reset"},
 		{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+		{"passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset"},
 	} {
+		if _, present := updates[window.util]; present {
+			incoming := accountObservationTimeExpression("$1::jsonb", window.util+"_observed_at")
+			if updates[window.util+"_observed_at"] == nil {
+				incoming = accountObservationTimeExpression("$1::jsonb", "passive_usage_sampled_at")
+			}
+			current := accountObservationTimeExpression("extra", window.util+"_observed_at")
+			// Compare while the row is locked: delayed passive writes cannot replace newer active evidence.
+			condition := fmt.Sprintf("(%s > %s OR (%s = %s AND extra->>'%s_source' = 'active' AND $1::jsonb->>'%s_source' = 'passive'))", current, incoming, current, incoming, window.util, window.util)
+			extraExpression += fmt.Sprintf(" || CASE WHEN %s THEN jsonb_build_object('%s', extra->'%s', '%s', extra->'%s', '%s_source', extra->'%s_source', '%s_observed_at', extra->'%s_observed_at') ELSE '{}'::jsonb END", condition, window.reset, window.reset, window.util, window.util, window.util, window.util, window.util, window.util)
+		}
 		if value, present := updates[window.util]; !present || value != nil {
 			continue
 		}

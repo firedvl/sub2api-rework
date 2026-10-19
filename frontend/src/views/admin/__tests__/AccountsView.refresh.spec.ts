@@ -269,6 +269,138 @@ describe('admin AccountsView refresh behavior', () => {
     expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1']).toEqual(fresh)
   })
 
+  it.each(['manual', 'automatic'] as const)('refreshes eligible Claude accounts across filtered fleet pages with %s policy', async (mode) => {
+    if (mode === 'automatic') localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const first = makeAccount({ platform: 'anthropic' })
+    const second = makeAccount({ id: 2, name: 'Second Claude account', platform: 'anthropic' })
+    const setup = makeAccount({ id: 3, platform: 'anthropic', type: 'setup-token' })
+    const apiKey = makeAccount({ id: 4, platform: 'anthropic', type: 'apikey' })
+    listAccounts.mockImplementation(async (page: number, pageSize: number) => ({
+      items: pageSize !== 1000 ? [first] : page === 1 ? [first, apiKey] : [second, setup],
+      total: 4, page, page_size: pageSize, pages: pageSize === 1000 ? 2 : 1,
+    }))
+    getBatchUsage.mockResolvedValue({ usage: { '1': makeUsage(20), '2': makeUsage(60), '3': makeUsage(70) }, errors: {} })
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.getComponent({ name: 'AccountTableFilters' }).vm.$emit('update:filters', { platform: 'anthropic', search: 'Claude' })
+    if (mode === 'manual') await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    else await vi.advanceTimersByTimeAsync(5_000)
+    await flushPromises()
+    expect(getBatchUsage).toHaveBeenLastCalledWith([1, 2, 3], mode === 'manual')
+    expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.objectContaining({ platform: 'anthropic', search: 'Claude' }))
+    const fleet = wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')
+    expect(fleet['1'].five_hour.utilization).toBe(20)
+    expect(fleet['2'].five_hour.utilization).toBe(60)
+    expect(fleet['3'].five_hour.utilization).toBe(70)
+  })
+
+  it('preserves newer windows when a subsequent passive batch starts after Query', async () => {
+    serverAccount = makeAccount({ platform: 'anthropic' })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    const fresh = {
+      ...makeUsage(50), source: 'active', updated_at: '2026-08-25T00:02:00Z',
+      five_hour: { ...makeUsage(50).five_hour, source: 'active', observed_at: '2026-08-25T00:02:00Z' },
+    }
+    cell.vm.$emit('usage-loaded', fresh)
+    await flushPromises()
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': { ...makeUsage(96), source: 'passive' } }, errors: {} })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(cell.props('batchedUsage').five_hour).toEqual(fresh.five_hour)
+    expect(cell.props('batchedUsage').updated_at).toBe(fresh.updated_at)
+    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1']).toEqual(cell.props('batchedUsage'))
+  })
+
+  it('reports partial failures in both views and keeps independent successful accounts', async () => {
+    const first = makeAccount({ platform: 'anthropic' })
+    const second = makeAccount({ id: 2, name: 'Second Claude account', platform: 'anthropic' })
+    listAccounts.mockImplementation(async (_page: number, pageSize: number) => ({
+      items: [first, second], total: 2, page: 1, page_size: pageSize, pages: 1,
+    }))
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': makeUsage(20), '2': makeUsage(60) }, errors: {} })
+    const wrapper = mountView()
+    await flushPromises()
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': { ...makeUsage(20), cached: true }, '2': makeUsage(40) }, errors: { '1': 'Claude temporarily unavailable' } })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(showError).toHaveBeenCalledTimes(1)
+    const cells = wrapper.findAllComponents({ name: 'AccountUsageCell' })
+    const overview = wrapper.getComponent({ name: 'OperatorCapacityOverview' })
+    expect(cells[0].props('batchedUsage').five_hour.utilization).toBe(20)
+    expect(cells[0].props('batchedUsageError')).toBe('Claude temporarily unavailable')
+    expect(overview.props('errorsByAccountId')['1']).toBe('Claude temporarily unavailable')
+    expect(overview.props('usageByAccountId')['2'].five_hour.utilization).toBe(40)
+    cells[0].props('requestBatchedUsage')(first)
+    await flushPromises()
+    expect(cells[0].props('batchedUsageError')).toBe('Claude temporarily unavailable')
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': makeUsage(30), '2': makeUsage(45) }, errors: {} })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(cells[0].props('batchedUsageError')).toBeNull()
+    expect(overview.props('errorsByAccountId')['1']).toBeNull()
+  })
+
+  it('shares batch policy and results with mobile Technical rows', async () => {
+    vi.mocked(window.matchMedia).mockImplementation(() => ({
+      matches: false, media: '(min-width: 768px)', addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList))
+    serverAccount = makeAccount({ platform: 'anthropic' })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    expect(cell.props('requestBatchedUsage')).toBeTypeOf('function')
+    expect(cell.props('batchedUsage')).toEqual(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1'])
+    cell.props('requestBatchedUsage')(serverAccount)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getBatchUsage).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a Query failure visible through cached passive reads until active refresh succeeds', async () => {
+    serverAccount = makeAccount({ platform: 'anthropic' })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
+    cell.vm.$emit('usage-query-error', 'Query failed')
+    await flushPromises()
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': { ...makeUsage(20), source: 'passive', cached: true } }, errors: {} })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(cell.props('queryError')).toBe('Query failed')
+    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('errorsByAccountId')['1']).toBe('Query failed')
+    getBatchUsage.mockResolvedValueOnce({ usage: { '1': { ...makeUsage(30), source: 'active', cached: false } }, errors: {} })
+    await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+    await flushPromises()
+    expect(cell.props('queryError')).toBeNull()
+  })
+
+  it('keeps Query observations and request ownership across table navigation', async () => {
+    const first = makeAccount({ platform: 'anthropic' })
+    const second = makeAccount({ id: 2, platform: 'anthropic', name: 'Second account' })
+    listAccounts.mockImplementation(async (page: number, pageSize: number) => ({
+      items: pageSize === 1000 ? [first, second] : page === 1 ? [first] : [second],
+      total: 2, page, page_size: pageSize, pages: pageSize === 1000 ? 1 : 2,
+    }))
+    let resolveBatch!: (result: unknown) => void
+    getBatchUsage.mockReturnValueOnce(new Promise(resolve => { resolveBatch = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const fresh = { ...makeUsage(50), source: 'active' as const, updated_at: '2026-08-25T00:02:00Z' }
+    wrapper.getComponent({ name: 'AccountUsageCell' }).vm.$emit('usage-loaded', fresh)
+    await flushPromises()
+    wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 2)
+    await flushPromises()
+    resolveBatch({ usage: { '1': { ...makeUsage(96), source: 'passive' }, '2': makeUsage(60) }, errors: {} })
+    await flushPromises()
+    const overview = wrapper.getComponent({ name: 'OperatorCapacityOverview' })
+    expect(overview.props('usageByAccountId')['1']).toEqual(fresh)
+    expect(overview.props('usageByAccountId')['2'].five_hour.utilization).toBe(60)
+    wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 1)
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'AccountUsageCell' }).props('batchedUsage')).toEqual(fresh)
+  })
+
   it('replaces manual live data without remounting and prevents duplicate clicks', async () => {
     const wrapper = mountView()
     await flushPromises()

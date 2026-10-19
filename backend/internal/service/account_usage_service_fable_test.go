@@ -112,7 +112,8 @@ func TestSyncActiveToPassive_WritesFableExtras(t *testing.T) {
 	case updates := <-repo.updateExtraCh:
 		require.InDelta(t, 0.87, updates["passive_usage_7d_oi_utilization"], 1e-9)
 		require.Equal(t, resetAt.Unix(), updates["passive_usage_7d_oi_reset"])
-		require.Contains(t, updates, "passive_usage_sampled_at")
+		require.Contains(t, updates, "passive_usage_7d_oi_utilization_observed_at")
+		require.NotContains(t, updates, "passive_usage_sampled_at")
 	default:
 		t.Fatal("expected UpdateExtra to be called with fable extras")
 	}

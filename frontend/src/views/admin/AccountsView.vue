@@ -468,7 +468,7 @@
               :query-error="capacityUsageQueryErrors[String(row.id)] ?? null"
               :batched-usage-error="usageBatchErrorByAccountId[String(row.id)] ?? null"
               :batched-usage-loading="usageBatchLoadingByAccountId[String(row.id)] === true"
-              :request-batched-usage="isDesktopViewport ? queueBatchedUsage : null"
+              :request-batched-usage="queueBatchedUsage"
               @account-updated="handleAccountUpdated"
               @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
               @usage-query-error="handleUsageQueryError(row.id, $event)"
@@ -698,7 +698,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
-import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey, mergeClaudeUsageObservations } from '@/utils/accountUsageRefresh'
 import { supportsBatchAccountUsage, type OperatorAccountStatus } from '@/utils/operatorCapacity'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
@@ -938,13 +938,6 @@ const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const pendingFleetRefresh = ref(false)
 
-const desktopViewportQuery = '(min-width: 768px)'
-const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
-)
-let desktopViewportMediaQuery: MediaQueryList | null = null
-let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
-
 const usageBatchByAccountId = ref<Record<string, AccountUsageInfo | null>>({})
 const usageBatchErrorByAccountId = ref<Record<string, string | null>>({})
 const usageBatchLoadingByAccountId = ref<Record<string, boolean>>({})
@@ -956,8 +949,8 @@ let usageBatchFlushTimer: ReturnType<typeof setTimeout> | null = null
 let queuedUsageBatchForce = false
 let usageBatchRequestToken = 0
 const fleetAccounts = ref<Account[]>([])
-const fleetUsageByAccountId = ref<Record<string, AccountUsageInfo | null>>({})
-const fleetUsageErrorByAccountId = ref<Record<string, string | null>>({})
+const fleetUsageByAccountId = usageBatchByAccountId
+const fleetUsageErrorByAccountId = usageBatchErrorByAccountId
 const fleetLoading = ref(false)
 const fleetError = ref(false)
 let fleetLoadSeq = 0
@@ -999,6 +992,7 @@ const applyUsageBatchState = (
   const nextUsage = { ...usageBatchByAccountId.value }
   const nextErrors = { ...usageBatchErrorByAccountId.value }
   const nextLoading = { ...usageBatchLoadingByAccountId.value }
+  const accountsByID = new Map([...accounts.value, ...fleetAccounts.value].map(account => [account.id, account]))
 
   for (const accountID of accountIDs) {
     const key = String(accountID)
@@ -1009,8 +1003,12 @@ const applyUsageBatchState = (
       continue
     }
 
-    const usage = usageMap[key]
-    const error = errorMap[key] ?? null
+    const incoming = usageMap[key]
+    const account = accountsByID.get(accountID)
+    const usage = incoming && account?.platform === 'anthropic'
+      ? mergeClaudeUsageObservations(nextUsage[key], incoming)
+      : incoming
+    const error = errorMap[key] || incoming?.error || null
     if (usage) {
       nextUsage[key] = usage
       usageBatchCache.set(accountID, { data: usage, ts: now })
@@ -1019,6 +1017,9 @@ const applyUsageBatchState = (
       usageBatchCache.delete(accountID)
     }
     nextErrors[key] = error
+    if (!error && incoming && !incoming.cached && (incoming.source === 'active' || incoming.source === 'mixed')) {
+      delete capacityUsageQueryErrors.value[key]
+    }
     nextLoading[key] = false
   }
 
@@ -1030,13 +1031,13 @@ const applyUsageBatchState = (
 const handleAccountUsageLoaded = (accountID: number, usage: AccountUsageInfo) => {
   const key = String(accountID)
   if (usageBatchByAccountId.value[key] === usage) return
+  const account = fleetAccounts.value.find(row => row.id === accountID) ?? accounts.value.find(row => row.id === accountID)
+  if (account?.platform === 'anthropic') usage = mergeClaudeUsageObservations(usageBatchByAccountId.value[key], usage)
   usageBatchRequestTokenByAccountId.value[key] = ++usageBatchRequestToken
   pendingUsageBatchIds.delete(accountID)
   usageBatchLoadingByAccountId.value[key] = false
   usageBatchCache.set(accountID, { data: usage, ts: Date.now() })
-  fleetUsageByAccountId.value[key] = usage
-  fleetUsageErrorByAccountId.value[key] = null
-  setUsageBatchState(accountID, usage, null)
+  setUsageBatchState(accountID, usage, usage.error || usageBatchErrorByAccountId.value[key] || null)
 }
 
 const capacityUsageQueryErrors = ref<Record<string, string>>({})
@@ -1044,6 +1045,7 @@ const handleUsageQueryError = (accountID: number, error: string | null) => {
   const key = String(accountID)
   if (error) capacityUsageQueryErrors.value[key] = error
   else delete capacityUsageQueryErrors.value[key]
+  usageBatchErrorByAccountId.value[key] = error
 }
 const capacityUsageRefreshing = ref<Record<string, boolean>>({})
 const refreshCapacityUsage = async (account: Account) => {
@@ -1092,19 +1094,19 @@ const flushQueuedUsageBatch = async () => {
 }
 
 const queueBatchedUsage = (account: Account, options?: { force?: boolean }) => {
-  if (!isDesktopViewport.value) return
   if (!supportsBatchAccountUsage(account)) return
 
   const force = options?.force === true
   const cacheKey = account.id
   const key = String(cacheKey)
+  if (!force && usageBatchLoadingByAccountId.value[key]) return
 
   if (force) {
     usageBatchCache.delete(cacheKey)
   } else {
     const cached = usageBatchCache.get(cacheKey)
     if (cached && Date.now() - cached.ts < USAGE_BATCH_CACHE_TTL) {
-      setUsageBatchState(cacheKey, cached.data, null)
+      setUsageBatchState(cacheKey, cached.data, usageBatchErrorByAccountId.value[key] ?? cached.data.error ?? null)
       setUsageBatchLoading(cacheKey, false)
       return
     }
@@ -1475,25 +1477,9 @@ const loadFleetCapacity = async (forceUsage = false) => {
     }
     if (currentSeq !== fleetLoadSeq) return
 
-    const previousFleetUsage = fleetUsageByAccountId.value
-    const nextFleetUsage: Record<string, AccountUsageInfo | null> = {}
-    const nextFleetErrors: Record<string, string | null> = {}
-    for (const accountID of usageAccountIDs) {
-      const key = String(accountID)
-      if ((usageBatchRequestTokenByAccountId.value[key] ?? 0) !== usageRequestTokens[key]) {
-        nextFleetUsage[key] = usageBatchByAccountId.value[key] ?? previousFleetUsage[key] ?? null
-        nextFleetErrors[key] = usageBatchErrorByAccountId.value[key] ?? null
-        continue
-      }
-      const error = errors[key] ?? null
-      nextFleetUsage[key] = usage[key] ?? (error ? previousFleetUsage[key] ?? null : null)
-      nextFleetErrors[key] = error
-    }
-
     fleetAccounts.value = rows
-    fleetUsageByAccountId.value = nextFleetUsage
-    fleetUsageErrorByAccountId.value = nextFleetErrors
     applyUsageBatchState(usageAccountIDs, usage, errors, usageRequestTokens)
+    usageLoaded = usageLoaded && usageAccountIDs.every(id => !usageBatchErrorByAccountId.value[String(id)])
     return usageLoaded
   } catch (error) {
     if (currentSeq !== fleetLoadSeq) return
@@ -1716,22 +1702,6 @@ watch(loading, (isLoading, wasLoading) => {
     pendingFleetRefresh.value = false
     void loadFleetCapacity()
   }
-})
-
-watch(accounts, (rows) => {
-  const visibleIDs = new Set(rows.map((row) => String(row.id)))
-  usageBatchByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchErrorByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchErrorByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchLoadingByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchLoadingByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
-  usageBatchRequestTokenByAccountId.value = Object.fromEntries(
-    Object.entries(usageBatchRequestTokenByAccountId.value).filter(([key]) => visibleIDs.has(key))
-  )
 })
 
 const isAnyModalOpen = computed(() => {
@@ -3068,18 +3038,6 @@ const handleDropdownEscape = (event: KeyboardEvent) => {
 
 onMounted(async () => {
   autoRefreshLastAttemptAt.value = Date.now()
-  if (typeof window !== 'undefined') {
-    desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
-    isDesktopViewport.value = desktopViewportMediaQuery.matches
-    desktopViewportListener = (event: MediaQueryListEvent) => {
-      isDesktopViewport.value = event.matches
-    }
-    if (typeof desktopViewportMediaQuery.addEventListener === 'function') {
-      desktopViewportMediaQuery.addEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.addListener(desktopViewportListener)
-    }
-  }
 
   load()
   loadUpstreamBillingProbeGlobalState()
@@ -3134,15 +3092,7 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleDropdownEscape)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
-  if (desktopViewportMediaQuery && desktopViewportListener) {
-    if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
-      desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
-    } else {
-      desktopViewportMediaQuery.removeListener(desktopViewportListener)
-    }
-  }
-  desktopViewportListener = null
-  desktopViewportMediaQuery = null
+
 })
 </script>
 

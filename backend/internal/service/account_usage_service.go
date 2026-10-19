@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"math"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +94,36 @@ type apiUsageCache struct {
 	response  *ClaudeUsageResponse
 	err       error // 非 nil 表示缓存的错误（负缓存）
 	timestamp time.Time
+	retryAt   time.Time
+	failures  int
+}
+
+// ClaudeUsageRateLimitError carries only the provider's retry boundary, never its body.
+type ClaudeUsageRateLimitError struct{ RetryAt time.Time }
+
+func (e *ClaudeUsageRateLimitError) Error() string { return "Claude usage API returned status 429" }
+
+func NewClaudeUsageRateLimitError(header http.Header) error {
+	now := time.Now()
+	return &ClaudeUsageRateLimitError{RetryAt: now.Add(retryAfter(header, now))}
+}
+
+func (entry *apiUsageCache) refreshError(force bool) error {
+	if entry.err == nil {
+		return nil
+	}
+	var limited *ClaudeUsageRateLimitError
+	if force && !errors.As(entry.err, &limited) {
+		return nil
+	}
+	due := entry.retryAt
+	if due.IsZero() {
+		due = entry.timestamp.Add(apiErrorCacheTTL)
+	}
+	if time.Now().Before(due) {
+		return entry.err
+	}
+	return nil
 }
 
 // windowStatsCache 缓存从本地数据库查询的窗口统计（requests, tokens, cost）
@@ -334,6 +366,12 @@ func supportsAnthropicPassiveUsage(account *Account) bool {
 	return account != nil && account.IsAnthropicOAuthOrSetupToken()
 }
 
+func supportsAnthropicActiveUsage(account *Account) bool {
+	return account != nil && account.Platform == PlatformAnthropic && account.Type == AccountTypeOAuth &&
+		!account.IsSyntheticUITest() && account.GetCredential("access_token") != "" && account.Status != StatusDisabled &&
+		(account.GetCredential("scope") == "" || slices.Contains(strings.Fields(account.GetCredential("scope")), "user:profile"))
+}
+
 func batchUsageErrorMessage(err error) string {
 	if err == nil {
 		return ""
@@ -389,12 +427,12 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 		var snapshot *apiUsageCache
 		cachedResponse := false
 		if cached, ok := s.cache.apiCache.Load(accountID); ok {
-			if entry, ok := cached.(*apiUsageCache); ok && !forceProbe {
-				age := time.Since(entry.timestamp)
-				if entry.err != nil && age < apiErrorCacheTTL {
-					return nil, entry.err
+			if entry, ok := cached.(*apiUsageCache); ok {
+				if err := entry.refreshError(forceProbe); err != nil {
+					return nil, err
 				}
-				if entry.response != nil && age < apiCacheTTL {
+				age := time.Since(entry.timestamp)
+				if !forceProbe && entry.err == nil && entry.response != nil && age < apiCacheTTL {
 					snapshot, cachedResponse = entry, true
 				}
 			}
@@ -407,38 +445,64 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 				return nil, ctx.Err()
 			}
 			for attempt := 0; attempt < 2; attempt++ {
-				result, flightErr, _ := s.cache.apiFlight.Do(fmt.Sprintf("usage:%d", accountID), func() (any, error) {
+				flight := s.cache.apiFlight.DoChan(fmt.Sprintf("usage:%d", accountID), func() (any, error) {
+					var previous *apiUsageCache
 					if cached, ok := s.cache.apiCache.Load(accountID); ok {
 						if entry, ok := cached.(*apiUsageCache); ok {
+							previous = entry
+							if err := entry.refreshError(forceProbe); err != nil {
+								return nil, err
+							}
 							age := time.Since(entry.timestamp)
 							// A forced refresh may reuse only a fetch completed after this request began.
-							if !forceProbe || !entry.timestamp.Before(requestStarted) {
-								if entry.err != nil && age < apiErrorCacheTTL {
-									return nil, entry.err
-								}
-								if entry.response != nil && age < apiCacheTTL {
+							if !forceProbe || entry.timestamp.After(requestStarted) {
+								if entry.err == nil && entry.response != nil && age < apiCacheTTL {
 									return entry, nil
 								}
 							}
 						}
 					}
-					response, err := s.fetchOAuthUsageRaw(ctx, account)
+					// A canceled waiter must not cancel another caller's shared observation.
+					fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+					defer cancel()
+					response, err := s.fetchOAuthUsageRaw(fetchCtx, account)
 					if err == nil && response == nil {
 						err = fmt.Errorf("empty Claude usage response")
 					}
 					entry := &apiUsageCache{response: response, err: err, timestamp: time.Now().UTC()}
-					s.cache.apiCache.Store(accountID, entry)
+					if err == nil {
+						err = s.syncActiveToPassive(fetchCtx, account.ID, s.buildUsageInfo(response, &entry.timestamp))
+						entry.err = err
+					}
 					if err != nil {
+						entry.failures = 1
+						if previous != nil {
+							entry.failures = previous.failures + 1
+							entry.response, entry.timestamp = previous.response, previous.timestamp
+						}
+						delay := apiErrorCacheTTL * time.Duration(1<<min(entry.failures-1, 4))
+						entry.retryAt = time.Now().Add(delay + time.Duration(rand.Int64N(int64(apiQueryMaxJitter))))
+						var limited *ClaudeUsageRateLimitError
+						if errors.As(err, &limited) && limited.RetryAt.After(entry.retryAt) {
+							entry.retryAt = limited.RetryAt
+						}
+						s.cache.apiCache.Store(accountID, entry)
 						return nil, err
 					}
-					s.syncActiveToPassive(ctx, account.ID, s.buildUsageInfo(response, &entry.timestamp))
+					s.cache.apiCache.Store(accountID, entry)
 					return entry, nil
 				})
-				if flightErr != nil {
-					return nil, flightErr
+				var result singleflight.Result
+				select {
+				case result = <-flight:
+				case <-ctx.Done():
+					return nil, ctx.Err()
 				}
-				snapshot = result.(*apiUsageCache)
-				if !forceProbe || !snapshot.timestamp.Before(requestStarted) {
+				if result.Err != nil {
+					return nil, result.Err
+				}
+				snapshot = result.Val.(*apiUsageCache)
+				if !forceProbe || snapshot.timestamp.After(requestStarted) {
 					break
 				}
 				// A refresh can join an older fetch while its persistence is still running.
@@ -450,12 +514,22 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 		}
 		usage := s.buildUsageInfo(snapshot.response, &snapshot.timestamp)
 		usage.Cached = cachedResponse
-		s.addWindowStats(ctx, account, usage)
-		// Only the subscription-specific Fable window may fall back to a header sample.
-		if usage.SevenDayFable == nil && account.Extra["passive_usage_7d_oi_utilization_source"] != "active" {
-			usage.SevenDayFable = buildPassiveUsageWindow(account.Extra, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset")
+		// A partial response cannot renew or erase an unrelated window's observation.
+		for _, item := range []struct {
+			window      **UsageProgress
+			util, reset string
+		}{
+			{&usage.FiveHour, "session_window_utilization", "session_window_usage_reset"},
+			{&usage.SevenDay, "passive_usage_7d_utilization", "passive_usage_7d_reset"},
+			{&usage.SevenDaySonnet, "passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset"},
+			{&usage.SevenDayFable, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+		} {
+			if *item.window == nil {
+				*item.window = buildPassiveUsageWindow(account.Extra, item.util, item.reset)
+			}
 		}
 		markClaudeUsageMetadata(usage)
+		s.addWindowStats(ctx, account, usage)
 
 		s.tryClearRecoverableAccountError(ctx, account)
 		return usage, nil
@@ -496,7 +570,8 @@ func (s *AccountUsageService) GetUsageForAccount(ctx context.Context, account *A
 }
 
 // GetUsageBatch 批量获取账号使用量。
-// Anthropic OAuth/SetupToken 统一走 passive 链路，其他账号复用现有主动查询逻辑。
+// Eligible Anthropic OAuth accounts refresh when due; force bypasses the success cache,
+// but never a provider 429 cooldown. SetupToken and unsupported OAuth stay passive.
 // 单个账号失败不会中断整批请求，错误会按账号返回。
 func (s *AccountUsageService) GetUsageBatch(ctx context.Context, accountIDs []int64, force bool) (map[int64]*UsageInfo, map[int64]string, error) {
 	uniqueIDs := make([]int64, 0, len(accountIDs))
@@ -548,19 +623,24 @@ func (s *AccountUsageService) GetUsageBatch(ctx context.Context, accountIDs []in
 		g.Go(func() error {
 			var usage *UsageInfo
 			var usageErr error
-			if supportsAnthropicPassiveUsage(account) {
+			if supportsAnthropicPassiveUsage(account) && !supportsAnthropicActiveUsage(account) {
 				usage, usageErr = s.getPassiveUsageForAccount(gctx, account)
 			} else {
 				usage, usageErr = s.getUsageForAccount(gctx, account, force)
+			}
+			if usageErr != nil && supportsAnthropicPassiveUsage(account) {
+				// Keep the last observation visible together with the refresh failure.
+				usage, _ = s.getPassiveUsageForAccount(gctx, account)
 			}
 
 			mu.Lock()
 			defer mu.Unlock()
 			if usageErr != nil {
 				errorsByAccount[id] = batchUsageErrorMessage(usageErr)
-				return nil
 			}
-			usageByAccount[id] = usage
+			if usage != nil {
+				usageByAccount[id] = usage
+			}
 			return nil
 		})
 	}
@@ -702,7 +782,7 @@ func markClaudeUsageMetadata(usage *UsageInfo) {
 }
 
 // Persist only newly fetched observations, preserving their upstream units and timestamp.
-func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) {
+func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID int64, usage *UsageInfo) error {
 	observed := usage.UpdatedAt
 	if observed == nil {
 		now := time.Now().UTC()
@@ -718,14 +798,11 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 		{usage.SevenDaySonnet, "passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset"},
 		{usage.SevenDayFable, "passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
 	} {
-		if item.window == nil && item.util == "passive_usage_7d_oi_utilization" {
+		if item.window == nil {
 			continue
 		}
 		updates[item.util], updates[item.reset] = nil, nil
 		updates[item.util+"_source"], updates[item.util+"_observed_at"] = nil, nil
-		if item.window == nil {
-			continue
-		}
 		updates[item.util] = item.window.Utilization / 100
 		if item.window.ResetsAt != nil {
 			updates[item.reset] = item.window.ResetsAt.Unix()
@@ -733,15 +810,19 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 		updates[item.util+"_source"] = "active"
 		updates[item.util+"_observed_at"] = observed.UTC().Format(time.RFC3339Nano)
 	}
-	updates["passive_usage_sampled_at"] = observed.UTC().Format(time.RFC3339Nano)
+	if len(updates) == 0 {
+		return nil
+	}
 	if err := s.accountRepo.UpdateExtra(ctx, accountID, updates); err != nil {
 		slog.Warn("sync_active_to_passive_failed", "account_id", accountID, "error", err)
+		return fmt.Errorf("persist Claude usage observation failed")
 	}
 	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != nil {
 		if err := s.accountRepo.UpdateSessionWindowEnd(ctx, accountID, *usage.FiveHour.ResetsAt); err != nil {
 			slog.Warn("sync_active_to_passive_session_window_end_failed", "account_id", accountID, "error", err)
 		}
 	}
+	return nil
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
