@@ -4,11 +4,53 @@
 
 The operator has now authorized the controlled `0.2.3-rework.12` release: merge PR305, publish through the established GitHub publisher, and install through host updater 1.1.6. This supersedes the earlier draft-only boundary below for this release. Paid inference, warm-up activation, authentication changes, API-key pool activation, billing changes and reset-credit redemption remain unauthorized.
 
-Release preparation changes only the embedded version to `.12` and supported maximum schema to252. Minimum schema239, upstream `v0.2.14` and its SHA, artifact/repository identities, stable channel, manual policy and minimum updater1.1.6 remain unchanged. Migration252 adds a nullable boolean with no default or historical backfill; historical token and cost values must remain unchanged. Complete gateway observations do not establish final provider charges.
+Release preparation changes only the embedded version to `.12` and supported maximum schema to 252. Minimum schema 239, upstream `v0.2.14` and its SHA, artifact/repository identities, stable channel, manual policy and minimum updater 1.1.6 remain unchanged. Migration 252 adds a nullable boolean with no default or historical backfill; historical token and cost values must remain unchanged. Complete gateway observations do not establish final provider charges.
 
-Installation requires a planned service interruption while the updater quiesces application writers, verifies the source251 snapshot, migrates in its migration-only container and checks exact target252 before normal acceptance. Schema advancement blocks ordinary application-only rollback to `.11`. Before exposure the updater retains its verified automatic restoration path. After possible exposure, recovery requires the protected two-stage rescue protocol and a separate incident-specific destructive recovery acknowledgement; restoring the source snapshot can require reconciliation of later writes. No recovery exercise is implied by this release authorization.
+Installation requires a planned service interruption while the updater quiesces application writers, verifies the source 251 snapshot, migrates in its migration-only container and checks exact target 252 before normal acceptance. Schema advancement blocks ordinary application-only rollback to `.11`. Before exposure the updater retains its verified automatic restoration path. After possible exposure, recovery requires the protected two-stage rescue protocol and a separate incident-specific destructive recovery acknowledgement; restoring the source snapshot can require reconciliation of later writes. No recovery exercise is implied by this release authorization.
 
-Final release identities, qualification and production results will be recorded here after the corresponding gates complete. The historical sections below retain their original scope and evidence.
+## Production release acceptance — PASS
+
+The authorized release is deployed. [PR305](https://github.com/firedvl/sub2api-rework/pull/305) merged at `2026-10-19T05:27:20Z`; its merge tree exactly matches qualified head `4e00e0f33452ca1447f9f10ee8785985972c12a0`. The immutable application tag remains separate from later documentation-only commits. All times below are UTC unless stated otherwise.
+
+| Item | Verified result |
+| --- | --- |
+| Merge / production revision | `40c1f7b4adb62b18b1317f8c6b9e10e30e8c1704` |
+| Release | [`v0.2.3-rework.12`](https://github.com/firedvl/sub2api-rework/releases/tag/v0.2.3-rework.12) |
+| Publisher | [Run 39204688960](https://github.com/firedvl/sub2api-rework/actions/runs/39204688960), all four jobs passed |
+| Immutable image | `sha256:5290dd50af481f7203dc35195dc8eb90d2a09b8848cc1d2d1f95889ba7dcd1fa` |
+| Canonical manifest SHA256 | `sha256:d881d0c0e125d3bcd3ef32b656521c49c5d0ac189dfdfc775e261be4ea3bf24a`; shared Go manifest validation passed |
+| Metadata | `.12`, schema 239–252, minimum updater 1.1.6, stable channel, manual default; upstream baseline and repository identities unchanged |
+| Prepare | `upd-151addf578de7226d929a266`; `05:45:38Z` → `05:45:45Z`, succeeded |
+| Install | `upd-513c5bcb1d2226a413f738db`; `05:47:12Z` → `05:47:40Z`, succeeded; one install submission |
+| Migration | Source 251 → exact target 252; nullable boolean, no default or historical backfill |
+| Updater | 1.1.6, same binary hash and policy, healthy/idle, durable succeeded state |
+| Runtime | Exact image digest and source/revision labels; Linux/amd64; application, PostgreSQL and Redis healthy; no application Docker socket |
+| Public/local checks | Health, frontend and public settings 200; Messages, Responses and API-only Messages/count-tokens return JSON 401 without authentication |
+| Frontend/admin agreement | Existing authenticated UI displays `.12`, exact revision and stable channel; ordinary rollback button disabled |
+| Historical usage | All 258,785 baseline rows through ID 259349 have unchanged full-row hashes excluding the added field; completeness remains null |
+| Accounts and controls | Nine original identities, credentials, routing/configuration, groups/assignments, API-key/quota/subscription configuration, settings and automation flags match the immediate pre-install baseline |
+| Credits/billing | Credit balances, billing and automation fields match account data read from the verified quiesced source archive; no database restore was needed for comparison |
+| Deployment preservation | Compose files, updater binary/policy and environment excluding the approved image pin match |
+| Backups | All 190 files in 38 historical backups are byte-identical; new backup makes 39; database/environment/Compose checksums and archive listing passed |
+| New source snapshot | `20261019T054720Z-upd-513c5bcb1d2226a413f738db`; operation `upd-513c5bcb1d2226a413f738db`, source `.11`/schema 251 |
+| Retained source image | `ghcr.io/firedvl/sub2api-rework@sha256:d13bc3ffaff1e0ae021baaec0694b7c3e510ca0575e1d100f9d5718d8807be83` |
+| Recovery | Ordinary schema-crossing rollback is blocked; protected two-stage recovery applies. No rescue, rollback or destructive restore was performed; no incident-specific acknowledgement is outstanding |
+
+The final delta review found no material correctness/security finding between accepted implementation `f9ffcad4` and qualified head `4e00e0f33`. Runtime application code did not change after the earlier independent M22 reviews; subsequent implementation-boundary changes were isolated fixture cleanup, release metadata/assertions and documentation. The prior full unit/integration/race, Python/client and synthetic server evidence below remains applicable.
+
+Final release checks passed: 51 ordinary Go packages with tests; four release/updater contract packages; affected PostgreSQL round-trip and historical migration integration; full vet; zero new lint issues; clean dependency contract; full frontend ESLint/i18n/type checking/build; 47 affected frontend tests; and ten compiled Chromium cases at 390/1280px. The clean integrity script passed embedded web/routes and all five binary targets with exact revision and `vcs.modified=false`. The publisher then rebuilt matching frontend/backend from the merge revision and passed its own integrity gates. Raw outputs and sanitized comparison artifacts remain under ignored `.codex/m22-release-*` and `.codex/m22-production-*` paths.
+
+Production observations are deliberately limited. New naturally occurring OpenAI traffic remains unknown because that provider path is uninstrumented; the observed production completeness counts were complete 0 / incomplete 0 / unknown 258,817. Authenticated Activity shows the unknown label and provider-invoice disclaimer. Complete/incomplete UI, authenticated owner/admin API and export contracts are covered by synthetic staging and the compiled browser checks, without manufacturing production records or inference. Claude Capacity retains historical 23%/27% remaining with unknown current capacity; Technical retains 77%/73% used, `Upstream Cached`, stale labels and the original `2026-10-18 22:10:40 America/Los_Angeles` observation time. No Query or reset action was invoked. The Settings compatibility-pending notice concerns newer upstream `v0.2.17` beyond the unchanged embedded `v0.2.14` baseline; it is the existing watcher behavior, not a failed `.12` installation.
+
+Six existing OpenAI accounts refreshed quota-reset timestamps/countdowns during normal activity. Their credit balances, reset-credit snapshots, billing fields and automation controls remain unchanged against the quiesced source archive; these observation updates are not configuration changes or redemptions. The captured console log window had no error-, fatal- or panic-level application records. Existing SIMPLE-mode billing/quota, URL-allowlist, trusted-proxy/CORS and fallback-pricing warnings were inspected; their configuration and code were preserved. Later background Gemini refresh logs included a Google Drive 403 during the optional storage-tier lookup. Its Drive client and refresh path are unchanged from `.11`; this is an existing scope/permission limitation, not evidence of a failed migration or unhealthy service. No new authentication was attempted.
+
+Early local checks retained their failures: macOS's long temporary path prevented Unix-socket tests until rerun with `TMPDIR=/tmp`; a Python HTTP client received 403 while the established curl checks and browser passed; archive data inspection required an explicit stdout output option; and console-format logs required the matching parser. None was counted as a passing check, and no production safeguard or application code was changed to make acceptance pass.
+
+Schema 252 prevents ordinary application-only rollback to the recorded `.11` source. Before possible exposure, the updater retains its verified automatic restoration behavior. After exposure, the protected two-stage protocol must preserve current data in a verified rescue before an incident-specific Stage 2 acknowledgement can authorize source-snapshot restoration. Later writes may require separate reconciliation. Healthy production rollback and destructive recovery were not exercised.
+
+No paid inference was initiated, no Anthropic API-key pool was activated, no Claude warm-up schedule was installed/activated, and no login, native profile, credential, billing acknowledgement/configuration or reset-credit redemption action was performed. Existing OpenAI automation settings were preserved. Live provider billing, new native authentication and Windows live acceptance remain deferred. The existing browser was returned to Accounts/Capacity.
+
+## Historical implementation and readiness record
 
 M22 follows the completed M21 release. The user asked Codex to obtain the next prompt from the existing ChatGPT conversation, then explicitly authorized proceeding with it. The report was delivered through the ordinary Brave ChatGPT UI in “Rerun Gateway Test”; the completed response proposed M22 priorities and a dedicated draft PR. It reviewed the published M21 evidence, not production or independently rerun tests.
 
