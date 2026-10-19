@@ -50,7 +50,28 @@ These are targeted reviews, not a whole-repository certification or live-provide
 
 The preferred local-Qwen worker was unavailable because its configured host did not resolve. Each bounded implementation assignment continued through its configured native worker, preserving the same ownership and authorization limits. No local-Qwen source changes occurred.
 
-Final verification results and draft PR identity are recorded after the candidate freezes. Raw logs remain under ignored `.codex/m22-*.log`.
+Qualified implementation commit: `f9ffcad4a236c91e1bdd1120f14e7cff9ffc2ad4`. The clean embedded staging binary reports that revision and `vcs.modified=false`; frontend/backend used the same committed sources. Acceptance-only documentation may follow this commit on the draft branch. Raw logs remain under ignored `.codex/m22-*.log`.
+
+| Check | Result |
+| --- | --- |
+| Full unit-tag Go | 62 packages with tests passed; qualified-client handler contract explicitly enabled |
+| Full ordinary Go | All 51 packages with tests passed |
+| Repository/DTO/API contract | Affected checks passed after adding the expected nullable field to the exact user API contract fixture |
+| PostgreSQL/Redis | Full repository integration suite passed; tri-state single/batch/best-effort roundtrips, immutable deduplication, original billing IDs/amounts and migration/historical sentinel passed |
+| Race | Four affected packages passed uncached: service, handler, repository and DTO |
+| Embedded web/routes | Both packages passed with `unit embed` |
+| Vet/build/lint | Full vet, native server and clean embedded staging build passed; compatible golangci-lint 2.15.0 reports zero new issues; `go mod tidy -diff` clean |
+| Frontend | 354 files / 2,851 Vitest tests passed; full ESLint, TypeScript, locale check and Vite build passed |
+| Compiled Chromium | 10 affected cases passed: mobile/desktop completeness labels, keyboard tooltip behavior, small-cost precision, export snapshot and Claude usage regressions |
+| Python/client | 52 passed: 37 warm-up, 11 profile and four installed official-client loopback contracts |
+| Full-server staging | 35 checks passed against actual disposable schema 252, authenticated routes, SQL billing records and an owned loopback provider |
+| Independent review | Correctness and targeted security review found no unresolved material findings after counter/sequence fixes |
+
+Staging verified A429→B failover/affinity, original account/user/key attribution, count-tokens, invalid downstream authentication and credential/cookie isolation. It then canceled after partial output while the synthetic provider continued: the gateway stored eight observed input tokens, no final output tokens and `usage_observation_complete=false`. Successful responses stored true; a historical fixture stored null with unchanged tokens/cost. Authenticated owner and admin APIs exposed the same tri-state values. No paid/provider request occurred. All owned containers, server processes and synthetic secret configuration were removed afterward.
+
+An early full Go run caught the new nullable field missing from the exact API contract fixture; the expected response was updated without removing assertions. The first full repository integration run caught the new committed roundtrip fixture contaminating later dashboard totals; cleanup now deletes only that test's generated records, and the full suite passed on rerun. New test cleanup lint errors were fixed. Ent's generator temporarily added unused tool checksums; `go mod tidy -diff` identified and removed only those additions, leaving dependency files unchanged. One worker's native cancellation test hit a process-group permission error; the unchanged complete 52-test run subsequently passed. Failed and superseded outputs are retained and are not counted as passing verification. Existing frontend bundle-size/Browserslist warnings remain.
+
+Read-only readiness against the existing disabled acceptance configuration reported qualified 2.1.300, valid config, bound identity with current identity unknown, acknowledgement absent, quota evidence unavailable, no registered hashed job and external live authorization/API-pool state unknown. No settings, native credentials or ledger data were changed by that inspection. Production preflight remained healthy `.11`/schema251/updater1.1.6 with nine accounts; the only production actions in M22 were read-only checks.
 
 ## Readiness matrix
 

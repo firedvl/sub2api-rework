@@ -18,8 +18,22 @@ func TestUsageLogObservationCompleteRoundTrip(t *testing.T) {
 	client := testEntClient(t)
 	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
 	user := mustCreateUser(t, client, &service.User{Email: "observation-" + uuid.NewString() + "@example.com"})
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, "DELETE FROM usage_logs WHERE user_id=$1", user.ID)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE user_id=$1", user.ID)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "DELETE FROM users WHERE id=$1", user.ID)
+		require.NoError(t, err)
+	})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-observation-" + uuid.NewString(), Name: "observation"})
 	account := mustCreateAccount(t, client, &service.Account{Name: "observation-" + uuid.NewString()})
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, "DELETE FROM usage_logs WHERE account_id=$1", account.ID)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "DELETE FROM accounts WHERE id=$1", account.ID)
+		require.NoError(t, err)
+	})
 	complete, incomplete := true, false
 	values := []*bool{nil, &incomplete, &complete}
 	for _, path := range []string{"single", "batch", "best_effort"} {
