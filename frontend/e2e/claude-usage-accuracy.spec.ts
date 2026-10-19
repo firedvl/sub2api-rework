@@ -50,7 +50,11 @@ for (const width of [390, 1280]) {
     await refresh.click()
     await expect(cell).toContainText('0.1%')
     await expect(cell).toContainText('Upstream')
-    await expect(cell).not.toContainText('Stale — refresh needed')
+    await expect(cell.locator('[data-test="usage-provenance"]').first()).not.toContainText('Stale — refresh needed')
+    await expect(cell.locator('[data-test="usage-provenance"]').first().locator('time')).toHaveAttribute('datetime', refreshedAt)
+    // A partial active response must retain the independently observed historical window.
+    await expect(cell).toContainText('0.9%')
+    await expect(cell.locator('[data-test="usage-provenance"]').nth(1).locator('time')).toHaveAttribute('datetime', observedAt)
     await cell.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`claude-usage-${width}.png`), animations: 'disabled' })
     expect(refreshes).toBe(2)
@@ -128,5 +132,88 @@ for (const width of [390, 1280]) {
     await expect(page.locator('body')).toHaveJSProperty('scrollWidth', width)
     await row.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`claude-capacity-${width}.png`), animations: 'disabled' })
+  })
+}
+
+for (const width of [390, 1280]) {
+  test(`Accounts refresh updates the filtered Claude fleet without Query at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    const now = new Date('2026-10-18T12:00:00Z')
+    await page.clock.install({ time: now })
+    await page.addInitScript(() => localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 })))
+    await seedSession(page)
+    await installOperatorApiMock(page)
+    const accounts = [102, 103, 104, 105].map((id, index) => ({
+      ...operatorFixtureAccounts[1], id, name: `Claude fleet ${id}`, platform: 'anthropic',
+      type: index === 2 ? 'setup-token' : index === 3 ? 'apikey' : 'oauth',
+      status: 'active', rate_limited_at: null, rate_limit_reset_at: null,
+      overload_until: null, temp_unschedulable_until: null,
+    }))
+    await page.route('**/api/v1/admin/accounts?*', route => {
+      const url = new URL(route.request().url())
+      const fleet = url.searchParams.get('page_size') === '1000'
+      const secondPage = url.searchParams.get('page') === '2'
+      return route.fulfill({ json: { code: 0, data: {
+        items: fleet ? secondPage ? accounts.slice(2) : accounts.slice(0, 2) : accounts,
+        total: 4, page: secondPage ? 2 : 1, pages: fleet ? 2 : 1, page_size: fleet ? 1000 : 20,
+      } } })
+    })
+    const makeUsage = (utilization: number, source = 'active') => ({
+      source, cached: false, stale: false, updated_at: now.toISOString(),
+      five_hour: { utilization, source, observed_at: now.toISOString(), stale: false, resets_at: '2026-10-18T17:00:00Z' },
+      seven_day: null, seven_day_sonnet: null,
+    })
+    const requests: Array<{ account_ids: number[]; force: boolean }> = []
+    let manualDone = false
+    let automaticDone = false
+    await page.route('**/api/v1/admin/accounts/usage/batch', route => {
+      const body = route.request().postDataJSON()
+      requests.push(body)
+      expect(body.account_ids.slice().sort()).toEqual([102, 103, 104])
+      if (body.force) {
+        manualDone = true
+        return route.fulfill({ json: { code: 0, data: {
+          usage: { 102: makeUsage(25), 103: { ...makeUsage(60), cached: true }, 104: makeUsage(70, 'passive') },
+          errors: { 103: 'Claude refresh temporarily unavailable' },
+        } } })
+      }
+      if (manualDone) automaticDone = true
+      return route.fulfill({ json: { code: 0, data: {
+        usage: { 102: makeUsage(manualDone ? 35 : 20), 103: makeUsage(manualDone ? 45 : 60), 104: makeUsage(70, 'passive') },
+        errors: {},
+      } } })
+    })
+    let directQueries = 0
+    await page.route(/\/api\/v1\/admin\/accounts\/\d+\/usage(?:\?|$)/, route => {
+      directQueries++
+      return route.fulfill({ status: 500, json: { message: 'Unexpected subscription query' } })
+    })
+    await page.goto('/admin/accounts?platform=anthropic&view=capacity')
+    const capacity = page.getByRole('tabpanel', { name: 'Capacity', exact: true })
+    const first = capacity.getByTestId('account-capacity-row').filter({ hasText: 'Claude fleet 102' })
+    const second = capacity.getByTestId('account-capacity-row').filter({ hasText: 'Claude fleet 103' })
+    await expect(first).toContainText('80%')
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(first).toContainText('75%')
+    await second.getByRole('button', { name: 'Show details for Claude fleet 103' }).click()
+    await expect(second).toContainText('Claude refresh temporarily unavailable')
+    expect(requests.at(-1)?.force).toBe(true)
+    await page.getByRole('tab', { name: 'Technical', exact: true }).click()
+    const technical = page.getByRole('tabpanel', { name: 'Technical', exact: true })
+    await expect(technical).toContainText('25%')
+    await expect(technical).toContainText('Claude refresh temporarily unavailable')
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+    await page.clock.fastForward(5_000)
+    await expect.poll(() => automaticDone).toBe(true)
+    await expect(technical).toContainText('35%')
+    await expect(technical).not.toContainText('Claude refresh temporarily unavailable')
+    expect(requests.at(-1)?.force).toBe(false)
+    await page.getByRole('tab', { name: 'Capacity', exact: true }).click()
+    await expect(first).toContainText('65%')
+    await expect(second).toContainText('55%')
+    expect(directQueries).toBe(0)
+    await expect(page.locator('body')).toHaveJSProperty('scrollWidth', width)
+    await first.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`claude-fleet-refresh-${width}.png`), animations: 'disabled' })
   })
 }

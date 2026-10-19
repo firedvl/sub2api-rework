@@ -88,7 +88,7 @@ func anthropicClientContractSSE(w http.ResponseWriter, model string, block map[s
 	start := map[string]any{"type": "text", "text": ""}
 	delta := map[string]any{"type": "text_delta", "text": block["text"]}
 	if block["type"] == "tool_use" {
-		start = map[string]any{"type": "tool_use", "id": block["id"], "name": "Read", "input": map[string]any{}}
+		start = map[string]any{"type": "tool_use", "id": block["id"], "name": block["name"], "input": map[string]any{}}
 		input, _ := json.Marshal(block["input"])
 		delta = map[string]any{"type": "input_json_delta", "partial_json": string(input)}
 	}

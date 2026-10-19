@@ -108,7 +108,7 @@
         <template #pre-actions>
           <button
             type="button"
-            class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="activeQueryLoading"
             @click="loadActiveUsage"
           >
@@ -690,7 +690,7 @@ import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'v
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
-import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import { buildOpenAIUsageRefreshKey, mergeClaudeUsageObservations } from '@/utils/accountUsageRefresh'
 import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
@@ -1428,9 +1428,14 @@ const requestParentBatchUsage = (options?: { force?: boolean }) => {
   props.requestBatchedUsage?.(props.account, options)
 }
 
+const mergeUsage = (incoming: AccountUsageInfo) => props.account.platform === 'anthropic'
+  ? mergeClaudeUsageObservations(usageInfo.value, incoming)
+  : incoming
+
 const syncManagedUsageState = () => {
   if (!isBatchManaged.value || activeQueryLoading.value) return
-  usageInfo.value = props.batchedUsage ?? null
+  usageInfo.value = props.batchedUsage ? mergeUsage(props.batchedUsage) : null
+  if (usageInfo.value) _usageCache.set(props.account.id, { data: usageInfo.value, ts: Date.now() })
   error.value = props.batchedUsageError ?? null
   loading.value = props.batchedUsageLoading === true
 }
@@ -1464,8 +1469,8 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 			: adminAPI.accounts.getUsage(accountID)
     const result = await enqueueUsageRequest(requestAccount, fetchFn)
     if (!unmounted.value && requestToken === usageRequestToken) {
-      usageInfo.value = result
-      _usageCache.set(accountID, { data: result, ts: Date.now() })
+      usageInfo.value = mergeUsage(result)
+      _usageCache.set(accountID, { data: usageInfo.value, ts: Date.now() })
     }
   } catch (e: any) {
     if (!unmounted.value && requestToken === usageRequestToken) {
@@ -1536,11 +1541,11 @@ const loadActiveUsage = async () => {
   try {
     const result = await adminAPI.accounts.getUsage(accountID, 'active', true)
     if (!unmounted.value && requestToken === usageRequestToken) {
-      usageInfo.value = result
-      _usageCache.set(accountID, { data: result, ts: Date.now() })
+      usageInfo.value = mergeUsage(result)
+      _usageCache.set(accountID, { data: usageInfo.value, ts: Date.now() })
       activeQueryError.value = result.error || null
       emit('usage-query-error', activeQueryError.value)
-      emit('usage-loaded', result)
+      emit('usage-loaded', usageInfo.value)
     }
   } catch (e: any) {
     if (!unmounted.value && requestToken === usageRequestToken) {
@@ -1698,8 +1703,8 @@ watch(
   () => [props.batchedUsage, props.batchedUsageError, props.batchedUsageLoading] as const,
   ([usage, batchError, batchLoading]) => {
     if (isBatchManaged.value || batchLoading || batchError || activeQueryLoading.value) return
-    usageInfo.value = usage ?? null
-    if (usage) _usageCache.set(props.account.id, { data: usage, ts: Date.now() })
+    usageInfo.value = usage ? mergeUsage(usage) : null
+    if (usageInfo.value) _usageCache.set(props.account.id, { data: usageInfo.value, ts: Date.now() })
     else _usageCache.delete(props.account.id)
   },
   { deep: true }

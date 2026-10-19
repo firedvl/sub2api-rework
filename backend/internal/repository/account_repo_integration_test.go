@@ -1693,6 +1693,50 @@ func (s *AccountRepoSuite) TestUpdateSessionWindow() {
 
 // --- UpdateExtra ---
 
+func (s *AccountRepoSuite) TestUpdateExtra_ClaudeObservationsCannotRegress() {
+	for _, window := range []struct{ util, reset string }{
+		{"session_window_utilization", "session_window_usage_reset"},
+		{"passive_usage_7d_utilization", "passive_usage_7d_reset"},
+		{"passive_usage_7d_sonnet_utilization", "passive_usage_7d_sonnet_reset"},
+		{"passive_usage_7d_oi_utilization", "passive_usage_7d_oi_reset"},
+	} {
+		observed := time.Now().UTC().Truncate(time.Second).Add(123456789*time.Nanosecond)
+		reset := observed.Add(time.Hour).Unix()
+		account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "ordered-claude", Extra: map[string]any{
+			window.util: 0.3, window.reset: reset, window.util + "_source": "active", window.util + "_observed_at": observed.Format(time.RFC3339Nano),
+		}})
+		if window.util == "session_window_utilization" {
+			s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, time.Unix(reset, 0)))
+		}
+		for _, at := range []time.Time{observed.Add(-time.Second), observed} {
+			s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{window.util: 0.9, window.reset: reset + 1, window.util + "_source": "passive", window.util + "_observed_at": at.Format(time.RFC3339Nano)}))
+			got, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(0.3, got.Extra[window.util])
+			s.Require().Equal("active", got.Extra[window.util+"_source"])
+			s.Require().Equal(observed.Format(time.RFC3339Nano), got.Extra[window.util+"_observed_at"])
+			if window.util == "session_window_utilization" {
+				s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, time.Unix(reset+1, 0)))
+				got, err = s.repo.GetByID(s.ctx, account.ID)
+				s.Require().NoError(err)
+				s.Require().Equal(reset, got.SessionWindowEnd.Unix(), "rejected observation must not change the separate session reset")
+			}
+		}
+		next := observed.Add(time.Second)
+		s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{window.util: 0.4, window.reset: reset + 2, window.util + "_source": "passive", window.util + "_observed_at": next.Format(time.RFC3339Nano)}))
+		got, err := s.repo.GetByID(s.ctx, account.ID)
+		s.Require().NoError(err)
+		s.Require().Equal(0.4, got.Extra[window.util])
+		s.Require().Equal("passive", got.Extra[window.util+"_source"])
+		if window.util == "session_window_utilization" {
+			s.Require().NoError(s.repo.UpdateSessionWindowEnd(s.ctx, account.ID, time.Unix(reset+2, 0)))
+			got, err = s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			s.Require().Equal(reset+2, got.SessionWindowEnd.Unix())
+		}
+	}
+}
+
 func (s *AccountRepoSuite) TestUpdateExtra_ClaudeResetOnlyPreservesConcurrentSameCycleSample() {
 	for _, window := range []struct{ util, reset string }{
 		{"session_window_utilization", "session_window_usage_reset"},

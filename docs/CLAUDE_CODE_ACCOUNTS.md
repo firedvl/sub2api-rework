@@ -2,7 +2,7 @@
 
 Release `.11` delivers the explicit API-key-only Messages endpoint and local tools for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced. [M21 acceptance](M21_ACCEPTANCE.md) records the deployed revision and remaining live proof.
 
-## Provider contract, checked 2026-10-17
+## Provider contract, checked 2026-10-19
 
 [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) prohibit third-party services from collecting subscription credentials or routing users' requests through those credentials. Personal use of the official client is different: [native CLI scripting](https://code.claude.com/docs/en/headless) and [personal Agent SDK use](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) have supported paths. These permissions do not authorize a subscription-token pool in this gateway.
 
@@ -70,6 +70,7 @@ export ANTHROPIC_BASE_URL=https://gateway.fdvl.net/anthropic-api
 export ANTHROPIC_API_KEY="$SUB2API_KEY"
 unset ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
 unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+unset CLAUDE_CODE_USE_ANTHROPIC_AWS
 # --bare uses API-key auth and excludes OAuth/Keychain/config discovery.
 # Interactive use; any prompt you submit consumes API usage.
 claude --bare --model claude-sonnet-4-6
@@ -81,7 +82,7 @@ PowerShell:
 $env:ANTHROPIC_BASE_URL = 'https://gateway.fdvl.net/anthropic-api'
 $env:ANTHROPIC_API_KEY = $env:SUB2API_KEY
 'ANTHROPIC_AUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY' | ForEach-Object {
+  'CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY','CLAUDE_CODE_USE_ANTHROPIC_AWS' | ForEach-Object {
     Remove-Item "Env:$_" -ErrorAction SilentlyContinue
   }
 claude --bare --model claude-sonnet-4-6
@@ -95,13 +96,50 @@ The base URL exposes **POST `/anthropic-api/v1/messages`** and **POST `/anthropi
 
 Normal downstream authentication, group assignment, model allowlists, request size limits and billing eligibility still apply. The new endpoint requires an Anthropic group, then attaches a private typed policy to the request context. Clients cannot weaken it with a JSON/header value. Candidate lists, preferred model routes, sticky selections, mixed/load-aware selection, hydrated snapshots and final account refreshes reject other authentication types. Forwarding and credential retrieval check again before upstream access. Failed hydration releases an acquired concurrency slot.
 
-API-only affinity uses a reserved namespace. Legacy session IDs starting with that namespace are escaped to prevent a caller-controlled collision. Existing affinity, cooldown, rate-limit recovery, priority, concurrency admission, bounded retries and account failover are reused. A quota-exhausted API pool returns an error; it does not try OAuth. Once response data is written, a failed stream cannot silently move to another account. Usage records retain the selected upstream account ID and the original downstream user/key attribution.
+API-only affinity uses a reserved namespace and hashes the session identity together with the authenticated downstream key ID. Identical client session IDs on different downstream keys do not share affinity. Legacy session IDs starting with that namespace are escaped. The first request after this change establishes a new API-only binding. Subsequent turns prefer that account while it remains authorized, available and model-compatible. Failover can lose upstream-local prompt-cache benefits; conversation history still travels with the request.
+
+Anthropic's [API limits](https://platform.claude.com/docs/en/api/rate-limits) apply at organization level, with workspace controls. Multiple keys in the same organization do not create independent provider capacity. Request/token limit, remaining and reset headers describe API rate capacity; Retry-After directs retry timing. They do not describe subscription five-hour windows. The [Usage and Cost Admin API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) supports organization reports and API-key/workspace attribution with appropriately authorized Admin API credentials; workspace-scoped inference keys do not grant that reporting access. M23 neither creates those credentials nor adds a billing poller. Existing gateway usage records remain observations, not a provider invoice.
+
+The canonical scheduler selects the lowest configured priority, then the lowest effective concurrency load, then least-recent use, with random tie selection. Load factor changes effective capacity; actual admission still respects the account's concurrency slots. Equivalent independent sessions can distribute without issuing extra requests. Cooldown, rate-limit recovery and bounded failover reuse the same scheduler. API-key accounts do not have subscription five-hour utilization weights. A quota-exhausted API pool returns an error; it does not try OAuth. Once response data is written, a failed stream cannot silently move to another account. Usage records retain the selected upstream account ID and original downstream user/key attribution.
 
 M21 rechecks authoritative account state during candidate admission, final slot admission and before every wire attempt. Missing/read-failed, reclassified, disabled, rate-limited or removed-from-group accounts fail closed. Credential/model/endpoint/authentication-scheme, proxy or concurrency changes require a new selection. Routine usage/LRU timestamps do not invalidate authorization. Permanent client errors such as 404, 413 and 422 are not retried even under custom error-code settings. Transient same-account retries remain bounded; failover never substitutes an authentication mode or model.
 
-Usage and cost totals record observed gateway usage. After a disconnect, that record can omit provider work performed later; it is not guaranteed final upstream spend. Local limits are soft and require provider-side spending controls. Cancellation completeness is not persisted as a separate usage-log field.
+Usage and cost totals record observed gateway usage. After a disconnect, that record can omit provider work performed later; it is not guaranteed final upstream spend. M22 persists complete, incomplete or unknown gateway observation status. Local limits are soft and require provider-side spending controls.
 
 The endpoint forces the existing Anthropic API-key passthrough without changing saved account settings. It skips legacy mock warm-up/suggestion interception, web-search emulation and Bedrock channel rewriting. Client authentication and cookies are removed before the selected account's upstream authentication is applied. Existing trusted operator header overrides remain an administrative capability. No fabricated official-client fingerprint is added by this route.
+
+### macOS setup and verification
+
+Use the shell block above in a subshell so gateway variables leave your normal terminal and native subscription profiles unchanged:
+
+```sh
+(
+  export ANTHROPIC_BASE_URL=https://gateway.fdvl.net/anthropic-api
+  export ANTHROPIC_API_KEY="${SUB2API_KEY:?Load your downstream key from your secret source first}"
+  unset ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+  unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+  unset CLAUDE_CODE_USE_ANTHROPIC_AWS
+  claude --bare --model claude-sonnet-4-6
+)
+```
+
+Choose a model allowed by both the group and upstream accounts. No model discovery endpoint is supplied by this route. In the client, run `/status` before submitting a prompt: the base URL must end in `/anthropic-api`, and the credential source must name `ANTHROPIC_API_KEY`. A native claude.ai login is the wrong billing mode for this setup. Setting only the base URL does not replace a saved subscription credential. `ANTHROPIC_AUTH_TOKEN` is also accepted by Sub2API's bearer authentication; set only one credential variable. Do not log out or copy native credentials to configure the gateway.
+
+For full hooks/plugins/MCP and persisted history, use a separate private API configuration directory with the same gateway variables, omit `--bare`, and exclude project/local settings with `--setting-sources user`. Inspect that profile's settings and `/status` for overrides. Keep managed machine policy intact. The native subscription launcher deliberately removes gateway variables and retains its own profiles.
+
+Confirm routing in the admin usage log using the downstream key/user and selected upstream account. Scheduler diagnostics report admission/exclusion and failover without raw native session IDs. A 401 indicates downstream authentication or upstream credential failure; a group/model rejection requires matching group membership and model mappings. A fully busy/cooling pool can return an availability error; check account status, concurrency and cooldown before changing priorities. Permanent invalid requests do not trigger account-shopping retries. See the [gateway connection guide](https://code.claude.com/docs/en/llm-gateway-connect) and [protocol reference](https://code.claude.com/docs/en/llm-gateway-protocol) for client headers and feature requirements.
+
+Configuration checklist: two authorized API-key accounts; one Anthropic group containing both; compatible model mappings; suitable priority, load factor and concurrency; provider spending controls; one downstream key bound to that group; explicit API-only URL and credential; `/status` checked; selected-account attribution checked. Supplying real accounts and authorizing a bounded paid canary remain separate operator actions.
+
+## Automatic Claude usage refresh
+
+Accounts **Refresh** queries eligible Anthropic OAuth usage across the filtered account fleet, including rows outside the current table page. It waits for the batch and reports partial failures. Capacity and Technical consume the same observations on mobile and desktop; **Query** remains an optional account diagnostic.
+
+Auto Refresh may update local status every 5, 10, 15 or 30 seconds. Eligible Claude observations use the existing three-minute active cache; short UI intervals do not make an upstream usage call each tick. Concurrent requests for one account share a fetch; a fleet batch runs at most six workers. Manual Refresh bypasses the success cache. Both paths honor an upstream 429 cooldown and Retry-After. Periodic errors back off for 1, 2, 4, 8, then 16 minutes, plus jitter. A manual retry may bypass a non-429 error delay.
+
+Only Anthropic OAuth accounts with an access token and without the disabled/synthetic status use the existing active observation path. A saved scope must include `user:profile`; legacy OAuth imports without saved scope metadata retain their existing query behavior. SetupToken accounts keep passive samples; API-key accounts have no subscription usage windows. This observation mechanism is an existing compatibility path, not a documented first-party personal quota API or permission to pool subscription credentials. It does not send inference or authorize warm-up.
+
+Source labels distinguish fresh/cached upstream observations, passive samples, stale data and unavailable data. Each window keeps its actual observation timestamp; reading a cache or receiving a partial response does not renew another window. Refresh failures remain visible beside retained observations. Stale capacity remains unknown rather than becoming available quota. The displayed upstream observation time tells you when usage was measured, not when the UI last refreshed.
 
 ## Manual Test Connection
 
@@ -129,14 +167,12 @@ A manual Claude test now needs `message_start`, a terminal `message_delta.stop_r
 | Subscription warm-up/pooling | Local official-client scheduling is opt-in and disabled by default; no subscription credential pooling or gateway warm-up |
 | Native login isolation | Offline subprocess/directory checks plus official contract; real two-account login/Keychain/Windows acceptance pending |
 
-See [M20 validation](M20_VALIDATION.md) for exact executed checks and review outcomes. Synthetic tests do not prove live provider access, subscription activation, actual billing or every feature of the current client. The installed-client loopback check verifies the requests observed by its stub; it does not measure or enforce all network egress.
+See [M23 acceptance](M23_ACCEPTANCE.md), [M21 acceptance](M21_ACCEPTANCE.md) and [M20 validation](M20_VALIDATION.md) for exact executed checks and review outcomes. Synthetic tests do not prove live provider access, subscription activation, actual billing or every feature of the current client. The installed-client loopback check verifies the requests observed by its stub; it does not measure or enforce all network egress.
 
 ## Staging, release and rollback
 
-M21 started from healthy `.10`, application revision `33badf364d01a025740158b15e54ebf88b10aa41`, image digest `sha256:7c276b3cd58e48c8095d46d8d439c5d6f7f6b8ad10968c273e5b73e9748202f2`, schema 251 and updater 1.1.6. Nine existing accounts and 37 backups were present; no Anthropic API-key account existed.
+M23 read-only production preflight verified healthy `.12`, application revision `40c1f7b4adb62b18b1317f8c6b9e10e30e8c1704`, schema 252 and idle updater 1.1.6. All nine accounts remain; there is no Anthropic API-key pool. This assignment prepares a draft PR only. It does not authorize merge, publication, deployment or production configuration changes.
 
 The API-only endpoint requires no migration or saved-route mutation. Code deployment is separate from activation: it creates no API accounts, changes no existing routing or billing configuration, and installs no warm-up schedule. Use matching frontend/backend from the reviewed revision, synthetic staging and the full release gates. Actual API activation requires authorized API accounts, model access and provider spending controls; live paid acceptance remains separately gated. Never redeem reset credits to complete a test.
 
-The M21 task authorizes release after independent reviews and local/synthetic gates pass. Follow [the host updater procedure](UPDATER.md), immutable manifest/image checks and [M21 acceptance](M21_ACCEPTANCE.md); preserve every existing backup. Recheck production immediately before rollout. With unchanged schema 251, `.10` and its digest above are the next release's application rollback target. Do not use an older schema-249 image with the current database.
-
-Rolling back to `.10` removes the new endpoint. API clients must then stop or fail closed; do not silently replace their base URL with `/v1` because that loses the API-only guarantee. Profile data stays local and the official client remains usable through documented direct commands. Do not restore the database, change accounts, copy credentials or redeem credits as an application rollback.
+Any later release needs separate authorization and [the host updater procedure](UPDATER.md), immutable manifest/image checks and schema-252 rollback gates. Preserve every existing backup and recheck production immediately before rollout. Never silently replace the API-only base URL with `/v1`; that loses its authentication guarantee. Profile data stays local. Do not restore the database, change accounts, copy credentials or redeem credits as an application rollback.

@@ -13,22 +13,22 @@ import (
 func qualifyStagingSameSchemaRollback(t *testing.T, docker string, compose []string, service *Service, runner *stagingRunner) {
 	t.Helper()
 	source := stagingRecoverySource{
-		version:  "0.2.3-rework.8",
-		image:    "ghcr.io/firedvl/sub2api-rework@sha256:da3f32d69e04a8c2ae5ece8da023ab4f131e15d11031eed1a99f39cc410f5604",
-		revision: "c066ff092042455e81759e9b154bfaaa92ddedbb", migration: 251,
+		version:  "0.2.3-rework.12",
+		image:    "ghcr.io/firedvl/sub2api-rework@sha256:5290dd50af481f7203dc35195dc8eb90d2a09b8848cc1d2d1f95889ba7dcd1fa",
+		revision: "40c1f7b4adb62b18b1317f8c6b9e10e30e8c1704", migration: 252,
 	}
 	if stagingCandidateMigration != source.migration {
 		t.Fatal("same-schema rollback fixture needs a separate review when candidate migrations change")
 	}
 	if output, err := runStagingCommand(docker, "pull", source.image); err != nil {
-		t.Fatalf("pull immutable .8 rollback source: %v: %s", err, output)
+		t.Fatalf("pull immutable .12 rollback source: %v: %s", err, output)
 	}
 	assertStagingRecoveryProvenance(t, docker, source)
 	if err := rewriteEnvironmentImage(service.policy.EnvironmentFile, source.image); err != nil {
 		t.Fatal(err)
 	}
 	if output, err := runStagingCommand(docker, append(append([]string(nil), compose...), "up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "180", "sub2api")...); err != nil {
-		t.Fatalf("advance disposable fixture to .8: %v: %s", err, output)
+		t.Fatalf("advance disposable fixture to .12: %v: %s", err, output)
 	}
 	// Reset only the disposable test state after the preceding recovery scenarios.
 	state := stagingRecoveryState(t, service)

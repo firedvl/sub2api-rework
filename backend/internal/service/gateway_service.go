@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -262,10 +263,7 @@ func shortSessionHash(sessionHash string) string {
 	if sessionHash == "" {
 		return ""
 	}
-	if len(sessionHash) <= 8 {
-		return sessionHash
-	}
-	return sessionHash[:8]
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(sessionHash)))[:8]
 }
 
 func redactAuthHeaderValue(v string) string {
@@ -908,14 +906,14 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		if uid != nil && uid.SessionID != "" {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
-				"session_id", uid.SessionID,
-				"device_id", uid.DeviceID,
+				"has_session_id", true,
+				"has_device_id", uid.DeviceID != "",
 				"is_new_format", uid.IsNewFormat,
 			)
 			return uid.SessionID
 		}
 		slog.Info("sticky.hash_metadata_parse_failed",
-			"metadata_user_id", parsed.MetadataUserID,
+			"has_metadata_user_id", true,
 			"parsed_nil", uid == nil,
 		)
 	}

@@ -1,4 +1,35 @@
-import type { Account } from '@/types'
+import type { Account, AccountUsageInfo } from '@/types'
+
+const claudeUsageWindows = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_fable'] as const
+
+// Requests can finish out of order, and Claude windows have independent observations.
+export const mergeClaudeUsageObservations = (previous: AccountUsageInfo | null | undefined, incoming: AccountUsageInfo): AccountUsageInfo => {
+  if (!previous || previous === incoming) return incoming
+  const merged = { ...incoming }
+  let retained = false
+  for (const key of claudeUsageWindows) {
+    const current = previous[key]
+    const next = incoming[key]
+    if (!current) continue
+    const currentTime = Date.parse(current.observed_at || '')
+    const nextTime = Date.parse(next?.observed_at || '')
+    if (!next || (Number.isFinite(currentTime) && (!Number.isFinite(nextTime) || currentTime > nextTime)) ||
+      ((currentTime === nextTime || (!Number.isFinite(currentTime) && !Number.isFinite(nextTime))) &&
+        (current.source || previous.source) === 'active' && (next.source || incoming.source) === 'passive')) {
+      merged[key] = current
+      retained = true
+    }
+  }
+  if (!retained) return incoming
+  const sources = new Set(claudeUsageWindows.map(key => merged[key]?.source).filter(Boolean))
+  if (sources.size > 1) merged.source = 'mixed'
+  else if (sources.size === 1) merged.source = sources.values().next().value
+  if (Date.parse(previous.updated_at || '') > Date.parse(incoming.updated_at || '') || !incoming.updated_at) {
+    merged.updated_at = previous.updated_at
+  }
+  merged.stale = claudeUsageWindows.some(key => merged[key]?.stale === true)
+  return merged
+}
 
 const normalizeUsageRefreshValue = (value: unknown): string => {
   if (value == null) return ''

@@ -2040,7 +2040,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
 				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
-					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
+					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", shortSessionHash(sessionHash), selected.ID, err)
 				}
 			}
 			if s.debugModelRoutingEnabled() {
@@ -2165,7 +2165,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
 		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
-			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
+			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", shortSessionHash(sessionHash), selected.ID, err)
 		}
 	}
 
@@ -2306,7 +2306,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		if selected != nil {
 			if sessionHash != "" && s.cache != nil {
 				if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
-					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
+					logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", shortSessionHash(sessionHash), selected.ID, err)
 				}
 			}
 			if s.debugModelRoutingEnabled() {
@@ -2432,7 +2432,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	// 4. 建立粘性绑定
 	if sessionHash != "" && s.cache != nil {
 		if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID); err != nil {
-			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
+			logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", shortSessionHash(sessionHash), selected.ID, err)
 		}
 	}
 

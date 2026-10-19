@@ -187,7 +187,7 @@ func TestClaudePassiveUtilizationOnlyDoesNotInheritActiveReset(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Hour)
 	repo := &claudeAccuracyRepo{account: &Account{ID: 42, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{}}}
 	svc := &AccountUsageService{accountRepo: repo, usageLogRepo: &usageBatchLogRepoStub{}, cache: &UsageCache{}}
-	svc.syncActiveToPassive(t.Context(), 42, &UsageInfo{FiveHour: &UsageProgress{Utilization: 80, ResetsAt: &past}})
+	require.NoError(t, svc.syncActiveToPassive(t.Context(), 42, &UsageInfo{FiveHour: &UsageProgress{Utilization: 80, ResetsAt: &past}}))
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-5h-utilization", "0.1")
 	newRateLimitServiceForTest(repo).UpdateSessionWindow(t.Context(), repo.account, headers)

@@ -93,6 +93,9 @@ func (s *claudeUsageService) FetchUsageWithOptions(ctx context.Context, opts *se
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return nil, service.NewClaudeUsageRateLimitError(resp.Header)
+		}
 		msg := fmt.Sprintf("Claude usage API returned status %d", resp.StatusCode)
 		return nil, infraerrors.New(http.StatusInternalServerError, "UPSTREAM_ERROR", msg)
 	}

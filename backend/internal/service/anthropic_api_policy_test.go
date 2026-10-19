@@ -200,10 +200,17 @@ func TestAnthropicAPIOnlyRetryClassification(t *testing.T) {
 func TestAnthropicAPIOnlySessionIsolationAndSlotRelease(t *testing.T) {
 	plain := context.Background()
 	ctx := WithAnthropicAPIOnly(plain)
-	require.Equal(t, "", ScopeAnthropicAPISession(ctx, ""))
-	require.Equal(t, "session", ScopeAnthropicAPISession(plain, "session"))
-	require.Equal(t, "anthropic-api:session", ScopeAnthropicAPISession(ctx, "session"))
-	require.Equal(t, "legacy:anthropic-api:session", ScopeAnthropicAPISession(plain, "anthropic-api:session"))
+	require.Equal(t, "", ScopeAnthropicAPISession(ctx, "", 1))
+	require.Equal(t, "session", ScopeAnthropicAPISession(plain, "session", 1))
+	scoped := ScopeAnthropicAPISession(ctx, "session", 1)
+	require.True(t, strings.HasPrefix(scoped, "anthropic-api:1:"))
+	require.NotContains(t, scoped, "session")
+	require.Equal(t, scoped, ScopeAnthropicAPISession(ctx, "session", 1))
+	require.NotEqual(t, scoped, ScopeAnthropicAPISession(ctx, "session", 2))
+	require.Equal(t, "", ScopeAnthropicAPISession(ctx, "session", 0))
+	require.Equal(t, "", ScopeAnthropicAPISession(ctx, "session", -1))
+	require.Equal(t, "legacy:"+scoped, ScopeAnthropicAPISession(plain, scoped, 1))
+	require.NotEqual(t, scoped, ScopeAnthropicAPISession(ctx, scoped, 2), "client input cannot impersonate a scoped key")
 	require.True(t, IsAnthropicAPIOnly(context.WithoutCancel(ctx)))
 	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}
 	released := 0

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '../accountUsageRefresh'
+import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey, mergeClaudeUsageObservations } from '../accountUsageRefresh'
 
 describe('buildOpenAIUsageRefreshKey', () => {
   it('会在 codex 快照变化时生成不同 key', () => {
@@ -157,5 +157,83 @@ describe('buildGrokUsageRefreshKey', () => {
       platform: 'openai',
       extra: { grok_usage_snapshot: { subscription_tier: 'SuperGrok' } }
     } as any)).toBe('')
+  })
+})
+
+
+describe('mergeClaudeUsageObservations', () => {
+  const observation = (utilization: number, observed_at: string, source: 'active' | 'passive') => ({
+    utilization, observed_at, source, resets_at: null, remaining_seconds: 0,
+  })
+
+  it('does not borrow another window timestamp for a legacy observation', () => {
+    const previous = {
+      source: 'mixed' as const, updated_at: '2026-10-18T10:03:00Z',
+      five_hour: observation(30, '2026-10-18T10:03:00Z', 'active'),
+      seven_day: { utilization: 90, source: 'passive' as const, stale: true, resets_at: null, remaining_seconds: 0 },
+      seven_day_sonnet: null,
+    }
+    const incoming = {
+      source: 'active' as const, updated_at: '2026-10-18T10:02:00Z',
+      five_hour: observation(25, '2026-10-18T10:02:00Z', 'active'),
+      seven_day: observation(40, '2026-10-18T10:02:00Z', 'active'), seven_day_sonnet: null,
+    }
+    const merged = mergeClaudeUsageObservations(previous, incoming)
+    expect(merged.five_hour).toBe(previous.five_hour)
+    expect(merged.seven_day).toBe(incoming.seven_day)
+    expect(merged.updated_at).toBe(previous.updated_at)
+  })
+
+  it('keeps the latest observation independently for each Claude window', () => {
+    const earlier = '2026-10-18T10:00:00Z'
+    const later = '2026-10-18T10:01:00Z'
+    const previous = {
+      source: 'active' as const, updated_at: later,
+      five_hour: observation(30, later, 'active'),
+      seven_day: observation(60, earlier, 'active'), seven_day_sonnet: null,
+      seven_day_fable: { ...observation(12, earlier, 'passive'), stale: true },
+    }
+    const incoming = {
+      source: 'passive' as const, cached: true, updated_at: later,
+      five_hour: observation(20, earlier, 'passive'),
+      seven_day: observation(40, later, 'passive'), seven_day_sonnet: null,
+    }
+    const merged = mergeClaudeUsageObservations(previous, incoming)
+    expect(merged.five_hour).toBe(previous.five_hour)
+    expect(merged.seven_day).toBe(incoming.seven_day)
+    expect(merged.seven_day_fable).toBe(previous.seven_day_fable)
+    expect(merged.source).toBe('mixed')
+    expect(merged.cached).toBe(true)
+    expect(merged.stale).toBe(true)
+    expect(merged.updated_at).toBe(later)
+  })
+
+  it('does not turn cached active data into a newer observation or lose refresh failures', () => {
+    const previous = {
+      source: 'active' as const, updated_at: '2026-10-18T10:01:00Z',
+      five_hour: observation(30, '2026-10-18T10:01:00Z', 'active'),
+      seven_day: null, seven_day_sonnet: null,
+    }
+    const merged = mergeClaudeUsageObservations(previous, {
+      source: 'passive', cached: true, updated_at: '2026-10-18T10:00:00Z',
+      five_hour: observation(90, '2026-10-18T10:00:00Z', 'passive'),
+      seven_day: null, seven_day_sonnet: null, error: 'Refresh failed',
+    })
+    expect(merged.five_hour).toBe(previous.five_hour)
+    expect(merged.updated_at).toBe(previous.updated_at)
+    expect(merged.source).toBe('active')
+    expect(merged.error).toBe('Refresh failed')
+  })
+
+  it('keeps active data over an equal-time passive replay, while allowing a later reset to reduce usage', () => {
+    const previous = {
+      source: 'active' as const, updated_at: '2026-10-18T10:01:00Z',
+      five_hour: observation(90, '2026-10-18T10:01:00Z', 'active'),
+      seven_day: null, seven_day_sonnet: null,
+    }
+    const replay = { ...previous, source: 'passive' as const, five_hour: observation(20, previous.updated_at, 'passive') }
+    expect(mergeClaudeUsageObservations(previous, replay).five_hour).toBe(previous.five_hour)
+    const reset = { ...replay, five_hour: observation(0, '2026-10-18T15:01:00Z', 'passive') }
+    expect(mergeClaudeUsageObservations(previous, reset).five_hour).toBe(reset.five_hour)
   })
 })
