@@ -1,5 +1,15 @@
 # M22 operational readiness
 
+## Authorized .12 release
+
+The operator has now authorized the controlled `0.2.3-rework.12` release: merge PR305, publish through the established GitHub publisher, and install through host updater 1.1.6. This supersedes the earlier draft-only boundary below for this release. Paid inference, warm-up activation, authentication changes, API-key pool activation, billing changes and reset-credit redemption remain unauthorized.
+
+Release preparation changes only the embedded version to `.12` and supported maximum schema to252. Minimum schema239, upstream `v0.2.14` and its SHA, artifact/repository identities, stable channel, manual policy and minimum updater1.1.6 remain unchanged. Migration252 adds a nullable boolean with no default or historical backfill; historical token and cost values must remain unchanged. Complete gateway observations do not establish final provider charges.
+
+Installation requires a planned service interruption while the updater quiesces application writers, verifies the source251 snapshot, migrates in its migration-only container and checks exact target252 before normal acceptance. Schema advancement blocks ordinary application-only rollback to `.11`. Before exposure the updater retains its verified automatic restoration path. After possible exposure, recovery requires the protected two-stage rescue protocol and a separate incident-specific destructive recovery acknowledgement; restoring the source snapshot can require reconciliation of later writes. No recovery exercise is implied by this release authorization.
+
+Final release identities, qualification and production results will be recorded here after the corresponding gates complete. The historical sections below retain their original scope and evidence.
+
 M22 follows the completed M21 release. The user asked Codex to obtain the next prompt from the existing ChatGPT conversation, then explicitly authorized proceeding with it. The report was delivered through the ordinary Brave ChatGPT UI in “Rerun Gateway Test”; the completed response proposed M22 priorities and a dedicated draft PR. It reviewed the published M21 evidence, not production or independently rerun tests.
 
 Starting main: `a62270c9ab9ccc98d8a754b5c22774c0374a20eb`. Branch: `codex/m22-operational-readiness`. Production remains `0.2.3-rework.11`, application `ec84acdba727b2b0f36a630fffcf926a379e7470`, schema 251, updater 1.1.6. Read-only preflight confirmed healthy/idle updater state and nine accounts.
