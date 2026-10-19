@@ -325,6 +325,12 @@ export default {
 
   // Usage
   usage: {
+    observationCompleteness: 'Usage observation',
+    observationComplete: 'Complete response observed',
+    observationPartial: 'Partial response observed',
+    observationUnknown: 'Observation completeness unknown',
+    observationCostDisclaimer: 'Costs reflect gateway observations, not a final provider invoice. Provider work after a disconnect may be missing, even when a complete response was observed.',
+
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',

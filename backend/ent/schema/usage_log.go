@@ -41,6 +41,8 @@ func (UsageLog) Fields() []ent.Field {
 		field.String("model").
 			MaxLen(100).
 			NotEmpty(),
+		field.Bool("usage_observation_complete").Optional().Nillable().
+			Comment("Gateway response observation completed; NULL is unknown, not final provider spend"),
 		// RequestedModel stores the client-requested model name for stable display and analytics.
 		// NULL means historical rows written before requested_model dual-write was introduced.
 		field.String("requested_model").

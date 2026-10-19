@@ -24,6 +24,8 @@ const (
 	FieldRequestID = "request_id"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
+	// FieldUsageObservationComplete holds the string denoting the usage_observation_complete field in the database.
+	FieldUsageObservationComplete = "usage_observation_complete"
 	// FieldRequestedModel holds the string denoting the requested_model field in the database.
 	FieldRequestedModel = "requested_model"
 	// FieldUpstreamModel holds the string denoting the upstream_model field in the database.
@@ -165,6 +167,7 @@ var Columns = []string{
 	FieldAccountID,
 	FieldRequestID,
 	FieldModel,
+	FieldUsageObservationComplete,
 	FieldRequestedModel,
 	FieldUpstreamModel,
 	FieldUpstreamResponseModel,
@@ -323,6 +326,11 @@ func ByRequestID(opts ...sql.OrderTermOption) OrderOption {
 // ByModel orders the results by the model field.
 func ByModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldModel, opts...).ToFunc()
+}
+
+// ByUsageObservationComplete orders the results by the usage_observation_complete field.
+func ByUsageObservationComplete(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsageObservationComplete, opts...).ToFunc()
 }
 
 // ByRequestedModel orders the results by the requested_model field.

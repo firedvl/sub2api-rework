@@ -255,6 +255,8 @@ func TestGatewayAnthropicAPIOnlyOfficialClientContract(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		select {
 		case usage := <-usageRepo.created:
+			require.NotNil(t, usage.UsageObservationComplete)
+			require.True(t, *usage.UsageObservationComplete)
 			require.Equal(t, int64(72), usage.AccountID)
 			require.Equal(t, key.ID, usage.APIKeyID)
 			require.Equal(t, key.UserID, usage.UserID)
@@ -327,6 +329,16 @@ func TestGatewayAnthropicAPIOnlyOfficialClientContract(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("client cancellation did not close the gateway and upstream stream")
 		}
+	}
+	select {
+	case usage := <-usageRepo.created:
+		require.NotNil(t, usage.UsageObservationComplete)
+		require.False(t, *usage.UsageObservationComplete)
+		require.Equal(t, int64(72), usage.AccountID)
+		require.EqualValues(t, 8, usage.InputTokens)
+		require.EqualValues(t, 0, usage.OutputTokens)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled observed response did not retain incomplete usage")
 	}
 	mu.Lock()
 	defer mu.Unlock()

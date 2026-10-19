@@ -908,6 +908,21 @@ describe('admin UsageView model audit export', () => {
 		vi.useRealTimers()
 	})
 
+  it.each([
+    [true, 'usage.observationComplete'], [false, 'usage.observationPartial'],
+    [null, 'usage.observationUnknown'], [undefined, 'usage.observationUnknown'],
+  ])('exports observation completeness %s', async (complete, expected) => {
+    exportList.mockResolvedValue({ items: [{ actual_cost: 0.42, total_cost: 0.22, usage_observation_complete: complete }], total: 1, pages: 1 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    await (wrapper.vm as any).exportToExcel()
+    expect(aoaToSheet.mock.calls[0][0][0].at(-1)).toBe('usage.observationCompleteness')
+    expect(sheetAddAoa.mock.calls[0][1][0].at(-1)).toBe(expected)
+    expect(sheetAddAoa.mock.calls[0][1][0]).toContain('0.420000')
+    wrapper.unmount()
+  })
+
 	it('exports requested, sent, response, and mismatch as separate admin columns', async () => {
 		const wrapper = mountRouteFilteredUsageView()
 		vi.advanceTimersByTime(120)

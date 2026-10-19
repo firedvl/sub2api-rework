@@ -2,6 +2,7 @@
   <AppLayout>
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('usage.observationCostDisclaimer') }}</p>
 
       <div class="space-y-4">
         <div class="card p-4">
@@ -219,6 +220,7 @@
 </template>
 
 <script setup lang="ts">
+import { usageObservationKey } from '@/utils/usageObservation'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -677,6 +679,7 @@ const exportToCSV = async () => {
       'Original Cost',
       'First Token (ms)',
       'Duration (ms)',
+      t('usage.observationCompleteness'),
     ]
     const rows = allLogs.map((log) => [
       log.created_at,
@@ -696,6 +699,7 @@ const exportToCSV = async () => {
       log.total_cost.toFixed(8),
       log.first_token_ms ?? '',
       log.duration_ms ?? '',
+      t(usageObservationKey(log.usage_observation_complete)),
     ].map(escapeCSVValue))
     const csvContent = [
       headers.map(escapeCSVValue).join(','),

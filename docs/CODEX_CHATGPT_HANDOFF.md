@@ -1,5 +1,27 @@
 # M20 recovery consultation — 2026-10-18
 
+## M22 follow-up delivered — 2026-10-18
+
+Computer Use and Brave access were restored. Codex sent the pending sanitized M22 report through the ordinary UI in the exact existing “Rerun Gateway Test” conversation. The message appeared under “You said”; a completed reply appeared under “ChatGPT said.” No credentials, private account data or secret logs were sent.
+
+Reviewed branch head: `7a08442f2468ea436747baee5690c164618bc08b`, draft [PR305](https://github.com/firedvl/sub2api-rework/pull/305). Exact question: identify concrete defects or offline requirements after the completed M22 checks, or state that implementation is complete and separate the operator decisions. The message linked [M22 acceptance](M22_ACCEPTANCE.md), described the nullable usage field and read-only readiness command, and supplied the test totals and 50-check disposable compatibility evidence.
+
+ChatGPT said it reviewed the public PR diff and acceptance report, found no new material defect, and considered the requested implementation and offline acceptance complete. It did not rerun tests. Its only next prompt requested a read-only check of migration252, release metadata and the updater recovery boundary, with no release or activation.
+
+Codex completed that source check and sent the results back. Remote main remained `a62270c9ab9ccc98d8a754b5c22774c0374a20eb`; PR305 remained open, draft and mergeable. A future release needs a new version, migration maximum252 and matching metadata assertions, with updater minimum1.1.6 retained. The existing updater supports the upgrade but blocks ordinary rollback after schema advancement. Post-exposure recovery requires a verified current-data rescue and separate operation-bound consent to restore the source251 snapshot and exact source image. Retaining the rescue does not automatically reconcile post-upgrade writes. [Release decision check](M22_ACCEPTANCE.md#release-decision-check) records the sources and limits.
+
+The completed follow-up reply confirmed that the release check closed the final safe M22 task, identified no factual correction or remaining offline implementation, and called for a human release decision. It did not independently rerun tests or grant operational consent.
+
+No operational authorization comes from this consultation. M22 remains draft-only; production, billing, credentials and native schedules remain unchanged. The next human decision concerns release and schema recovery; warm-up activation, paid API acceptance, a second login and Windows execution remain separate choices.
+
+## M22 consultation delivered and received
+
+At the user's explicit request, Codex pasted the M21 completion report into the existing authenticated “Rerun Gateway Test” conversation in Brave and received a completed response. The message contained public revision/release/test evidence and proof limits; no credentials, cookies, private account identifiers or secret logs were sent. ChatGPT said it reviewed PR300, PR304 and the public M21 report, without independently rerunning tests or inspecting production.
+
+The exact request asked for prioritized next steps after completed M21, distinguishing already authorized offline work from paid inference, authentication, billing and schedule activation. The response proposed **M22 — Operational Readiness and Evidence Closure**: persist complete/partial/unknown usage observations and label their spending limits; close concrete offline warm-up gaps; add read-only readiness diagnostics; test/review; create a dedicated branch and draft PR. It explicitly said not to merge, tag, publish, deploy or activate in that task. The user then authorized proceeding with that prompt.
+
+Implementation baseline: `a62270c9ab9ccc98d8a754b5c22774c0374a20eb`, production .11/schema251/updater1.1.6. [M22 acceptance](M22_ACCEPTANCE.md) records the chosen nullable observation field, migration252, unchanged accounting amounts, inspection-only native command, review findings/resolutions and verification. Live provider spend, native current-login identity, API pool state and Windows execution remain separate proof gaps. ChatGPT advice supplies no new operational consent.
+
 ## M21 follow-up prepared 2026-10-18
 
 Delivery: PR300 merged at `ec84acdba727b2b0f36a630fffcf926a379e7470`; `.11` deployed successfully through the host updater. Independent correctness/security review closed the auth and retry findings. Full-server staging additionally found embedded frontend interception of `/anthropic-api/`; the shared prefix bypass and embedded authentication regressions fixed it. The publisher now runs those embedded checks. Final post-install Query matched official usage at 54%/59%, credits off. All nine accounts, current credentials/settings and 37 historical backups were preserved; the new snapshot makes 38. No new ChatGPT reply, paid canary or schedule activation is claimed. [M21 acceptance](M21_ACCEPTANCE.md) contains exact tests, digest and operation evidence.

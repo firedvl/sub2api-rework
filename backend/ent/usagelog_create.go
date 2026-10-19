@@ -57,6 +57,20 @@ func (_c *UsageLogCreate) SetModel(v string) *UsageLogCreate {
 	return _c
 }
 
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (_c *UsageLogCreate) SetUsageObservationComplete(v bool) *UsageLogCreate {
+	_c.mutation.SetUsageObservationComplete(v)
+	return _c
+}
+
+// SetNillableUsageObservationComplete sets the "usage_observation_complete" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUsageObservationComplete(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetUsageObservationComplete(*v)
+	}
+	return _c
+}
+
 // SetRequestedModel sets the "requested_model" field.
 func (_c *UsageLogCreate) SetRequestedModel(v string) *UsageLogCreate {
 	_c.mutation.SetRequestedModel(v)
@@ -975,6 +989,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
 	}
+	if value, ok := _c.mutation.UsageObservationComplete(); ok {
+		_spec.SetField(usagelog.FieldUsageObservationComplete, field.TypeBool, value)
+		_node.UsageObservationComplete = &value
+	}
 	if value, ok := _c.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
 		_node.RequestedModel = &value
@@ -1329,6 +1347,24 @@ func (u *UsageLogUpsert) SetModel(v string) *UsageLogUpsert {
 // UpdateModel sets the "model" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateModel() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldModel)
+	return u
+}
+
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (u *UsageLogUpsert) SetUsageObservationComplete(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldUsageObservationComplete, v)
+	return u
+}
+
+// UpdateUsageObservationComplete sets the "usage_observation_complete" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateUsageObservationComplete() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldUsageObservationComplete)
+	return u
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (u *UsageLogUpsert) ClearUsageObservationComplete() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUsageObservationComplete)
 	return u
 }
 
@@ -2194,6 +2230,27 @@ func (u *UsageLogUpsertOne) SetModel(v string) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateModel() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (u *UsageLogUpsertOne) SetUsageObservationComplete(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageObservationComplete(v)
+	})
+}
+
+// UpdateUsageObservationComplete sets the "usage_observation_complete" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateUsageObservationComplete() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageObservationComplete()
+	})
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (u *UsageLogUpsertOne) ClearUsageObservationComplete() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageObservationComplete()
 	})
 }
 
@@ -3350,6 +3407,27 @@ func (u *UsageLogUpsertBulk) SetModel(v string) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateModel() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (u *UsageLogUpsertBulk) SetUsageObservationComplete(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetUsageObservationComplete(v)
+	})
+}
+
+// UpdateUsageObservationComplete sets the "usage_observation_complete" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateUsageObservationComplete() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateUsageObservationComplete()
+	})
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (u *UsageLogUpsertBulk) ClearUsageObservationComplete() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUsageObservationComplete()
 	})
 }
 

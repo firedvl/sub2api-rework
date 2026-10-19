@@ -108,6 +108,8 @@ type UsageLog struct {
 	AccountID int64
 	RequestID string
 	Model     string
+	// Nil is unknown; true means the gateway observed response completion, not final provider spend.
+	UsageObservationComplete *bool
 	// RequestedModel is the client-requested model name recorded for stable user/admin display.
 	// Empty should be treated as Model for backward compatibility with historical rows.
 	RequestedModel string

@@ -172,6 +172,38 @@ function mountUsageView() {
 }
 
 describe('user UsageView', () => {
+  it.each([
+    [true, 'usage.observationComplete'], [false, 'usage.observationPartial'],
+    [null, 'usage.observationUnknown'], [undefined, 'usage.observationUnknown'],
+  ])('exports observation completeness %s with unchanged cost precision', async (complete, expected) => {
+    query.mockResolvedValue({ items: [{ ...usageLog, actual_cost: 0.00000042, usage_observation_complete: complete }], total: 1, pages: 1 })
+    const wrapper = mountUsageView()
+    await flushPromises()
+    const originalCreate = URL.createObjectURL
+    const originalRevoke = URL.revokeObjectURL
+    let blob!: Blob
+    URL.createObjectURL = vi.fn((value: Blob) => { blob = value; return 'blob:usage' })
+    URL.revokeObjectURL = vi.fn()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      await wrapper.findAll('button').find(button => button.text() === 'Export CSV')!.trigger('click')
+      await flushPromises()
+      const csv = await new Promise<string>(resolve => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.readAsText(blob)
+      })
+      expect(csv).toContain('usage.observationCompleteness')
+      expect(csv).toContain(expected)
+      expect(csv).toContain('0.00000042')
+    } finally {
+      URL.createObjectURL = originalCreate
+      URL.revokeObjectURL = originalRevoke
+      click.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
   it('keeps the initial filters, sort, and filename while exporting multiple pages', async () => {
     const pageResponse = { items: [usageLog], total: 101, pages: 2 }
     query.mockResolvedValue(pageResponse)
@@ -461,8 +493,8 @@ describe('user UsageView', () => {
     expect(showSuccess).toHaveBeenCalled()
     expect(csvContent.startsWith('\uFEFF')).toBe(true)
     expect(csvContent.slice(1)).toBe([
-      'Time,API Key Name,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing Mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms)',
-      '2026-03-08T00:00:00Z,demo-key,gpt-5.4,-,,203.0.113.10,Sync,Token,4057,101,278272,4,1,0.09288300,0.09288300,12,345',
+      'Time,API Key Name,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing Mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms),usage.observationCompleteness',
+      '2026-03-08T00:00:00Z,demo-key,gpt-5.4,-,,203.0.113.10,Sync,Token,4057,101,278272,4,1,0.09288300,0.09288300,12,345,usage.observationUnknown',
     ].join('\n'))
     expect(csvContent).toContain('IP Address')
     expect(csvContent).toContain('203.0.113.10')

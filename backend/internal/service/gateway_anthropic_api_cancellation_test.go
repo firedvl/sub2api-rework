@@ -128,6 +128,7 @@ func TestAnthropicAPIOnlyCancellationAfterUsage(t *testing.T) {
 			}
 			require.NotNil(t, result)
 			require.True(t, result.ClientDisconnect)
+			require.Equal(t, boolPtr(false), result.UsageObservationComplete)
 			require.Equal(t, 11, result.Usage.InputTokens)
 			require.Equal(t, 7, result.Usage.CacheReadInputTokens)
 			require.Equal(t, 1, upstream.attempts)

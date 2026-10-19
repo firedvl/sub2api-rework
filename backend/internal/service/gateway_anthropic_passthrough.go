@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -264,6 +265,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
+	var observationComplete *bool
 	if input.RequestStream {
 		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel)
 		if err != nil {
@@ -277,8 +279,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+		observationComplete = streamResult.usageObservationComplete
 	} else {
-		usage, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
+		usage, observationComplete, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
 		if err != nil {
 			return nil, err
 		}
@@ -288,6 +291,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 
 	return &ForwardResult{
+		UsageObservationComplete:      observationComplete,
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		Usage:                         *usage,
@@ -430,6 +434,15 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	var firstTokenMs *int
 	clientDisconnected := false
 	sawTerminalEvent := false
+	sawInputUsage, sawFinalUsage, sawMessageStop := false, false, false
+	invalidObservationSequence := false
+	completedObservation := func() *bool {
+		if !sawInputUsage && !sawFinalUsage && !usage.hasObservedTokens() {
+			return nil
+		}
+		complete := sawInputUsage && sawFinalUsage && sawMessageStop && !invalidObservationSequence
+		return &complete
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -534,11 +547,11 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, fmt.Errorf("stream usage incomplete: missing terminal event")
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected, usageObservationComplete: completedObservation()}, nil
 			}
 			if ev.err != nil {
 				if sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected, usageObservationComplete: completedObservation()}, nil
 				}
 				if clientDisconnected {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete after disconnect: %w", ev.err)
@@ -556,6 +569,29 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			line := ev.line
 			if data, ok := extractAnthropicSSEDataLine(line); ok {
 				trimmed := strings.TrimSpace(data)
+				if gjson.Valid(trimmed) {
+					event := gjson.Parse(trimmed)
+					switch event.Get("type").String() {
+					case "message_start":
+						invalidObservationSequence = invalidObservationSequence || sawInputUsage || sawFinalUsage || sawMessageStop
+						sawInputUsage = validAnthropicUsageCount(event.Get("message.usage.input_tokens")) && validAnthropicUsageCounts(event.Get("message.usage"))
+						invalidObservationSequence = invalidObservationSequence || !sawInputUsage
+					case "message_delta":
+						invalidObservationSequence = invalidObservationSequence || !sawInputUsage || sawFinalUsage || sawMessageStop
+						invalidObservationSequence = invalidObservationSequence || !validAnthropicUsageCounts(event.Get("usage"))
+						if sawInputUsage && !sawMessageStop && event.Get("delta.stop_reason").Type == gjson.String && event.Get("delta.stop_reason").String() != "" {
+							sawFinalUsage = validAnthropicUsageCount(event.Get("usage.output_tokens"))
+							invalidObservationSequence = invalidObservationSequence || !sawFinalUsage
+						}
+					case "message_stop":
+						invalidObservationSequence = invalidObservationSequence || !sawFinalUsage || sawMessageStop
+						sawMessageStop = sawFinalUsage
+					case "error":
+						invalidObservationSequence = true
+					}
+				} else if trimmed != "" {
+					invalidObservationSequence = true
+				}
 				observer.ObserveAnthropic([]byte(trimmed))
 				if anthropicStreamEventIsTerminal("", trimmed) {
 					sawTerminalEvent = true
@@ -873,19 +909,34 @@ func invalidNonStreamingJSONFailoverError(
 	}
 }
 
+func validAnthropicUsageCount(value gjson.Result) bool {
+	return value.Type == gjson.Number && value.Num >= 0 && value.Num < float64(math.MaxInt) && math.Trunc(value.Num) == value.Num
+}
+
+func validAnthropicUsageCounts(usage gjson.Result) bool {
+	for _, field := range []string{"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+		"cache_creation.ephemeral_5m_input_tokens", "cache_creation.ephemeral_1h_input_tokens", "cached_tokens",
+		"prompt_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "prompt_tokens_details.cached_tokens"} {
+		if value := usage.Get(field); value.Exists() && !validAnthropicUsageCount(value) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	ctx context.Context,
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
-) (*ClaudeUsage, error) {
+) (*ClaudeUsage, *bool, error) {
 	if s.rateLimitService != nil {
 		s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 	}
 
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, anthropicTooLargeError)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -896,15 +947,22 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 		var raw json.RawMessage
 		if err := json.Unmarshal(body, &raw); err != nil {
-			return nil, invalidNonStreamingJSONFailoverError(ctx, s.rateLimitService, resp, account, body, err)
+			return nil, nil, invalidNonStreamingJSONFailoverError(ctx, s.rateLimitService, resp, account, body, err)
 		}
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+	parsed := gjson.ParseBytes(body)
+	var observationComplete *bool
+	if parsed.Get("usage").IsObject() {
+		complete := parsed.Get("type").String() == "message" && parsed.Get("stop_reason").Type == gjson.String && parsed.Get("stop_reason").String() != "" &&
+			validAnthropicUsageCount(parsed.Get("usage.input_tokens")) && validAnthropicUsageCount(parsed.Get("usage.output_tokens")) && validAnthropicUsageCounts(parsed.Get("usage"))
+		observationComplete = &complete
+	}
 	if IsForceCacheBilling(ctx) && usage.InputTokens > 0 {
 		body, err = classifyAnthropicResponseInputAsCacheRead(body, usage)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -915,7 +973,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 	body = reverseToolNamesIfPresent(c, body)
 	c.Data(resp.StatusCode, contentType, body)
-	return usage, nil
+	return usage, observationComplete, nil
 }
 
 func classifyAnthropicResponseInputAsCacheRead(body []byte, usage *ClaudeUsage) ([]byte, error) {

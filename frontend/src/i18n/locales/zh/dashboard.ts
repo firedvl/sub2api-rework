@@ -330,6 +330,12 @@ export default {
 
   // Usage
   usage: {
+    observationCompleteness: '用量观测',
+    observationComplete: '已观测完整响应',
+    observationPartial: '仅观测部分响应',
+    observationUnknown: '观测完整性未知',
+    observationCostDisclaimer: '费用基于网关观测，并非提供商最终账单。即使已观测完整响应，断开连接后提供商继续执行的工作仍可能未计入。',
+
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',
