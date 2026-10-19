@@ -118,3 +118,32 @@ Before live activation, create at least two authorized Anthropic API-key account
 ## Subsequent release preparation
 
 The implementation ledger above records M23 acceptance before a version bump. The later draft-branch `.13` metadata proposal, release gates and operator decision are recorded separately in [M23 release readiness](M23_RELEASE_READINESS.md) and [draft release notes](releases/v0.2.3-rework.13.md). They do not claim a merge, publication, deployment or live provider acceptance.
+
+
+## Production release acceptance — PASS
+
+The operator authorized the release after the readiness report. [PR #307](https://github.com/firedvl/sub2api-rework/pull/307) merged on 2026-10-19 at `5ed4ba6c2586e9959de02ac062c41b94ac4e308b`; its tree exactly matches qualified final PR head `fa5a0aaffd801106ebc5312e938e12c22b6e7e93`. The immutable annotated tag is `v0.2.3-rework.13`. No application change was added during release execution.
+
+The established amd64 publisher [run 39307763213](https://github.com/firedvl/sub2api-rework/actions/runs/39307763213) passed all four jobs: release contracts/clean dependency metadata, matching frontend, five-target embedded integrity, and publication/manifest validation. All five binaries identify the exact merge and `vcs.modified=false`. The [published release](https://github.com/firedvl/sub2api-rework/releases/tag/v0.2.3-rework.13) follows the existing GitHub prerelease flag convention for rework tags; the validated rework manifest and embedded channel remain approved/stable/manual. An initial local assertion assumed a non-prerelease flag; comparison with `.12` confirmed the established convention, without changing the publisher or release flags.
+
+| Identity | Verified value |
+| --- | --- |
+| Application | `0.2.3-rework.13`, revision `5ed4ba6c2586e9959de02ac062c41b94ac4e308b` |
+| Immutable image | `ghcr.io/firedvl/sub2api-rework@sha256:02a9f1a2bc90b90fbdaa7e98956f051b806538d52c2635b5a470fc461699b877` |
+| Canonical manifest SHA-256 | `c56b7eae99c78ebace77f3fced06f064e9a9ce20752c2067d6b1f2cbd17e01e3` |
+| Compatibility | Schema 252 → 252; supported range 239–252; updater 1.1.6; upstream v0.2.14/SHA unchanged |
+| Prepare | `upd-44ee24046a3552698a321e31`, succeeded `19:22:47Z`–`19:22:55Z` on 2026-10-19 |
+| Install | `upd-29bf5aee86b2344b131bd51b`, succeeded `19:24:25Z`–`19:24:50Z` on 2026-10-19 |
+| New source snapshot | `20261019T192431Z-upd-29bf5aee86b2344b131bd51b`, recorded `.12` / schema252 |
+
+The downloaded canonical manifest passed the shared Go environment validator. Independent host preparation verified its exact version, revision, digest, source/version labels and linux/amd64 platform before the single install request. Updater 1.1.6 controlled quiescence, verified snapshot, schema validation, startup and health; no direct container replacement or updater-policy change was used. The final durable status is succeeded, healthy and idle at `.13`/252, with recorded rollback version `.12`.
+
+Runtime checks verify the exact image/revision/source, healthy application/PostgreSQL/Redis, local/public health and no Docker socket in the application. The new source252 backup's database/environment/Compose checksums and archive listing pass, and the immutable `.12` source image remains present. All 39 historical backup directories / 195 files match their before-install hashes; the new backup makes 40. Nine account IDs, credentials, routing/groups, settings, API-key/subscription/quota configuration, billing/automation controls, protected Compose/updater policy/binary and non-image environment match the immediate baseline.
+
+All 260,428 historical usage rows through ID260992 retain their full-row SHA-256 `3fe4b3b0bfeefd7c8bf68f5d5fb77ae2dc70695692a1d3d75ac9b1ebda544309`, including nullable usage completeness. Reset-observation hashes changed for existing OpenAI and Anthropic accounts during normal observations. Read-only comparison against the updater's quiesced source archive confirms credit, billing and automation fields remain unchanged; no database restore occurred.
+
+Unauthenticated smoke checks return 200 for health/root/public settings and JSON401 for API-only Messages/count_tokens. The freshly reloaded production Settings UI shows `.13`, full `5ed4ba6c…` revision, stable channel, updater succeeded and available ordinary rollback. “Compatibility review pending” concerns the newer upstream v0.2.17; it does not change the qualified rework deployment. No update/rollback/recovery button was invoked in the UI. Bounded post-install logs contain 91 info and six warning records, no error/fatal/panic-level records; existing SIMPLE-mode billing/quota bypass, URL allowlist, proxy/CORS configuration and pricing fallback warnings remain unchanged. Receipts and screenshot are ignored `.codex/m23-*` artifacts.
+
+Same-schema application-only rollback now has a recorded `.12`/252 source, subject to the exact updater backup, identity, state and schema checks described in [release readiness](M23_RELEASE_READINESS.md). No rollback was executed. Post-exposure installation failures still enter critical and suppress automatic restore; destructive recovery requires separate incident-specific authorization.
+
+This release activated no Anthropic API-key pool, paid inference, credential/login action, provider billing/quota change, reset-credit redemption, subscription pooling or native Claude warm-up schedule. Zero production Anthropic API-key accounts remain. Real-provider billing/failover, hours-long sessions and native Windows live acceptance remain unexecuted. Deployment does not replace those separate acceptance decisions.
