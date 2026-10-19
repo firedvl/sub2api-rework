@@ -501,7 +501,11 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 				if result.Err != nil {
 					return nil, result.Err
 				}
-				snapshot = result.Val.(*apiUsageCache)
+				var ok bool
+				snapshot, ok = result.Val.(*apiUsageCache)
+				if !ok || snapshot == nil {
+					return nil, fmt.Errorf("claude usage refresh returned an invalid cache entry")
+				}
 				if !forceProbe || snapshot.timestamp.After(requestStarted) {
 					break
 				}
@@ -509,7 +513,7 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 				snapshot = nil
 			}
 			if snapshot == nil {
-				return nil, fmt.Errorf("Claude usage refresh did not produce a new observation")
+				return nil, fmt.Errorf("claude usage refresh did not produce a new observation")
 			}
 		}
 		usage := s.buildUsageInfo(snapshot.response, &snapshot.timestamp)

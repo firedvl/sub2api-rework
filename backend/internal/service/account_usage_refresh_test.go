@@ -157,7 +157,10 @@ func TestClaudeRefreshHonorsRetryAfterAndBackoff(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 2, f.calls[1])
 		entry, _ := s.cache.apiCache.Load(int64(1))
-		require.GreaterOrEqual(t, time.Until(entry.(*apiUsageCache).retryAt), 2*time.Minute)
+		cached, ok := entry.(*apiUsageCache)
+		require.True(t, ok)
+		require.NotNil(t, cached)
+		require.GreaterOrEqual(t, time.Until(cached.retryAt), 2*time.Minute)
 	})
 }
 
