@@ -1,6 +1,6 @@
-# M23 proposed .13 release readiness
+# M23 .13 release readiness and deployment
 
-Status: GO FOR OPERATOR RELEASE DECISION. All safe preparation gates passed; the application is release-prepared and remains unreleased. Release preparation is separate from release authorization. PR #307 remains draft; production remains `.12`. This record supplements [M23 implementation acceptance](M23_ACCEPTANCE.md), whose results remain historical.
+Status: RELEASED AND DEPLOYED. After the preparation decision below, the operator authorized merge, publication and controlled updater deployment. [PR #307](https://github.com/firedvl/sub2api-rework/pull/307) merged, `.13` published, and production installation passed on 2026-10-19. The preparation sections retain the evidence and authorization boundary as recorded before release. See [production release acceptance](M23_ACCEPTANCE.md#production-release-acceptance--pass) for the executed outcome. Live API-key setup and paid acceptance remain separate.
 
 ## Source and release proposal
 
@@ -67,9 +67,9 @@ Two independent read-only reviewers found no material release blocker. The routi
 
 There is no live Anthropic API-key pool, real-provider pooled billing acceptance, paid failover canary, hours-long provider session acceptance or native Windows live acceptance. API billing is separate from Claude subscriptions; organization keys share provider limits. Local gateway limits are soft; gateway usage completeness does not prove provider charges. Subscription OAuth pooling remains unsupported; the native Claude warm-up companion remains disabled. Account setup/spending controls/paid acceptance require separate authorization.
 
-Remaining release decision: “Authorize merge of the qualified PR #307 revision, publication of the proposed v0.2.3-rework.13 release through the established publisher, and controlled deployment through updater 1.1.6, subject to final release-artifact and production preflight gates.” This is a request for the operator, not approval already granted.
+Recorded pre-release decision request (subsequently authorized by the operator): “Authorize merge of the qualified PR #307 revision, publication of the proposed v0.2.3-rework.13 release through the established publisher, and controlled deployment through updater 1.1.6, subject to final release-artifact and production preflight gates.” That request was not approval by itself; the subsequent operator instruction, “proceed with the next steps,” authorized this release execution.
 
-GO FOR OPERATOR RELEASE DECISION
+Historical preparation decision: GO FOR OPERATOR RELEASE DECISION
 
 All safe preparation and qualification gates passed. Only explicit merge/publication/deployment authorization and execution-time artifact/production checks remain. PR #307 stays open, draft and unmerged. No release tag, image, manifest or production update was published or installed by this assignment.
 
