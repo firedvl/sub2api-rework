@@ -114,3 +114,7 @@ Both final CI workflows at `e0078b545` are fully green: [PR run 39231637911](htt
 Synthetic fixtures cannot establish real key/model access, actual upstream quotas, prompt-cache hit continuity, final billing, hours-long durability or provider-side cancellation. Native Windows and live multi-account subscription login acceptance are not claimed. This assignment changes no schema, release version, billing controls, account credentials or warm-up switches.
 
 Before live activation, create at least two authorized Anthropic API-key accounts in one Anthropic group, configure allowed models, priorities/load/concurrency and provider spending controls, then issue one downstream group-bound key. Inspect Claude Code `/status` and separately authorize a bounded paid canary covering multi-account requests and recorded attribution. Merge, artifact publication and production rollout require a separate release decision under the updater's schema-252 gates.
+
+## Subsequent release preparation
+
+The implementation ledger above records M23 acceptance before a version bump. The later draft-branch `.13` metadata proposal, release gates and operator decision are recorded separately in [M23 release readiness](M23_RELEASE_READINESS.md) and [draft release notes](releases/v0.2.3-rework.13.md). They do not claim a merge, publication, deployment or live provider acceptance.
