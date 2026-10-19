@@ -166,6 +166,24 @@ describe('mergeClaudeUsageObservations', () => {
     utilization, observed_at, source, resets_at: null, remaining_seconds: 0,
   })
 
+  it('does not borrow another window timestamp for a legacy observation', () => {
+    const previous = {
+      source: 'mixed' as const, updated_at: '2026-10-18T10:03:00Z',
+      five_hour: observation(30, '2026-10-18T10:03:00Z', 'active'),
+      seven_day: { utilization: 90, source: 'passive' as const, stale: true, resets_at: null, remaining_seconds: 0 },
+      seven_day_sonnet: null,
+    }
+    const incoming = {
+      source: 'active' as const, updated_at: '2026-10-18T10:02:00Z',
+      five_hour: observation(25, '2026-10-18T10:02:00Z', 'active'),
+      seven_day: observation(40, '2026-10-18T10:02:00Z', 'active'), seven_day_sonnet: null,
+    }
+    const merged = mergeClaudeUsageObservations(previous, incoming)
+    expect(merged.five_hour).toBe(previous.five_hour)
+    expect(merged.seven_day).toBe(incoming.seven_day)
+    expect(merged.updated_at).toBe(previous.updated_at)
+  })
+
   it('keeps the latest observation independently for each Claude window', () => {
     const earlier = '2026-10-18T10:00:00Z'
     const later = '2026-10-18T10:01:00Z'

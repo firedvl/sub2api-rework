@@ -11,8 +11,8 @@ export const mergeClaudeUsageObservations = (previous: AccountUsageInfo | null |
     const current = previous[key]
     const next = incoming[key]
     if (!current) continue
-    const currentTime = Date.parse(current.observed_at || previous.updated_at || '')
-    const nextTime = Date.parse(next?.observed_at || incoming.updated_at || '')
+    const currentTime = Date.parse(current.observed_at || '')
+    const nextTime = Date.parse(next?.observed_at || '')
     if (!next || (Number.isFinite(currentTime) && (!Number.isFinite(nextTime) || currentTime > nextTime)) ||
       ((currentTime === nextTime || (!Number.isFinite(currentTime) && !Number.isFinite(nextTime))) &&
         (current.source || previous.source) === 'active' && (next.source || incoming.source) === 'passive')) {
