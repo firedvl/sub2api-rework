@@ -45,20 +45,59 @@ Official documentation checked 2026-10-19: [legal/authentication rules](https://
 
 ## Verification ledger
 
-Completed at the first implementation commit:
+Validated application revision: `8068f1dd572c9f624d82a81d5a11a71decb9df84`. Later acceptance edits change documentation only. No schema or release-version bump is included.
 
 | Gate | Evidence |
 | --- | --- |
 | Ordinary Go | All 51 packages with tests passed; latest affected repository rerun passed |
+| Unit-tag Go | All 62 packages with tests passed, with the qualified official CLI explicitly enabled |
+| Affected race | All five packages passed: service, repository, handler, admin handler and routes; 420 named cases/subtests, 380 leaf cases, zero failures |
 | Database | Full repository integration passed against disposable PostgreSQL/Redis; focused ordering/reset tests and fractional observation timestamps passed |
+| Active usage HTTP/database | Real loopback usage GET → batch service → PostgreSQL passed for two distinct observations, measured zero, missing weekly data, persisted timestamps/reset, cache reuse, partial failure and force respecting 429 Retry-After |
 | Frontend | 354 files / 2,861 tests passed; TypeScript, full ESLint, locale completeness and production build passed |
+| Final refresh regressions | All 85 affected AccountsView/component/helper tests passed after the last frontend edits |
 | Compiled browser | 12 Chromium tests passed at 390/1280px: normal/automatic fleet refresh, failures, timestamps, cross-view state, account-type warnings and client URLs |
 | Independent frontend inspection | 320px keyboard activation/pending state, reduced motion, long-content reflow and visible Query focus verified |
-| Earlier focused routing checks | API-only policy/revalidation, cross-key metadata/cache affinity, legacy behavior and session log redaction passed; final integrated unit/race gates still running |
+| Official CLI → Go handler | All three opt-in contracts passed, including under race: Read/history/protocol/failover, Edit/resume/model/interactive status, and actual process cancellation |
+| Existing Python client contracts | All four qualified-client loopbacks passed, including six Read cycles, 96,925 bytes of history and cancellation |
+| Vet / lint / build | Full vet passed; compatible golangci-lint 2.15.0 reports zero new issues; final embedded server build passed with the exact revision and `vcs.modified=false` |
+| Full-server synthetic staging | All 35 checks passed against the final source build: embedded assets, real downstream authentication, API-only A429→B, affinity, count_tokens, auth/cookie isolation, selected-account/user/key database attribution, complete/incomplete observations and schema 252 |
+| Cleanup | Owned staging server stopped; both owned containers and synthetic secret configuration removed; unrelated containers preserved |
 
-Unit-tag Go with the explicit official CLI, affected race checks, vet/lint, final full-server synthetic staging and delivery evidence will be appended after those gates finish. No pending gate is counted as passed.
+The full-server usage fixtures deliberately retain the synthetic passive guard and never call Anthropic. Active usage integration has its separate real HTTP/database test. Handler-only tests inject a principal; full-server staging tests ordinary database-backed authentication. CLI token counting is verified through raw HTTP against the same real handler, rather than claimed as a CLI-issued operation. Long-session evidence consists of protocol/tool turns and retained history, not hours of live provider use.
+
+The seven new real-handler routing cases cover independent concurrent slots/distribution, stable affinity and disabled-account replacement, model-change exclusion, cooldown expiry with a stale snapshot, pre-output 503 failover, permanent invalid requests and post-output stream errors. Existing API-only tests add OAuth exclusion, exhausted pools, priority/load factors, authoritative revocation/group/coherence checks, 429 failover, selected-account/original-key attribution and token counting. Cross-key metadata and cache-control tests demonstrate both the original shared identity and the corrected isolated cache bindings.
+
+Reproduce the main local gates after installing the repository's pinned dependencies:
+
+```sh
+cd backend
+TMPDIR=/tmp GOMAXPROCS=2 go test -p=2 ./...
+# Use the absolute qualified official 2.1.300 binary; this variable enables loopback tests only.
+CLAUDE_GATEWAY_CONTRACT_BINARY=/absolute/path/to/claude TMPDIR=/tmp GOMAXPROCS=2 go test -p=2 -tags=unit ./...
+TMPDIR=/tmp GOMAXPROCS=2 CI=true go test -p=2 -parallel=1 -tags=integration ./internal/repository -count=1
+TMPDIR=/tmp GOMAXPROCS=4 CLAUDE_GATEWAY_CONTRACT_BINARY=/absolute/path/to/claude go test -p=1 -race -tags=unit ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin ./internal/server/routes -run 'TestClaude|TestAccountUsageService|TestSyncActiveToPassive|TestAnthropicAPIOnly|TestGenerateSessionHash|TestGatewayMessagesAnthropicAPIOnly|TestGatewayAnthropicAPIOnly|TestAnthropicAPI' -count=1
+go vet ./...
+cd ../frontend
+./node_modules/.bin/vitest run
+./node_modules/.bin/vue-tsc -b
+./node_modules/.bin/eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts
+./node_modules/.bin/vite build
+```
+
+Raw local receipts remain under ignored `.codex/m23-*` paths: ordinary/unit/race output, repository and active HTTP/database integration, frontend/build/lint/browser, and full-server staging/cleanup. The final staging harness reuses the prior disposable M20/M22 harness with current source/version assertions; it does not replace the gateway or scheduler. The compiled browser run used a Vite preview and stubbed API responses. Screenshots confirm the 320px Query focus repair. No live provider claim is inferred from a synthetic result.
+
+Failed attempts remain visible in those receipts. Initial lint found unchecked error-return/type-assertion results and a capitalized error; tests now assert persistence errors, the shared-flight result is checked, and the error follows repository style. An initial forced-refresh regression exposed equal synthetic clock timestamps reusing a prior observation; force now requires a strictly newer observation. Obsolete concurrent compilations were canceled before final frozen-source gates and were not counted as passes. Early cold-navigation browser timeouts and obsolete global-stale expectations resolved in the final 12-case compiled run. The host's Python HTTP client received an edge 403; established curl checks returned JSON 401 for both public and origin API-only routes. No protection was weakened to make a check pass.
 
 Independent correctness review found and fixed missing local statistics on a reconstructed five-hour window, renewal of legacy timestamps and the separate session-reset ordering race. Independent security investigation/review confirmed the cross-key affinity defect and found four additional raw-session failure logs; all are included in the fix. Independent integration work expanded the actual-handler/official-client fixtures. The optional local Qwen worker was unavailable because its configured host did not resolve; the configured native fallbacks completed those bounded assignments.
+
+## Delivery and production state
+
+Draft [PR #307](https://github.com/firedvl/sub2api-rework/pull/307) contains `codex/m23-unified-claude-routing-refresh`. Application commit `8068f1dd5` includes the implementation, regression fixtures and active HTTP/database proof. The guide documents native/API modes, current provider sources, one-group/one-key setup, model/load/affinity behavior, refresh cadence, diagnostics and live acceptance limits.
+
+Final read-only production checks still show healthy `.12` at `40c1f7b4…`, schema 252, idle updater 1.1.6 and the same nine account types with zero Anthropic API-key accounts. Public and origin API-only Messages/count_tokens reject unauthenticated curl requests with JSON 401. No deployment, merge, tag, release publication, account/credential/billing change, reset credit action or warm-up activation occurred.
+
+Local implementation and synthetic acceptance are complete. This is ready for code review and a separate release qualification/authorization decision, not approval to deploy or activate a real pool. GitHub checks are reported separately from local results; a later documentation-only acceptance commit follows the tested application revision.
 
 ## Live limits and release decision
 
