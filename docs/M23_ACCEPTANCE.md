@@ -45,18 +45,20 @@ Official documentation checked 2026-10-19: [legal/authentication rules](https://
 
 ## Verification ledger
 
-Validated application revision: `8068f1dd572c9f624d82a81d5a11a71decb9df84`. Later acceptance edits change documentation only. No schema or release-version bump is included.
+Validated application revision: `8068f1dd572c9f624d82a81d5a11a71decb9df84`. Later acceptance and CI fixture edits do not alter application runtime. No schema or application release-version bump is included.
 
 | Gate | Evidence |
 | --- | --- |
 | Ordinary Go | All 51 packages with tests passed; latest affected repository rerun passed |
 | Unit-tag Go | All 62 packages with tests passed, with the qualified official CLI explicitly enabled |
+| Linux CI backend | 63 unit and 52 integration packages passed on application revision `8068f1dd5`; the extra platform package is Linux live attestation |
 | Affected race | All five packages passed: service, repository, handler, admin handler and routes; 420 named cases/subtests, 380 leaf cases, zero failures |
 | Database | Full repository integration passed against disposable PostgreSQL/Redis; focused ordering/reset tests and fractional observation timestamps passed |
 | Active usage HTTP/database | Real loopback usage GET → batch service → PostgreSQL passed for two distinct observations, measured zero, missing weekly data, persisted timestamps/reset, cache reuse, partial failure and force respecting 429 Retry-After |
 | Frontend | 354 files / 2,861 tests passed; TypeScript, full ESLint, locale completeness and production build passed |
 | Final refresh regressions | All 85 affected AccountsView/component/helper tests passed after the last frontend edits |
 | Compiled browser | 12 Chromium tests passed at 390/1280px: normal/automatic fleet refresh, failures, timestamps, cross-view state, account-type warnings and client URLs |
+| Full browser / fresh checkout | GitHub frontend job passed all 189 Chromium cases, critical frontend regressions and clean embedded cross-target build qualification on application revision `8068f1dd5` |
 | Independent frontend inspection | 320px keyboard activation/pending state, reduced motion, long-content reflow and visible Query focus verified |
 | Official CLI → Go handler | All three opt-in contracts passed, including under race: Read/history/protocol/failover, Edit/resume/model/interactive status, and actual process cancellation |
 | Existing Python client contracts | All four qualified-client loopbacks passed, including six Read cycles, 96,925 bytes of history and cancellation |
@@ -89,11 +91,13 @@ Raw local receipts remain under ignored `.codex/m23-*` paths: ordinary/unit/race
 
 Failed attempts remain visible in those receipts. Initial lint found unchecked error-return/type-assertion results and a capitalized error; tests now assert persistence errors, the shared-flight result is checked, and the error follows repository style. An initial forced-refresh regression exposed equal synthetic clock timestamps reusing a prior observation; force now requires a strictly newer observation. Obsolete concurrent compilations were canceled before final frozen-source gates and were not counted as passes. Early cold-navigation browser timeouts and obsolete global-stale expectations resolved in the final 12-case compiled run. The host's Python HTTP client received an edge 403; established curl checks returned JSON 401 for both public and origin API-only routes. No protection was weakened to make a check pass.
 
+GitHub's broader updater qualification exposed a pre-existing schema-251 fixture after M22 advanced the baseline to 252. Commit `1287515e0` changes only two staging test files and the CI candidate version: the same-schema source is the immutable released `.12` image/revision at schema 252, and the synthetic CI candidate is `.13`. This is a local CI image/version, not a release or publication. The explicit equality guard and every provenance, health, exact-image, no-destructive-command and post-upgrade sentinel assertion remain. Independent review confirmed the three-file change. Local staging compilation and updater/releaseinfo unit tests passed. Both push and PR Linux/systemd updater qualification reruns passed, including the `.12` same-schema application rollback with its acknowledged database write preserved. See [the PR workflow](https://github.com/firedvl/sub2api-rework/actions/runs/39228308357) and [push workflow](https://github.com/firedvl/sub2api-rework/actions/runs/39228300879). These exercise disposable CI hosts only.
+
 Independent correctness review found and fixed missing local statistics on a reconstructed five-hour window, renewal of legacy timestamps and the separate session-reset ordering race. Independent security investigation/review confirmed the cross-key affinity defect and found four additional raw-session failure logs; all are included in the fix. Independent integration work expanded the actual-handler/official-client fixtures. The optional local Qwen worker was unavailable because its configured host did not resolve; the configured native fallbacks completed those bounded assignments.
 
 ## Delivery and production state
 
-Draft [PR #307](https://github.com/firedvl/sub2api-rework/pull/307) contains `codex/m23-unified-claude-routing-refresh`. Application commit `8068f1dd5` includes the implementation, regression fixtures and active HTTP/database proof. The guide documents native/API modes, current provider sources, one-group/one-key setup, model/load/affinity behavior, refresh cadence, diagnostics and live acceptance limits.
+Draft [PR #307](https://github.com/firedvl/sub2api-rework/pull/307) contains `codex/m23-unified-claude-routing-refresh`. Application commit `8068f1dd5` includes the implementation, regression fixtures and active HTTP/database proof; later commit `1287515e0` refreshes only CI/staging fixtures. The guide documents native/API modes, current provider sources, one-group/one-key setup, model/load/affinity behavior, refresh cadence, diagnostics and live acceptance limits.
 
 Final read-only production checks still show healthy `.12` at `40c1f7b4…`, schema 252, idle updater 1.1.6 and the same nine account types with zero Anthropic API-key accounts. Public and origin API-only Messages/count_tokens reject unauthenticated curl requests with JSON 401. No deployment, merge, tag, release publication, account/credential/billing change, reset credit action or warm-up activation occurred.
 

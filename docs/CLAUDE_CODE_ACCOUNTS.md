@@ -70,6 +70,7 @@ export ANTHROPIC_BASE_URL=https://gateway.fdvl.net/anthropic-api
 export ANTHROPIC_API_KEY="$SUB2API_KEY"
 unset ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
 unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+unset CLAUDE_CODE_USE_ANTHROPIC_AWS
 # --bare uses API-key auth and excludes OAuth/Keychain/config discovery.
 # Interactive use; any prompt you submit consumes API usage.
 claude --bare --model claude-sonnet-4-6
@@ -81,7 +82,7 @@ PowerShell:
 $env:ANTHROPIC_BASE_URL = 'https://gateway.fdvl.net/anthropic-api'
 $env:ANTHROPIC_API_KEY = $env:SUB2API_KEY
 'ANTHROPIC_AUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY' | ForEach-Object {
+  'CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY','CLAUDE_CODE_USE_ANTHROPIC_AWS' | ForEach-Object {
     Remove-Item "Env:$_" -ErrorAction SilentlyContinue
   }
 claude --bare --model claude-sonnet-4-6
@@ -115,6 +116,7 @@ Use the shell block above in a subshell so gateway variables leave your normal t
   export ANTHROPIC_API_KEY="${SUB2API_KEY:?Load your downstream key from your secret source first}"
   unset ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
   unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+  unset CLAUDE_CODE_USE_ANTHROPIC_AWS
   claude --bare --model claude-sonnet-4-6
 )
 ```
