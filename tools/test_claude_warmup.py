@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import signal
+import sqlite3
 import sys
 import tempfile
 import time
@@ -27,6 +28,12 @@ def racing_tick(path, queue, profile='personal'):
     with patch.object(w, 'auth', return_value=w.identity(AUTH)), patch.object(
             w, 'dispatch', side_effect=lambda *a: (time.sleep(.2) or 'request_completed_reset_unverified')):
         queue.put(w.tick(Path(path), profile, True, NOW))
+
+
+def abrupt_tick(path):
+    with patch.object(w, 'auth', return_value=w.identity(AUTH)), patch.object(
+            w, 'dispatch', side_effect=lambda *a: os._exit(73)):
+        w.tick(Path(path), 'personal', True, NOW)
 
 
 class WarmupTests(unittest.TestCase):
@@ -138,6 +145,26 @@ class WarmupTests(unittest.TestCase):
         db.close()
         self.assertEqual(w.status(self.path, 'personal', NOW)['outcome'], 'outcome_unknown')
         self.assertEqual(self.run_tick()[0]['skipped'], 'five_hour_attempt_guard')
+
+    @unittest.skipUnless(os.name == 'posix', 'fork abrupt-exit test')
+    def test_abrupt_exit_after_claim_survives_restart_and_clock_rollback(self):
+        self.p['billing_acknowledged_at'] = w.iso(NOW - 60)
+        self.p['observation']['observed_at'] = w.iso(NOW - 60)
+        self.save()
+        process = multiprocessing.get_context('fork').Process(target=abrupt_tick, args=(str(self.path),))
+        process.start()
+        process.join(5)
+        if process.is_alive():
+            process.kill()
+            process.join(5)
+            self.fail('synthetic abrupt-exit child did not stop')
+        self.assertEqual(process.exitcode, 73)
+        self.assertEqual(w.status(self.path, 'personal', NOW)['outcome'], 'outcome_unknown')
+        with patch.object(w, 'auth') as auth, patch.object(w, 'dispatch') as dispatch:
+            for now in (NOW, NOW - 1):
+                self.assertEqual(w.tick(self.path, 'personal', True, now)['skipped'], 'five_hour_attempt_guard')
+            auth.assert_not_called()
+            dispatch.assert_not_called()
 
     def test_preflight_max_two_backoff_and_identity_mismatch(self):
         self.p['mode'] = 'scheduled_unverified'
@@ -432,6 +459,114 @@ class WarmupTests(unittest.TestCase):
             self.assertEqual(current['last_skip_reason'], 'disabled')
             self.assertEqual(current['last_check'], w.iso(NOW))
             self.assertIsNone(current['billing_acknowledgment_expires_at'])
+
+    def test_status_and_readiness_never_create_or_modify_state(self):
+        with patch.object(w, 'scheduler_status', return_value={'installed': False}), patch.object(
+                w.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, w.QUALIFIED_CLIENT_VERSION + ' (Claude Code)')):
+            for inspect in (w.status, w.readiness):
+                inspect(self.path, 'personal', NOW)
+                self.assertFalse(self.state_root.exists())
+            self.run_tick()
+            for legacy in (False, True):
+                if legacy:
+                    db = w.state(self.path)
+                    db.execute('DROP TABLE checks')
+                    db.close()
+                before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.state_root.iterdir()}
+                config_before = (self.path.read_bytes(), self.path.stat().st_mtime_ns)
+                for inspect in (w.status, w.readiness):
+                    result = inspect(self.path, 'personal', NOW)
+                    self.assertEqual(result['outcome'], 'request_completed_reset_unverified')
+                    if legacy:
+                        self.assertIsNone(result['last_check'])
+                self.assertEqual(before, {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.state_root.iterdir()})
+                self.assertEqual(config_before, (self.path.read_bytes(), self.path.stat().st_mtime_ns))
+                db = w.state(self.path, False)
+                try:
+                    with self.assertRaises(sqlite3.OperationalError):
+                        db.execute("UPDATE profiles SET outcome='changed'")
+                finally:
+                    db.close()
+
+    def test_readiness_separates_local_evidence_from_live_acceptance(self):
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'must-not-inherit', 'CLAUDE_CODE_USE_BEDROCK': '1'}), patch.object(
+                w, 'scheduler_status', return_value={'installed': None, 'inspection': 'query_failed'}), patch.object(
+                w.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, w.QUALIFIED_CLIENT_VERSION + ' (Claude Code)')) as run, patch.object(
+                w, 'auth') as auth, patch.object(w, 'dispatch') as dispatch:
+            result = w.readiness(self.path, 'personal', NOW)
+            self.assertEqual(result['client'], 'qualified')
+            self.assertEqual(result['identity_binding'], 'bound')
+            self.assertEqual(result['current_identity'], 'unknown_not_checked')
+            self.assertEqual(result['billing_acknowledgment'], 'valid_identity_bound')
+            self.assertEqual(result['quota_evidence'], 'fresh')
+            self.assertEqual(result['api_pool'], 'unknown_external_gateway_state')
+            self.assertEqual(result['live_acceptance'], 'external_authorization_required')
+            self.assertIsNone(result['scheduler']['installed'])
+            self.assertEqual(run.call_args.args[0], ['/synthetic/claude', '--version'])
+            self.assertNotIn('ANTHROPIC_API_KEY', run.call_args.kwargs['env'])
+            self.assertNotIn('CLAUDE_CODE_USE_BEDROCK', run.call_args.kwargs['env'])
+            auth.assert_not_called()
+            dispatch.assert_not_called()
+            self.assertEqual(w.readiness(self.path, 'personal', NOW + 86401)['billing_acknowledgment'], 'expired')
+            self.assertEqual(w.readiness(self.path, 'personal', NOW + 181)['quota_evidence'], 'stale_or_invalid')
+            self.p['billing_identity_digest'] = '0' * 64
+            self.save()
+            self.assertEqual(w.readiness(self.path, 'personal', NOW)['billing_acknowledgment'], 'identity_or_billing_mode_unverified')
+            self.p['billing_acknowledged_at'] = 'invalid'
+            self.save()
+            self.assertEqual(w.readiness(self.path, 'personal', NOW)['billing_acknowledgment'], 'invalid')
+            self.p.update(billing_acknowledged_at=None, identity_digest=None, observation=None)
+            self.save()
+            result = w.readiness(self.path, 'personal', NOW)
+            self.assertEqual(result['billing_acknowledgment'], 'absent')
+            self.assertEqual(result['identity_binding'], 'unbound')
+            self.assertEqual(result['quota_evidence'], 'unavailable')
+
+    def test_readiness_failures_are_observable_and_sanitized(self):
+        with patch.object(w, 'scheduler_status', return_value={'installed': False}), patch.object(w.subprocess, 'run') as run:
+            run.return_value = subprocess.CompletedProcess([], 0, 'untrusted secret output')
+            code, result = self.invoke('readiness', 'personal')
+            self.assertEqual(code, 0)
+            self.assertEqual(result['client'], 'unqualified')
+            self.assertNotIn('secret', json.dumps(result))
+            run.side_effect = subprocess.TimeoutExpired('secret', 15)
+            self.assertEqual(w.readiness(self.path, 'personal', NOW)['client'], 'inspection_failed')
+            self.path.write_text('{invalid secret')
+            code, result = self.invoke('readiness', 'personal')
+            self.assertEqual(code, 1)
+            self.assertEqual(result['configuration'], 'invalid')
+            self.path.unlink()
+            code, result = self.invoke('readiness', 'personal')
+            self.assertEqual(code, 1)
+            self.assertEqual(result['configuration'], 'missing')
+            self.assertFalse(self.state_root.exists())
+
+    def test_missing_required_schema_is_not_silently_repaired(self):
+        db = w.state(self.path)
+        db.execute('DROP TABLE profiles')
+        db.close()
+        before = (self.state_root / 'state.sqlite3').read_bytes()
+        for inspect in (w.status, w.readiness):
+            with self.assertRaises(sqlite3.OperationalError):
+                inspect(self.path, 'personal', NOW)
+        self.assertEqual(before, (self.state_root / 'state.sqlite3').read_bytes())
+        code, result = self.invoke('readiness', 'personal')
+        self.assertEqual(code, 1)
+        self.assertEqual(result['kind'], 'OperationalError')
+
+    def test_scheduler_inspection_present_removed_and_unknown_without_mutation(self):
+        with patch.object(w.sys, 'platform', 'darwin'), patch.object(w.subprocess, 'run') as run:
+            for completed, installed in ((subprocess.CompletedProcess([], 0, 'service'), True),
+                                         (subprocess.CompletedProcess([], 113, '', 'Could not find service'), False),
+                                         (subprocess.CompletedProcess([], 1, '', 'untrusted failure'), None)):
+                run.return_value = completed
+                self.assertIs(w.scheduler_status(self.path, 'personal')['installed'], installed)
+                self.assertEqual(run.call_args.args[0][1], 'print')
+        with patch.object(w.sys, 'platform', 'linux'), patch.object(w.subprocess, 'run') as run:
+            for output, installed in (('loaded', True), ('not-found', False)):
+                run.return_value = subprocess.CompletedProcess([], 0, output)
+                self.assertIs(w.scheduler_status(self.path, 'personal')['installed'], installed)
+                self.assertEqual(run.call_args.args[0][2], 'show')
 
     def test_setup_previews_disabled_config_without_native_execution(self):
         self.path.unlink()

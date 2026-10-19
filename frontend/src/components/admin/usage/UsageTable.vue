@@ -232,6 +232,7 @@
                 </span>
               </button>
             </div>
+            <div v-if="row.usage_observation_complete !== true" data-testid="usage-observation-label" class="mt-0.5 text-[11px] text-amber-700 dark:text-amber-300">{{ t(usageObservationKey(row.usage_observation_complete)) }}</div>
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
               A ${{ accountBilled(row).toFixed(6) }}
             </div>
@@ -415,6 +416,7 @@
     >
       <div class="max-w-[calc(100vw-16px)] rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <div class="space-y-1.5">
+          <p data-testid="usage-observation-detail">{{ t('usage.observationCompleteness') }}: {{ t(usageObservationKey(tooltipData?.usage_observation_complete)) }}</p>
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
@@ -542,6 +544,7 @@
 </template>
 
 <script setup lang="ts">
+import { usageObservationKey } from '@/utils/usageObservation'
 import { computed, nextTick, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'

@@ -33,6 +33,8 @@ type UsageLog struct {
 	RequestID string `json:"request_id,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
+	// Gateway response observation completed; NULL is unknown, not final provider spend
+	UsageObservationComplete *bool `json:"usage_observation_complete,omitempty"`
 	// RequestedModel holds the value of the "requested_model" field.
 	RequestedModel *string `json:"requested_model,omitempty"`
 	// UpstreamModel holds the value of the "upstream_model" field.
@@ -202,7 +204,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
-		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
+		case usagelog.FieldUsageObservationComplete, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
 		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
@@ -262,6 +264,13 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field model", values[i])
 			} else if value.Valid {
 				_m.Model = value.String
+			}
+		case usagelog.FieldUsageObservationComplete:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field usage_observation_complete", values[i])
+			} else if value.Valid {
+				_m.UsageObservationComplete = new(bool)
+				*_m.UsageObservationComplete = value.Bool
 			}
 		case usagelog.FieldRequestedModel:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -613,6 +622,11 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)
+	builder.WriteString(", ")
+	if v := _m.UsageObservationComplete; v != nil {
+		builder.WriteString("usage_observation_complete=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	if v := _m.RequestedModel; v != nil {
 		builder.WriteString("requested_model=")

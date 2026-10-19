@@ -80,6 +80,11 @@ func Model(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))
 }
 
+// UsageObservationComplete applies equality check predicate on the "usage_observation_complete" field. It's identical to UsageObservationCompleteEQ.
+func UsageObservationComplete(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageObservationComplete, v))
+}
+
 // RequestedModel applies equality check predicate on the "requested_model" field. It's identical to RequestedModelEQ.
 func RequestedModel(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldRequestedModel, v))
@@ -473,6 +478,26 @@ func ModelEqualFold(v string) predicate.UsageLog {
 // ModelContainsFold applies the ContainsFold predicate on the "model" field.
 func ModelContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldModel, v))
+}
+
+// UsageObservationCompleteEQ applies the EQ predicate on the "usage_observation_complete" field.
+func UsageObservationCompleteEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldUsageObservationComplete, v))
+}
+
+// UsageObservationCompleteNEQ applies the NEQ predicate on the "usage_observation_complete" field.
+func UsageObservationCompleteNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldUsageObservationComplete, v))
+}
+
+// UsageObservationCompleteIsNil applies the IsNil predicate on the "usage_observation_complete" field.
+func UsageObservationCompleteIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldUsageObservationComplete))
+}
+
+// UsageObservationCompleteNotNil applies the NotNil predicate on the "usage_observation_complete" field.
+func UsageObservationCompleteNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldUsageObservationComplete))
 }
 
 // RequestedModelEQ applies the EQ predicate on the "requested_model" field.

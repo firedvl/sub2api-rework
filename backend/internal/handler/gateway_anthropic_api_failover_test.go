@@ -137,6 +137,8 @@ func TestGatewayMessagesAnthropicAPIOnly(t *testing.T) {
 			require.Contains(t, recorder.Body.String(), "msg_fixture")
 			select {
 			case usage := <-usageRepo.created:
+				require.NotNil(t, usage.UsageObservationComplete)
+				require.True(t, *usage.UsageObservationComplete)
 				require.Equal(t, tc.wantIDs[len(tc.wantIDs)-1], usage.AccountID)
 				require.Equal(t, key.ID, usage.APIKeyID)
 				require.Equal(t, key.UserID, usage.UserID)

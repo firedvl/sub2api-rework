@@ -116,6 +116,18 @@ A slot is due for ten minutes after its local time. Nonexistent DST times are sk
 
 `status PROFILE` reports enabled state, mode, next configured slot, last attempt/completion/outcome, last scheduler check and skip reason, quota observation age/freshness, and billing acknowledgement expiration. A next slot is a scheduled opportunity, not an eligibility promise. Scheduler inspection reports `installed: null` when the native query is unavailable or fails; generation alone never establishes whether a job already exists. Reset attribution remains `unverified`, including after a completed request.
 
+For a local readiness report without authentication or inference:
+
+```sh
+python3 tools/claude_warmup.py --config "$HOME/.claude-warmup/config.json" readiness personal
+```
+
+This combines status with a sanitized official `--version` check against the exact qualified version, configuration validity, saved identity binding, billing attestation validity/identity binding, and quota evidence freshness. It never invokes native auth status, inspects Keychain entries, renews acknowledgement, installs/removes schedules, or sends a prompt. `current_identity: unknown_not_checked` is intentional: a saved binding does not prove the current official login still matches. Use the explicitly requested official account status command separately when needed.
+
+Missing/invalid configuration returns a nonzero exit with a sanitized reason. An unavailable profile, failed version inspection or unqualified version is reported explicitly; successful diagnostic execution does not authorize activation. Billing evidence is an operator attestation, not provider verification. `api_pool: unknown_external_gateway_state` makes no claim about a remote gateway; `live_acceptance: external_authorization_required` describes a separate operator decision, not persisted permission. Native `installed` means registration was found, not that a job is enabled or currently running. Configuration `enabled` and `verification` remain separate execution gates.
+
+Both `status` and `readiness` open existing SQLite state in read-only mode, create no ledger when absent, and do not migrate legacy ledgers. A missing legacy scheduler-check table produces null last-check fields; missing required tables or unreadable/corrupt state fail observably instead of returning an empty successful history. Keep the ledger in place: neither inspection resets duplicate prevention.
+
 Generation writes four files into a new private directory. It never registers or enables a schedule:
 
 ```sh
@@ -157,6 +169,8 @@ Unregister-ScheduledTask -TaskName 'LABEL' -Confirm:$false
 Disable the profile before uninstalling schedules to cancel any running child. Leave `~/.claude-warmup-state/state.sqlite3` in place when re-enabling or moving configuration: deleting it discards the account-wide attempt guard. Existing companion state files next to older configurations are not used by this version; after upgrading, wait at least five hours since any prior attempt before enabling it. Windows file privacy inherits the current user's directory ACLs; provision a private user directory, not a shared location.
 
 ## Verification and official contracts
+
+M22 added six offline warm-up regressions (37 warm-up tests total): byte/mtime-preserving status/readiness against current and legacy SQLite schemas, refused writes through the inspection connection, missing-state noncreation, observable malformed state/configuration, sanitized version-only diagnostics, simulated scheduler registration/removal/query failures, and a real child `os._exit` immediately after the durable claim. Restart and a backward clock step suppress redispatch and report the interrupted outcome as unknown. Existing DST gap/fold and timezone tests remain unchanged. The selected installed client still reported qualified **2.1.300** via sanitized `--version`; no native authentication or inference was invoked for this check. Scheduler registration/removal is simulated, not live platform execution.
 
 M21 passed 46 Python/client tests (31 warm-up, 11 profile and four installed-client loopbacks), plus the official client through the actual Go gateway and 27 full-server staging checks. Generated hashed plist syntax passed. Final read-only inspection found no registered local warm-up jobs, no default companion config, and the existing acceptance profile disabled. These results do not establish real subscription inference, two-account Keychain isolation or Windows execution. See [M21 acceptance](M21_ACCEPTANCE.md) for final source, deployment and proof limits. The following M20 counts are historical.
 

@@ -653,9 +653,10 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 
 // streamingResult 流式响应结果
 type streamingResult struct {
-	usage            *ClaudeUsage
-	firstTokenMs     *int
-	clientDisconnect bool // 客户端是否在流式传输过程中断开
+	usageObservationComplete *bool
+	usage                    *ClaudeUsage
+	firstTokenMs             *int
+	clientDisconnect         bool // 客户端是否在流式传输过程中断开
 }
 
 // hasObservedTokens 报告流式过程中是否已观测到任何上游计量的 token。
@@ -684,7 +685,9 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 	if errors.As(err, &failoverErr) {
 		return nil
 	}
+	complete := false
 	return &ForwardResult{
+		UsageObservationComplete:      &complete,
 		RequestID:                     resp.Header.Get("x-request-id"),
 		UpstreamHeaders:               resp.Header,
 		Usage:                         *streamResult.usage,

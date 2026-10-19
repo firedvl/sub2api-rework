@@ -44673,6 +44673,7 @@ type UsageLogMutation struct {
 	id                           *int64
 	request_id                   *string
 	model                        *string
+	usage_observation_complete   *bool
 	requested_model              *string
 	upstream_model               *string
 	upstream_response_model      *string
@@ -45026,6 +45027,55 @@ func (m *UsageLogMutation) OldModel(ctx context.Context) (v string, err error) {
 // ResetModel resets all changes to the "model" field.
 func (m *UsageLogMutation) ResetModel() {
 	m.model = nil
+}
+
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (m *UsageLogMutation) SetUsageObservationComplete(b bool) {
+	m.usage_observation_complete = &b
+}
+
+// UsageObservationComplete returns the value of the "usage_observation_complete" field in the mutation.
+func (m *UsageLogMutation) UsageObservationComplete() (r bool, exists bool) {
+	v := m.usage_observation_complete
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsageObservationComplete returns the old "usage_observation_complete" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldUsageObservationComplete(ctx context.Context) (v *bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsageObservationComplete is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsageObservationComplete requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsageObservationComplete: %w", err)
+	}
+	return oldValue.UsageObservationComplete, nil
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (m *UsageLogMutation) ClearUsageObservationComplete() {
+	m.usage_observation_complete = nil
+	m.clearedFields[usagelog.FieldUsageObservationComplete] = struct{}{}
+}
+
+// UsageObservationCompleteCleared returns if the "usage_observation_complete" field was cleared in this mutation.
+func (m *UsageLogMutation) UsageObservationCompleteCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldUsageObservationComplete]
+	return ok
+}
+
+// ResetUsageObservationComplete resets all changes to the "usage_observation_complete" field.
+func (m *UsageLogMutation) ResetUsageObservationComplete() {
+	m.usage_observation_complete = nil
+	delete(m.clearedFields, usagelog.FieldUsageObservationComplete)
 }
 
 // SetRequestedModel sets the "requested_model" field.
@@ -47420,7 +47470,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 48)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -47435,6 +47485,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.model != nil {
 		fields = append(fields, usagelog.FieldModel)
+	}
+	if m.usage_observation_complete != nil {
+		fields = append(fields, usagelog.FieldUsageObservationComplete)
 	}
 	if m.requested_model != nil {
 		fields = append(fields, usagelog.FieldRequestedModel)
@@ -47580,6 +47633,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.RequestID()
 	case usagelog.FieldModel:
 		return m.Model()
+	case usagelog.FieldUsageObservationComplete:
+		return m.UsageObservationComplete()
 	case usagelog.FieldRequestedModel:
 		return m.RequestedModel()
 	case usagelog.FieldUpstreamModel:
@@ -47683,6 +47738,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldRequestID(ctx)
 	case usagelog.FieldModel:
 		return m.OldModel(ctx)
+	case usagelog.FieldUsageObservationComplete:
+		return m.OldUsageObservationComplete(ctx)
 	case usagelog.FieldRequestedModel:
 		return m.OldRequestedModel(ctx)
 	case usagelog.FieldUpstreamModel:
@@ -47810,6 +47867,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetModel(v)
+		return nil
+	case usagelog.FieldUsageObservationComplete:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsageObservationComplete(v)
 		return nil
 	case usagelog.FieldRequestedModel:
 		v, ok := value.(string)
@@ -48390,6 +48454,9 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *UsageLogMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(usagelog.FieldUsageObservationComplete) {
+		fields = append(fields, usagelog.FieldUsageObservationComplete)
+	}
 	if m.FieldCleared(usagelog.FieldRequestedModel) {
 		fields = append(fields, usagelog.FieldRequestedModel)
 	}
@@ -48470,6 +48537,9 @@ func (m *UsageLogMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *UsageLogMutation) ClearField(name string) error {
 	switch name {
+	case usagelog.FieldUsageObservationComplete:
+		m.ClearUsageObservationComplete()
+		return nil
 	case usagelog.FieldRequestedModel:
 		m.ClearRequestedModel()
 		return nil
@@ -48558,6 +48628,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldModel:
 		m.ResetModel()
+		return nil
+	case usagelog.FieldUsageObservationComplete:
+		m.ResetUsageObservationComplete()
 		return nil
 	case usagelog.FieldRequestedModel:
 		m.ResetRequestedModel()

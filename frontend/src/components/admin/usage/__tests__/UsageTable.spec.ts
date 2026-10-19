@@ -143,6 +143,27 @@ describe('admin UsageTable tooltip', () => {
     } as DOMRect)
   })
 
+  it.each([
+    [true, 'usage.observationComplete'],
+    [false, 'usage.observationPartial'],
+    [null, 'usage.observationUnknown'],
+    [undefined, 'usage.observationUnknown'],
+  ])('renders observation %s without changing the money amount', async (complete, key) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, usage_observation_complete: complete }], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.text()).toContain('$0.400000')
+    expect(wrapper.find('[data-testid="usage-observation-label"]').exists()).toBe(complete !== true)
+    if (complete !== true) expect(wrapper.text()).toContain(key)
+    await wrapper.get('button[aria-label="Cost Breakdown"]').trigger('focus')
+    await nextTick()
+    expect(wrapper.get('[data-testid="usage-observation-detail"]').text()).toContain(key)
+    await wrapper.get('button[aria-label="Cost Breakdown"]').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.find('[data-testid="usage-observation-detail"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('marks only usage rows that actually applied long-context billing', () => {
     const wrapper = mount(UsageTable, {
       props: {

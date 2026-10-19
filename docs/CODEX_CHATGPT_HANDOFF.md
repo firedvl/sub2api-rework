@@ -1,5 +1,13 @@
 # M20 recovery consultation — 2026-10-18
 
+## M22 consultation delivered and received
+
+At the user's explicit request, Codex pasted the M21 completion report into the existing authenticated “Rerun Gateway Test” conversation in Brave and received a completed response. The message contained public revision/release/test evidence and proof limits; no credentials, cookies, private account identifiers or secret logs were sent. ChatGPT said it reviewed PR300, PR304 and the public M21 report, without independently rerunning tests or inspecting production.
+
+The exact request asked for prioritized next steps after completed M21, distinguishing already authorized offline work from paid inference, authentication, billing and schedule activation. The response proposed **M22 — Operational Readiness and Evidence Closure**: persist complete/partial/unknown usage observations and label their spending limits; close concrete offline warm-up gaps; add read-only readiness diagnostics; test/review; create a dedicated branch and draft PR. It explicitly said not to merge, tag, publish, deploy or activate in that task. The user then authorized proceeding with that prompt.
+
+Implementation baseline: `a62270c9ab9ccc98d8a754b5c22774c0374a20eb`, production .11/schema251/updater1.1.6. [M22 acceptance](M22_ACCEPTANCE.md) records the chosen nullable observation field, migration252, unchanged accounting amounts, inspection-only native command, review findings/resolutions and verification. Live provider spend, native current-login identity, API pool state and Windows execution remain separate proof gaps. ChatGPT advice supplies no new operational consent.
+
 ## M21 follow-up prepared 2026-10-18
 
 Delivery: PR300 merged at `ec84acdba727b2b0f36a630fffcf926a379e7470`; `.11` deployed successfully through the host updater. Independent correctness/security review closed the auth and retry findings. Full-server staging additionally found embedded frontend interception of `/anthropic-api/`; the shared prefix bypass and embedded authentication regressions fixed it. The publisher now runs those embedded checks. Final post-install Query matched official usage at 54%/59%, credits off. All nine accounts, current credentials/settings and 37 historical backups were preserved; the new snapshot makes 38. No new ChatGPT reply, paid canary or schedule activation is claimed. [M21 acceptance](M21_ACCEPTANCE.md) contains exact tests, digest and operation evidence.

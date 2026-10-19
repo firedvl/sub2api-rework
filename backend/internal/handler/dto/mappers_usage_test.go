@@ -332,3 +332,22 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 func f64Ptr(value float64) *float64 {
 	return &value
 }
+
+func TestUsageLogFromService_PreservesUsageObservationCompleteness(t *testing.T) {
+	complete, incomplete := true, false
+	for _, tt := range []struct {
+		name  string
+		value *bool
+		json  string
+	}{{"unknown", nil, "null"}, {"incomplete", &incomplete, "false"}, {"complete", &complete, "true"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			log := &service.UsageLog{UsageObservationComplete: tt.value}
+			for _, got := range []*UsageLog{UsageLogFromService(log), &UsageLogFromServiceAdmin(log).UsageLog} {
+				require.Equal(t, tt.value, got.UsageObservationComplete)
+				body, err := json.Marshal(got)
+				require.NoError(t, err)
+				require.Contains(t, string(body), `"usage_observation_complete":`+tt.json)
+			}
+		})
+	}
+}

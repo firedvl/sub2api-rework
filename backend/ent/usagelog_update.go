@@ -102,6 +102,26 @@ func (_u *UsageLogUpdate) SetNillableModel(v *string) *UsageLogUpdate {
 	return _u
 }
 
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (_u *UsageLogUpdate) SetUsageObservationComplete(v bool) *UsageLogUpdate {
+	_u.mutation.SetUsageObservationComplete(v)
+	return _u
+}
+
+// SetNillableUsageObservationComplete sets the "usage_observation_complete" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableUsageObservationComplete(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetUsageObservationComplete(*v)
+	}
+	return _u
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (_u *UsageLogUpdate) ClearUsageObservationComplete() *UsageLogUpdate {
+	_u.mutation.ClearUsageObservationComplete()
+	return _u
+}
+
 // SetRequestedModel sets the "requested_model" field.
 func (_u *UsageLogUpdate) SetRequestedModel(v string) *UsageLogUpdate {
 	_u.mutation.SetRequestedModel(v)
@@ -1141,6 +1161,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.UsageObservationComplete(); ok {
+		_spec.SetField(usagelog.FieldUsageObservationComplete, field.TypeBool, value)
+	}
+	if _u.mutation.UsageObservationCompleteCleared() {
+		_spec.ClearField(usagelog.FieldUsageObservationComplete, field.TypeBool)
+	}
 	if value, ok := _u.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
 	}
@@ -1613,6 +1639,26 @@ func (_u *UsageLogUpdateOne) SetNillableModel(v *string) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetModel(*v)
 	}
+	return _u
+}
+
+// SetUsageObservationComplete sets the "usage_observation_complete" field.
+func (_u *UsageLogUpdateOne) SetUsageObservationComplete(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetUsageObservationComplete(v)
+	return _u
+}
+
+// SetNillableUsageObservationComplete sets the "usage_observation_complete" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableUsageObservationComplete(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetUsageObservationComplete(*v)
+	}
+	return _u
+}
+
+// ClearUsageObservationComplete clears the value of the "usage_observation_complete" field.
+func (_u *UsageLogUpdateOne) ClearUsageObservationComplete() *UsageLogUpdateOne {
+	_u.mutation.ClearUsageObservationComplete()
 	return _u
 }
 
@@ -2684,6 +2730,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UsageObservationComplete(); ok {
+		_spec.SetField(usagelog.FieldUsageObservationComplete, field.TypeBool, value)
+	}
+	if _u.mutation.UsageObservationCompleteCleared() {
+		_spec.ClearField(usagelog.FieldUsageObservationComplete, field.TypeBool)
 	}
 	if value, ok := _u.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)

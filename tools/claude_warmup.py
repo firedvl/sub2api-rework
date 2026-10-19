@@ -180,12 +180,16 @@ def identity(result):
     return hashlib.sha256(email.strip().casefold().encode()).hexdigest()
 
 
-def auth(env, directory, binary='claude'):
-    env = dict(env, CLAUDE_CODE_SAFE_MODE='1')
+def client_version(env, directory, binary):
     version = subprocess.run([binary, '--version'], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=15)
     if version.returncode or version.stdout.strip() != QUALIFIED_CLIENT_VERSION + ' (Claude Code)':
         raise UnqualifiedClientVersion('Native client requires qualification')
+
+
+def auth(env, directory, binary='claude'):
+    env = dict(env, CLAUDE_CODE_SAFE_MODE='1')
+    client_version(env, directory, binary)
     result = subprocess.run([binary, '--settings', '{"forceLoginMethod":"claudeai"}',
                              '--setting-sources', '', 'auth', 'status', '--json'],
                             env=env, cwd=directory,
@@ -208,8 +212,11 @@ def state(path, create=True):
             os.close(fd)
         except FileExistsError:
             private_file(database)
-    db = sqlite3.connect(database, timeout=5, isolation_level=None)
+    db = sqlite3.connect(database if create else database.resolve().as_uri() + '?mode=ro',
+                         uri=not create, timeout=5, isolation_level=None)
     db.row_factory = sqlite3.Row
+    if not create:
+        return db
     db.execute('CREATE TABLE IF NOT EXISTS profiles (name TEXT PRIMARY KEY, last_attempt REAL, '
                'last_completed REAL, last_failure TEXT, outcome TEXT, cancel INTEGER NOT NULL DEFAULT 0)')
     db.execute('CREATE TABLE IF NOT EXISTS identities (digest TEXT PRIMARY KEY, last_attempt REAL NOT NULL)')
@@ -257,11 +264,15 @@ def scheduler_status(path, name):
 def status(path, name, now):
     config, p = load(path, name)
     db = state(path, False)
-    row = db.execute('SELECT * FROM profiles WHERE name=?', (state_key(path, name),)).fetchone() if db else None
-    checked = db.execute('SELECT * FROM checks WHERE profile=?', (state_key(path, name),)).fetchone() if db else None
-    result = dict(row) if row else {}
-    if db:
-        db.close()
+    try:
+        row = db.execute('SELECT * FROM profiles WHERE name=?', (state_key(path, name),)).fetchone() if db else None
+        # Older ledgers have no scheduler-check table; do not migrate during inspection.
+        has_checks = db and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='checks'").fetchone()
+        checked = db.execute('SELECT * FROM checks WHERE profile=?', (state_key(path, name),)).fetchone() if has_checks else None
+        result = dict(row) if row else {}
+    finally:
+        if db:
+            db.close()
     next_slot = occurrence(p, now, True)
     observed = p.get('observation')
     observation_age = None
@@ -293,6 +304,47 @@ def status(path, name, now):
                   reset_attribution='unverified')
     if result.get('outcome') == 'in_flight':
         result['outcome'] = 'outcome_unknown'  # Never resend an interrupted dispatch.
+    return result
+
+
+def readiness(path, name, now):
+    """Inspect local prerequisites without auth, inference or persistent writes."""
+    try:
+        config, p = load(path, name)
+    except FileNotFoundError:
+        return {'profile': name, 'configuration': 'missing', 'reason': 'configuration_or_parent_missing'}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'profile': name, 'configuration': 'invalid', 'reason': 'invalid_or_inaccessible_configuration'}
+    result = status(path, name, now)
+    try:
+        env = profile_environment(config['profile_root'], name, native_default=p.get('native_default', False))
+    except (OSError, ValueError):
+        qualified = 'profile_unavailable'
+    else:
+        try:
+            client_version(dict(env, CLAUDE_CODE_SAFE_MODE='1'), path.parent, config['claude_binary'])
+            qualified = 'qualified'
+        except UnqualifiedClientVersion:
+            qualified = 'unqualified'
+        except (OSError, subprocess.SubprocessError):
+            qualified = 'inspection_failed'
+    bound = bool(re.fullmatch('[0-9a-f]{64}', p.get('identity_digest') or ''))
+    ack = 'absent'
+    if p.get('billing_acknowledged_at'):
+        try:
+            age = now - stamp(p['billing_acknowledged_at'])
+            ack = 'expired' if not 0 <= age <= 86400 else 'valid_identity_bound'
+            if ack == 'valid_identity_bound' and (not bound or p.get('billing_identity_digest') != p['identity_digest']
+                                                or p.get('billing_mode') != 'credits_disabled_attested'):
+                ack = 'identity_or_billing_mode_unverified'
+        except (TypeError, ValueError):
+            ack = 'invalid'
+    result.update(configuration='valid', client=qualified, qualified_client_version=QUALIFIED_CLIENT_VERSION,
+                  identity_binding='bound' if bound else 'unbound', current_identity='unknown_not_checked',
+                  billing_acknowledgment=ack, billing_control='operator_attestation_not_provider_verification',
+                  quota_evidence=('fresh' if result['observation_fresh'] else
+                                  'stale_or_invalid' if p.get('observation') else 'unavailable'),
+                  live_acceptance='external_authorization_required', api_pool='unknown_external_gateway_state')
     return result
 
 
@@ -577,7 +629,7 @@ def main(argv=None):
     wizard = commands.add_parser('setup', help='Interactive disabled setup; no login, inference or scheduler installation')
     wizard.add_argument('--root', type=Path, default=Path.home() / '.claude-accounts')
     wizard.add_argument('--claude', type=Path, default=shutil.which('claude'))
-    for verb in ('bind', 'acknowledge-billing', 'observe', 'status', 'tick', 'disable', 'cancel', 'schedule'):
+    for verb in ('bind', 'acknowledge-billing', 'observe', 'status', 'readiness', 'tick', 'disable', 'cancel', 'schedule'):
         sub = commands.add_parser(verb)
         sub.add_argument('profile')
         if verb == 'acknowledge-billing':
@@ -615,6 +667,8 @@ def main(argv=None):
             result = tick(path, args.profile, args.execute)
         elif args.command == 'status':
             result = status(path, args.profile, now)
+        elif args.command == 'readiness':
+            result = readiness(path, args.profile, now)
         elif args.command == 'schedule':
             result = schedules(path, args.profile, args.output.expanduser().absolute())
         else:
@@ -658,6 +712,8 @@ def main(argv=None):
                 db.close()
                 result = {'cancel_requested': True, 'disabled': args.command == 'disable'}
         print(json.dumps(result, allow_nan=False))
+        if args.command == 'readiness' and result['configuration'] != 'valid':
+            return 1
         return 0
     except (OSError, ValueError, KeyError, TypeError, EOFError, sqlite3.Error, subprocess.SubprocessError) as exc:
         # Deliberately omit exception text: native output and account data must not leak.
