@@ -1,23 +1,36 @@
 <template>
-  <section aria-labelledby="user-usage-trend-title" class="border-t border-gray-200 pt-4 dark:border-dark-700">
-    <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h2 id="user-usage-trend-title" class="text-sm font-semibold">{{ t('admin.dashboard.recentUsage') }} (Top 12)</h2>
-      <div role="group" :aria-label="t('admin.dashboard.recentUsage')" class="flex gap-1">
-        <button v-for="choice in metrics" :key="choice" type="button" class="rounded px-3 py-1.5 text-xs"
-          :class="metric === choice ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200'"
-          :aria-pressed="metric === choice" @click="changeMetric(choice)">
+  <section aria-labelledby="user-usage-trend-title" class="card">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-5 py-3.5 dark:border-dark-700">
+      <h2 id="user-usage-trend-title" class="text-[0.9375rem] font-semibold text-gray-900 dark:text-white">
+        {{ t('admin.dashboard.recentUsage') }} (Top 12)
+      </h2>
+      <div role="group" :aria-label="t('admin.dashboard.recentUsage')" class="tabs">
+        <button
+          v-for="choice in metrics"
+          :key="choice"
+          type="button"
+          class="tab"
+          :class="{ 'tab-active': metric === choice }"
+          :aria-pressed="metric === choice"
+          @click="changeMetric(choice)"
+        >
           {{ t(choice === 'tokens' ? 'admin.dashboard.tokens' : 'admin.dashboard.actualSpending') }}
         </button>
       </div>
     </header>
-    <div class="h-64">
-      <div v-if="loading" class="flex h-full items-center justify-center"><LoadingSpinner /></div>
-      <div v-else-if="error" role="alert" class="flex h-full flex-col items-center justify-center gap-3">
+    <div class="px-5 py-4">
+      <div v-if="loading" class="flex h-64 items-center justify-center"><LoadingSpinner /></div>
+      <div v-else-if="error" role="alert" class="flex h-64 flex-col items-center justify-center gap-3">
         <p class="text-sm text-red-600">{{ t('admin.dashboard.failedToLoad') }}</p>
-        <button type="button" class="btn btn-secondary" @click="load"><Icon name="refresh" size="sm" />{{ t('admin.dashboard.retry') }}</button>
+        <button type="button" class="btn btn-secondary btn-sm" @click="load"><Icon name="refresh" size="sm" />{{ t('admin.dashboard.retry') }}</button>
       </div>
-      <Line v-else-if="points.length" :data="chartData" :options="chartOptions" />
-      <div v-else class="flex h-full items-center justify-center text-sm text-gray-500">{{ t('admin.dashboard.noDataAvailable') }}</div>
+      <div v-else-if="points.length" class="h-64"><Line :data="chartData" :options="chartOptions" /></div>
+      <div v-else class="flex flex-col items-center justify-center gap-2 py-8 text-center">
+        <span class="grid h-10 w-10 place-items-center rounded-xl border border-gray-200 bg-gray-50 text-gray-400 dark:border-dark-700 dark:bg-dark-800">
+          <Icon name="chart" size="sm" />
+        </span>
+        <p class="text-sm text-gray-500">{{ t('admin.dashboard.noDataAvailable') }}</p>
+      </div>
     </div>
   </section>
 </template>

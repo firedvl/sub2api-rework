@@ -33,7 +33,7 @@ test.describe('bulk account import', () => {
     })
 
     let dialog = await openImport(page)
-    await expect(page.getByRole('button', { name: 'Close modal' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
     await expect(page.getByRole('button', { name: 'More Actions' })).toBeFocused()

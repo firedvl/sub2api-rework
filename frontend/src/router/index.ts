@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { installRouteTransitions } from '@/utils/viewTransition'
 
 /**
  * Route definitions with lazy loading
@@ -1065,5 +1066,7 @@ router.onError((error) => {
     }
   }
 })
+
+installRouteTransitions(router)
 
 export default router

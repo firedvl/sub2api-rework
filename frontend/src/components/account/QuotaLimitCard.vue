@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import QuotaDimensionRow from './QuotaDimensionRow.vue'
 import type { QuotaThresholdType, QuotaResetMode } from '@/constants/account'
+import CollapseTransition from '@/components/common/CollapseTransition.vue'
 
 const { t } = useI18n()
 
@@ -163,6 +164,7 @@ const dailyFixedHint = computed(() =>
       </div>
 
       <!-- Collapsible content -->
+      <CollapseTransition>
       <div v-if="localEnabled && !collapsed" class="space-y-2 p-4 pt-3">
         <!-- Daily quota -->
         <QuotaDimensionRow
@@ -242,5 +244,6 @@ const dailyFixedHint = computed(() =>
           @update:notify-threshold-type="emit('update:quotaNotifyTotalThresholdType', $event)"
         />
       </div>
+      </CollapseTransition>
   </div>
 </template>

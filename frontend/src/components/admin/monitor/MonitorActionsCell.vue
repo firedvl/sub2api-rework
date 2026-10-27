@@ -3,36 +3,39 @@
     <button
       @click="$emit('run', row)"
       :disabled="running"
-      class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-    >
+      class="row-action"
+                :title="t('admin.channelMonitor.runNow')"
+              >
       <Icon name="refresh" size="sm" :class="running ? 'animate-spin' : ''" />
-      <span class="text-xs">{{ t('admin.channelMonitor.runNow') }}</span>
+      <span class="row-action-label">{{ t('admin.channelMonitor.runNow') }}</span>
     </button>
     <button
       data-testid="monitor-duplicate"
       :title="duplicateTitle"
       :disabled="duplicating || Boolean(row.api_key_decrypt_failed)"
       @click="$emit('duplicate', row)"
-      class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+      class="row-action disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Icon name="copy" size="sm" />
-      <span class="text-xs">
+      <span class="row-action-label">
         {{ duplicating ? t('admin.channelMonitor.duplicating') : t('admin.channelMonitor.duplicate') }}
       </span>
     </button>
     <button
       @click="$emit('edit', row)"
-      class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-    >
+      class="row-action"
+                :title="t('common.edit')"
+              >
       <Icon name="edit" size="sm" />
-      <span class="text-xs">{{ t('common.edit') }}</span>
+      <span class="row-action-label">{{ t('common.edit') }}</span>
     </button>
     <button
       @click="$emit('delete', row)"
-      class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-    >
+      class="row-action row-action-danger"
+                :title="t('common.delete')"
+              >
       <Icon name="trash" size="sm" />
-      <span class="text-xs">{{ t('common.delete') }}</span>
+      <span class="row-action-label">{{ t('common.delete') }}</span>
     </button>
   </div>
 </template>

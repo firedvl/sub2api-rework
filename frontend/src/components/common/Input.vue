@@ -24,11 +24,10 @@
         :autocomplete="autocomplete"
         :readonly="readonly"
         :class="[
-          'input w-full transition-all duration-200',
+          'input w-full',
           $slots.prefix ? 'pl-11' : '',
           $slots.suffix ? 'pr-11' : '',
-          error ? 'input-error ring-2 ring-red-500/20' : '',
-          disabled ? 'cursor-not-allowed bg-gray-100 opacity-60 dark:bg-dark-900' : ''
+          error ? 'input-error' : ''
         ]"
         @input="onInput"
         @change="$emit('change', ($event.target as HTMLInputElement).value)"

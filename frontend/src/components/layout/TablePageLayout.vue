@@ -44,9 +44,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 桌面端：Flexbox 布局 */
 .table-page-layout {
-  @apply flex min-h-0 min-w-0 flex-1 flex-col gap-6;
+  @apply flex min-h-0 min-w-0 flex-1 flex-col;
+  gap: 1rem;
 }
 
 .layout-section-fixed {
@@ -57,46 +57,59 @@ onUnmounted(() => {
   @apply flex min-h-0 min-w-0 flex-1 flex-col;
 }
 
-/* 表格滚动容器 - 增强版表体滚动方案 */
+/* The table body scrolls under a sticky header inside one bordered surface. */
 .table-scroll-container {
-  @apply flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800;
+  @apply flex h-full min-w-0 flex-col overflow-hidden;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
 }
 
 .table-scroll-container :deep(.table-wrapper) {
   @apply flex-1 overflow-x-auto overflow-y-auto;
-  /* 确保横向滚动条显示在最底部 */
   scrollbar-gutter: stable;
 }
 
 .table-scroll-container :deep(table) {
   @apply w-full;
-  min-width: max-content; /* 关键：确保表格宽度根据内容撑开，从而触发横向滚动 */
-  display: table; /* 使用标准 table 布局以支持 sticky 列 */
+  min-width: max-content;
+  display: table;
 }
 
 .table-scroll-container :deep(thead) {
-  @apply bg-gray-50/80 dark:bg-dark-800/80 backdrop-blur-sm;
-}
-
-.table-scroll-container :deep(tbody) {
-  /* 保持默认 table-row-group 显示，不使用 block */
+  background: var(--table-header-background);
 }
 
 .table-scroll-container :deep(th) {
-  @apply px-5 py-4 text-left text-sm font-medium text-gray-600 dark:text-dark-300 border-b border-gray-200 dark:border-dark-700;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--operator-border);
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: left;
 }
 
 .table-scroll-container :deep(td) {
-  @apply px-5 py-4 text-sm text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-dark-800;
+  padding: 0.75rem 1rem;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
 }
 
-/* 移动端：恢复正常滚动 */
+.table-scroll-container :deep(tbody > tr + tr > td) {
+  border-top: 1px solid var(--operator-border-subtle);
+}
+
+/* Narrow layouts: DataTable renders cards, so the frame steps aside. */
 .table-page-layout.mobile-mode .table-scroll-container {
-  @apply h-auto overflow-visible border-none shadow-none bg-transparent;
+  @apply h-auto overflow-visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .table-page-layout.mobile-mode .layout-section-scrollable {
-  @apply flex-none min-h-fit;
+  @apply min-h-fit flex-none;
 }
 
 .table-page-layout.mobile-mode .table-scroll-container :deep(table) {

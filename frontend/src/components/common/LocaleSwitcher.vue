@@ -4,13 +4,13 @@
       type="button"
       @click="toggleDropdown"
       :disabled="switching"
-      class="operator-locale-trigger operator-control flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+      class="app-icon-button operator-locale-trigger"
       :title="currentLocale?.name"
       aria-haspopup="menu"
       :aria-expanded="isOpen"
     >
-      <span class="text-base">{{ currentLocale?.flag }}</span>
-      <span class="hidden sm:inline">{{ currentLocale?.code.toUpperCase() }}</span>
+      <span class="text-base leading-none">{{ currentLocale?.flag }}</span>
+      <span class="hidden text-xs font-semibold sm:inline">{{ currentLocale?.code.toUpperCase() }}</span>
       <Icon
         name="chevronDown"
         size="xs"
@@ -23,7 +23,7 @@
       <div
         v-if="isOpen"
         role="menu"
-        class="operator-menu absolute right-0 z-50 mt-1 w-32 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
+        class="operator-menu absolute right-0 z-50 mt-1.5 w-40 overflow-hidden p-1"
       >
         <button
           v-for="locale in availableLocales"
@@ -32,7 +32,7 @@
           role="menuitemradio"
           :disabled="switching"
           @click="selectLocale(locale.code)"
-          class="operator-menu-item flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+          class="operator-menu-item flex w-full items-center gap-2 rounded-md px-2.5 text-sm transition-colors"
           :aria-current="locale.code === currentLocaleCode ? 'true' : undefined"
           :aria-checked="locale.code === currentLocaleCode"
           :class="{
@@ -98,18 +98,30 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Selection uses the shared popup tokens from .operator-menu; this hook marks it. */
 .operator-locale-selected {
-  @apply bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-gray-100;
+  font-weight: 500;
 }
 
-.dropdown-enter-active,
+.dropdown-enter-active {
+  transition:
+    opacity var(--operator-duration) var(--operator-ease-out),
+    transform var(--operator-duration) var(--operator-ease-out);
+}
+
 .dropdown-leave-active {
-  transition: all 0.15s ease;
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-in),
+    transform var(--operator-duration-fast) var(--operator-ease-in);
 }
 
 .dropdown-enter-from,
 .dropdown-leave-to {
   opacity: 0;
-  transform: scale(0.95) translateY(-4px);
+  transform: translateY(-4px) scale(0.98);
+}
+
+.operator-menu {
+  transform-origin: top right;
 }
 </style>

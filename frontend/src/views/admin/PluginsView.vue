@@ -1,26 +1,13 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <!-- The page title and description come from AppLayout. -->
       <section
-        class="flex flex-col gap-4 border-b border-gray-200 pb-5 dark:border-dark-700 sm:flex-row sm:items-end sm:justify-between"
+        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
-        <div class="min-w-0">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t("admin.plugins.title") }}
-          </h2>
-          <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
-            {{ t("admin.plugins.description") }}
-          </p>
-          <div
-            class="mt-3 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300"
-          >
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">{{
-              t("admin.plugins.onlyOpenAI")
-            }}</span>
-            <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">{{
-              t("admin.plugins.noAccountCoupling")
-            }}</span>
-          </div>
+        <div class="flex min-w-0 flex-wrap gap-2">
+          <span class="badge badge-gray">{{ t("admin.plugins.onlyOpenAI") }}</span>
+          <span class="badge badge-gray">{{ t("admin.plugins.noAccountCoupling") }}</span>
         </div>
 
         <div class="flex flex-shrink-0 items-center gap-2">
@@ -57,9 +44,7 @@
         {{ t("admin.plugins.uploadHint") }}
       </p>
 
-      <div
-        class="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200"
-      >
+      <div class="operator-callout operator-callout-info px-4 py-3 text-sm">
         <p>{{ t("admin.plugins.runtimeNotice") }}</p>
         <p class="mt-1">{{ t("admin.plugins.menuNotice") }}</p>
       </div>

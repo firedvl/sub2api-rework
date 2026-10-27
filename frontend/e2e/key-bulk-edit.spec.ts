@@ -40,7 +40,7 @@ for (const width of [390, 1280]) {
     await page.getByRole('checkbox', { name: 'Select key Key 2', exact: true }).check()
     await page.locator('[data-test="bulk-edit-keys"]').click()
     const dialog = page.getByRole('dialog', { name: 'Bulk Edit', exact: true })
-    await expect(dialog.getByRole('button', { name: 'Close modal' })).toBeFocused()
+    await expect(dialog.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused()
     await page.keyboard.press('Tab')
     await expect(dialog.locator('[data-test="enable-group"]')).toBeFocused()
     const submit = dialog.locator('[data-test="submit"]')

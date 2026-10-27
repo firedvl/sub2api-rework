@@ -31,7 +31,7 @@ describe('BaseDialog', () => {
     expect(document.body.querySelector('.modal-header')?.classList).toContain('operator-dialog-header')
     expect(document.body.querySelector('.modal-body')?.classList).toContain('operator-dialog-body')
     expect(document.body.querySelector('.modal-footer')?.classList).toContain('operator-dialog-footer')
-    expect(document.body.querySelector('[aria-label="Close modal"]')?.classList).toContain('operator-dialog-close')
+    expect(document.body.querySelector('[aria-label="common.closeDialog"]')?.classList).toContain('operator-dialog-close')
     wrapper.unmount()
   })
 

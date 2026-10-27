@@ -76,7 +76,7 @@
       <div
         v-if="activePoint"
         :id="tooltipId"
-        class="stats-bar-tooltip"
+        class="stats-bar-tooltip tooltip-enter"
         :class="{ 'is-below': activePoint.y < 28 }"
         role="tooltip"
         :style="tooltipStyle"
@@ -104,7 +104,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const CHART_TOP = 6
 const CHART_BASELINE = 78
-const CHART_LEFT = 12
+const CHART_LEFT = 14
 const CHART_RIGHT = 92
 const MIN_BAR_HEIGHT = 1.25
 const MAX_BAR_WIDTH = 14
@@ -209,7 +209,7 @@ const focusBar = (index: number) => {
 .stats-bar-grid-line {
   position: absolute;
   right: 0;
-  left: 12%;
+  left: 14%;
   height: 1px;
   background: var(--operator-border-subtle);
 }
@@ -222,7 +222,7 @@ const focusBar = (index: number) => {
   pointer-events: none;
   white-space: nowrap;
 }
-.stats-bar-y-label { left: 0; transform: translateY(-50%); }
+.stats-bar-y-label { left: 0; font-variant-numeric: tabular-nums; transform: translateY(-50%); }
 .stats-bar-x-label { top: 87%; transform: translateX(-50%); }
 .stats-bar-x-label.is-first { transform: none; }
 .stats-bar-x-label.is-last { transform: translateX(-100%); }

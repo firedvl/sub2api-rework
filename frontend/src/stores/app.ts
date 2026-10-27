@@ -10,10 +10,20 @@ import { i18n } from '@/i18n'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 import { OPERATOR_PRODUCT_NAME, resolveOperatorProductName } from '@/utils/branding'
 
+const SIDEBAR_COLLAPSED_KEY = 'sidebar_collapsed'
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
 
-  const sidebarCollapsed = ref<boolean>(false)
+  const sidebarCollapsed = ref<boolean>(readSidebarCollapsed())
   const mobileOpen = ref<boolean>(false)
   const sidebarScrollTop = ref<number>(0)
   const loading = ref<boolean>(false)
@@ -47,7 +57,7 @@ export const useAppStore = defineStore('app', () => {
    * Toggle sidebar collapsed state
    */
   function toggleSidebar(): void {
-    sidebarCollapsed.value = !sidebarCollapsed.value
+    setSidebarCollapsed(!sidebarCollapsed.value)
   }
 
   /**
@@ -56,6 +66,11 @@ export const useAppStore = defineStore('app', () => {
    */
   function setSidebarCollapsed(collapsed: boolean): void {
     sidebarCollapsed.value = collapsed
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+    } catch {
+      // Storage can be unavailable (private mode); the choice then lasts for this session.
+    }
   }
 
   /**

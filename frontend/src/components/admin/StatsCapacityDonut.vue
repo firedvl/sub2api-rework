@@ -33,7 +33,7 @@
         />
       </svg>
       <div class="stats-capacity-donut-value" aria-hidden="true">
-        <strong>
+        <strong :class="{ 'is-unknown': capacity.remainingPercent === null }">
           {{ capacity.remainingPercent === null
             ? t('common.unknown')
             : `${formatPercent(capacity.remainingPercent)}%` }}
@@ -198,7 +198,7 @@ const chartLabel = computed(() => {
 }
 .stats-capacity-donut-ring.is-healthy { stroke: var(--operator-success); }
 .stats-capacity-donut-ring.is-limited { stroke: var(--operator-warning); }
-.stats-capacity-donut-ring.is-exhausted { stroke: var(--operator-danger); }
+.stats-capacity-donut-ring.is-exhausted { stroke: var(--operator-destructive); }
 
 .stats-capacity-donut-value {
   position: absolute;
@@ -214,6 +214,13 @@ const chartLabel = computed(() => {
   font-variant-numeric: tabular-nums;
   line-height: 1;
   white-space: nowrap;
+}
+
+/* The word "Unknown" is wider than a percentage and must fit inside the ring. */
+.stats-capacity-donut-value strong.is-unknown {
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .stats-capacity-donut dl {
@@ -270,5 +277,5 @@ const chartLabel = computed(() => {
 }
 .stats-capacity-donut-limit .is-healthy { color: var(--operator-success); }
 .stats-capacity-donut-limit .is-limited { color: var(--operator-warning); }
-.stats-capacity-donut-limit .is-exhausted { color: var(--operator-danger); }
+.stats-capacity-donut-limit .is-exhausted { color: var(--operator-destructive); }
 </style>

@@ -1,9 +1,8 @@
 <template>
   <div class="space-y-1">
     <!--
-      Same action row layout as OpenAIQuotaResetCell: the parent's local
-      "查询" button is passed in via #pre-actions so related buttons share one
-      row. The reset count only shows for Anthropic OAuth accounts; the slot always
+      Same action row layout as OpenAIQuotaResetCell; #pre-actions lets a
+      parent add related buttons to the same row. The reset count only shows for Anthropic OAuth accounts; the slot always
       renders. The count button is read-only; only the orange reset button,
       after a query shows a redeemable credit and the operator confirms,
       consumes one reset.

@@ -54,13 +54,13 @@
         </template>
         <template #cell-actions="{ row }">
           <div class="flex items-center gap-2">
-            <button @click="openPlanEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400">
+            <button @click="openPlanEdit(row)" class="row-action" :title="t('common.edit')">
               <Icon name="edit" size="sm" />
-              <span class="text-xs">{{ t('common.edit') }}</span>
+              <span class="row-action-label">{{ t('common.edit') }}</span>
             </button>
-            <button @click="confirmDeletePlan(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+            <button @click="confirmDeletePlan(row)" class="row-action row-action-danger" :title="t('common.delete')">
               <Icon name="trash" size="sm" />
-              <span class="text-xs">{{ t('common.delete') }}</span>
+              <span class="row-action-label">{{ t('common.delete') }}</span>
             </button>
           </div>
         </template>

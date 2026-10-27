@@ -337,6 +337,7 @@
           </div>
 
           <!-- Expanded Results Section -->
+          <CollapseTransition>
           <div
             v-if="expandedPlanId === plan.id"
             class="border-t border-gray-100 px-4 py-3 dark:border-dark-700"
@@ -416,10 +417,12 @@
                       ]"
                     />
                   </div>
+                  <CollapseTransition>
                   <pre
                     v-if="expandedResultIds.has(result.id)"
                     class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-red-50 p-2 text-xs text-red-700 dark:bg-red-900/20 dark:text-red-300"
                   >{{ result.error_message }}</pre>
+                  </CollapseTransition>
                 </div>
                 <div v-else-if="result.response_text" class="mt-2">
                   <div
@@ -436,14 +439,17 @@
                       ]"
                     />
                   </div>
+                  <CollapseTransition>
                   <pre
                     v-if="expandedResultIds.has(result.id)"
                     class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-gray-100 p-2 text-xs text-gray-700 dark:bg-dark-800 dark:text-gray-300"
                   >{{ result.response_text }}</pre>
+                  </CollapseTransition>
                 </div>
               </div>
             </div>
           </div>
+          </CollapseTransition>
         </div>
       </div>
     </div>
@@ -476,6 +482,7 @@ import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
 import type { ScheduledTestPlan, ScheduledTestResult } from '@/types'
+import CollapseTransition from '@/components/common/CollapseTransition.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()

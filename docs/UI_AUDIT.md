@@ -54,6 +54,22 @@ translated long text.
 - The production router has direct Vitest coverage, and the operator shell has a
   maintained Chromium Playwright suite in CI.
 
+## Redesign Update
+
+A follow-up redesign reviewed the rendered console at 1440 and 390 pixels in light
+and dark mode, then fixed these problems at their shared source:
+
+| Finding | Evidence | Outcome |
+| --- | --- | --- |
+| Secondary and personal routes were unreachable on desktop | The operator top bar listed six areas. Users, subscriptions, announcements, redeem and promo codes, plugins, affiliates, orders, and every personal page had no link outside the narrow drawer or a typed URL. | One sidebar for all authenticated routes: operator areas, an `Administration` group, and `My Account`. A mounted Vitest suite checks that operators reach each group. |
+| Two visual systems | Admin routes used the neutral operator shell; personal routes used the older teal sidebar with a mesh background, glass header, and gradient buttons. | Both use the same shell, tokens, and components. |
+| Neutral styling depended on an override layer | Roughly 500 lines of attribute selectors such as `[class*=" bg-blue-"]` under `body[data-operator-console]` recolored utilities on admin routes only, forced every popup dark even in light mode, and flattened meaningful color. | The overrides and the body marker are gone. Ramps and text tokens in `tailwind.config.js` and `src/style.css` produce the same restraint on every route, and popups follow the active theme. |
+| Duplicate page titles | Ops, Channel Monitor, Channel Status, Risk Control, and Prompt Audit rendered their own `h1` under the layout's `h1`. | The layout owns the title; those views keep only their status lines, controls, and tabs. Ops shows its own title only in fullscreen, where no layout is present. |
+| Low-contrast and missing status colors | Muted and status text shades such as `text-gray-400` or `text-amber-600` fell below 4.5:1, and `--operator-danger` was referenced but never defined, leaving exhausted capacity bars uncolored. | Theme-aware text tokens meet AA on both themes, and the capacity views use `--operator-destructive`. |
+| Action columns covered table data | Icon-over-label row actions made the sticky Actions column in Groups about 420 px wide, hiding the Type and Accounts columns at 1440 px. | `row-action` icon buttons keep the label as the accessible name and tooltip; all Groups columns fit at 1440 px. |
+| Unlabelled controls | Password visibility toggles on sign-in, registration, and reset had no accessible name; the dialog close button was announced as "Close modal" in every locale. | The toggles use the existing show/hide password messages with `aria-pressed`; dialog close buttons use the localized `Close dialog` label, distinct from footer `Close` buttons. |
+| Persistent status bar | A 40 px footer repeated the area name and authentication state on every operator page. | Removed. The version stays in the sidebar, and fixture review mode shows a header badge. |
+
 ## System Inventory
 
 | Layer | Current implementation | Migration consequence |

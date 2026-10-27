@@ -284,7 +284,8 @@ describe('admin StatsView', () => {
     expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('0')
     expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('0')
     expect(point.classes()).toContain('is-zero')
-    expect(point.attributes('style')).toContain('left: 52%')
+    // A single period sits in the middle of the plot, which spans 14% to 92%.
+    expect(point.attributes('style')).toContain('left: 53%')
     expect(point.attributes('style')).toContain('bottom: 22%')
     expect(point.attributes('style')).toContain('height: 1.25%')
   })

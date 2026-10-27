@@ -1,73 +1,33 @@
 <template>
   <Teleport to="body">
-    <div
-      class="pointer-events-none fixed right-4 top-4 z-[9999] space-y-3"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <TransitionGroup
-        enter-active-class="transition ease-out duration-300"
-        enter-from-class="opacity-0 translate-x-full"
-        enter-to-class="opacity-100 translate-x-0"
-        leave-active-class="transition ease-in duration-200"
-        leave-from-class="opacity-100 translate-x-0"
-        leave-to-class="opacity-0 translate-x-full"
-      >
+    <div class="toast-region" aria-live="polite" aria-atomic="true">
+      <TransitionGroup name="toast">
         <div
           v-for="toast in toasts"
           :key="toast.id"
           :data-tone="toast.type"
-          :class="[
-            'operator-toast pointer-events-auto min-w-[320px] max-w-md overflow-hidden rounded-lg shadow-lg',
-            'bg-white dark:bg-dark-800',
-          ]"
+          class="operator-toast toast-item"
         >
-          <div class="p-4">
-            <div class="flex items-start gap-3">
-              <!-- Icon -->
-              <div class="operator-toast-icon mt-0.5 flex-shrink-0">
-                <Icon
-                  :name="getToastIconName(toast.type)"
-                  size="md"
-                  :class="getIconColor(toast.type)"
-                  aria-hidden="true"
-                />
-              </div>
-
-              <!-- Content -->
-              <div class="min-w-0 flex-1">
-                <p v-if="toast.title" class="text-sm font-semibold text-gray-900 dark:text-white">
-                  {{ toast.title }}
-                </p>
-                <p
-                  :class="[
-                    'text-sm leading-relaxed',
-                    toast.title
-                      ? 'mt-1 text-gray-600 dark:text-gray-300'
-                      : 'text-gray-900 dark:text-white'
-                  ]"
-                >
-                  {{ toast.message }}
-                </p>
-              </div>
-
-              <!-- Close button -->
-              <button
-                @click="removeToast(toast.id)"
-                class="operator-toast-close -m-1 flex-shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-gray-300"
-                aria-label="Close notification"
-              >
-                <Icon name="x" size="sm" />
-              </button>
-            </div>
+          <div class="operator-toast-icon toast-icon" aria-hidden="true">
+            <Icon :name="getToastIconName(toast.type)" size="md" />
           </div>
 
-          <!-- Progress bar -->
-          <div v-if="toast.duration" class="operator-toast-track h-1 bg-gray-100 dark:bg-dark-700">
-            <div
-              :class="['h-full toast-progress', getProgressBarColor(toast.type)]"
-              :style="{ animationDuration: `${toast.duration}ms` }"
-            ></div>
+          <div class="min-w-0 flex-1">
+            <p v-if="toast.title" class="toast-title">{{ toast.title }}</p>
+            <p :class="toast.title ? 'toast-message' : 'toast-title font-normal'">{{ toast.message }}</p>
+          </div>
+
+          <button
+            type="button"
+            class="operator-toast-close toast-close"
+            :aria-label="t('common.closeNotification')"
+            @click="removeToast(toast.id)"
+          >
+            <Icon name="x" size="sm" />
+          </button>
+
+          <div v-if="toast.duration" class="operator-toast-track toast-track" aria-hidden="true">
+            <div class="toast-progress" :style="{ animationDuration: `${toast.duration}ms` }"></div>
           </div>
         </div>
       </TransitionGroup>
@@ -77,9 +37,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 
 const toasts = computed(() => appStore.toasts)
@@ -98,45 +60,139 @@ const getToastIconName = (type: string): 'checkCircle' | 'xCircle' | 'exclamatio
   }
 }
 
-const getIconColor = (type: string): string => {
-  const colors: Record<string, string> = {
-    success: 'text-green-500',
-    error: 'text-red-500',
-    warning: 'text-yellow-500',
-    info: 'text-blue-500'
-  }
-  return colors[type] || colors.info
-}
-
-const getProgressBarColor = (type: string): string => {
-  const colors: Record<string, string> = {
-    success: 'bg-green-500',
-    error: 'bg-red-500',
-    warning: 'bg-yellow-500',
-    info: 'bg-blue-500'
-  }
-  return colors[type] || colors.info
-}
-
 const removeToast = (id: string) => {
   appStore.hideToast(id)
 }
 </script>
 
 <style scoped>
+.toast-region {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  width: min(24rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+.toast-item {
+  --toast-tone: var(--operator-accent);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding: 0.75rem 0.625rem 0.875rem 0.875rem;
+  border-radius: var(--operator-radius-lg);
+  pointer-events: auto;
+}
+
+.toast-item[data-tone='success'] {
+  --toast-tone: var(--operator-success);
+}
+
+.toast-item[data-tone='error'] {
+  --toast-tone: var(--operator-destructive);
+}
+
+.toast-item[data-tone='warning'] {
+  --toast-tone: var(--operator-warning);
+}
+
+.toast-icon {
+  display: flex;
+  flex-shrink: 0;
+  padding-top: 0.0625rem;
+  color: var(--toast-tone);
+}
+
+.toast-title {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.375rem;
+  overflow-wrap: anywhere;
+}
+
+.toast-message {
+  margin-top: 0.125rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.toast-close {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin: -0.125rem 0 0;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-subtle-foreground);
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.toast-close:hover {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+.toast-track {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--toast-tone) 14%, transparent);
+}
+
+/* A countdown runs at a constant rate, so linear timing is the honest curve. */
 .toast-progress {
-  width: 100%;
-  animation-name: toast-progress-shrink;
+  height: 100%;
+  background: color-mix(in srgb, var(--toast-tone) 70%, transparent);
+  transform-origin: left center;
+  animation-name: toast-countdown;
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
 
-@keyframes toast-progress-shrink {
+@keyframes toast-countdown {
   from {
-    width: 100%;
+    transform: scaleX(1);
   }
+
   to {
-    width: 0%;
+    transform: scaleX(0);
   }
+}
+
+.toast-enter-active {
+  transition:
+    opacity var(--operator-duration) var(--operator-ease-out),
+    transform var(--operator-duration-slow) var(--operator-ease-out);
+}
+
+.toast-leave-active {
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-in),
+    transform var(--operator-duration-fast) var(--operator-ease-in);
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.98);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
 }
 </style>

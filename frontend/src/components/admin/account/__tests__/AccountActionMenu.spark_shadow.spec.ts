@@ -108,22 +108,16 @@ describe('account action menu viewport bounds', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the menu above the persistent operator status bar', async () => {
-    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900)
+  it('bounds a tall menu to the viewport without a status bar reservation', async () => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(320)
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600)
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('operator-status-bar') ? new DOMRect(0, 300, 1280, 24) : new DOMRect(0, 0, 208, 600)
-    })
-    const statusBar = document.createElement('div')
-    statusBar.className = 'operator-status-bar'
-    document.body.appendChild(statusBar)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 208, 600))
     const wrapper = mount(AccountActionMenu, { props: { show: true, account: makeAccount({}), position }, attachTo: document.body })
     await flushPromises()
     const menu = document.querySelector<HTMLElement>('.action-menu-content')!
     expect(menu.style.top).toBe('8px')
-    expect(menu.style.maxHeight).toBe('284px')
+    expect(menu.style.maxHeight).toBe('304px')
     wrapper.unmount()
-    statusBar.remove()
   })
 })
 

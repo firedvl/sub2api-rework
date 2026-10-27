@@ -203,10 +203,12 @@
 
             <div v-if="ev.message" class="mt-3 break-words text-sm font-medium text-gray-900 dark:text-white">{{ ev.message }}</div>
 
+            <CollapseTransition>
             <pre
               v-if="expandedUpstreamDetailIds.has(ev.id)"
               class="mt-3 max-h-[240px] overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-900 dark:text-gray-100"
             ><code>{{ prettyJSON(getUpstreamResponsePreview(ev)) }}</code></pre>
+            </CollapseTransition>
           </div>
         </div>
       </div>
@@ -233,6 +235,7 @@ import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import { formatDateTime } from '@/utils/format'
 import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import CollapseTransition from '@/components/common/CollapseTransition.vue'
 
 interface Props {
   show: boolean

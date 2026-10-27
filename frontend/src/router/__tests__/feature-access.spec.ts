@@ -37,6 +37,7 @@ vi.mock('vue-router', () => ({
     beforeEach: vi.fn((guard: NavigationGuard) => {
       routerHarness.guard = guard
     }),
+    beforeResolve: vi.fn(),
     afterEach: vi.fn(),
     onError: vi.fn(),
   })),

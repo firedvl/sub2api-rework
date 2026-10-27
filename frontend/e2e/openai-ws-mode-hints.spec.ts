@@ -42,7 +42,7 @@ for (const width of [390, 1280]) {
 
     await page.getByRole('tab', { name: 'Technical', exact: true }).click()
     const accountRow = page.locator(width < 640
-      ? '.operator-account-table div.rounded-lg.border'
+      ? '.operator-account-table .data-card'
       : '.operator-account-table tr').filter({ hasText: 'Codex Team West' })
     await expect(accountRow).toHaveCount(1)
     await accountRow.locator('.operator-table-row-action').filter({ hasText: 'Edit' }).click()

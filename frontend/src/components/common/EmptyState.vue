@@ -1,14 +1,13 @@
 <template>
   <div class="empty-state">
     <!-- Icon -->
-    <div
-      class="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-gray-100 dark:bg-dark-800"
-    >
+    <div class="empty-state-badge">
       <slot name="icon">
-        <component v-if="icon" :is="icon" class="empty-state-icon h-10 w-10" aria-hidden="true" />
+        <component v-if="icon" :is="icon" class="empty-state-icon h-6 w-6" aria-hidden="true" />
         <svg
           v-else
-          class="empty-state-icon h-10 w-10"
+          class="empty-state-icon h-6 w-6"
+          aria-hidden="true"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -34,7 +33,7 @@
     </p>
 
     <!-- Action -->
-    <div v-if="actionText || $slots.action" class="mt-6">
+    <div v-if="actionText || $slots.action" class="mt-5">
       <slot name="action">
         <component
           :is="actionTo ? 'RouterLink' : 'button'"
@@ -43,7 +42,7 @@
           @click="!actionTo && $emit('action')"
           class="btn btn-primary"
         >
-          <Icon v-if="actionIcon" name="plus" size="md" class="mr-2" />
+          <Icon v-if="actionIcon" name="plus" size="sm" />
           {{ actionText }}
         </component>
       </slot>
@@ -78,3 +77,16 @@ const displayTitle = computed(() => props.title || t('common.noData'))
 
 defineEmits(['action'])
 </script>
+
+<style scoped>
+.empty-state-badge {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 1rem;
+  place-items: center;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-muted);
+}
+</style>

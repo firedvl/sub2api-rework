@@ -567,6 +567,7 @@ const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapac
 .stats-capacity-overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(16.5rem, 1fr));
+  grid-auto-rows: 1fr;
   gap: 0.75rem;
 }
 .stats-capacity-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
@@ -608,15 +609,15 @@ const accountWindowAriaLabel = (platform: AccountPlatform, window: OperatorCapac
 .stats-window-track { height: 0.5rem; margin-top: 0.4rem; overflow: hidden; border-radius: 2px; background: var(--operator-muted); }
 .stats-window-track > span { display: block; height: 100%; background: var(--operator-success); }
 .stats-window-track > span.is-limited { background: var(--operator-warning); }
-.stats-window-track > span.is-exhausted { background: var(--operator-danger); }
+.stats-window-track > span.is-exhausted { background: var(--operator-destructive); }
 .stats-window-row p,
 .stats-model-limits p { margin-top: 0.375rem; color: var(--operator-muted-foreground); font-size: 0.6875rem; }
 .is-healthy { color: var(--operator-success); }
 .is-limited { color: var(--operator-warning); }
-.is-exhausted { color: var(--operator-danger); }
+.is-exhausted { color: var(--operator-destructive); }
 .is-unknown { color: var(--operator-muted-foreground); }
 .is-active { color: var(--operator-success); }
-.is-error { color: var(--operator-danger); }
+.is-error { color: var(--operator-destructive); }
 .is-disabled { color: var(--operator-muted-foreground); }
 
 .stats-inspector-control {

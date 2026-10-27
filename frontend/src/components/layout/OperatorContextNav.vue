@@ -1,16 +1,17 @@
 <template>
   <nav
     v-if="area && visibleSections.length > 1"
-    class="operator-context-nav mb-4 overflow-x-auto border-b border-gray-200 dark:border-dark-700"
+    class="operator-context-nav"
     :aria-label="t('nav.areaSections', { area: t(area.labelKey) })"
   >
-    <div class="flex min-w-max gap-5">
+    <div class="flex min-w-max gap-6">
       <router-link
         v-for="section in visibleSections"
         :key="section.path"
         :to="section.path"
         class="operator-context-link"
-        :class="{ 'operator-context-link-active': matchesOperatorPath(route.path, section.path) }"
+        :class="{ 'operator-context-link-active': isCurrent(section) }"
+        :aria-current="isCurrent(section) ? 'page' : undefined"
       >
         {{ t(section.labelKey) }}
       </router-link>
@@ -24,22 +25,15 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAuthStore } from '@/stores/auth'
+import { usePageMeta } from '@/composables/usePageMeta'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
-import {
-  getOperatorArea,
-  matchesOperatorPath,
-  type OperatorSection,
-} from '@/router/operatorNavigation'
+import { matchesOperatorPath, type OperatorSection } from '@/router/operatorNavigation'
 
 const { t } = useI18n()
 const route = useRoute()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
-
-const area = computed(() => {
-  const currentArea = getOperatorArea(route.path)
-  return authStore.isSimpleMode && currentArea?.hideInSimpleMode ? undefined : currentArea
-})
+const { area } = usePageMeta()
 
 function isVisible(section: OperatorSection): boolean {
   if (authStore.isSimpleMode && section.hideInSimpleMode) return false
@@ -49,6 +43,10 @@ function isVisible(section: OperatorSection): boolean {
   }
   if (section.gate === 'risk-control') return isFeatureFlagEnabled(FeatureFlags.riskControl)
   return true
+}
+
+function isCurrent(section: OperatorSection): boolean {
+  return matchesOperatorPath(route.path, section.path)
 }
 
 const visibleSections = computed(() => area.value?.sections.filter(isVisible) ?? [])

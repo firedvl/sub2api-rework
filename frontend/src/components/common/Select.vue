@@ -42,8 +42,8 @@
       <span class="select-icon">
         <Icon
           name="chevronDown"
-          size="md"
-          :class="['transition-transform duration-200', isOpen && 'rotate-180']"
+          size="sm"
+          :class="['transition-transform duration-normal ease-ui-out', isOpen && 'rotate-180']"
         />
       </span>
     </button>
@@ -55,7 +55,7 @@
           v-if="isOpen"
           ref="dropdownRef"
           class="select-dropdown-portal operator-select-menu operator-menu"
-          :class="[instanceId]"
+          :class="[instanceId, dropdownPosition === 'top' && 'select-dropdown-up']"
           :style="dropdownStyle"
           role="listbox"
           tabindex="-1"
@@ -522,185 +522,218 @@ onUnmounted(() => {
 
 <style scoped>
 .select-trigger {
-  @apply flex w-full items-center justify-between gap-2;
-  @apply rounded-xl px-4 py-2.5 text-sm;
-  border: 1px solid var(--operator-border, #e5e7eb);
-  background: var(--operator-card, #fff);
-  color: var(--operator-foreground, #111827);
-  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
-  @apply cursor-pointer;
+  display: flex;
+  width: 100%;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.625rem 0.4375rem 0.75rem;
+  border: 1px solid var(--operator-border-strong);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: left;
+  transition:
+    border-color var(--operator-duration-fast) var(--operator-ease-out),
+    box-shadow var(--operator-duration-fast) var(--operator-ease-out),
+    background-color var(--operator-duration-fast) var(--operator-ease-out);
 }
 
-.dark .select-trigger {
-  border-color: var(--operator-border, #475569);
-  background: var(--operator-card, #1e293b);
-  color: var(--operator-foreground, #f3f4f6);
-}
-
-.select-trigger:hover {
-  border-color: color-mix(in oklch, var(--operator-border, #e5e7eb) 65%, var(--operator-foreground, #111827));
+.select-trigger:hover:not(.select-trigger-open):not(:focus-visible) {
+  border-color: color-mix(in srgb, var(--operator-border-strong) 70%, var(--operator-foreground));
 }
 
 .select-trigger:focus-visible,
 .select-trigger-open {
-  border-color: var(--operator-focus, #14b8a6);
+  border-color: var(--operator-accent);
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--operator-focus, #14b8a6) 20%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--operator-accent) 22%, transparent);
 }
 
-.select-trigger-error {
-  @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
+.select-trigger-error,
+.select-trigger-error:hover {
+  border-color: var(--operator-destructive);
 }
 
-.select-trigger-disabled {
-  @apply cursor-not-allowed opacity-60;
-  background: var(--operator-muted, #f3f4f6);
+.select-trigger-error:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--operator-destructive) 22%, transparent);
 }
 
-.dark .select-trigger-disabled {
-  background: var(--operator-muted, #0f172a);
+.select-trigger-disabled,
+.select-trigger-disabled:hover {
+  cursor: not-allowed;
+  border-color: var(--operator-border);
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  box-shadow: none;
 }
 
 .select-value {
-  @apply flex-1 truncate text-left;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select-icon {
-  @apply flex-shrink-0;
-  color: var(--operator-muted-foreground, #9ca3af);
+  display: flex;
+  flex-shrink: 0;
+  color: var(--operator-subtle-foreground);
 }
 
 .select-clear {
-  @apply flex flex-shrink-0 cursor-pointer items-center justify-center;
-  @apply rounded text-gray-400 transition-colors;
-  @apply hover:text-gray-600 dark:hover:text-gray-200;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-subtle-foreground);
+  cursor: pointer;
+  transition: color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.select-clear:hover {
+  color: var(--operator-foreground);
 }
 </style>
 
 <style>
 .select-dropdown-portal.operator-select-menu {
-  @apply w-max min-w-[200px];
-  @apply rounded-xl;
-  @apply overflow-hidden;
-  border: 1px solid var(--operator-popup-border, var(--operator-border, #e5e7eb));
-  background: var(--operator-popup-surface, var(--operator-card, #fff));
-  box-shadow: var(--operator-popup-shadow, 0 8px 24px rgb(0 0 0 / 0.14));
-  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
+  width: max-content;
+  min-width: 200px;
+  overflow: hidden;
+  border: 1px solid var(--operator-popup-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-popup-surface);
+  box-shadow: var(--operator-popup-shadow);
+  color: var(--operator-popup-foreground);
   pointer-events: auto !important;
+  transform-origin: top left;
 }
 
-.dark .select-dropdown-portal.operator-select-menu {
-  border-color: var(--operator-popup-border, var(--operator-border, #334155));
-  background: var(--operator-popup-surface, var(--operator-card, #1e293b));
-  color: var(--operator-popup-foreground, var(--operator-foreground, #f3f4f6));
+.select-dropdown-portal.operator-select-menu.select-dropdown-up {
+  transform-origin: bottom left;
 }
 
 .select-dropdown-portal.operator-select-menu .select-search {
-  @apply flex items-center gap-2 px-3 py-2;
-  border-bottom: 1px solid var(--operator-popup-border, var(--operator-border, #f3f4f6));
-  background: var(--operator-popup-search, var(--operator-card, #fff));
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-search {
-  border-color: var(--operator-popup-border, var(--operator-border, #334155));
-  background: var(--operator-popup-search, var(--operator-card, #1e293b));
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--operator-popup-border);
+  background: var(--operator-popup-search);
+  color: var(--operator-subtle-foreground);
 }
 
 .select-dropdown-portal.operator-select-menu .select-search-input {
-  @apply flex-1 bg-transparent text-sm;
-  @apply focus:outline-none;
-  background: var(--operator-popup-search, transparent);
-  color: var(--operator-popup-foreground, var(--operator-foreground, #111827));
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-search-input {
-  color: var(--operator-popup-foreground, var(--operator-foreground, #f3f4f6));
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  color: var(--operator-popup-foreground);
+  font-size: 0.875rem;
+  outline: none;
 }
 
 .select-dropdown-portal.operator-select-menu .select-search-input::placeholder {
-  color: var(--operator-popup-muted, var(--operator-muted-foreground, #9ca3af));
+  color: var(--operator-placeholder);
 }
 
 .select-dropdown-portal.operator-select-menu .select-options {
-  @apply max-h-80 overflow-y-auto py-1 outline-none;
-  background: var(--operator-popup-surface, var(--operator-card, #fff));
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  outline: none;
+  background: var(--operator-popup-surface);
 }
 
 .select-dropdown-portal.operator-select-menu .select-option {
-  @apply flex items-center justify-between gap-2;
-  @apply px-4 py-2.5 text-sm;
-  @apply cursor-pointer transition-colors duration-150;
-  background: var(--operator-popup-surface, transparent);
-  color: var(--operator-popup-foreground, var(--operator-foreground, #374151));
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--operator-radius-sm);
+  background: transparent;
+  color: var(--operator-popup-foreground);
+  cursor: pointer;
+  font-size: 0.875rem;
   pointer-events: auto !important;
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-option {
-  color: var(--operator-popup-foreground, var(--operator-foreground, #d1d5db));
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out);
 }
 
 .select-dropdown-portal.operator-select-menu .select-option:hover,
 .select-dropdown-portal.operator-select-menu .select-option-focused {
-  background: var(--operator-popup-hover, var(--operator-muted, #f3f4f6));
+  background: var(--operator-popup-hover);
 }
 
-.dark .select-dropdown-portal.operator-select-menu .select-option:hover,
-.dark .select-dropdown-portal.operator-select-menu .select-option-focused {
-  background: var(--operator-popup-hover, var(--operator-muted, #334155));
-}
-
-.select-dropdown-portal.operator-select-menu .select-option-selected {
-  background: var(--operator-popup-selected, var(--operator-muted, #f0fdfa));
-  color: var(--operator-popup-foreground, var(--operator-foreground, #0f766e));
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-option-selected {
-  background: var(--operator-popup-selected, var(--operator-muted, rgb(19 78 74 / 0.2)));
-  color: var(--operator-popup-foreground, var(--operator-foreground, #5eead4));
+.select-dropdown-portal.operator-select-menu .select-option-selected,
+.select-dropdown-portal.operator-select-menu .select-option-selected:hover {
+  background: var(--operator-popup-selected);
+  color: var(--operator-popup-foreground);
 }
 
 .select-dropdown-portal.operator-select-menu .select-option-disabled {
-  @apply cursor-not-allowed opacity-40;
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
-.select-dropdown-portal.operator-select-menu .select-option-group {
-  @apply cursor-default select-none;
-  @apply text-[11px] font-bold uppercase tracking-wider;
-  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
-  color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-option-group {
-  background: var(--operator-popup-search, var(--operator-muted, #0f172a));
-  color: var(--operator-popup-muted, var(--operator-muted-foreground, #9ca3af));
-}
-
+.select-dropdown-portal.operator-select-menu .select-option-group,
 .select-dropdown-portal.operator-select-menu .select-option-group:hover {
-  background: var(--operator-popup-search, var(--operator-muted, #f9fafb));
-}
-
-.dark .select-dropdown-portal.operator-select-menu .select-option-group:hover {
-  background: var(--operator-popup-search, var(--operator-muted, #0f172a));
+  min-height: 1.75rem;
+  margin-top: 0.25rem;
+  background: transparent;
+  color: var(--operator-popup-muted);
+  cursor: default;
+  font-size: 0.75rem;
+  font-weight: 600;
+  user-select: none;
 }
 
 .select-dropdown-portal.operator-select-menu .select-option-label {
-  @apply flex-1 min-w-0 truncate text-left;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select-dropdown-portal.operator-select-menu .select-empty {
-  @apply px-4 py-8 text-center text-sm;
-  background: var(--operator-popup-surface, transparent);
-  color: var(--operator-popup-muted, var(--operator-muted-foreground, #6b7280));
+  padding: 1.5rem 1rem;
+  background: transparent;
+  color: var(--operator-popup-muted);
+  font-size: 0.875rem;
+  text-align: center;
 }
 
-.select-dropdown-enter-active,
+.select-dropdown-enter-active {
+  transition:
+    opacity var(--operator-duration) var(--operator-ease-out),
+    transform var(--operator-duration) var(--operator-ease-out);
+}
+
 .select-dropdown-leave-active {
-  transition: all 0.2s ease;
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-in),
+    transform var(--operator-duration-fast) var(--operator-ease-in);
 }
 
 .select-dropdown-enter-from,
 .select-dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-4px) scale(0.98);
+}
+
+.select-dropdown-up.select-dropdown-enter-from,
+.select-dropdown-up.select-dropdown-leave-to {
+  transform: translateY(4px) scale(0.98);
 }
 </style>

@@ -20,13 +20,6 @@ const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
-const isOperatorConsole = computed(
-  () => authStore.isAdmin && (route.path === '/admin' || route.path.startsWith('/admin/')),
-)
-
-watch(isOperatorConsole, (enabled) => {
-  document.body.toggleAttribute('data-operator-console', enabled)
-}, { immediate: true })
 
 function updateDocumentTitle() {
   const customMenuItems = [
@@ -143,7 +136,6 @@ router.afterEach(() => {
 })
 
 onBeforeUnmount(() => {
-  document.body.removeAttribute('data-operator-console')
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
 })

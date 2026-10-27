@@ -1,7 +1,7 @@
 <template>
   <div class="auth-codex-shell">
-    <div v-if="isFixtureReview" class="auth-review-banner" role="status">
-      Local fixture review · no production connection
+    <div v-if="isFixtureReview" class="auth-review-banner app-review-badge" role="status">
+      {{ t('nav.fixtureReview') }}
     </div>
 
     <!-- Content Container -->

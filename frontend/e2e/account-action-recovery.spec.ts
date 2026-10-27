@@ -59,13 +59,11 @@ for (const width of [390, 1280]) {
     const menu = page.locator('.action-menu-content')
     await expect(menu).toBeVisible()
     await page.setViewportSize({ width, height: 360 })
-    await expect.poll(() => page.locator('.operator-status-bar').evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(360)
     await expect.poll(async () => {
       const bounds = await menu.boundingBox()
-      const statusBarTop = await page.locator('.operator-status-bar').evaluate(element => element.getBoundingClientRect().top)
-      return bounds && bounds.x >= 8 && bounds.y >= 8 && bounds.x + bounds.width <= width - 8 && bounds.y + bounds.height <= Math.min(360, statusBarTop) - 8
+      return bounds && bounds.x >= 8 && bounds.y >= 8 && bounds.x + bounds.width <= width - 8 && bounds.y + bounds.height <= 360 - 8
         ? 'within viewport'
-        : JSON.stringify({ bounds, statusBarTop, style: await menu.getAttribute('style') })
+        : JSON.stringify({ bounds, style: await menu.getAttribute('style') })
     }).toBe('within viewport')
     await menu.hover()
     await page.mouse.wheel(0, 400)

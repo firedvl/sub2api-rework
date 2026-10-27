@@ -211,6 +211,17 @@ describe('useAppStore', () => {
       expect(store.sidebarCollapsed).toBe(false)
     })
 
+    it('remembers the collapsed sidebar across store instances', () => {
+      useAppStore().setSidebarCollapsed(true)
+      expect(localStorage.getItem('sidebar_collapsed')).toBe('1')
+
+      setActivePinia(createPinia())
+      expect(useAppStore().sidebarCollapsed).toBe(true)
+
+      useAppStore().toggleSidebar()
+      expect(localStorage.getItem('sidebar_collapsed')).toBe('0')
+    })
+
     it('sidebarScrollTop 默认为 0 且可读写', () => {
       const store = useAppStore()
       expect(store.sidebarScrollTop).toBe(0)

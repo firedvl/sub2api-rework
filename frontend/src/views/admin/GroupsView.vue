@@ -73,13 +73,13 @@
               </button>
               <div
                 v-if="showColumnDropdown"
-                class="operator-menu absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                class="operator-menu menu-enter absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto py-1"
               >
                 <button
                   v-for="col in toggleableColumns"
                   :key="col.key"
                   @click="toggleColumn(col.key)"
-                  class="operator-menu-item flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="operator-menu-item flex w-full items-center justify-between px-4 py-2 text-left text-sm"
                   :aria-pressed="isColumnVisible(col.key)"
                 >
                   <span>{{ col.label }}</span>
@@ -381,10 +381,11 @@
             <div class="flex items-center gap-1">
               <button
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="row-action"
+                :title="t('common.edit')"
               >
                 <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t("common.edit") }}</span>
+                <span class="row-action-label">{{ t("common.edit") }}</span>
               </button>
               <button
                 data-testid="group-duplicate"
@@ -395,10 +396,10 @@
                 "
                 :disabled="duplicatingGroupIds.has(row.id)"
                 @click="handleDuplicate(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="row-action disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="copy" size="sm" />
-                <span class="text-xs">
+                <span class="row-action-label">
                   {{
                     duplicatingGroupIds.has(row.id)
                       ? t("admin.groups.duplicating")
@@ -409,37 +410,41 @@
               <button
                 v-if="row.platform === 'composite'"
                 @click="handleCompositeRoutes(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
+                class="row-action"
+                :title="t('admin.groups.compositeRoutes.action')"
               >
                 <Icon name="swap" size="sm" />
-                <span class="text-xs">{{
+                <span class="row-action-label">{{
                   t("admin.groups.compositeRoutes.action")
                 }}</span>
               </button>
               <button
                 @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                class="row-action"
+                :title="t('admin.groups.rateMultipliers')"
               >
                 <Icon name="dollar" size="sm" />
-                <span class="text-xs">{{
+                <span class="row-action-label">{{
                   t("admin.groups.rateMultipliers")
                 }}</span>
               </button>
               <button
                 @click="handleRPMOverrides(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                class="row-action"
+                :title="t('admin.groups.rpmOverrides')"
               >
                 <Icon name="bolt" size="sm" />
-                <span class="text-xs">{{
+                <span class="row-action-label">{{
                   t("admin.groups.rpmOverrides")
                 }}</span>
               </button>
               <button
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="row-action row-action-danger"
+                :title="t('common.delete')"
               >
                 <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t("common.delete") }}</span>
+                <span class="row-action-label">{{ t("common.delete") }}</span>
               </button>
             </div>
           </template>
@@ -2203,7 +2208,7 @@
                           accountSearchResults[getCreateRuleSearchKey(rule)]
                             ?.length > 0
                         "
-                        class="operator-menu absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                        class="operator-menu menu-enter absolute z-50 mt-1 max-h-48 w-full overflow-auto"
                       >
                         <button
                           v-for="account in accountSearchResults[
@@ -2212,7 +2217,7 @@
                           :key="account.id"
                           type="button"
                           @click="selectAccount(rule, account)"
-                          class="operator-menu-item w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
+                          class="operator-menu-item w-full px-3 py-2 text-left text-sm"
                           :class="{
                             'opacity-50': rule.accounts.some(
                               (a) => a.id === account.id,
@@ -4041,7 +4046,7 @@
                           accountSearchResults[getEditRuleSearchKey(rule)]
                             ?.length > 0
                         "
-                        class="operator-menu absolute z-50 mt-1 max-h-48 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                        class="operator-menu menu-enter absolute z-50 mt-1 max-h-48 w-full overflow-auto"
                       >
                         <button
                           v-for="account in accountSearchResults[
@@ -4050,7 +4055,7 @@
                           :key="account.id"
                           type="button"
                           @click="selectAccount(rule, account, true)"
-                          class="operator-menu-item w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
+                          class="operator-menu-item w-full px-3 py-2 text-left text-sm"
                           :class="{
                             'opacity-50': rule.accounts.some(
                               (a) => a.id === account.id,

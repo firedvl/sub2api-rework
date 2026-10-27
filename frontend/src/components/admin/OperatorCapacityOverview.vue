@@ -133,6 +133,7 @@
             </button>
           </header>
 
+          <CollapseTransition>
           <div
             v-show="!isProviderCollapsed(provider.platform)"
             :id="providerPanelId(provider.platform)"
@@ -226,6 +227,7 @@
                 </button>
               </header>
 
+              <CollapseTransition>
               <div
                 v-show="isAccountExpanded(summary.account.id)"
                 :id="accountDetailsId(summary.account.id)"
@@ -310,8 +312,10 @@
                   <span>{{ summary.error || t('admin.dashboard.capacity.quotaUnknownHint') }}</span>
                 </div>
               </div>
+              </CollapseTransition>
             </article>
           </div>
+          </CollapseTransition>
         </section>
       </div>
       <div v-else-if="!compact" class="operator-capacity-empty" data-testid="capacity-filter-empty">
@@ -328,6 +332,7 @@ import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CollapseTransition from '@/components/common/CollapseTransition.vue'
 import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { formatDateTimeToMinute, formatDayAwareDateTime } from '@/utils/format'
 import {

@@ -5,6 +5,12 @@ import ClaudeResetCreditsCell from '../ClaudeResetCreditsCell.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { Account } from '@/types'
 
+// Claude has no manual Query button; a redeemed reset credit is what forces an active refresh.
+async function refreshAfterRedeem(wrapper: { getComponent: (component: typeof ClaudeResetCreditsCell) => { vm: { $emit: (event: 'redeemed') => void } } }) {
+  wrapper.getComponent(ClaudeResetCreditsCell).vm.$emit('redeemed')
+  await Promise.resolve()
+}
+
 const { getUsage } = vi.hoisted(() => ({
   getUsage: vi.fn()
 }))
@@ -1726,6 +1732,17 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('5h|65')
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.unavailable')
   })
+  it('offers no manual Query action for Claude accounts', async () => {
+    getUsage.mockResolvedValueOnce({ five_hour: { utilization: 20, resets_at: null, remaining_seconds: 0 } })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 3990, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: { AccountQuotaInfo: true } },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('button').some(button => button.text() === 'admin.accounts.usageWindow.activeQuery')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps active Claude usage when an older passive request resolves later', async () => {
     let resolvePassive!: (usage: unknown) => void
     getUsage.mockReturnValueOnce(new Promise(resolve => { resolvePassive = resolve }))
@@ -1736,7 +1753,7 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenCalledWith(3992, 'passive', false)
     const fresh = { five_hour: { utilization: 50, resets_at: null, source: 'active' } }
     getUsage.mockResolvedValueOnce(fresh)
-    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await flushPromises()
     resolvePassive({ five_hour: { utilization: 25, resets_at: null, source: 'passive' } })
     await flushPromises()
@@ -1757,8 +1774,7 @@ describe('AccountUsageCell', () => {
       },
       global: { stubs: { AccountQuotaInfo: true } },
     })
-    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
-    await query.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await wrapper.setProps({ batchedUsageLoading: true })
     const fresh = { updated_at: '2026-10-18T00:00:00Z', five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } }
     resolveActive(fresh)
@@ -1770,7 +1786,7 @@ describe('AccountUsageCell', () => {
     wrapper.unmount()
   })
 
-  it.each(['resolve', 'reject'] as const)('isolates a reused Claude row from a previous account Query %s', async (outcome) => {
+  it.each(['resolve', 'reject'] as const)('isolates a reused Claude row from a previous account refresh %s', async (outcome) => {
     let resolveA!: (usage: unknown) => void
     let rejectA!: (error: Error) => void
     let resolveB!: (usage: unknown) => void
@@ -1783,17 +1799,14 @@ describe('AccountUsageCell', () => {
       },
       global: { stubs: { AccountQuotaInfo: true } },
     })
-    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
-    await query.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await wrapper.setProps({ account: makeAccount({ id: 4102, platform: 'anthropic', type: 'oauth' }) })
-    expect(query.attributes('disabled')).toBeUndefined()
-    await query.trigger('click')
+    await refreshAfterRedeem(wrapper)
     expect(getUsage).toHaveBeenLastCalledWith(4102, 'active', true)
     const usageA = { five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } }
     if (outcome === 'resolve') resolveA(usageA)
     else rejectA(new Error('account A failed'))
     await flushPromises()
-    expect(query.attributes('disabled')).toBeDefined()
     expect(wrapper.emitted('usage-loaded')).toBeUndefined()
     expect(wrapper.emitted('usage-query-error')).toBeUndefined()
     expect(wrapper.text()).not.toContain('96%')
@@ -1803,7 +1816,6 @@ describe('AccountUsageCell', () => {
     await flushPromises()
     expect(wrapper.emitted('usage-loaded')?.at(-1)).toEqual([usageB])
     expect(wrapper.text()).toContain('50%')
-    expect(query.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -1838,7 +1850,7 @@ describe('AccountUsageCell', () => {
     wrapper.unmount()
   })
 
-  it('keeps an unmanaged Claude Query active across a passive manual-refresh token', async () => {
+  it('keeps an unmanaged Claude refresh active across a passive manual-refresh token', async () => {
     getUsage.mockResolvedValueOnce({ five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 } })
     const wrapper = mount(AccountUsageCell, {
       props: { account: makeAccount({ id: 4301, platform: 'anthropic', type: 'oauth' }) },
@@ -1847,18 +1859,16 @@ describe('AccountUsageCell', () => {
     await flushPromises()
     let resolveQuery!: (usage: unknown) => void
     getUsage.mockReturnValueOnce(new Promise(resolve => { resolveQuery = resolve }))
-    const query = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
-    await query.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await wrapper.setProps({ manualRefreshToken: 1 })
     expect(getUsage).toHaveBeenCalledTimes(2)
     resolveQuery({ five_hour: { utilization: 50, resets_at: null, remaining_seconds: 0 } })
     await flushPromises()
     expect(wrapper.text()).toContain('50%')
-    expect(query.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
-  it('allows forced Claude refresh from unavailable data and failed requests', async () => {
+  it('forces a Claude refresh after a redeemed reset, even from unavailable data and failed requests', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {
         account: makeAccount({ id: 3991, platform: 'anthropic', type: 'oauth' }),
@@ -1866,10 +1876,9 @@ describe('AccountUsageCell', () => {
       },
       global: { stubs: { AccountQuotaInfo: true } },
     })
-    const refresh = wrapper.findAll('button').find(button => button.text() === 'admin.accounts.usageWindow.activeQuery')!
     expect(wrapper.text()).toContain('admin.accounts.usageWindow.unavailable')
     getUsage.mockRejectedValueOnce(new Error('upstream unavailable'))
-    await refresh.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('common.error')
     expect(wrapper.emitted('usage-query-error')?.at(-1)).toEqual(['common.error'])
@@ -1878,12 +1887,11 @@ describe('AccountUsageCell', () => {
       updated_at: '2026-10-01T00:00:00Z', five_hour: { utilization: 96, resets_at: null, remaining_seconds: 0 },
     } })
     expect(wrapper.get('[data-test="claude-active-query-error"]').text()).toContain('common.error')
-    expect(refresh.attributes('disabled')).toBeUndefined()
     getUsage.mockResolvedValueOnce({
       source: 'active', updated_at: '2026-10-17T10:00:00Z',
       five_hour: { utilization: 0.9, resets_at: null, source: 'active', observed_at: '2026-10-17T10:00:00Z' },
     })
-    await refresh.trigger('click')
+    await refreshAfterRedeem(wrapper)
     await flushPromises()
     expect(getUsage).toHaveBeenLastCalledWith(3991, 'active', true)
     expect(wrapper.text()).toContain('0.9%')
