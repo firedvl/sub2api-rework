@@ -44,7 +44,7 @@
           <button
             type="button"
             role="option"
-            class="dropdown-item select-option select-option-group operator-menu-item flex w-full items-center justify-between border-b border-gray-100 px-4 py-2 text-left text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:border-dark-700 dark:text-gray-300 dark:hover:bg-dark-700"
+            class="dropdown-item select-option select-option-group operator-menu-item flex w-full items-center justify-between border-b border-gray-100 px-4 py-2 text-left text-sm font-semibold dark:border-dark-700"
             :aria-selected="modelValue.length === 0"
             @click="clear"
           >
@@ -57,7 +57,7 @@
             :key="option.value"
             type="button"
             role="option"
-            class="dropdown-item select-option operator-menu-item flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+            class="dropdown-item select-option operator-menu-item flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm"
             :class="modelValue.includes(option.value) ? 'select-option-selected' : ''"
             :aria-selected="modelValue.includes(option.value)"
             @click="toggle(option.value)"

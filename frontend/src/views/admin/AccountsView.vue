@@ -96,23 +96,23 @@
                 </button>
                 <div
                   v-if="showAutoRefreshDropdown"
-                  class="operator-menu absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
+                  class="operator-menu menu-enter absolute right-0 z-50 mt-2 w-56 origin-top-right"
                 >
                   <div class="p-2">
                     <button
                       @click="setAutoRefreshEnabled(!autoRefreshEnabled)"
-                      class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                      class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm"
                       :aria-pressed="autoRefreshEnabled"
                     >
                       <span>{{ t('admin.accounts.enableAutoRefresh') }}</span>
                       <Icon v-if="autoRefreshEnabled" name="check" size="sm" class="operator-menu-check" />
                     </button>
-                    <div class="operator-menu-divider my-1 border-t border-gray-100 dark:border-dark-700"></div>
+                    <div class="operator-menu-divider my-1 border-t"></div>
                     <button
                       v-for="sec in autoRefreshIntervals"
                       :key="sec"
                       @click="setAutoRefreshInterval(sec)"
-                      class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                      class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm"
                       :aria-pressed="autoRefreshIntervalSeconds === sec"
                     >
                       <span>{{ autoRefreshIntervalLabel(sec) }}</span>
@@ -138,7 +138,7 @@
                 <Teleport to="body">
                   <div
                     v-if="showAccountToolsDropdown"
-                    class="account-tools-menu operator-menu fixed z-[9999] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-dark-700 dark:bg-dark-800"
+                    class="account-tools-menu operator-menu menu-enter fixed z-[9999] origin-top-right overflow-hidden"
                     :style="accountToolsDropdownStyle"
                     @click.stop
                   >
@@ -175,7 +175,7 @@
                         </span>
                       </button>
 
-                      <div class="operator-menu-divider my-2 border-t border-gray-100 dark:border-dark-700"></div>
+                      <div class="operator-menu-divider my-2 border-t"></div>
                       <div class="px-2 py-2">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                           {{ t('admin.accounts.toolActions') }}
@@ -194,7 +194,7 @@
                         <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
                       </button>
 
-                      <div class="operator-menu-divider my-2 border-t border-gray-100 dark:border-dark-700"></div>
+                      <div class="operator-menu-divider my-2 border-t"></div>
                       <div class="px-2 py-2">
                         <div class="flex items-center justify-between gap-3">
                           <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
@@ -208,7 +208,7 @@
                           v-for="col in toggleableColumns"
                           :key="col.key"
                           @click="toggleColumn(col.key)"
-                          class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                          class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors"
                           :aria-pressed="isColumnVisible(col.key)"
                         >
                           <span class="truncate">{{ col.label }}</span>
@@ -256,16 +256,6 @@
             <AutoWarmupStatus :account="account" :global-enabled="globalAutoWarmupEnabled" details />
           </template>
           <template #account-actions="{ account }">
-            <button
-              v-if="account.platform === 'anthropic' && supportsBatchAccountUsage(account)"
-              type="button"
-              class="operator-account-row-action"
-              :aria-label="`${t('admin.accounts.usageWindow.activeQuery')} ${account.name}`"
-              :disabled="capacityUsageRefreshing[String(account.id)]"
-              @click="refreshCapacityUsage(account)"
-            >
-              {{ t('admin.accounts.usageWindow.activeQuery') }}
-            </button>
             <button
               type="button"
               class="operator-account-row-action"
@@ -1047,24 +1037,6 @@ const handleUsageQueryError = (accountID: number, error: string | null) => {
   else delete capacityUsageQueryErrors.value[key]
   usageBatchErrorByAccountId.value[key] = error
 }
-const capacityUsageRefreshing = ref<Record<string, boolean>>({})
-const refreshCapacityUsage = async (account: Account) => {
-  const key = String(account.id)
-  if (capacityUsageRefreshing.value[key]) return
-  capacityUsageRefreshing.value[key] = true
-  try {
-    const usage = await adminAPI.accounts.getUsage(account.id, 'active', true)
-    handleAccountUsageLoaded(account.id, usage)
-    handleUsageQueryError(account.id, usage.error || null)
-  } catch (error) {
-    const message = extractApiErrorMessage(error, t('common.error'))
-    handleUsageQueryError(account.id, message)
-    appStore.showError(message)
-  } finally {
-    capacityUsageRefreshing.value[key] = false
-  }
-}
-
 const flushQueuedUsageBatch = async () => {
   usageBatchFlushTimer = null
   const accountIDs = Array.from(pendingUsageBatchIds)
@@ -1873,15 +1845,11 @@ const updateAccountToolsDropdownPosition = () => {
   const trigger = accountToolsTriggerRef.value
   if (!trigger) return
 
-  const viewportHeight = window.innerHeight
-  const statusBarTop = document.querySelector<HTMLElement>('.operator-status-bar')?.getBoundingClientRect().top
-  const usableHeight = Math.min(viewportHeight, statusBarTop ?? viewportHeight)
   const position = getFloatingPanelPosition(
     trigger.getBoundingClientRect(),
     document.documentElement.clientWidth || window.innerWidth,
-    usableHeight
+    window.innerHeight
   )
-  if (position.bottom !== null) position.bottom += viewportHeight - usableHeight
   Object.assign(accountToolsDropdownPosition, position)
 }
 
@@ -3249,11 +3217,11 @@ onUnmounted(() => {
 }
 
 .operator-scheduling-switch.is-enabled {
-  background: var(--operator-success-fill);
+  background: var(--operator-switch-on);
 }
 
 .operator-scheduling-switch.is-enabled:hover {
-  background: color-mix(in oklch, var(--operator-success-fill) 88%, black);
+  background: color-mix(in srgb, var(--operator-switch-on) 88%, black);
 }
 
 .operator-scheduling-switch.is-disabled:hover {
@@ -3296,7 +3264,7 @@ onUnmounted(() => {
 }
 
 .account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700;
+  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors;
   min-height: 2.5rem;
 }
 

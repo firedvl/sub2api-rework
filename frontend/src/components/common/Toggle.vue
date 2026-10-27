@@ -3,13 +3,13 @@
     type="button"
     :disabled="disabled"
     @click="toggle"
-    class="operator-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800"
-    :class="[modelValue ? 'operator-toggle-on bg-primary-600' : 'operator-toggle-off bg-gray-200 dark:bg-dark-600']"
+    class="operator-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-normal ease-ui-out disabled:cursor-not-allowed disabled:opacity-50"
+    :class="[modelValue ? 'operator-toggle-on' : 'operator-toggle-off']"
     role="switch"
     :aria-checked="modelValue"
   >
     <span
-      class="operator-toggle-thumb pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+      class="operator-toggle-thumb pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-normal ease-ui-out"
       :class="[modelValue ? 'translate-x-5' : 'translate-x-0']"
     />
   </button>

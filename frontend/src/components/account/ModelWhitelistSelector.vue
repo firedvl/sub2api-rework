@@ -38,9 +38,9 @@
       <!-- Dropdown List -->
       <div
         v-if="showDropdown"
-        class="operator-menu absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-700"
+        class="operator-menu menu-enter absolute left-0 right-0 top-full z-50 mt-1"
       >
-        <div class="operator-menu-divider sticky top-0 border-b border-gray-200 bg-white p-2 dark:border-dark-600 dark:bg-dark-700">
+        <div class="operator-menu-divider sticky top-0 border-b bg-white p-2 dark:bg-dark-700">
           <input
             v-model="searchQuery"
             type="text"

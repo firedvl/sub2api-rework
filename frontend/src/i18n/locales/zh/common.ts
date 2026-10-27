@@ -50,6 +50,8 @@ export default {
     inactive: '禁用',
     more: '更多',
     close: '关闭',
+    closeNotification: '关闭通知',
+    closeDialog: '关闭对话框',
     toggleMenu: '切换菜单',
     userMenu: '用户菜单',
     pageNotFound: '页面不存在',
@@ -163,12 +165,17 @@ export default {
 
   // Navigation
   nav: {
+    mainNavigation: '主导航',
+    breadcrumb: '面包屑导航',
+    skipToContent: '跳到主要内容',
+    fixtureReview: '本地夹具预览 · 未连接生产环境',
     operatorConsole: '运营控制台',
     overview: '概览',
     stats: '统计',
     modelsRouting: '模型与路由',
     activity: '活动',
     more: '更多',
+    administration: '系统管理',
     areaSections: '{area}分区',
     dashboard: '仪表盘',
     announcements: '公告',

@@ -321,7 +321,7 @@
   <Teleport to="body">
     <div
       v-if="tokenTooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
+      class="tooltip-enter fixed z-[9999] pointer-events-none -translate-y-1/2"
       :style="{
         left: tokenTooltipPosition.x + 'px',
         top: tokenTooltipPosition.y + 'px'
@@ -408,7 +408,7 @@
       :id="costTooltipId"
       ref="costTooltip"
       role="tooltip"
-      class="usage-cost-tooltip fixed z-[9999] w-max max-w-[calc(100vw-16px)] pointer-events-none -translate-y-1/2"
+      class="tooltip-enter usage-cost-tooltip fixed z-[9999] w-max max-w-[calc(100vw-16px)] pointer-events-none -translate-y-1/2"
       :style="{
         left: tooltipPosition.x + 'px',
         top: tooltipPosition.y + 'px'
@@ -787,9 +787,9 @@ const hideTokenTooltip = () => {
 </script>
 
 <style scoped>
-.usage-cost-tooltip {
-  --operator-foreground: #f8fafc;
-  --operator-muted-foreground: #cbd5e1;
-  --operator-success: #86efac;
+.usage-cost-tooltip > div {
+  --operator-foreground-rgb: 248 250 252;
+  --operator-muted-foreground-rgb: 203 213 225;
+  --operator-success-rgb: 134 239 172;
 }
 </style>

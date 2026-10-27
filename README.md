@@ -25,7 +25,7 @@ disabled defaults, native identity binding and explicit billing acknowledgement.
 | OpenAI-compatible gateway | Experimental | Preserves upstream Responses and Chat Completions paths |
 | Codex client tools | Experimental | Antigravity forwarding reuses shared namespace and custom-tool adaptation |
 | Standalone Codex web search | Experimental | Uses a separate, configurable `alpha_search` Composite route |
-| Operator console | In review | The Vue UI ports codex-lb's visual system while preserving Sub2API workflows |
+| Operator console | In review | One sidebar shell and token-based design system for operator and personal pages, adapted from codex-lb's neutral style |
 
 No stable rework release exists yet.
 

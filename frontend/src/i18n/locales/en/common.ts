@@ -50,6 +50,8 @@ export default {
     inactive: 'Inactive',
     more: 'More',
     close: 'Close',
+    closeNotification: 'Close notification',
+    closeDialog: 'Close dialog',
     toggleMenu: 'Toggle menu',
     userMenu: 'User menu',
     pageNotFound: 'Page not found',
@@ -163,12 +165,17 @@ export default {
 
   // Navigation
   nav: {
+    mainNavigation: 'Main navigation',
+    breadcrumb: 'Breadcrumb',
+    skipToContent: 'Skip to content',
+    fixtureReview: 'Fixture review · no production connection',
     operatorConsole: 'Operator console',
     overview: 'Overview',
     stats: 'Stats',
     modelsRouting: 'Models & Routing',
     activity: 'Activity',
     more: 'More',
+    administration: 'Administration',
     areaSections: '{area} sections',
     dashboard: 'Dashboard',
     announcements: 'Announcements',

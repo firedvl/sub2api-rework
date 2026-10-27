@@ -32,57 +32,39 @@ const isVisible = computed(() => isLoading.value)
 .navigation-progress {
   position: fixed;
   top: 0;
-  left: 0;
   right: 0;
-  height: 3px;
+  left: 0;
   z-index: 9999;
+  height: 2px;
   overflow: hidden;
-  background: transparent;
+  background: color-mix(in srgb, var(--operator-accent) 14%, transparent);
 }
 
+/* Indeterminate: a short accent segment travels across the top edge. */
 .navigation-progress-bar {
+  width: 35%;
   height: 100%;
-  width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    theme('colors.primary.400') 20%,
-    theme('colors.primary.500') 50%,
-    theme('colors.primary.400') 80%,
-    transparent 100%
-  );
-  animation: progress-slide 1.5s ease-in-out infinite;
+  border-radius: 0 2px 2px 0;
+  background: var(--operator-accent);
+  animation: progress-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-/* 暗色模式下的进度条颜色 */
-:root.dark .navigation-progress-bar {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    theme('colors.primary.500') 20%,
-    theme('colors.primary.400') 50%,
-    theme('colors.primary.500') 80%,
-    transparent 100%
-  );
-}
-
-/* 进度条滑动动画 */
 @keyframes progress-slide {
-  0% {
+  from {
     transform: translateX(-100%);
   }
-  100% {
-    transform: translateX(100%);
+
+  to {
+    transform: translateX(300%);
   }
 }
 
-/* 淡入淡出过渡 */
 .progress-fade-enter-active {
-  transition: opacity 0.15s ease-out;
+  transition: opacity var(--operator-duration-fast) var(--operator-ease-out);
 }
 
 .progress-fade-leave-active {
-  transition: opacity 0.3s ease-out;
+  transition: opacity var(--operator-duration-slow) var(--operator-ease-out);
 }
 
 .progress-fade-enter-from,
@@ -90,17 +72,18 @@ const isVisible = computed(() => isLoading.value)
   opacity: 0;
 }
 
-/* 减少动画模式 */
 @media (prefers-reduced-motion: reduce) {
   .navigation-progress-bar {
-    animation: progress-pulse 2s ease-in-out infinite;
+    width: 100%;
+    animation: progress-pulse 2s ease-in-out infinite !important;
   }
 
   @keyframes progress-pulse {
     0%,
     100% {
-      opacity: 0.4;
+      opacity: 0.35;
     }
+
     50% {
       opacity: 1;
     }

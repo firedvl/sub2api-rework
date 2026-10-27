@@ -5596,6 +5596,7 @@
                       </div>
                     </div>
 
+                    <CollapseTransition>
                     <div v-show="block.expanded">
                       <div class="grid gap-3 md:grid-cols-2">
                         <div>
@@ -5673,6 +5674,7 @@
                         </div>
                       </div>
                     </div>
+                    </CollapseTransition>
                   </div>
                 </div>
 
@@ -6080,6 +6082,7 @@
                   </div>
 
                   <!-- Expanded content -->
+                  <CollapseTransition>
                   <div
                     v-if="expandedProviders[pIdx]"
                     class="space-y-3 border-t border-gray-100 px-4 pb-4 pt-3 dark:border-dark-700"
@@ -6306,6 +6309,7 @@
                       </button>
                     </div>
                   </div>
+                  </CollapseTransition>
                 </div>
               </div>
             </div>
@@ -9121,6 +9125,7 @@ import {
   defaultFingerprintSignalRows,
   type FingerprintSignalRow,
 } from "./codexFingerprintSignals";
+import CollapseTransition from "@/components/common/CollapseTransition.vue";
 
 const { t, locale } = useI18n();
 const appStore = useAppStore();

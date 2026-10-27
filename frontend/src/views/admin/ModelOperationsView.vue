@@ -33,9 +33,9 @@
         <span>{{ t('admin.modelOperations.window', { start: formatDate(snapshot.window.start), end: formatDate(snapshot.window.end) }) }}</span>
       </div>
 
-      <div class="overflow-x-auto border-y border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800">
-        <table class="min-w-[1460px] w-full table-fixed text-left text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">
+      <div class="table-container">
+        <table class="table min-w-[1460px] table-fixed text-left">
+          <thead>
             <tr>
               <th class="w-64 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.model') }}</th>
               <th class="w-48 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.provider') }}</th>
@@ -47,11 +47,11 @@
               <th class="w-72 px-3 py-3 font-medium">{{ t('admin.modelOperations.columns.performance') }}</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+          <tbody>
             <tr v-if="loading && !snapshot"><td colspan="8" class="px-3 py-10 text-center text-gray-500" role="status">{{ t('common.loading') }}</td></tr>
             <tr v-else-if="!selectedGroupID"><td colspan="8" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.selectGroup') }}</td></tr>
             <tr v-else-if="filteredModels.length === 0"><td colspan="8" class="px-3 py-10 text-center text-gray-500">{{ t('admin.modelOperations.empty') }}</td></tr>
-            <tr v-for="model in filteredModels" :key="model.public_id" class="align-top hover:bg-gray-50 dark:hover:bg-dark-700/60">
+            <tr v-for="model in filteredModels" :key="model.public_id" class="align-top">
               <td class="px-3 py-3">
                 <div class="break-words font-mono text-xs font-semibold text-gray-900 dark:text-white">{{ model.public_id }}</div>
                 <div v-if="model.model_id !== model.public_id" class="mt-1 break-words font-mono text-xs text-gray-500">{{ model.model_id }}</div>

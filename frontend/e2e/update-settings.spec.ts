@@ -74,7 +74,7 @@ test('confirms a ready install by keyboard at a wide width', async ({ page }, te
 
   const dialog = page.getByRole('dialog', { name: 'Install' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Close modal' })).toBeFocused()
+  await expect(dialog.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused()
   await page.keyboard.press('Tab')
   const confirmation = dialog.getByLabel('Type INSTALL 0.1.184-rework.1 to confirm')
   await expect(confirmation).toBeFocused()

@@ -307,118 +307,194 @@ onUnmounted(() => {
 
 <style scoped>
 .select-trigger {
-  @apply flex w-full items-center justify-between gap-2;
-  @apply rounded-xl px-4 py-2.5 text-sm;
-  @apply bg-white dark:bg-dark-800;
-  @apply border border-gray-200 dark:border-dark-600;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply transition-all duration-200;
-  @apply focus:border-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500/30;
-  @apply hover:border-gray-300 dark:hover:border-dark-500;
-  @apply cursor-pointer;
+  display: flex;
+  width: 100%;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.625rem 0.4375rem 0.75rem;
+  border: 1px solid var(--operator-border-strong);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-foreground);
+  box-shadow: var(--operator-shadow-xs);
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transition:
+    border-color var(--operator-duration-fast) var(--operator-ease-out),
+    box-shadow var(--operator-duration-fast) var(--operator-ease-out);
 }
 
+.select-trigger:hover:not(.select-trigger-open):not(:focus-visible) {
+  border-color: color-mix(in srgb, var(--operator-border-strong) 70%, var(--operator-foreground));
+}
+
+.select-trigger:focus-visible,
 .select-trigger-open {
-  @apply border-gray-500 ring-2 ring-gray-500/30;
+  border-color: var(--operator-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--operator-accent) 22%, transparent);
 }
 
-.select-trigger-disabled {
-  @apply cursor-not-allowed bg-gray-100 opacity-60 dark:bg-dark-900;
+.select-trigger-disabled,
+.select-trigger-disabled:hover {
+  cursor: not-allowed;
+  border-color: var(--operator-border);
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  box-shadow: none;
 }
 
 .select-value {
-  @apply flex-1 truncate text-left;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .select-icon {
-  @apply flex-shrink-0 text-gray-400 dark:text-dark-400;
+  display: flex;
+  flex-shrink: 0;
+  color: var(--operator-subtle-foreground);
 }
 
 .select-dropdown {
-  @apply absolute z-[100] mt-2 w-full;
-  @apply bg-white dark:bg-dark-800;
-  @apply rounded-xl;
-  @apply border border-gray-200 dark:border-dark-700;
-  @apply shadow-lg shadow-black/10 dark:shadow-black/30;
-  @apply overflow-hidden;
+  position: absolute;
+  z-index: 100;
+  width: 100%;
+  margin-top: 0.375rem;
+  overflow: hidden;
+  border: 1px solid var(--operator-popup-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-popup-surface);
+  box-shadow: var(--operator-popup-shadow);
+  color: var(--operator-popup-foreground);
+  transform-origin: top left;
 }
 
 .select-header {
-  @apply flex items-center gap-2 px-3 py-2;
-  @apply border-b border-gray-100 dark:border-dark-700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--operator-popup-border);
 }
 
 .select-search {
-  @apply flex flex-1 items-center gap-2;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .select-search-input {
-  @apply flex-1 bg-transparent text-sm;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
-  @apply focus:outline-none;
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  color: var(--operator-popup-foreground);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.select-search-input::placeholder {
+  color: var(--operator-placeholder);
+}
+
+.batch-test-btn,
+.test-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-muted-foreground);
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out);
 }
 
 .batch-test-btn {
-  @apply flex-shrink-0 rounded-lg p-1.5;
-  @apply text-gray-500 hover:text-emerald-600 dark:hover:text-emerald-400;
-  @apply hover:bg-emerald-50 dark:hover:bg-emerald-900/20;
-  @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
-}
-
-.select-options {
-  @apply max-h-60 overflow-y-auto py-1;
-}
-
-.select-option {
-  @apply flex items-center justify-between gap-2;
-  @apply px-4 py-2.5 text-sm;
-  @apply text-gray-700 dark:text-gray-300;
-  @apply cursor-pointer transition-colors duration-150;
-  @apply hover:bg-gray-50 dark:hover:bg-dark-700;
-}
-
-.select-option-selected {
-  @apply bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-gray-100;
-}
-
-.select-option-label {
-  @apply truncate;
-}
-
-.select-empty {
-  @apply px-4 py-8 text-center text-sm;
-  @apply text-gray-500 dark:text-dark-400;
+  padding: 0.375rem;
 }
 
 .test-btn {
-  @apply flex-shrink-0 rounded p-1;
-  @apply text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400;
-  @apply hover:bg-emerald-50 dark:hover:bg-emerald-900/20;
-  @apply transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  padding: 0.25rem;
 }
 
-:global(body[data-operator-console] .select-trigger.operator-control) {
-  border-color: var(--operator-border);
-  background: var(--operator-card);
-  color: var(--operator-foreground);
+.batch-test-btn:hover:not(:disabled),
+.test-btn:hover:not(:disabled) {
+  background: var(--operator-success-soft);
+  color: var(--operator-success);
 }
 
-:global(body[data-operator-console] .select-dropdown.operator-menu) {
-  border-color: var(--operator-popup-border, var(--operator-border));
-  background: var(--operator-popup-surface, var(--operator-card));
-  color: var(--operator-popup-foreground, var(--operator-foreground));
+.batch-test-btn:disabled,
+.test-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
-/* Dropdown animation */
-.select-dropdown-enter-active,
+.select-options {
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+
+.select-option {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-popup-foreground);
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.select-option:hover {
+  background: var(--operator-popup-hover);
+}
+
+.select-option-selected,
+.select-option-selected:hover {
+  background: var(--operator-popup-selected);
+}
+
+.select-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-empty {
+  padding: 1.5rem 1rem;
+  color: var(--operator-popup-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.select-dropdown-enter-active {
+  transition:
+    opacity var(--operator-duration) var(--operator-ease-out),
+    transform var(--operator-duration) var(--operator-ease-out);
+}
+
 .select-dropdown-leave-active {
-  transition: all 0.2s ease;
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-in),
+    transform var(--operator-duration-fast) var(--operator-ease-in);
 }
 
 .select-dropdown-enter-from,
 .select-dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-4px) scale(0.98);
 }
 </style>

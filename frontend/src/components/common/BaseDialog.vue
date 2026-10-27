@@ -19,11 +19,12 @@
             </h3>
             <button
               v-if="showCloseButton"
+              type="button"
+              class="operator-dialog-close -mr-1.5 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md transition-colors"
+              :aria-label="t('common.closeDialog')"
               @click="emit('close')"
-              class="operator-dialog-close -mr-2 rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none dark:text-dark-500 dark:hover:bg-dark-700 dark:hover:text-dark-300"
-              aria-label="Close modal"
             >
-              <Icon name="x" size="md" />
+              <Icon name="x" size="sm" />
             </button>
           </div>
 
@@ -60,7 +61,10 @@ const updateScrollLock = () => {
 
 <script setup lang="ts">
 import { computed, watch, onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+
+const { t } = useI18n()
 
 // 生成唯一ID以避免多个对话框时ID冲突
 const dialogId = `modal-title-${++dialogIdCounter}`

@@ -2,13 +2,16 @@
 
 ## Status
 
-Implemented on `ui/operator-console-implementation` for human review. The shell
-recomposes existing routes and page owners; no backend contract was replaced and
-no production deployment was performed. See [UI_AUDIT.md](UI_AUDIT.md) for the
-architecture, evidence, and route-preservation matrix.
+Implemented for human review. One shell (sidebar, header, page heading) now serves
+operator, personal, and secondary routes, and one token layer drives every page,
+dialog, and teleported menu. The shell recomposes existing routes and page owners;
+no backend contract was replaced and no production deployment was performed. See
+[UI_AUDIT.md](UI_AUDIT.md) for the architecture, evidence, and route-preservation
+matrix.
 
-The current visual system is a Vue port and adaptation of codex-lb's operator UI
-at commit `b311aea760aa639fd96f63bd118f775e9b4a89f9` (`v1.24.0-beta.4`). It keeps
+The neutral, compact visual direction began as a Vue port of codex-lb's operator
+UI at commit `b311aea760aa639fd96f63bd118f775e9b4a89f9` (`v1.24.0-beta.4`) and
+has since been adapted into the design system described below. It keeps
 Sub2API's routes, data contracts, and provider-specific controls. See
 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) for attribution and license
 terms.
@@ -38,6 +41,37 @@ provider, and account behavior unless a separately tested change replaces it.
 - Preserve recognition: keep current values, active filters, applied routes, and
   consequences visible near each action.
 - Use motion only for state change and feedback, and respect reduced motion.
+
+### Visual System
+
+- **Tokens.** `src/style.css` defines one semantic set (`--operator-*`) for
+  surfaces, text, lines, ink, accent, status, popups, elevation, radius, and
+  motion, with light values on `:root` and dark values on `.dark`.
+  `tailwind.config.js` maps the `gray`, `dark`, and `primary` ramps to the same
+  palette, so inherited utility classes render in the current system.
+- **Color roles.** Neutral zinc surfaces carry structure. Ink (near-black, or
+  near-white in dark mode) marks the primary action. One blue accent marks
+  selection, focus, links, and information. Green, amber, and red are reserved
+  for status and always appear with text or an icon.
+- **Contrast.** Muted and status text utilities resolve to theme-aware tokens
+  that meet WCAG AA on both themes, so `text-gray-400` or `text-green-600` stay
+  readable without per-component fixes.
+- **Type.** Geist Sans for interface text and JetBrains Mono for code and
+  identifiers, both bundled under `public/fonts`. Numbers in tables and metrics
+  use tabular figures.
+- **Shape and depth.** 6 px chips, 8 px controls, 12 px panels, 14 px dialogs.
+  Shadow utilities resolve to four ordered elevation tokens: control, card hover,
+  popover, and dialog.
+- **Motion.** 120, 180, and 240 ms tokens with one ease-out curve. Route changes
+  use the View Transitions API (`src/utils/viewTransition.ts`): the sidebar and
+  header stay still while the old page fades out and the new one fades in with a
+  short rise. Query-only changes update in place. If the browser does not capture
+  the old page within 150 ms, navigation continues without the animation.
+  Switching the theme cross-fades the window. Browsers without view transitions
+  fade the page in instead. Menus and dialogs rise a few pixels from their
+  trigger, tab panels fade in, toasts slide in from the top right and slide out
+  to the right, and the sidebar group expands in place. Under reduced motion
+  every transition becomes immediate, while loading spinners keep turning.
 
 ## Information Architecture
 
@@ -94,8 +128,15 @@ the first operator map.
 
 ## Navigation
 
-- Use Overview, Accounts, Models & Routing, Activity, and Settings as the stable
-  top level.
+- Use Overview, Stats, Accounts, Models & Routing, Activity, and Settings as the
+  stable top level. `src/router/operatorNavigation.ts` is the single definition;
+  the sidebar, area tabs, and header breadcrumb all read from it.
+- Present navigation in a collapsible sidebar with three groups: the operator
+  areas, an `Administration` group for secondary admin routes (users, subscriptions,
+  announcements, codes, plugins, affiliates, and orders), and `My Account` for
+  personal routes. Every route that previously existed stays reachable from it.
+- Show the area and page as a breadcrumb in the header, and the page `h1` with
+  its description at the top of the content. Views do not render their own `h1`.
 - Keep current paths and deep links. The new navigation initially points to the
   existing views.
 - Use local tabs or a compact secondary list for routes within an area. Tabs must
@@ -105,8 +146,9 @@ the first operator map.
   authentication, authorization, modes, compliance, and feature access.
 - Keep personal account actions separate from operator navigation, using the user
   menu or an explicit personal section.
-- On narrow layouts, use a dismissible navigation drawer and keep the current page
-  title visible outside the drawer.
+- On narrow layouts, use a dismissible navigation drawer with the same groups,
+  close it on Escape, overlay click, link selection, or a resize to desktop, and
+  keep the current page title visible outside the drawer.
 - Retain direct access to legacy routes until the mapped replacement passes parity
   checks.
 
@@ -128,6 +170,12 @@ the first operator map.
   model names do not shift the layout.
 - `BaseDialog` traps and restores focus, lets only the top dialog handle Escape,
   and uses a stack-aware body scroll lock.
+- Shared classes in `src/style.css` (`btn`, `input`, `card`, `badge`, `tabs`,
+  `modal-*`, `operator-menu`, `row-action`) carry the visual system. Components
+  add layout utilities, not their own colors, radii, or shadows.
+- Table row actions use `row-action` icon buttons. The label stays in the
+  accessible name and the hover tooltip, which keeps action columns narrow enough
+  that sticky columns do not cover data.
 
 ## Data and State Contracts
 
@@ -277,6 +325,16 @@ long-page scroll geometry, compact Activity geometry, simple-mode visibility,
 route-guard authority, and account-dialog focus. Live services, writes, actual
 browser zoom, translated long text, and every inherited dialog remain outside
 this fixture-only work.
+
+The redesign was checked in the fixture review server at 1440 and 390 pixels in
+light and dark mode across Overview, Stats, Accounts, Models & Routing, Activity,
+Settings, API Keys, Usage, Profile, and sign-in, including the narrow drawer, the
+collapsed rail, the Administration group, and the user menu. Its automated
+evidence is the full Vitest suite, ESLint, `vue-tsc`, the locale completeness
+check, and the Playwright suite run against installed Chrome, where every spec
+passes except `custom-page-controls`. That spec fails the same way on the code
+before the redesign: Chrome 151 stops delivering `pointermove` to the captured
+button once the drag crosses the cross-origin iframe.
 
 ## Workflow Definition of Done
 

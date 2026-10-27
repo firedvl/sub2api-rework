@@ -2,7 +2,7 @@
   <AppLayout>
     <div
       data-testid="profile-shell"
-      class="mx-auto max-w-[950px] space-y-6"
+      class="max-w-[950px] space-y-6"
     >
       <ProfileInfoCard
         :user="user"
@@ -20,7 +20,7 @@
         class="card border-primary-200 bg-primary-50 p-6 dark:bg-primary-900/20"
       >
         <div class="flex items-center gap-4">
-          <div class="rounded-xl bg-primary-100 p-3 text-primary-600">
+          <div class="rounded-xl bg-primary-100 p-3 text-primary-600 dark:bg-primary-500/15">
             <Icon name="chat" size="lg" />
           </div>
           <div>
