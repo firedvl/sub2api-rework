@@ -107,7 +107,7 @@ func (s *OpenAIQuotaAutoResetService) persistClaudeWarmupEvaluation(ctx context.
 // Publish the same observations used by the account usage cells and countdowns.
 func (s *OpenAIQuotaAutoResetService) fetchClaudeWarmupUsage(ctx context.Context, a *Account, token string) (*ClaudeUsageResponse, error) {
 	if a.ProxyID != nil && a.Proxy == nil {
-		return nil, fmt.Errorf("Claude warm-up proxy unavailable")
+		return nil, fmt.Errorf("claude warm-up proxy unavailable")
 	}
 	account := *a
 	account.Credentials = cloneOpenAIAutoResetExtra(a.Credentials)
@@ -240,15 +240,15 @@ func (s *OpenAIQuotaAutoResetService) evaluateClaudeAutoWarmup(ctx context.Conte
 	// Re-read the opt-in immediately before dispatch, as the queue and quota lookup may take time.
 	current, sendErr := s.accountRepo.GetByID(ctx, a.ID)
 	if sendErr == nil && (!IsClaudeAutoWarmupConfigurable(current) || !current.IsSchedulable() || current.IsSyntheticUITest() || !resolveAccountExtraBool(current.Extra, OpenAIAutoWarmupEnabledExtraKey)) {
-		sendErr = fmt.Errorf("Claude warm-up disabled or account unavailable")
+		sendErr = fmt.Errorf("claude warm-up disabled or account unavailable")
 	}
 	if sendErr == nil && current.ProxyID != nil && current.Proxy == nil {
-		sendErr = fmt.Errorf("Claude warm-up proxy unavailable")
+		sendErr = fmt.Errorf("claude warm-up proxy unavailable")
 	}
 	if sendErr == nil {
 		token, sendErr = s.claudeWarmupTokens.GetAccessToken(ctx, current)
 		if sendErr == nil && strings.TrimSpace(token) == "" {
-			sendErr = fmt.Errorf("Claude OAuth token unavailable")
+			sendErr = fmt.Errorf("claude OAuth token unavailable")
 		}
 	}
 	if sendErr == nil {
