@@ -1674,7 +1674,7 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
     }
   })
 
-  it('shows and saves Auto Warm-up only for OpenAI OAuth parent accounts', async () => {
+  it('shows and saves OpenAI OAuth parent warm-up and excludes unsupported accounts', async () => {
     const parent = buildOpenAIOAuthParentAccount()
     parent.extra = {
       codex_auto_warmup_state: {
@@ -1710,6 +1710,20 @@ describe('EditAccountModal OpenAI 自动使用重置卡', () => {
       expect(unsupported.find('[data-testid="auto-warmup-settings"]').exists()).toBe(false)
       unsupported.unmount()
     }
+  })
+
+  it('saves Claude OAuth warm-up without writing runtime state or reset credits', async () => {
+    const account = { ...buildAccount(), platform: 'anthropic', type: 'oauth', parent_account_id: null,
+      extra: { claude_auto_warmup_state: { status: 'succeeded' } } }
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="auto-warmup-settings"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="auto-warmup-enabled"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({ auto_warmup_enabled: true })
+    expect(extra).not.toHaveProperty('claude_auto_warmup_state')
+    expect(extra).not.toHaveProperty('auto_reset_credit_enabled')
   })
 
   it('独立保存两个阈值，并禁止把运行态回写到管理请求', async () => {

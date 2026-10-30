@@ -465,6 +465,10 @@ func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Cont
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
 func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	return s.testClaudeConnection(c, account, modelID, 1024, nil)
+}
+
+func (s *AccountTestService) testClaudeConnection(c *gin.Context, account *Account, modelID string, maxTokens int, observe func(*http.Response)) error {
 	ctx := c.Request.Context()
 
 	// Determine the model to use
@@ -534,6 +538,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to create test payload")
 		}
+		payload["max_tokens"] = maxTokens
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -576,6 +581,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if observe != nil {
+		observe(resp)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

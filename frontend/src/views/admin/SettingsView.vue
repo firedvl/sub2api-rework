@@ -11446,6 +11446,7 @@ async function loadAutoWarmupEnabledAccountCount() {
   try {
     const result = await adminAPI.accounts.list(1, 1, {
       auto_warmup: "enabled",
+      platform: "openai",
     });
     autoWarmupEnabledAccountCount.value = result.total;
   } catch (error) {

@@ -4,12 +4,25 @@ export function isOpenAIAutoWarmupConfigurable(account: Pick<Account, 'platform'
   return account.platform === 'openai' && account.type === 'oauth' && account.parent_account_id == null
 }
 
+export function isAutoWarmupConfigurable(account: Pick<Account, 'platform' | 'type' | 'parent_account_id'>): boolean {
+  return ['openai', 'anthropic'].includes(account.platform) && account.type === 'oauth' && account.parent_account_id == null
+}
+
 export function autoWarmupReason(account: Account, globalEnabled: boolean | undefined, now = Date.now()): string {
-  if (globalEnabled === false) return 'disabled_global'
+  if (account.platform === 'openai' && globalEnabled === false) return 'disabled_global'
   if (!account.extra?.auto_warmup_enabled) return 'disabled_account'
   if (account.status === 'error') return 'credential_attention'
   if (account.status !== 'active' || !account.schedulable) return 'account_not_schedulable'
   if ([account.temp_unschedulable_until, account.overload_until, account.rate_limit_reset_at].some(time => time && Date.parse(time) > now)) return 'account_not_schedulable'
+  if (account.platform === 'anthropic') {
+    const attempt = account.extra.claude_auto_warmup_state
+    const evaluation = account.extra.claude_auto_warmup_evaluation
+    if (attempt?.window_started && Date.parse(attempt.observed_5h_reset_at || '') > now) return 'current_window_complete'
+    const nextAt = Date.parse(evaluation?.next_eligible_at || '')
+    if (evaluation && nextAt > now) return evaluation.reason
+    if (attempt?.status === 'pending' && now - Date.parse(attempt.attempted_at || '') < 60000) return 'pending'
+    return 'waiting_evaluation'
+  }
   const attempt = account.extra.codex_auto_warmup_state
   const evaluation = account.extra.codex_auto_warmup_evaluation
   const resetAt = Date.parse(account.extra.codex_5h_reset_at || '')

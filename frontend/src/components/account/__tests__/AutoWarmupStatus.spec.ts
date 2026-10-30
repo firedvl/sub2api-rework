@@ -8,24 +8,19 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => {
   const messages = en.admin.accounts.autoWarmup
   if (key.endsWith('.claudeUnavailableReason')) return messages.claudeUnavailableReason
   if (key.endsWith('.claudeAPIBilling')) return messages.claudeAPIBilling
-  return messages.claudeUnavailable
+  return (messages.reason as Record<string, string>)[key.split('.').pop() || ''] || messages.claudeUnavailable
 } }) }))
 
 describe('provider warm-up availability', () => {
-  it('keeps Claude unavailable even with forged OpenAI warm-up state', () => {
+  it('supports Claude OAuth independently of OpenAI settings and ignores Codex state', () => {
     const account = {
       platform: 'anthropic', type: 'oauth', status: 'active', schedulable: true,
       extra: { auto_warmup_enabled: true, codex_auto_warmup_state: { status: 'succeeded', completed_at: '2026-10-17T12:00:00Z' } }
     } as Account
-    const wrapper = mount(AutoWarmupStatus, {
-      props: { account, globalEnabled: true, details: true }
-    })
-    expect(wrapper.get('[data-testid="claude-auto-warmup-unavailable"]').text()).toContain('Warm-up: Unavailable')
-    expect(wrapper.text()).toContain('separate local official Claude Code companion')
-    expect(wrapper.text()).toContain('this gateway cannot enable or inspect them')
-    expect(wrapper.text()).not.toContain('Succeeded')
-    expect(wrapper.find('button').exists()).toBe(false)
-    expect(wrapper.find('dl').exists()).toBe(false)
+    const wrapper = mount(AutoWarmupStatus, { props: { account, globalEnabled: false, details: true } })
+    expect(wrapper.get('[data-testid="auto-warmup-reason"]').text()).toContain('Waiting for warm-up evaluation')
+    expect(wrapper.find('[data-testid="claude-auto-warmup-unavailable"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Last successful warm-up')
   })
 
   it('labels API usage separately from subscription windows', () => {

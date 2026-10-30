@@ -34,3 +34,30 @@ describe('warm-up operator reason', () => {
     expect(autoWarmupReason(account, true, now)).toBe('quota_unavailable')
   })
 })
+
+
+describe('Claude warm-up status', () => {
+  it('uses Claude state, respects account opt-out, and ages expired evaluations', () => {
+    const now = Date.parse('2026-10-30T12:00:00Z')
+    const account = { platform: 'anthropic', type: 'oauth', status: 'active', schedulable: true,
+      extra: { auto_warmup_enabled: true, claude_auto_warmup_evaluation: {
+        reason: 'request_completed_reset_unverified', checked_at: '2026-10-30T11:00:00Z', next_eligible_at: '2026-10-30T16:00:00Z'
+      } }
+    } as Account
+    expect(autoWarmupReason(account, false, now)).toBe('request_completed_reset_unverified')
+    expect(autoWarmupReason(account, false, now + 5 * 3600000)).toBe('waiting_evaluation')
+    account.extra!.auto_warmup_enabled = false
+    expect(autoWarmupReason(account, true, now)).toBe('disabled_account')
+  })
+})
+
+it('reports a Claude window complete only while its observed reset is in the future', () => {
+  const now = Date.parse('2026-10-30T12:00:00Z')
+  const account = { platform: 'anthropic', type: 'oauth', status: 'active', schedulable: true,
+    extra: { auto_warmup_enabled: true, claude_auto_warmup_state: {
+      status: 'succeeded', window_started: true, observed_5h_reset_at: '2026-10-30T17:00:00Z'
+    } }
+  } as Account
+  expect(autoWarmupReason(account, false, now)).toBe('current_window_complete')
+  expect(autoWarmupReason(account, false, now + 5 * 3600000)).toBe('waiting_evaluation')
+})

@@ -645,7 +645,7 @@ func (s *AccountRepoSuite) TestListWithAutoWarmupFilter() {
 		Name: "warmup-apikey", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
 	})
-	mustCreateAccount(s.T(), s.client, &service.Account{
+	claude := mustCreateAccount(s.T(), s.client, &service.Account{
 		Name: "warmup-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
 		Extra: map[string]any{service.OpenAIAutoWarmupEnabledExtraKey: true},
 	})
@@ -657,18 +657,18 @@ func (s *AccountRepoSuite) TestListWithAutoWarmupFilter() {
 
 	eligiblePage1, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 2}, "", "", "", "", 0, "", "eligible")
 	s.Require().NoError(err)
-	s.Require().Equal(int64(3), page.Total)
+	s.Require().Equal(int64(4), page.Total)
 	s.Require().Len(eligiblePage1, 2)
 	eligiblePage2, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 2, PageSize: 2}, "", "", "", "", 0, "", "eligible")
 	s.Require().NoError(err)
-	s.Require().Equal(int64(3), page.Total)
-	s.Require().Len(eligiblePage2, 1)
-	s.Require().ElementsMatch([]int64{enabled.ID, disabled.ID, missing.ID}, append(idsOfAccounts(eligiblePage1), idsOfAccounts(eligiblePage2)...))
+	s.Require().Equal(int64(4), page.Total)
+	s.Require().Len(eligiblePage2, 2)
+	s.Require().ElementsMatch([]int64{enabled.ID, disabled.ID, missing.ID, claude.ID}, append(idsOfAccounts(eligiblePage1), idsOfAccounts(eligiblePage2)...))
 
 	enabledAccounts, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0, "", "enabled")
 	s.Require().NoError(err)
-	s.Require().Equal(int64(1), page.Total)
-	s.Require().Equal([]int64{enabled.ID}, idsOfAccounts(enabledAccounts))
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().ElementsMatch([]int64{enabled.ID, claude.ID}, idsOfAccounts(enabledAccounts))
 
 	disabledAccounts, page, err := s.repo.ListWithAutoWarmupFilter(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", "", 0, "", "disabled")
 	s.Require().NoError(err)

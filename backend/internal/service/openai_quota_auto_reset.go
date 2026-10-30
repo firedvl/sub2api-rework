@@ -97,16 +97,19 @@ type openAIAutoResetRecovery interface {
 // OpenAIQuotaAutoResetService 通过小型去重队列承接实时信号，并用分钟扫描补偿
 // 重启、漏事件和多实例读取；真正消费仍由 PostgreSQL 幂等记录串行化。
 type OpenAIQuotaAutoResetService struct {
-	accountRepo    AccountRepository
-	quota          openAIAutoResetQuota
-	recoverer      openAIAutoResetRecovery
-	idempotency    *IdempotencyCoordinator
-	audit          *AuditLogService
-	settings       *SettingService
-	leaderLock     LeaderLockCache
-	warmupAttempts OpenAIAutoWarmupAttemptRepository
-	warmupSender   openAIAutoWarmupSender
-	warmupSlots    chan struct{}
+	accountRepo        AccountRepository
+	quota              openAIAutoResetQuota
+	recoverer          openAIAutoResetRecovery
+	idempotency        *IdempotencyCoordinator
+	audit              *AuditLogService
+	settings           *SettingService
+	leaderLock         LeaderLockCache
+	warmupAttempts     OpenAIAutoWarmupAttemptRepository
+	warmupSender       openAIAutoWarmupSender
+	claudeWarmupTest   *AccountTestService
+	claudeWarmupUsage  *AccountUsageService
+	claudeWarmupTokens claudeResetTokens
+	warmupSlots        chan struct{}
 
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -253,6 +256,7 @@ func (s *OpenAIQuotaAutoResetService) scanEligibleAccounts(ctx context.Context) 
 	}
 	s.scanQuotaRecoveryAccounts(ctx, coordinated)
 	s.scanAutoResetCreditAccounts(ctx)
+	s.scanClaudeAutoWarmupAccounts(ctx)
 }
 
 func (s *OpenAIQuotaAutoResetService) scanAutoResetCreditAccounts(ctx context.Context) {
@@ -384,6 +388,9 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 			s.Notify(*account.ParentAccountID)
 		}
 		return nil
+	}
+	if account.Platform == PlatformAnthropic {
+		return s.evaluateClaudeAutoWarmup(ctx, account)
 	}
 	config := ResolveOpenAIAutoResetCreditConfig(account)
 	warmupEnabled := ResolveOpenAIAutoWarmupEnabled(account) && s.openAIAutoWarmupEnabled(ctx)

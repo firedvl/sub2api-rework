@@ -76,6 +76,8 @@ var schedulerNeutralExtraKeys = map[string]struct{}{
 	service.OpenAICodexManifestSnapshotExtraKey: {},
 	service.OpenAIVisionQualificationExtraKey:   {},
 	service.OpenAIAutoWarmupEvaluationExtraKey:  {},
+	service.ClaudeAutoWarmupStateExtraKey:       {},
+	service.ClaudeAutoWarmupEvaluationExtraKey:  {},
 	"grok_billing_snapshot":                     {},
 	"session_window_utilization":                {},
 }
@@ -1135,7 +1137,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 
 func (r *accountRepository) ListWithAutoWarmupFilter(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode, autoWarmup string) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode).Where(
-		dbaccount.PlatformEQ(service.PlatformOpenAI),
+		dbaccount.PlatformIn(service.PlatformOpenAI, service.PlatformAnthropic),
 		dbaccount.TypeEQ(service.AccountTypeOAuth),
 		dbaccount.ParentAccountIDIsNil(),
 	)
