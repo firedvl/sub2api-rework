@@ -150,7 +150,8 @@ func (r *autoWarmupAttemptMemoryRepo) ClaimDormant(_ context.Context, accountID 
 	now := time.Now().UTC()
 	for _, attempt := range r.attempts {
 		if attempt.AccountID == accountID && attempt.WindowType == windowType && now.Sub(attempt.AttemptedAt) < retryAfter {
-			return nil, false, nil
+			clone := *attempt
+			return &clone, false, nil
 		}
 	}
 	r.nextID++

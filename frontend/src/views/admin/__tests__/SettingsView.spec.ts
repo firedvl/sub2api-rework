@@ -1623,7 +1623,7 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(notice.get("a").attributes("href")).toBe(
       "/admin/accounts?view=technical&auto_warmup=disabled",
     );
-    expect(listAccounts).toHaveBeenCalledWith(1, 1, { auto_warmup: "enabled" });
+    expect(listAccounts).toHaveBeenCalledWith(1, 1, { auto_warmup: "enabled", platform: "openai" });
   });
 
   it("hides the global-only warning when an eligible account is enabled", async () => {

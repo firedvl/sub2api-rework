@@ -210,6 +210,9 @@ func ProvideOpenAIQuotaAutoResetService(
 	settingService *SettingService,
 	leaderLock LeaderLockCache,
 	warmupAttempts OpenAIAutoWarmupAttemptRepository,
+	claudeTest *AccountTestService,
+	claudeUsage *AccountUsageService,
+	claudeTokens *ClaudeTokenProvider,
 	openAIGatewayService *OpenAIGatewayService,
 	pluginManager *PluginManager,
 ) *OpenAIQuotaAutoResetService {
@@ -224,6 +227,9 @@ func ProvideOpenAIQuotaAutoResetService(
 		leaderLock,
 	)
 	service.SetAutoWarmup(warmupAttempts, openAIGatewayService)
+	service.claudeWarmupTest = claudeTest
+	service.claudeWarmupUsage = claudeUsage
+	service.claudeWarmupTokens = claudeTokens
 	service.Start()
 	return service
 }

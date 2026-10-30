@@ -199,3 +199,29 @@ func TestOpenAIAutoWarmupRepositoryRetriesOnlyKnownPreflightFailures(t *testing.
 		require.Equal(t, 1, winners)
 	}
 }
+
+func TestClaudeAutoWarmupRepositoryRetryFloor(t *testing.T) {
+	ctx := context.Background()
+	var accountID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+  INSERT INTO accounts (name, platform, type, status, schedulable, credentials, extra)
+  VALUES ($1, 'anthropic', 'oauth', 'active', TRUE, '{}'::jsonb, '{}'::jsonb) RETURNING id`, "claude-warmup-retry-"+time.Now().UTC().Format("20060102150405.000000000")).Scan(&accountID))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", accountID)
+	})
+	repo := &openAIAutoWarmupRepository{db: integrationDB}
+	reset := time.Now().Add(5 * time.Hour)
+	first, claimed, err := repo.ClaimDormant(ctx, accountID, "claude_5h", reset, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	_, claimed, err = repo.ClaimDormant(ctx, accountID, "claude_5h", reset.Add(time.Minute), 10*time.Minute)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	// The gateway additionally requires fresh idle quota before using this retry path.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE openai_auto_warmup_attempts SET attempted_at = NOW() - INTERVAL '11 minutes' WHERE id = $1", first.ID)
+	require.NoError(t, err)
+	second, claimed, err := repo.ClaimDormant(ctx, accountID, "claude_5h", reset.Add(11*time.Minute), 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotEqual(t, first.ID, second.ID)
+}

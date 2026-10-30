@@ -1,4 +1,16 @@
-# Local Claude subscription warm-up companion
+# Claude automatic warm-up
+
+For gateway-managed Claude OAuth parent accounts, open **Accounts → Edit → Automatic warm-up** and enable the toggle. Bulk edit and the Auto Warm-up filters support these accounts too. The default is off. Claude uses the account toggle independently of the OpenAI global warm-up switch.
+
+The gateway checks enabled, active, schedulable accounts every minute. It reads fresh Claude usage before sending anything and waits while a five-hour window is active or a reported weekly window is exhausted. Missing or invalid five-hour usage prevents sending; failed quota checks retry after ten minutes.
+
+When the five-hour window is idle or expired, the gateway sends the connection test’s `hi` request with a 16-token output limit, using the existing OAuth refresh, proxy, TLS and native stream completion checks. PostgreSQL claims prevent duplicate attempts across instances and restarts for ten minutes. A confirmed active window waits until Claude’s actual reset time. A failed or unconfirmed request can retry only after the ten-minute floor and another fresh usage check still reports an idle or expired window. The existing attempts table stores Claude entries under `window_type=claude_5h`; no migration is required.
+
+The gateway confirms the new window from Claude’s response headers or an immediate read of its usage API, then saves the actual reset time for the account countdown and usage display. If confirmation is delayed, it checks again after one minute without resending. It does not invent a local five-hour timer. The account shows **Warm-up complete for current window** only after confirmation; a completed but unconfirmed request stays labeled **Request completed; new quota window not yet verified**. Requests consume subscription quota and may incur extra usage if that is enabled upstream. API keys, setup tokens, shadow accounts and synthetic UI accounts are unsupported.
+
+The separate local companion below remains available for native Claude Code profiles.
+
+## Local Claude subscription warm-up companion
 
 `tools/claude_warmup.py` runs the unmodified official Claude Code CLI with native subscription authentication. It is disabled by default. It does not use gateway credentials, copy credentials, sign in, redeem credits, change account billing settings, install schedules, or configure an API billing fallback. Native identity checks reject reported API-key and cloud-provider authentication before dispatch; the remaining authentication race is described below.
 

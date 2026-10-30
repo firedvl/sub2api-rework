@@ -86,6 +86,8 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	delete(normalized, OpenAIAutoResetCreditStateExtraKey)
 	delete(normalized, OpenAIAutoWarmupStateExtraKey)
 	delete(normalized, OpenAIAutoWarmupEvaluationExtraKey)
+	delete(normalized, ClaudeAutoWarmupStateExtraKey)
+	delete(normalized, ClaudeAutoWarmupEvaluationExtraKey)
 
 	_, hasEnabled := normalized[OpenAIAutoResetCreditEnabledExtraKey]
 	_, has5hEnabled := normalized[OpenAIAutoResetCredit5hEnabledExtraKey]
@@ -94,6 +96,17 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 	_, has7d := normalized[OpenAIAutoResetCredit7dThresholdExtraKey]
 	_, hasWarmup := normalized[OpenAIAutoWarmupEnabledExtraKey]
 	if !hasEnabled && !has5hEnabled && !has7dEnabled && !has5h && !has7d && !hasWarmup {
+		return normalized, nil
+	}
+	if hasWarmup {
+		if !IsAutoWarmupConfigurable(&Account{Platform: platform, Type: accountType}) || isShadow {
+			return nil, infraerrors.BadRequest("AUTO_WARMUP_ACCOUNT_INVALID", "automatic warm-up requires an OpenAI or Claude OAuth parent account")
+		}
+		if _, ok := normalized[OpenAIAutoWarmupEnabledExtraKey].(bool); !ok {
+			return nil, infraerrors.BadRequest("OPENAI_AUTO_WARMUP_ENABLED_INVALID", "auto_warmup_enabled must be a boolean")
+		}
+	}
+	if !hasEnabled && !has5hEnabled && !has7dEnabled && !has5h && !has7d {
 		return normalized, nil
 	}
 	if platform != PlatformOpenAI || accountType != AccountTypeOAuth || isShadow {
@@ -134,11 +147,6 @@ func normalizeOpenAIAutoResetCreditExtra(platform, accountType string, isShadow 
 		}
 		normalized[key] = value
 	}
-	if hasWarmup {
-		if _, ok := normalized[OpenAIAutoWarmupEnabledExtraKey].(bool); !ok {
-			return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_AUTO_WARMUP_ENABLED_INVALID", "auto_warmup_enabled must be a boolean")
-		}
-	}
 	return normalized, nil
 }
 
@@ -168,6 +176,8 @@ func stripOpenAIAutoResetCreditManagedExtra(extra map[string]any, stripConfig bo
 	delete(extra, OpenAIAutoResetCreditStateExtraKey)
 	delete(extra, OpenAIAutoWarmupStateExtraKey)
 	delete(extra, OpenAIAutoWarmupEvaluationExtraKey)
+	delete(extra, ClaudeAutoWarmupStateExtraKey)
+	delete(extra, ClaudeAutoWarmupEvaluationExtraKey)
 	if stripConfig {
 		delete(extra, OpenAIAutoResetCreditEnabledExtraKey)
 		delete(extra, OpenAIAutoResetCredit5hEnabledExtraKey)

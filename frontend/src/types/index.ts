@@ -1300,6 +1300,27 @@ export interface Account {
       observed_at?: string
       next_eligible_at?: string
     }
+    claude_auto_warmup_state?: {
+      status?: string
+      attempted_at?: string
+      completed_at?: string
+      error_code?: string
+      model?: string
+      request_id?: string
+      reset_at?: string
+      window_type?: string
+      upstream_status?: number
+      upstream_error_code?: string
+      window_started?: boolean
+      observed_5h_reset_at?: string
+      observed_5h_used_percent?: number
+    }
+    claude_auto_warmup_evaluation?: {
+      reason: string
+      checked_at: string
+      observed_at?: string
+      next_eligible_at?: string
+    }
     codex_auto_warmup_state?: {
       status?: string
       attempted_at?: string

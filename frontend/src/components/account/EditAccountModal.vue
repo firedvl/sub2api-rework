@@ -2575,7 +2575,7 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+        v-if="account && isAutoWarmupConfigurable(account)"
         class="space-y-2 border-t border-gray-200 pt-4 dark:border-dark-600"
         data-testid="auto-warmup-settings"
       >
@@ -2583,7 +2583,7 @@
           <div class="min-w-0">
             <label class="input-label mb-0">{{ t('admin.accounts.autoWarmup.title') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.autoWarmup.hint') }}
+              {{ t(account?.platform === 'anthropic' ? 'admin.accounts.autoWarmup.claudeHint' : 'admin.accounts.autoWarmup.hint') }}
             </p>
           </div>
           <Toggle
@@ -2595,13 +2595,13 @@
         <p v-if="autoWarmupLastAttempt" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt">
           {{ autoWarmupLastAttemptLabel }}
         </p>
-        <AutoWarmupStatus v-if="account" :account="account" :global-enabled="globalAutoWarmupEnabled" details />
+        <AutoWarmupStatus v-if="account" :account="{ ...account, extra: { ...account.extra, auto_warmup_enabled: autoWarmupEnabled } }" :global-enabled="globalAutoWarmupEnabled" details />
         <p v-if="autoWarmupLastAttemptDetails" class="text-xs text-gray-500 dark:text-gray-400" data-testid="auto-warmup-last-attempt-details">
           {{ autoWarmupLastAttemptDetails }}
         </p>
       </div>
 
-      <div v-if="account?.platform === 'anthropic'" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-2" data-testid="claude-auto-warmup-status">
+      <div v-if="account?.platform === 'anthropic' && !isAutoWarmupConfigurable(account)" class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-2" data-testid="claude-auto-warmup-status">
         <h3 class="input-label">{{ t('admin.accounts.autoWarmup.title') }}</h3>
         <AutoWarmupStatus :account="account" details />
       </div>
@@ -3242,7 +3242,7 @@ import {
   splitModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
-import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
+import { isAutoWarmupConfigurable, isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
 import AutoWarmupStatus from './AutoWarmupStatus.vue'
 
 interface Props {
@@ -3679,13 +3679,15 @@ const pendingAutoResetCreditReview = ref<{
   lowered: boolean
 } | null>(null)
 const autoWarmupEnabled = ref(false)
-const autoWarmupLastAttempt = computed(() => props.account?.extra?.codex_auto_warmup_state)
+const autoWarmupLastAttempt = computed(() => props.account?.platform === 'anthropic' ? props.account.extra?.claude_auto_warmup_state : props.account?.extra?.codex_auto_warmup_state)
 const autoWarmupLastAttemptLabel = computed(() => {
   const attempt = autoWarmupLastAttempt.value
   if (!attempt) return ''
   const knownStatuses = ['pending', 'succeeded', 'failed', 'window_started_with_warning']
   const rawStatus = attempt.status?.trim() || 'unknown'
-  const status = t(`admin.accounts.autoWarmup.status.${knownStatuses.includes(rawStatus) ? rawStatus : 'unknown'}`)
+  const status = props.account?.platform === 'anthropic' && rawStatus === 'succeeded' && !attempt.window_started
+    ? t('admin.accounts.autoWarmup.reason.request_completed_reset_unverified')
+    : t(`admin.accounts.autoWarmup.status.${knownStatuses.includes(rawStatus) ? rawStatus : 'unknown'}`)
   const timestamp = attempt.completed_at || attempt.attempted_at
   const time = timestamp ? formatRelativeTime(timestamp) : t('admin.accounts.autoWarmup.unknownTime')
   return t('admin.accounts.autoWarmup.lastAttempt', { status, time })
@@ -5904,6 +5906,14 @@ const handleSubmit = async () => {
       }
       // Quota notify config
       writeQuotaNotifyToExtra(newExtra, 'update')
+      updatePayload.extra = newExtra
+    }
+
+    if (isAutoWarmupConfigurable(props.account)) {
+      const newExtra = { ...((updatePayload.extra as Record<string, unknown>) || props.account.extra || {}) }
+      newExtra.auto_warmup_enabled = autoWarmupEnabled.value
+      delete newExtra.claude_auto_warmup_state
+      delete newExtra.claude_auto_warmup_evaluation
       updatePayload.extra = newExtra
     }
 

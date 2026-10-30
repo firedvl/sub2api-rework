@@ -786,6 +786,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			OpenAIAutoResetCreditStateExtraKey,
 			OpenAIAutoWarmupStateExtraKey,
 			OpenAIAutoWarmupEvaluationExtraKey,
+			ClaudeAutoWarmupStateExtraKey,
+			ClaudeAutoWarmupEvaluationExtraKey,
 			OpenCodeGoUsageAutoRefreshExtraKey,
 			OpenCodeGoUsageSnapshotExtraKey,
 		} {
@@ -1149,6 +1151,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if !ok {
 				return nil, ErrAccountNotFound
 			}
+			if input.AutoWarmupEnabled != nil {
+				if IsAutoWarmupConfigurable(account) {
+					eligibleWarmupIDs = append(eligibleWarmupIDs, accountID)
+				} else {
+					result.AutoWarmupSkippedIDs = append(result.AutoWarmupSkippedIDs, accountID)
+				}
+			}
 			if IsOpenAIAutoWarmupConfigurable(account) {
 				if err := validateOpenAIAutoResetCreditWindowUpdate(account, resetCreditUpdates); err != nil {
 					return nil, err
@@ -1156,14 +1165,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				eligibleManagedOpenAIIDs = append(eligibleManagedOpenAIIDs, accountID)
 				continue
 			}
-			if input.AutoWarmupEnabled != nil {
-				result.AutoWarmupSkippedIDs = append(result.AutoWarmupSkippedIDs, accountID)
-			}
 			if len(resetCreditUpdates) > 0 {
 				result.AutoResetCreditSkippedIDs = append(result.AutoResetCreditSkippedIDs, accountID)
 			}
 		}
-		eligibleWarmupIDs = eligibleManagedOpenAIIDs
 		result.AutoWarmupSkippedCount = len(result.AutoWarmupSkippedIDs)
 		result.AutoResetCreditSkippedCount = len(result.AutoResetCreditSkippedIDs)
 	}
@@ -1363,7 +1368,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Handle group bindings per account (requires individual operations).
 	resultIDs := input.AccountIDs
 	if (input.AutoWarmupEnabled != nil || len(resetCreditUpdates) > 0) && !hasNormalRepoUpdate && input.GroupIDs == nil {
-		resultIDs = eligibleManagedOpenAIIDs
+		resultIDs = nil
+		for _, id := range input.AccountIDs {
+			if (input.AutoWarmupEnabled != nil && IsAutoWarmupConfigurable(targetsByID[id])) ||
+				(len(resetCreditUpdates) > 0 && IsOpenAIAutoWarmupConfigurable(targetsByID[id])) {
+				resultIDs = append(resultIDs, id)
+			}
+		}
 	}
 	for _, accountID := range resultIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}

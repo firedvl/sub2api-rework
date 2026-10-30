@@ -403,7 +403,7 @@
             <div class="flex flex-wrap items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
               <span
-                v-if="isOpenAIAutoWarmupConfigurable(row)"
+                v-if="isAutoWarmupConfigurable(row)"
                 :class="[
                   'inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium',
                   row.extra?.auto_warmup_enabled
@@ -696,7 +696,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import { isOpenAIAutoWarmupConfigurable } from '@/utils/autoWarmup'
+import { isAutoWarmupConfigurable } from '@/utils/autoWarmup'
 import AutoWarmupStatus from '@/components/account/AutoWarmupStatus.vue'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
@@ -2580,7 +2580,7 @@ const accountMatchesCurrentFilters = (account: Account) => {
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
   if (filters.auto_warmup) {
-    if (!isOpenAIAutoWarmupConfigurable(account)) return false
+    if (!isAutoWarmupConfigurable(account)) return false
     const enabled = account.extra?.auto_warmup_enabled === true
     if (filters.auto_warmup === 'enabled' && !enabled) return false
     if (filters.auto_warmup === 'disabled' && enabled) return false

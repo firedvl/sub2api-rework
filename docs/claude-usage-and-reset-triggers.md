@@ -1,22 +1,10 @@
 # Claude usage and automatic reset triggers
 
-## Claude warm-up is unavailable
+## Claude automatic warm-up
 
-M20 adds [native account launchers and explicit API-key-only routing](CLAUDE_CODE_ACCOUNTS.md).
-It retains the unavailable subscription warm-up boundary and distinguishes manual
-inference completion from quota-window advancement.
+Claude OAuth parent accounts now support per-account automatic warm-up through the gateway. It reuses the connection-test request and the existing warm-up queue and durable claims. Fresh usage must show an idle or expired five-hour window before dispatch; missing quota data prevents inference. The OpenAI global warm-up switch applies only to OpenAI accounts.
 
-The account table and editor report Claude OAuth warm-up as unavailable. This change adds no Claude warm-up sender, scheduler, global setting, or account opt-in. It cannot spend subscription allowance or Extra usage on a warm-up. OpenAI warm-up keeps its existing opt-in controls and scheduler.
-
-Starting a window requires upstream activity; reading usage is not proof that a window started. The gateway has no verified, supported subscription-window activation operation with a request-scoped guarantee against paid overflow. A low-token Messages request is still inference and cannot provide that guarantee from a cached usage snapshot.
-
-Sources inspected on 2026-10-17:
-
-- [Anthropic authentication and credential guidance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) limits subscription OAuth to native application use and does not authorize third-party subscription request routing.
-- [Usage credits for paid plans](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans) explains that requests can switch to paid credits when an included limit is reached.
-- [Usage limit guidance](https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work) describes separate session and weekly limits.
-
-These facts do not establish a safe gateway warm-up API. Revisit only with explicit upstream support, a verified no-paid-overflow control, separate global/account opt-ins disabled by default, synthetic tests for every safety gate, and explicit authorization for any live canary. Do not imitate the official client to bypass provider controls. Existing user-requested Claude routing and manual reset controls are unchanged by this work.
+See [Claude warm-up](CLAUDE_WARMUP.md) for enabling it, retry timing, account eligibility and usage implications. Historical validation records describing Claude warm-up as unavailable predate this feature. Request completion remains separate from proof of quota-window advancement.
 
 ## Usage observations
 
