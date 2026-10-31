@@ -117,6 +117,7 @@ func TestDefaultModelIDsForCompositeIncludesAntigravityDefaults(t *testing.T) {
 func TestDefaultModelIDsForAnthropicExcludeAntigravityGemini(t *testing.T) {
 	anthropicIDs := defaultModelIDsForPlatform(service.PlatformAnthropic)
 	require.Contains(t, anthropicIDs, "claude-opus-4-6")
+	require.Contains(t, anthropicIDs, "claude-opus-5-5")
 	require.NotContains(t, anthropicIDs, "gemini-2.5-flash")
 
 	antigravityIDs := defaultModelIDsForPlatform(service.PlatformAntigravity)
@@ -764,7 +765,12 @@ func TestGatewayCodexModels_CompositeAnthropicDoesNotAdvertiseAntigravityDefault
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	slugs := codexModelSlugsForTest(got.Models)
 	require.Contains(t, slugs, "claude-opus-4-6")
+	require.Contains(t, slugs, "claude-opus-5-5")
 	require.NotContains(t, slugs, "gemini-2.5-flash")
+
+	opus := requestModelForTest(h, &service.Group{ID: groupID, Platform: service.PlatformComposite}, "claude-opus-5-5", "")
+	require.Equal(t, http.StatusOK, opus.Code, opus.Body.String())
+	require.Contains(t, opus.Body.String(), `"id":"claude-opus-5-5"`)
 }
 
 // Scenario: Antigravity retains its own Claude and Gemini defaults inside Composite groups.
@@ -1329,7 +1335,7 @@ func TestGatewayModels_AnthropicCustomModelsListIncludesOAuthClaudeWithoutMappin
 			Platform: service.PlatformAnthropic,
 			ModelsListConfig: service.GroupModelsListConfig{
 				Enabled: true,
-				Models:  []string{"claude-opus-4-6-thinking", "claude-sonnet-4-5"},
+				Models:  []string{"claude-opus-5-5", "claude-opus-4-6-thinking", "claude-sonnet-4-5"},
 			},
 		},
 	})
@@ -1340,7 +1346,7 @@ func TestGatewayModels_AnthropicCustomModelsListIncludesOAuthClaudeWithoutMappin
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"claude-opus-4-6-thinking", "claude-sonnet-4-5"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"claude-opus-5-5", "claude-opus-4-6-thinking", "claude-sonnet-4-5"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t *testing.T) {

@@ -26,6 +26,8 @@ An answer that has already started streaming cannot be invisibly moved to anothe
 
 Automatic gateway warm-up now uses the shared Sonnet 4.6 connection-test default. A dated Sonnet 4.5 model can be unavailable on an individual account even when another account still accepts it. The warm-up request remains limited to 16 output tokens and confirms the actual upstream reset before reporting a completed window.
 
+The default Anthropic model catalog includes `claude-opus-5-5` (Opus 5.5). Existing account mappings, group model lists and allowlists still apply. Claude Desktop can override discovery with its own Model list (`inferenceModels`); restart Desktop after the gateway update and check that override if the model remains absent. Listing a model does not establish upstream account access.
+
 ## Provider contract, checked 2026-10-19
 
 [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) prohibit third-party services from collecting subscription credentials or routing users' requests through those credentials. Personal use of the official client is different: [native CLI scripting](https://code.claude.com/docs/en/headless) and [personal Agent SDK use](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) have supported paths. These permissions do not authorize a subscription-token pool in this gateway.
