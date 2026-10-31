@@ -1,6 +1,30 @@
 # Claude Code accounts and warm-up
 
-Release `.11` delivers the explicit API-key-only Messages endpoint and local tools for separate official Claude Code logins. The [local warm-up companion](CLAUDE_WARMUP.md) schedules the official client under an explicitly bound native account. It starts disabled and requires separate billing and scheduling opt-ins. Neither an API response nor a completed CLI process proves that a subscription window advanced. [M21 acceptance](M21_ACCEPTANCE.md) records the deployed revision and remaining live proof.
+The gateway supports Claude account groups on its normal Messages route, with automatic failover when an upstream account runs out of quota. Release `.15` adds opt-in gateway warm-up, and `.16` updates the shared connection-test/warm-up model to Sonnet 4.6. The separate native-profile helpers and API-key-only route are described below.
+
+## Use the existing gateway account group from Claude Code
+
+The normal `/v1/messages` gateway route supports the Claude OAuth accounts already configured on the server. Your two accounts belong to `anthropic-default`; use one downstream gateway API key assigned to that group. The key selects the group, and the scheduler selects an eligible upstream account. Never use an upstream account’s OAuth access token as the downstream key.
+
+For a terminal session, load the gateway key into `SUB2API_KEY` from your secret source, then run:
+
+```sh
+export ANTHROPIC_BASE_URL=https://gateway.fdvl.net
+export ANTHROPIC_AUTH_TOKEN="${SUB2API_KEY:?Load your gateway key first}"
+unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
+unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
+claude --model claude-sonnet-4-6
+```
+
+Run `/status` in Claude Code and confirm the gateway URL and credential source before working. This follows the [official gateway connection settings](https://code.claude.com/docs/en/llm-gateway-connect). The root URL is deliberate: Claude Code adds `/v1/messages`. The separate `/anthropic-api` prefix enforces API-key-only upstream routing and excludes the subscription OAuth accounts.
+
+For a persistent setup, put the same variables in a private user settings file or an `apiKeyHelper`; keep secrets out of project files. Gateway variables override a saved native login while set; unsetting them restores the native credential path. The separate `tools/claude_accounts.py` native-profile launcher intentionally removes gateway variables, so use ordinary `claude` for this gateway configuration.
+
+When an account is already cooling down or rate-limited, the scheduler selects another eligible account in the same group. If the upstream returns a quota 429 before response content is sent, the handler records the limit and retries the request on another account, preserving the conversation body and attributing usage to the successful account. Both accounts must allow the requested model and have available quota. If all are exhausted, the gateway returns an error. Gateway key/user budgets and rate limits still apply.
+
+An answer that has already started streaming cannot be invisibly moved to another account: stitching two partial streams could corrupt the answer or replay tool work. Retry that turn after an interrupted response. A new account may also lose the upstream prompt-cache benefit, while the conversation history remains in the client’s request.
+
+Automatic gateway warm-up now uses the shared Sonnet 4.6 connection-test default. A dated Sonnet 4.5 model can be unavailable on an individual account even when another account still accepts it. The warm-up request remains limited to 16 output tokens and confirms the actual upstream reset before reporting a completed window.
 
 ## Provider contract, checked 2026-10-19
 
