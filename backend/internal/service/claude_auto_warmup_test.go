@@ -400,3 +400,26 @@ func TestClaudeAutoWarmupHonorsUsageRetryAfter(t *testing.T) {
 		require.True(t, claudeAutoWarmupStateFromExtra(h.account.Extra).WindowStarted)
 	})
 }
+
+func TestClaudeAutoWarmupUsesAvailableConnectionTestModel(t *testing.T) {
+	h := newClaudeWarmupCountdownHarness(t)
+	reset := time.Now().Truncate(time.Second).Add(5 * time.Hour)
+	h.svc.claudeWarmupTest.httpUpstream = &autoWarmupHTTPUpstream{do: func(_ *http.Request, body []byte) (*http.Response, error) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.Unmarshal(body, &payload))
+		if payload.Model == "claude-sonnet-4-5-20250929" {
+			return newJSONResponse(http.StatusNotFound, `{"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-4-5-20250929"}}`), nil
+		}
+		require.Equal(t, "claude-sonnet-4-6", payload.Model)
+		response := newJSONResponse(http.StatusOK, claudeProbeStart+claudeProbeTerminal+claudeProbeStop)
+		response.Header.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(reset.Unix(), 10))
+		return response, nil
+	}}
+	require.NoError(t, h.svc.evaluateAccount(t.Context(), h.account.ID))
+	state := claudeAutoWarmupStateFromExtra(h.account.Extra)
+	require.Equal(t, http.StatusOK, state.UpstreamStatus, "the dated model produces the live upstream 404")
+	require.True(t, state.WindowStarted)
+	require.Equal(t, "claude-sonnet-4-6", state.Model)
+}
