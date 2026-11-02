@@ -1289,6 +1289,9 @@ func isClaudeCodexModel(modelID string) bool {
 }
 
 func claudeCodexDisplayName(modelID string) string {
+	if model, ok := claude.PublicModel(modelID); ok {
+		return model.DisplayName
+	}
 	if claude.IsSonnet55(modelID) {
 		return "Claude Sonnet 5.5"
 	}

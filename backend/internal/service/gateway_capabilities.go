@@ -136,6 +136,7 @@ func (s *GatewayService) BuildGatewayCapabilityModels(
 		return availableModelIDsFromAccountsWithManifestIDs(accounts, platform, observeManifest)
 	})
 
+	modelIDs = claude.FilterPublicModelIDs(modelIDs)
 	models := make([]GatewayCapabilityModel, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		route := gatewayCapabilityRouteForModel(group, modelID, routes, routesKnown, configured, s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple)

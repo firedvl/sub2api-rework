@@ -86,5 +86,10 @@ func modelsListAllowsModel(availablePatterns []string, model string) bool {
 			}
 		}
 	}
+	for _, pattern := range availablePatterns {
+		if claude.DenormalizeModelID(pattern) == claude.DenormalizeModelID(model) {
+			return true
+		}
+	}
 	return false
 }

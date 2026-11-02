@@ -107,8 +107,16 @@ var (
 	claudeSonnet55FallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken: 2e-6, OutputCostPerToken: 10e-6,
 		CacheCreationInputTokenCost: 2.5e-6, CacheCreationInputTokenCostAbove1hr: 4e-6,
-		CacheReadInputTokenCost: 0.2e-6,
+		CacheReadInputTokenCost: 0.1e-6,
 		LiteLLMProvider:         "anthropic", Mode: "chat", SupportsPromptCaching: true,
+	}
+	claudeHaiku55FallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken: 0.1e-6, OutputCostPerToken: 0.5e-6,
+		CacheCreationInputTokenCost: 0.125e-6, CacheCreationInputTokenCostAbove1hr: 0.2e-6,
+		CacheReadInputTokenCost:        0.01e-6,
+		LongContextInputTokenThreshold: 100_000, LongContextInputCostMultiplier: 5,
+		LongContextOutputCostMultiplier: 5,
+		LiteLLMProvider:                 "anthropic", Mode: "chat", SupportsPromptCaching: true,
 	}
 	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   5e-06,
@@ -1373,6 +1381,12 @@ func (s *PricingService) extractBaseName(model string) string {
 
 // matchByModelFamily 基于模型系列匹配
 func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
+	if claude.IsHaiku55(model) {
+		if pricing, ok := s.pricingData["claude-haiku-5-5"]; ok {
+			return pricing
+		}
+		return claudeHaiku55FallbackPricing
+	}
 	if claude.IsOpus55(model) {
 		if pricing, ok := s.pricingData["claude-opus-5-5"]; ok {
 			return pricing

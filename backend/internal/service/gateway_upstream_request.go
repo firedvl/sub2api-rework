@@ -420,7 +420,7 @@ func filterSonnet55ToolsetBeta(header string, body []byte, modelID string) strin
 	if at := strings.IndexByte(modelID, '@'); at >= 0 {
 		modelID = modelID[:at] // Vertex's dated model ID
 	}
-	if !claude.IsSonnet55(modelID) {
+	if !claude.IsSonnet55(modelID) && !claude.IsHaiku55(modelID) {
 		return header
 	}
 	for _, tool := range gjson.GetBytes(body, "tools").Array() {

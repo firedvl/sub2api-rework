@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 var gatewayEffectiveProtocols = []string{CompositeRouteEndpointResponses, CompositeRouteEndpointChatCompletions, CompositeRouteEndpointMessages}
@@ -246,6 +247,7 @@ func (s *GatewayService) gatewayEffectiveModelIDs(ctx context.Context, group *Gr
 	if group != nil {
 		ids = group.ModelAllowlist.FilterForListing(ids)
 	}
+	ids = claude.FilterPublicModelIDs(ids)
 	sort.Strings(ids)
 	return ids
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
@@ -777,6 +778,12 @@ func normalizeRequestedModelForLookup(platform, requestedModel string) string {
 	trimmed := strings.TrimSpace(requestedModel)
 	if trimmed == "" {
 		return ""
+	}
+	if platform == PlatformAnthropic {
+		if short := claude.DenormalizeModelID(trimmed); short != trimmed {
+			return short
+		}
+		return claude.NormalizeModelID(trimmed)
 	}
 	if platform != PlatformGemini && platform != PlatformAntigravity {
 		return trimmed
