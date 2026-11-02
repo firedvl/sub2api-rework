@@ -50,4 +50,24 @@ func TestGatewayModelsClaudeOfficialNames(t *testing.T) {
 	for _, id := range []string{"claude-haiku-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"} {
 		require.Equal(t, http.StatusOK, requestModelForTest(h, &service.Group{ID: groupID, Platform: service.PlatformComposite}, id, "").Code)
 	}
+	for _, path := range []string{"/models?client_version=0.147.0", "/v1/gateway/capabilities", "/v1/gateway/capabilities?schema_version=2"} {
+		rec = httptest.NewRecorder()
+		c, _ = gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		platform := service.PlatformComposite
+		if path == "/v1/gateway/capabilities?schema_version=2" {
+			platform = service.PlatformAnthropic
+		}
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: groupID, Platform: platform}})
+		if path == "/models?client_version=0.147.0" {
+			h.CodexModels(c)
+		} else {
+			h.Capabilities(c)
+		}
+		require.Equal(t, http.StatusOK, rec.Code, path)
+		require.Contains(t, rec.Body.String(), "claude-haiku-5-5", path)
+		require.NotContains(t, rec.Body.String(), "ag-claude-sonnet", path)
+		require.NotContains(t, rec.Body.String(), "claude-sonnet-4-5-thinking", path)
+		require.NotContains(t, rec.Body.String(), "claude-haiku-4-5-20251001", path)
+	}
 }
