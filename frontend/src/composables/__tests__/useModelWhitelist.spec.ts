@@ -7,6 +7,15 @@ vi.mock('@/api/admin/accounts', () => ({
 import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
+	it('offers Haiku 5.5 and excludes retired Claude suggestions', () => {
+		expect(getModelsByPlatform('claude')).toContain('claude-haiku-5-5')
+		expect(getModelsByPlatform('claude')).not.toContain('claude-3-5-haiku-20241022')
+		expect(getModelsByPlatform('claude')).not.toContain('claude-haiku-4-5-20251001')
+		expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
+			expect.objectContaining({ from: 'claude-haiku-5-5', to: 'claude-haiku-5-5' })
+		]))
+		expect(getModelsByPlatform('antigravity')).not.toContain('claude-haiku-5-5')
+	})
   it('offers Sonnet 5.5 compatibility presets only for supported platforms', () => {
     expect(getModelsByPlatform('claude')).toContain('claude-sonnet-5-5')
     expect(getModelsByPlatform('antigravity')).not.toContain('claude-sonnet-5-5')

@@ -1276,6 +1276,7 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 		forcedPlatform = strings.TrimSpace(value)
 	}
 	modelIDs := h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
+	modelIDs = claude.FilterPublicModelIDs(modelIDs)
 	modelIDs = service.FilterCodexModelIDsForGroup(modelIDs, apiKey.Group)
 	body, err := h.gatewayService.BuildCodexModelsManifestForGroup(
 		c.Request.Context(),
@@ -1404,7 +1405,11 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 		return
 	}
 	models := make([]claude.Model, 0, len(modelIDs))
-	for _, modelID := range modelIDs {
+	for _, modelID := range claude.FilterPublicModelIDs(modelIDs) {
+		if model, ok := claude.PublicModel(modelID); ok {
+			models = append(models, model)
+			continue
+		}
 		models = append(models, claude.Model{
 			ID:          modelID,
 			Type:        "model",

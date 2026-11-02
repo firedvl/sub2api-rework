@@ -570,7 +570,7 @@ func StripEmptyTextBlocks(body []byte) []byte {
 // isClaude55SignedThinkingModel identifies models whose default thinking mode
 // requires signed history to survive protocol conversion and request filtering.
 func isClaude55SignedThinkingModel(model string) bool {
-	return claude.IsOpus55(model) || claude.IsSonnet55(model)
+	return claude.IsOpus55(model) || claude.IsSonnet55(model) || claude.IsHaiku55(model)
 }
 
 // validateClaude55Request rejects settings that the upstream cannot honor.
@@ -580,15 +580,21 @@ func validateClaude55Request(body []byte, model string) error {
 		return nil
 	}
 	isSonnet55 := claude.IsSonnet55(model)
+	modelName := "claude-opus-5-5"
+	if isSonnet55 {
+		modelName = "claude-sonnet-5-5"
+	} else if claude.IsHaiku55(model) {
+		modelName = "claude-haiku-5-5"
+	}
 	switch gjson.GetBytes(body, "thinking.type").String() {
 	case "disabled", "enabled":
 		if isSonnet55 {
 			return fmt.Errorf("claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes")
 		}
-		return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort")
+		return fmt.Errorf("%s requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort", modelName)
 	case "between_tools":
 		if !isSonnet55 {
-			return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; thinking.type=between_tools is unsupported")
+			return fmt.Errorf("%s requires adaptive thinking; thinking.type=between_tools is unsupported", modelName)
 		}
 		effort := gjson.GetBytes(body, "output_config.effort").String()
 		if effort == "xhigh" || effort == "max" {
@@ -600,26 +606,24 @@ func validateClaude55Request(body []byte, model string) error {
 			}
 		}
 	}
-	modelName := "claude-opus-5-5"
-	if isSonnet55 {
-		modelName = "claude-sonnet-5-5"
-	}
-	if gjson.GetBytes(body, "tool_choice").String() == "required" {
+	if !claude.IsHaiku55(model) && gjson.GetBytes(body, "tool_choice").String() == "required" {
 		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
 	}
 	switch gjson.GetBytes(body, "tool_choice.type").String() {
 	case "any", "tool", "function", "custom", "namespace":
-		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+		if !claude.IsHaiku55(model) {
+			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+		}
 	}
-	if isSonnet55 {
+	if isSonnet55 || claude.IsHaiku55(model) {
 		if temperature := gjson.GetBytes(body, "temperature"); temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
-			return fmt.Errorf("claude-sonnet-5-5 does not support non-default temperature")
+			return fmt.Errorf("%s does not support non-default temperature", modelName)
 		}
 		if topP := gjson.GetBytes(body, "top_p"); topP.Exists() && (topP.Type != gjson.Number || topP.Float() < 0.99 || topP.Float() > 1) {
-			return fmt.Errorf("claude-sonnet-5-5 does not support non-default top_p")
+			return fmt.Errorf("%s does not support non-default top_p", modelName)
 		}
 		if gjson.GetBytes(body, "top_k").Exists() {
-			return fmt.Errorf("claude-sonnet-5-5 does not support top_k")
+			return fmt.Errorf("%s does not support top_k", modelName)
 		}
 	}
 	return nil

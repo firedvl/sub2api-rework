@@ -252,7 +252,7 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 	// InvokeModel accepts output_config.effort for Sonnet 5.5. Keep just that
 	// field; output_config.format has already been inlined above, and older
 	// models retain the existing output_config stripping behavior.
-	if claude.IsSonnet55(modelID) {
+	if claude.IsSonnet55(modelID) || claude.IsHaiku55(modelID) {
 		if effort := gjson.GetBytes(body, "output_config.effort"); effort.Exists() {
 			body, err = sjson.SetRawBytes(body, "output_config", []byte(`{"effort":`+effort.Raw+`}`))
 		} else {

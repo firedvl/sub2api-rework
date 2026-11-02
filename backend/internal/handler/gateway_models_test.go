@@ -132,6 +132,7 @@ func TestGatewayCodexModels_NonOpenAIGroupsUseMappedModels(t *testing.T) {
 		model      string
 		efforts    []string
 		modalities []string
+		hidden     bool
 	}{
 		{
 			name:       "Grok",
@@ -151,6 +152,7 @@ func TestGatewayCodexModels_NonOpenAIGroupsUseMappedModels(t *testing.T) {
 			name:       "provider-qualified Claude",
 			platform:   service.PlatformAnthropic,
 			model:      "anthropic/claude-sonnet-4-6",
+			hidden:     true,
 			efforts:    []string{"low", "medium", "high", "max"},
 			modalities: []string{"text"},
 		},
@@ -186,6 +188,10 @@ func TestGatewayCodexModels_NonOpenAIGroupsUseMappedModels(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code)
 			var got codexModelsResponseForTest
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			if tt.hidden {
+				require.Empty(t, got.Models)
+				return
+			}
 			require.Len(t, got.Models, 1)
 			require.Equal(t, tt.model, got.Models[0].Slug)
 			require.NotEmpty(t, got.Models[0].ModelMessages)
@@ -1346,7 +1352,7 @@ func TestGatewayModels_AnthropicCustomModelsListIncludesOAuthClaudeWithoutMappin
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"claude-opus-5-5", "claude-opus-4-6-thinking", "claude-sonnet-4-5"}, modelIDsForTest(got.Data))
+	require.Equal(t, []string{"claude-opus-5-5", "claude-sonnet-4-5"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t *testing.T) {
