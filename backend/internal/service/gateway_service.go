@@ -1576,9 +1576,9 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 		}
 		mapping := account.GetModelMapping()
 		passthrough := account.IsOpenAI() && account.IsOpenAIPassthroughEnabled()
-		// Gemini and Antigravity already project their inventories through their
-		// provider-specific mappings. Other providers need concrete discovered IDs.
-		if account.Platform != PlatformGemini && account.Platform != PlatformAntigravity {
+		// Provider-specific mappings and OAuth manifests own their visibility
+		// rules; generic inventories must not override them.
+		if account.Platform != PlatformGemini && account.Platform != PlatformAntigravity && !account.IsOpenAIOAuth() {
 			if inventory := account.GetUpstreamModelInventorySnapshot(); inventory != nil {
 				for _, id := range inventory.Models {
 					if id = publicCatalogModelID(account, id); id != "" && (passthrough || account.isModelSupportedByMapping(id, mapping)) {

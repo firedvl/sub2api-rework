@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -100,4 +102,27 @@ func TestModelCatalogSyncStopsInFlightRequest(t *testing.T) {
 		t.Fatal("shutdown did not cancel model discovery")
 	}
 	svc.Stop()
+}
+
+func TestModelCatalogSyncRefreshesEveryHourAfterCompletedScan(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int64
+		repo := &modelCatalogSyncRepo{accounts: []Account{{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "synthetic"}}}}
+		upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+			time.Sleep(10 * time.Second)
+			calls.Add(1)
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(modelCatalogSyncBody("claude-fable-5-2")))}, nil
+		}}
+		svc := NewModelCatalogSyncService(repo, &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}, nil)
+		defer svc.Stop()
+		svc.Start()
+		time.Sleep(20 * time.Second)
+		synctest.Wait()
+		require.Equal(t, int64(1), calls.Load())
+		for expected := int64(2); expected <= 3; expected++ {
+			time.Sleep(time.Hour + 20*time.Second)
+			synctest.Wait()
+			require.Equal(t, expected, calls.Load(), "a recent completed scan must not make the next scheduled refresh skip an hour")
+		}
+	})
 }
