@@ -35,13 +35,15 @@ func (s *ModelCatalogSyncService) Start() {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
+			s.runOnce()
 			ticker := time.NewTicker(modelCatalogSyncInterval)
 			defer ticker.Stop()
-			s.runOnce()
 			for {
 				select {
 				case <-ticker.C:
 					s.runOnce()
+					// Start the interval after persistence so the freshness check permits it.
+					ticker.Reset(modelCatalogSyncInterval)
 				case <-s.ctx.Done():
 					return
 				}
