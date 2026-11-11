@@ -1555,6 +1555,11 @@ func availableModelIDsFromAccounts(accounts []Account, platform string) []string
 	})
 }
 
+// CatalogModelIDs shares the gateway projection with the admin connection picker.
+func (a *Account) CatalogModelIDs() []string {
+	return availableModelIDsFromAccounts([]Account{*a}, a.Platform)
+}
+
 func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform string, manifestIDs func(*Account) []string) []string {
 	modelSet := make(map[string]struct{})
 	for i := range accounts {
@@ -1569,7 +1574,19 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 			}
 			continue
 		}
+		mapping := account.GetModelMapping()
 		passthrough := account.IsOpenAI() && account.IsOpenAIPassthroughEnabled()
+		// Gemini and Antigravity already project their inventories through their
+		// provider-specific mappings. Other providers need concrete discovered IDs.
+		if account.Platform != PlatformGemini && account.Platform != PlatformAntigravity {
+			if inventory := account.GetUpstreamModelInventorySnapshot(); inventory != nil {
+				for _, id := range inventory.Models {
+					if id = publicCatalogModelID(account, id); id != "" && (passthrough || account.isModelSupportedByMapping(id, mapping)) {
+						modelSet[id] = struct{}{}
+					}
+				}
+			}
+		}
 		if account.IsOpenAI() && (passthrough || len(stringMappingFromRaw(account.Credentials["model_mapping"])) == 0) {
 			for _, model := range manifestIDs(account) {
 				modelSet[model] = struct{}{}
@@ -1578,7 +1595,6 @@ func availableModelIDsFromAccountsWithManifestIDs(accounts []Account, platform s
 		if passthrough {
 			continue
 		}
-		mapping := account.GetModelMapping()
 		if len(mapping) == 0 {
 			continue
 		}

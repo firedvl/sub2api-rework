@@ -13,3 +13,11 @@ func TestPublicModelsHideInternalAndRetiredClaudeIDs(t *testing.T) {
 	require.True(t, IsHaiku55("anthropic/claude-haiku-5.5"))
 	require.False(t, IsHaiku55("claude-haiku-5-5-preview"))
 }
+
+func TestPublicModelsKeepNewProviderReleases(t *testing.T) {
+	ids := []string{"claude-fable-5-2", "claude-sonnet-6-1", "claude-haiku-6", "claude-future-7", "ag-claude-sonnet", "claude-sonnet-6-1-thinking", "claude-mythos-5-2"}
+	require.Equal(t, ids[:4], FilterPublicModelIDs(ids))
+	model, ok := PublicModel("claude-sonnet-6-1")
+	require.True(t, ok)
+	require.Equal(t, "Claude Sonnet 6.1", model.DisplayName)
+}

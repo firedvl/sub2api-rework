@@ -962,7 +962,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		descriptor.SupportsParallelToolCalls = true
 		if levels := configuredCodexClaudeReasoningLevels(modelID); len(levels) > 0 {
 			defaultReasoningLevel := claudeCodexDefaultReasoningLevel(levels)
-			if claude.IsSonnet55(modelID) {
+			if claude.IsSonnet55(modelID) || claude.IsFable52(modelID) {
 				defaultReasoningLevel = "high"
 			}
 			descriptor.DefaultReasoningLevel = &defaultReasoningLevel

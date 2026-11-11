@@ -69,6 +69,7 @@ describe('useModelWhitelist', () => {
     expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
       expect.objectContaining({ from: 'claude-opus-5-5', to: 'claude-opus-5-5' })
     ]))
+    expect(getModelsByPlatform('claude')).toContain('claude-fable-5-2')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5')

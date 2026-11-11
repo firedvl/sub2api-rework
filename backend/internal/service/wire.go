@@ -440,6 +440,12 @@ func ProvideClaudeCodeVersionSyncService(
 	return svc
 }
 
+func ProvideModelCatalogSyncService(accountRepo AccountRepository, accountTest *AccountTestService, gateway *GatewayService) *ModelCatalogSyncService {
+	svc := NewModelCatalogSyncService(accountRepo, accountTest, gateway)
+	svc.Start()
+	return svc
+}
+
 // ProvideProxyExpiryService creates and starts ProxyExpiryService.
 func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	svc := NewProxyExpiryService(proxyRepo, time.Minute)
@@ -952,6 +958,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountExpiryService,
 	ProvideOpenAICodexVersionSyncService,
 	ProvideClaudeCodeVersionSyncService,
+	ProvideModelCatalogSyncService,
 	ProvideProxyExpiryService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,

@@ -41,6 +41,23 @@ func TestSonnet55ResponsesThinkingAndSampling(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestFable52ResponsesKeepsAdaptiveThinkingAndSignedHistory(t *testing.T) {
+	block := AnthropicContentBlock{Type: "thinking", Thinking: "", Signature: "signed-fable-block"}
+	response := AnthropicToResponsesResponse(&AnthropicResponse{Model: "claude-fable-5-2", Content: []AnthropicContentBlock{block, {Type: "text", Text: "working"}}})
+	require.NotEmpty(t, response.Output[0].EncryptedContent)
+	raw, err := json.Marshal(response.Output)
+	require.NoError(t, err)
+	converted, err := ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-fable-5-2", Input: raw})
+	require.NoError(t, err)
+	require.Equal(t, "adaptive", converted.Thinking.Type)
+	require.Equal(t, "high", converted.OutputConfig.Effort)
+	var blocks []AnthropicContentBlock
+	require.NoError(t, json.Unmarshal(converted.Messages[0].Content, &blocks))
+	require.Equal(t, block, blocks[0])
+	_, err = ResponsesToAnthropicRequest(&ResponsesRequest{Model: "claude-fable-5-2", Input: json.RawMessage(`"hello"`), ToolChoice: json.RawMessage(`"required"`)})
+	require.ErrorContains(t, err, "forced tool_choice")
+}
+
 func TestSonnet55SignedThinkingResponsesRoundTrip(t *testing.T) {
 	block := AnthropicContentBlock{Type: "thinking", Thinking: "", Signature: "signed-sonnet-block"}
 	response := AnthropicToResponsesResponse(&AnthropicResponse{Model: "claude-sonnet-5-5", Content: []AnthropicContentBlock{block, {Type: "text", Text: "progress"}, {Type: "tool_use", ID: "toolu_1", Name: "lookup", Input: json.RawMessage(`{}`)}}})

@@ -582,8 +582,14 @@ func (a *Account) GetModelMapping() map[string]string {
 }
 
 func (a *Account) mergeDiscoveredModelMapping(mapping map[string]string) map[string]string {
+	if a.Platform != PlatformAntigravity && a.Platform != PlatformGemini && a.Platform != PlatformGrok {
+		return mapping
+	}
 	snapshot := a.GetUpstreamModelInventorySnapshot()
-	if snapshot == nil || (a.Platform != PlatformAntigravity && a.Platform != PlatformGemini) {
+	if snapshot == nil {
+		return mapping
+	}
+	if a.IsGrok() && len(stringMappingFromRaw(a.Credentials["model_mapping"])) > 0 {
 		return mapping
 	}
 	result := make(map[string]string, len(mapping)+len(snapshot.Models))
@@ -609,6 +615,9 @@ func discoveredPublicModelMapping(platform, upstreamID string) (string, string) 
 	upstreamID = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(upstreamID), "models/"))
 	if upstreamID == "" {
 		return "", ""
+	}
+	if platform == PlatformGrok && !strings.Contains(upstreamID, "*") {
+		return upstreamID, upstreamID
 	}
 	if platform == PlatformGemini {
 		if strings.HasPrefix(upstreamID, "gemini-") {
@@ -835,7 +844,10 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 	if a.IsOpenAIPassthroughEnabled() {
 		return true
 	}
-	mapping := a.GetModelMapping()
+	return a.isModelSupportedByMapping(requestedModel, a.GetModelMapping())
+}
+
+func (a *Account) isModelSupportedByMapping(requestedModel string, mapping map[string]string) bool {
 	if len(mapping) == 0 {
 		if a.IsOpenAIOAuth() {
 			return isOpenAIOAuthServableModel(requestedModel)

@@ -2831,6 +2831,24 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	// Use the refreshed provider inventory for the connection picker as well as
+	// gateway discovery. Account mappings still constrain the projected IDs.
+	if account.GetUpstreamModelInventorySnapshot() != nil {
+		models := make([]claude.Model, 0)
+		for _, id := range claude.FilterPublicModelIDs(account.CatalogModelIDs()) {
+			model, ok := claude.PublicModel(id)
+			if !ok {
+				model = claude.Model{ID: id, Type: "model", DisplayName: id}
+			}
+			if metadata, found := account.GetUpstreamModelMetadata(id); found && metadata.DisplayName != "" {
+				model.DisplayName = metadata.DisplayName
+			}
+			models = append(models, model)
+		}
+		response.Success(c, models)
+		return
+	}
+
 	// Handle Gemini accounts
 	if account.IsGemini() {
 		// Consumer Google One OAuth still uses the legacy Gemini CLI / Code

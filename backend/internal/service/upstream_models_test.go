@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -70,6 +71,54 @@ func TestBuildV1ModelsURL(t *testing.T) {
 	require.Equal(t, "https://api.anthropic.com/v1/models", buildV1ModelsURL("https://api.anthropic.com/v1"))
 	require.Equal(t, "https://api.anthropic.com/v1/models", buildV1ModelsURL("https://api.anthropic.com/v1/models"))
 	require.Equal(t, "https://gateway.example.com/antigravity/v1/models", buildV1ModelsURL("https://gateway.example.com/antigravity/"))
+}
+
+func TestUpstreamCatalogReadsAnthropicCapabilitiesWithoutRegistry(t *testing.T) {
+	body := []byte(`{"data":[{"id":"claude-fable-5-2","display_name":"Claude Fable 5.2","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"thinking":{"supported":true},"image_input":{"supported":true},"effort":{"supported":true,"low":{"supported":true},"high":{"supported":true},"max":{"supported":false}}}}]}`)
+	_, metadata, err := extractUpstreamModelCatalog(body, false)
+	require.NoError(t, err)
+	model := metadata["claude-fable-5-2"]
+	require.True(t, upstreamModelMetadataIsComplete(model))
+	require.Equal(t, int64(1000000), model.ContextWindow)
+	require.Equal(t, int64(128000), model.MaxOutputTokens)
+	require.Equal(t, []string{"low", "high"}, model.SupportedReasoningLevels)
+	require.Equal(t, []string{"text", "image"}, model.InputModalities)
+}
+
+func TestFetchUpstreamModelsFollowsPaginationAndRejectsLoops(t *testing.T) {
+	for _, provider := range []string{"anthropic", "gemini"} {
+		for _, repeatCursor := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/repeat=%t", provider, repeatCursor), func(t *testing.T) {
+				calls := 0
+				upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+					calls++
+					body := `{"data":[{"id":"claude-fable-5-2"}],"has_more":true,"last_id":"claude-fable-5-2"}`
+					queryKey, cursor := "after_id", "claude-fable-5-2"
+					if provider == "gemini" {
+						body = `{"models":[{"name":"models/gemini-4-carbon"}],"nextPageToken":"page-2"}`
+						queryKey, cursor = "pageToken", "page-2"
+					}
+					if calls == 2 {
+						require.Equal(t, cursor, req.URL.Query().Get(queryKey))
+						if !repeatCursor {
+							body = `{"data":[{"id":"provider-new-model"}]}`
+						}
+					}
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+				}}
+				svc := &AccountTestService{httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}
+				models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{Platform: provider, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "synthetic"}})
+				if repeatCursor {
+					require.ErrorContains(t, err, "pagination")
+				} else {
+					require.NoError(t, err)
+					require.Len(t, models, 2)
+					require.Contains(t, models, "provider-new-model")
+				}
+				require.Equal(t, 2, calls)
+			})
+		}
+	}
 }
 
 func TestBuildOpenAIModelsURL(t *testing.T) {

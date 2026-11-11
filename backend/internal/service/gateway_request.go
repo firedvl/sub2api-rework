@@ -570,7 +570,7 @@ func StripEmptyTextBlocks(body []byte) []byte {
 // isClaude55SignedThinkingModel identifies models whose default thinking mode
 // requires signed history to survive protocol conversion and request filtering.
 func isClaude55SignedThinkingModel(model string) bool {
-	return claude.IsOpus55(model) || claude.IsSonnet55(model) || claude.IsHaiku55(model)
+	return claude.RequiresSignedThinkingHistory(model)
 }
 
 // validateClaude55Request rejects settings that the upstream cannot honor.
@@ -585,6 +585,8 @@ func validateClaude55Request(body []byte, model string) error {
 		modelName = "claude-sonnet-5-5"
 	} else if claude.IsHaiku55(model) {
 		modelName = "claude-haiku-5-5"
+	} else if claude.IsFable52(model) {
+		modelName = "claude-fable-5-2"
 	}
 	switch gjson.GetBytes(body, "thinking.type").String() {
 	case "disabled", "enabled":
@@ -615,7 +617,7 @@ func validateClaude55Request(body []byte, model string) error {
 			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
 		}
 	}
-	if isSonnet55 || claude.IsHaiku55(model) {
+	if isSonnet55 || claude.IsHaiku55(model) || claude.IsFable52(model) {
 		if temperature := gjson.GetBytes(body, "temperature"); temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
 			return fmt.Errorf("%s does not support non-default temperature", modelName)
 		}

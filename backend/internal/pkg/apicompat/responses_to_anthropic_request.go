@@ -18,7 +18,8 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	isOpus55 := claude.IsOpus55(req.Model)
 	isSonnet55 := claude.IsSonnet55(req.Model)
 	isHaiku55 := claude.IsHaiku55(req.Model)
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55 || isHaiku55)
+	isFable52 := claude.IsFable52(req.Model)
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, claude.RequiresSignedThinkingHistory(req.Model))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	// Sonnet additionally supports between_tools to disable up-front thinking.
 	// Resolve the upstream model before conversion: client aliases need not
 	// identify a Claude model.
-	if isOpus55 || isSonnet55 || isHaiku55 {
+	if isOpus55 || isSonnet55 || isHaiku55 || isFable52 {
 		var choice struct {
 			Type string `json:"type"`
 		}
@@ -75,10 +76,10 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 			return nil, fmt.Errorf("%s does not support forced tool_choice; use auto or none", req.Model)
 		}
 		effort := "medium"
-		if isSonnet55 {
+		if isSonnet55 || isFable52 {
 			effort = "high"
 		}
-		if isSonnet55 || isHaiku55 {
+		if isSonnet55 || isHaiku55 || isFable52 {
 			if req.Temperature != nil && *req.Temperature != 1 {
 				return nil, fmt.Errorf("%s does not support non-default temperature", req.Model)
 			}

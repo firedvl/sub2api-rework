@@ -25,6 +25,21 @@ func requestModelForTest(gateway *GatewayHandler, group *service.Group, modelID,
 	return rec
 }
 
+func TestGatewayModelsExposeNewDiscoveredClaudeReleases(t *testing.T) {
+	group := &service.Group{ID: 71, Platform: service.PlatformAnthropic}
+	account := service.Account{ID: 1, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true}
+	account.SetUpstreamModelInventorySnapshot(service.UpstreamModelInventorySnapshot{Source: "upstream", Models: []string{"claude-fable-5-2", "claude-sonnet-6-1"}})
+	gateway := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{group.ID: {account}}})
+	list := requestModelForTest(gateway, group, "", "")
+	require.Equal(t, http.StatusOK, list.Code)
+	for _, model := range []string{"claude-fable-5-2", "claude-sonnet-6-1"} {
+		require.Contains(t, list.Body.String(), `"id":"`+model+`"`)
+		require.Equal(t, http.StatusOK, requestModelForTest(gateway, group, model, "").Code)
+	}
+	group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"claude-fable-*"}}
+	require.Equal(t, http.StatusNotFound, requestModelForTest(gateway, group, "claude-sonnet-6-1", "").Code)
+}
+
 func TestRetrieveModelMatchesVisibleCatalogue(test *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{service.PlatformOpenAI, service.PlatformAnthropic, service.PlatformGemini, service.PlatformGrok, service.PlatformComposite} {

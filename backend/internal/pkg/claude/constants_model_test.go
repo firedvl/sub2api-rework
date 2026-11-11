@@ -25,6 +25,7 @@ func TestDefaultModelsIncludesLatestClaudeCodeModels(t *testing.T) {
 		byID[model.ID] = model
 	}
 	for id, name := range map[string]string{
+		"claude-fable-5-2":  "Claude Fable 5.2",
 		"claude-haiku-5-5":  "Claude Haiku 5.5",
 		"claude-sonnet-5-5": "Claude Sonnet 5.5",
 		"claude-haiku-4-5":  "Claude Haiku 4.5",
