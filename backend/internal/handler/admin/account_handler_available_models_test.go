@@ -37,6 +37,18 @@ func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 	return router
 }
 
+func TestAccountHandlerConnectionPickerIncludesFutureDiscoveredClaude(t *testing.T) {
+	account := service.Account{ID: 44, Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth}
+	account.SetUpstreamModelInventorySnapshot(service.UpstreamModelInventorySnapshot{Source: "upstream", Models: []string{"claude-fable-5-2", "claude-sonnet-6-1"}})
+	router := setupAvailableModelsRouter(&availableModelsAdminService{stubAdminService: newStubAdminService(), account: account})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/44/models", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"id":"claude-fable-5-2"`)
+	require.Contains(t, rec.Body.String(), `"id":"claude-sonnet-6-1"`)
+	require.Contains(t, rec.Body.String(), `"display_name":"Claude Sonnet 6.1"`)
+}
+
 type syncUpstreamHTTPUpstream struct {
 	resp      *http.Response
 	responses []*http.Response

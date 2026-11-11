@@ -1,6 +1,11 @@
 package claude
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
+
+var publicModelPattern = regexp.MustCompile(`^claude-([a-z]+)-([0-9]{1,2})(?:-([0-9]{1,2}))?(?:-[0-9]{8})?$`)
 
 // PublicModel resolves official aliases to the named Claude Code catalog entry.
 func PublicModel(id string) (Model, bool) {
@@ -9,6 +14,16 @@ func PublicModel(id string) (Model, bool) {
 		if model.ID == id {
 			return model, true
 		}
+	}
+	// Provider-discovered releases must not wait for a gateway release. Keep
+	// internal routes, thinking variants and restricted Mythos IDs out of pickers.
+	if parts := publicModelPattern.FindStringSubmatch(id); parts != nil && parts[1] != "mythos" {
+		version := parts[2]
+		if parts[3] != "" {
+			version += "." + parts[3]
+		}
+		family := strings.ToUpper(parts[1][:1]) + parts[1][1:]
+		return Model{ID: id, Type: "model", DisplayName: "Claude " + family + " " + version, CreatedAt: "1970-01-01T00:00:00Z"}, true
 	}
 	return Model{}, false
 }

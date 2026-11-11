@@ -56,6 +56,14 @@ func IsHaiku55(model string) bool {
 	return normalizeEffortModelID(model) == "claude-haiku-5-5"
 }
 
+func IsFable52(model string) bool {
+	return normalizeEffortModelID(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(model)), "[1m]")) == "claude-fable-5-2"
+}
+
+func RequiresSignedThinkingHistory(model string) bool {
+	return IsOpus55(model) || IsSonnet55(model) || IsHaiku55(model) || IsFable52(model)
+}
+
 func normalizeEffortModelID(model string) string {
 	id := strings.ToLower(strings.TrimSpace(model))
 	id = strings.TrimPrefix(id, "models/")

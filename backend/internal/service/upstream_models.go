@@ -795,34 +795,29 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 		return nil, nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
 
-	req, err := s.buildUpstreamModelsRequest(ctx, account)
+	var body []byte
+	var err error
+	if account.IsOpenAIOAuth() && s.openaiGatewayService != nil {
+		// Reuse token refresh, client identity and durable manifest persistence.
+		clientVersion := CodexCanonicalClientVersion()
+		if s.settingService != nil {
+			clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
+		}
+		var manifest *CodexModelsManifest
+		manifest, err = s.openaiGatewayService.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		if err != nil {
+			return nil, nil, newUpstreamModelSyncUpstreamError("Failed to request OpenAI model list", err)
+		}
+		body = manifest.Body
+	} else {
+		var req *http.Request
+		req, err = s.buildUpstreamModelsRequest(ctx, account)
+		if err == nil {
+			body, err = s.fetchUpstreamModelsPages(req, account)
+		}
+	}
 	if err != nil {
 		return nil, nil, err
-	}
-
-	proxyURL := upstreamModelsProxyURL(account)
-	resp, err := s.doUpstreamModelsRequest(req, proxyURL, account)
-	if err != nil {
-		return nil, nil, newUpstreamModelSyncUpstreamError("Failed to request upstream model list", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	bodyLimit := resolveModelsListReadLimit(s.cfg)
-	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
-	if err != nil {
-		return nil, nil, newUpstreamModelSyncUpstreamError("Failed to read upstream model list", err)
-	}
-	if int64(len(body)) > bodyLimit {
-		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response is too large", fmt.Errorf("response exceeds %d bytes", bodyLimit))
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, nil, &UpstreamModelSyncError{
-			Kind:       UpstreamModelSyncErrorUpstream,
-			Message:    fmt.Sprintf("Upstream model list request failed with HTTP %d", resp.StatusCode),
-			StatusCode: resp.StatusCode,
-			Err:        fmt.Errorf("upstream model list returned HTTP %d", resp.StatusCode),
-		}
 	}
 
 	extractModels := extractUpstreamModelIDs
@@ -833,11 +828,95 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
 	}
+	if account.IsOpenAIOAuth() {
+		entries, _ := extractUpstreamModelRawEntries(body)
+		manifest, _ := json.Marshal(struct {
+			Models []json.RawMessage `json:"models"`
+		}{Models: entries})
+		observation, _ := parseCodexManifestObservation(manifest)
+		models = observation.publicIDs
+	}
 	if len(models) == 0 {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
 	}
 
 	return models, body, nil
+}
+
+func (s *AccountTestService) fetchUpstreamModelsPage(req *http.Request, account *Account) ([]byte, error) {
+	proxyURL := upstreamModelsProxyURL(account)
+	resp, err := s.doUpstreamModelsRequest(req, proxyURL, account)
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Failed to request upstream model list", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyLimit := resolveModelsListReadLimit(s.cfg)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
+	if err != nil {
+		return nil, newUpstreamModelSyncUpstreamError("Failed to read upstream model list", err)
+	}
+	if int64(len(body)) > bodyLimit {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream model list response is too large", fmt.Errorf("response exceeds %d bytes", bodyLimit))
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, &UpstreamModelSyncError{
+			Kind:       UpstreamModelSyncErrorUpstream,
+			Message:    fmt.Sprintf("Upstream model list request failed with HTTP %d", resp.StatusCode),
+			StatusCode: resp.StatusCode,
+			Err:        fmt.Errorf("upstream model list returned HTTP %d", resp.StatusCode),
+		}
+	}
+
+	return body, nil
+}
+
+func (s *AccountTestService) fetchUpstreamModelsPages(req *http.Request, account *Account) ([]byte, error) {
+	var all []json.RawMessage
+	seen := make(map[string]bool)
+	var total int64
+	for range 100 {
+		body, err := s.fetchUpstreamModelsPage(req, account)
+		if err != nil {
+			return nil, err
+		}
+		total += int64(len(body))
+		if total > resolveModelsListReadLimit(s.cfg) {
+			return nil, newUpstreamModelSyncUpstreamError("Upstream model list response is too large", nil)
+		}
+		entries, err := extractUpstreamModelRawEntries(body)
+		if err != nil {
+			return nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
+		}
+		all = append(all, entries...)
+		var pagination struct {
+			HasMore       bool   `json:"has_more"`
+			LastID        string `json:"last_id"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		_ = json.Unmarshal(body, &pagination)
+		if !pagination.HasMore && pagination.NextPageToken == "" {
+			return json.Marshal(struct {
+				Data []json.RawMessage `json:"data"`
+			}{Data: all})
+		}
+		key, cursor := "after_id", pagination.LastID
+		if pagination.NextPageToken != "" {
+			key, cursor = "pageToken", pagination.NextPageToken
+		}
+		if cursor == "" || seen[key+":"+cursor] {
+			return nil, newUpstreamModelSyncUpstreamError("Invalid upstream model list pagination", nil)
+		}
+		seen[key+":"+cursor] = true
+		// Keep pagination on the validated upstream origin; never follow response URLs.
+		next := req.Clone(req.Context())
+		query := next.URL.Query()
+		query.Set(key, cursor)
+		next.URL.RawQuery = query.Encode()
+		req = next
+	}
+	return nil, newUpstreamModelSyncUpstreamError("Too many upstream model list pages", nil)
 }
 
 func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
@@ -958,7 +1037,7 @@ func (s *AccountTestService) buildAnthropicUpstreamModelsRequest(ctx context.Con
 
 	if account.IsOAuth() {
 		accessToken := strings.TrimSpace(account.GetCredential("access_token"))
-		if accessToken == "" && s.claudeTokenProvider != nil {
+		if s.claudeTokenProvider != nil {
 			token, tokenErr := s.claudeTokenProvider.GetAccessToken(ctx, account)
 			if tokenErr != nil {
 				return nil, newUpstreamModelSyncUpstreamError("Failed to get Anthropic access token", tokenErr)
@@ -1316,7 +1395,20 @@ type upstreamModelCapabilityEntry struct {
 	ContextWindow            int64                      `json:"context_window"`
 	MaxContextWindow         int64                      `json:"max_context_window"`
 	MaxOutputTokens          int64                      `json:"max_output_tokens"`
+	MaxInputTokens           int64                      `json:"max_input_tokens"`
+	MaxTokens                int64                      `json:"max_tokens"`
+	InputTokenLimit          int64                      `json:"inputTokenLimit"`
+	OutputTokenLimit         int64                      `json:"outputTokenLimit"`
 	Limit                    modelsDevLimit             `json:"limit"`
+	Capabilities             *struct {
+		Thinking struct {
+			Supported *bool `json:"supported"`
+		} `json:"thinking"`
+		ImageInput struct {
+			Supported bool `json:"supported"`
+		} `json:"image_input"`
+		Effort map[string]json.RawMessage `json:"effort"`
+	} `json:"capabilities"`
 }
 
 func extractUpstreamModelIDs(body []byte) ([]string, error) {
@@ -1386,6 +1478,21 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 		levels = reasoningLevelsFromModelsDevOptions(entry.ReasoningOptions)
 	}
 	reasoning := entry.Reasoning
+	if entry.Capabilities != nil {
+		if reasoning == nil {
+			reasoning = entry.Capabilities.Thinking.Supported
+		}
+		if len(levels) == 0 {
+			for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+				var support struct {
+					Supported bool `json:"supported"`
+				}
+				if json.Unmarshal(entry.Capabilities.Effort[effort], &support) == nil && support.Supported {
+					levels = append(levels, effort)
+				}
+			}
+		}
+	}
 	if reasoning == nil && len(levels) > 0 {
 		inferred := len(levels) != 1 || levels[0] != "none"
 		reasoning = &inferred
@@ -1394,6 +1501,12 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 	if len(modalities) == 0 {
 		modalities = entry.Modalities.Input
 	}
+	if len(modalities) == 0 && entry.Capabilities != nil {
+		modalities = []string{"text"}
+		if entry.Capabilities.ImageInput.Supported {
+			modalities = append(modalities, "image")
+		}
+	}
 	contextWindow := entry.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = entry.MaxContextWindow
@@ -1401,9 +1514,21 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 	if contextWindow <= 0 {
 		contextWindow = entry.Limit.Context
 	}
+	if contextWindow <= 0 {
+		contextWindow = entry.MaxInputTokens
+	}
+	if contextWindow <= 0 {
+		contextWindow = entry.InputTokenLimit
+	}
 	maxOutputTokens := entry.MaxOutputTokens
 	if maxOutputTokens <= 0 {
 		maxOutputTokens = entry.Limit.Output
+	}
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = entry.MaxTokens
+	}
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = entry.OutputTokenLimit
 	}
 	defaultReasoningLevel := normalizeReasoningLevel(entry.DefaultReasoningLevel)
 	if defaultReasoningLevel == "" && len(levels) > 0 {
