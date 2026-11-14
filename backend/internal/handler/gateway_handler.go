@@ -311,8 +311,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	sessionHash := service.ScopeAnthropicAPISession(c.Request.Context(), h.gatewayService.GenerateSessionHash(parsedReq), apiKey.ID)
 
-	// [DEBUG-STICKY] 打印会话 hash 生成结果
-	reqLog.Info("sticky.session_hash_generated",
+	// 打印会话 hash 生成结果
+	reqLog.Debug("sticky.session_hash_generated",
 		zap.Bool("has_session_key", sessionHash != ""),
 		zap.Bool("has_metadata_user_id", parsedReq.MetadataUserID != ""),
 	)
@@ -335,8 +335,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
 		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
-		// [DEBUG-STICKY] 打印粘性会话查询结果
-		reqLog.Info("sticky.cache_lookup",
+		// 打印粘性会话查询结果
+		reqLog.Debug("sticky.cache_lookup",
 			zap.Bool("has_session_key", sessionKey != ""),
 			zap.Int64("bound_account_id", sessionBoundAccountID),
 		)
@@ -349,7 +349,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			c.Request = c.Request.WithContext(ctx)
 		}
 	} else {
-		reqLog.Info("sticky.no_session_key")
+		reqLog.Debug("sticky.no_session_key")
 	}
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := sessionKey != "" && sessionBoundAccountID > 0
@@ -697,7 +697,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			// 选择支持该模型的账号
-			reqLog.Info("sticky.selecting_account",
+			reqLog.Debug("sticky.selecting_account",
 				zap.Bool("has_session_key", sessionKey != ""),
 				zap.Int64("sticky_bound_account_id", sessionBoundAccountID),
 				zap.Bool("has_bound_session", hasBoundSession),
@@ -750,8 +750,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
-			// [DEBUG-STICKY] 打印账号选择结果
-			reqLog.Info("sticky.account_selected",
+			// 打印账号选择结果
+			reqLog.Debug("sticky.account_selected",
 				zap.Int64("selected_account_id", account.ID),
 				zap.String("account_name", account.Name),
 				zap.Bool("slot_acquired", selection.Acquired),
