@@ -71,6 +71,17 @@ func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT usage_5h FROM api_keys WHERE id = $1", apiKey.ID).Scan(&usage5h))
 	require.InDelta(t, 1.25, usage5h, 0.000001)
 
+	// 额度与限速在同一条 UPDATE 中结算：其余限速窗口也必须一并累加并开窗。
+	var usage1d, usage7d float64
+	var windowsStarted bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT usage_1d, usage_7d,
+			window_5h_start IS NOT NULL AND window_1d_start IS NOT NULL AND window_7d_start IS NOT NULL
+		FROM api_keys WHERE id = $1`, apiKey.ID).Scan(&usage1d, &usage7d, &windowsStarted))
+	require.InDelta(t, 1.25, usage1d, 0.000001)
+	require.InDelta(t, 1.25, usage7d, 0.000001)
+	require.True(t, windowsStarted)
+
 	var status string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT status FROM api_keys WHERE id = $1", apiKey.ID).Scan(&status))
 	require.Equal(t, service.StatusAPIKeyQuotaExhausted, status)

@@ -202,15 +202,21 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	// Key 已不存在时跳过其自身的额度/限速计数，其余结算项不受影响。
-	if cmd.APIKeyQuotaCost > 0 {
+	// 额度与限速同时计费时合并为一条 UPDATE，避免对同一行 api_keys 更新两次。
+	switch {
+	case cmd.APIKeyQuotaCost > 0 && cmd.APIKeyRateLimitCost > 0:
+		exhausted, err := incrementUsageBillingAPIKeyQuotaAndRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost, cmd.APIKeyRateLimitCost)
+		if err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
+			return err
+		}
+		result.APIKeyQuotaExhausted = exhausted
+	case cmd.APIKeyQuotaCost > 0:
 		exhausted, err := incrementUsageBillingAPIKeyQuota(ctx, tx, cmd.APIKeyID, cmd.APIKeyQuotaCost)
 		if err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
 		result.APIKeyQuotaExhausted = exhausted
-	}
-
-	if cmd.APIKeyRateLimitCost > 0 {
+	case cmd.APIKeyRateLimitCost > 0:
 		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil && !errors.Is(err, service.ErrAPIKeyNotFound) {
 			return err
 		}
@@ -428,11 +434,11 @@ func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, 
 	return true, nil
 }
 
-func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
-	var exhausted bool
-	err := tx.QueryRowContext(ctx, `
-		UPDATE api_keys
-		SET quota_used = quota_used + $1,
+// api_keys 计费 UPDATE 的 SET 片段。额度片段固定使用 $1=额度增量、$3=active 状态、
+// $4=quota_exhausted 状态；限速片段的费用参数位置由调用方指定。两个片段读写的列互不相交，
+// 且 SET 表达式都基于更新前的行求值，因此合并成一条语句与先后执行两条语句结果一致。
+const (
+	usageBillingAPIKeyQuotaSet = `quota_used = quota_used + $1,
 			status = CASE
 				WHEN quota > 0
 					AND status = $3
@@ -440,11 +446,44 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 					AND quota_used + $1 >= quota
 				THEN $4
 				ELSE status
-			END,
+			END`
+	usageBillingAPIKeyQuotaExhaustedExpr = `quota > 0 AND quota_used >= quota AND quota_used - $1 < quota`
+	usageBillingAPIKeyRateLimitSetTmpl   = `usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN {cost} ELSE usage_5h + {cost} END,
+			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN {cost} ELSE usage_1d + {cost} END,
+			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' <= NOW() THEN {cost} ELSE usage_7d + {cost} END,
+			window_5h_start = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
+			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
+			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END`
+)
+
+var (
+	usageBillingAPIKeyQuotaSQL = `
+		UPDATE api_keys
+		SET ` + usageBillingAPIKeyQuotaSet + `,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING quota > 0 AND quota_used >= quota AND quota_used - $1 < quota
-	`, amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).Scan(&exhausted)
+		RETURNING ` + usageBillingAPIKeyQuotaExhaustedExpr + `
+	`
+	usageBillingAPIKeyRateLimitSQL = `
+		UPDATE api_keys SET
+			` + strings.ReplaceAll(usageBillingAPIKeyRateLimitSetTmpl, "{cost}", "$1") + `,
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+	`
+	usageBillingAPIKeyQuotaAndRateLimitSQL = `
+		UPDATE api_keys
+		SET ` + usageBillingAPIKeyQuotaSet + `,
+			` + strings.ReplaceAll(usageBillingAPIKeyRateLimitSetTmpl, "{cost}", "$5") + `,
+			updated_at = NOW()
+		WHERE id = $2 AND deleted_at IS NULL
+		RETURNING ` + usageBillingAPIKeyQuotaExhaustedExpr + `
+	`
+)
+
+func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
+	var exhausted bool
+	err := tx.QueryRowContext(ctx, usageBillingAPIKeyQuotaSQL,
+		amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).Scan(&exhausted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, service.ErrAPIKeyNotFound
 	}
@@ -455,17 +494,7 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 }
 
 func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost float64) error {
-	res, err := tx.ExecContext(ctx, `
-		UPDATE api_keys SET
-			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
-			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
-			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' <= NOW() THEN $1 ELSE usage_7d + $1 END,
-			window_5h_start = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
-			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
-			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-	`, cost, apiKeyID)
+	res, err := tx.ExecContext(ctx, usageBillingAPIKeyRateLimitSQL, cost, apiKeyID)
 	if err != nil {
 		return err
 	}
@@ -477,6 +506,21 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 		return service.ErrAPIKeyNotFound
 	}
 	return nil
+}
+
+// incrementUsageBillingAPIKeyQuotaAndRateLimit 用一条 UPDATE 同时累加 Key 额度与限速窗口用量，
+// 返回值与 incrementUsageBillingAPIKeyQuota 相同（本次是否刚好用尽额度）。
+func incrementUsageBillingAPIKeyQuotaAndRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, quotaAmount, rateLimitCost float64) (bool, error) {
+	var exhausted bool
+	err := tx.QueryRowContext(ctx, usageBillingAPIKeyQuotaAndRateLimitSQL,
+		quotaAmount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted, rateLimitCost).Scan(&exhausted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, service.ErrAPIKeyNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	return exhausted, nil
 }
 
 func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) (*service.AccountQuotaState, error) {
