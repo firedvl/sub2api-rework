@@ -31,10 +31,16 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	gocache "github.com/patrickmn/go-cache"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 const gatewayCompatibilityMetricsLogInterval = 1024
+
+// apiKeyUsageStatsTTL 是 GET /v1/usage 中 usage_logs 聚合结果的缓存时长。
+// 该接口可被客户端轮询，每次需要五个聚合查询；额度、余额等实时字段不走缓存。
+const apiKeyUsageStatsTTL = 30 * time.Second
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64
 
@@ -58,6 +64,15 @@ type GatewayHandler struct {
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	usageStatsCache           *gocache.Cache
+	usageStatsSF              singleflight.Group
+}
+
+// apiKeyUsageStats 是 GET /v1/usage 响应里来自 usage_logs 聚合的部分。
+type apiKeyUsageStats struct {
+	usageData  gin.H
+	dailyUsage any
+	modelStats any
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -118,6 +133,7 @@ func NewGatewayHandler(
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
 		cfg:                       cfg,
 		settingService:            settingService,
+		usageStatsCache:           gocache.New(apiKeyUsageStatsTTL, time.Minute),
 	}
 }
 
@@ -1653,17 +1669,9 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 		return
 	}
 
-	// Best-effort: 获取用量统计（按当前 API Key 过滤），失败不影响基础响应
-	usageData := h.buildUsageData(ctx, apiKey.ID)
-	dailyUsage := h.buildAPIKeyDailyUsage(c, subject.UserID, apiKey.ID, days)
-
-	// Best-effort: 获取模型统计
-	var modelStats any
-	if h.usageService != nil {
-		if stats, err := h.usageService.GetAPIKeyModelStats(ctx, apiKey.ID, startTime, endTime); err == nil && len(stats) > 0 {
-			modelStats = stats
-		}
-	}
+	// Best-effort: 获取用量统计与模型统计（按当前 API Key 过滤），失败不影响基础响应
+	stats := h.loadAPIKeyUsageStats(c, subject.UserID, apiKey.ID, days, startTime, endTime)
+	usageData, dailyUsage, modelStats := stats.usageData, stats.dailyUsage, stats.modelStats
 
 	// 判断模式: key 有总额度或速率限制 → quota_limited，否则 → unrestricted
 	isQuotaLimited := apiKey.Quota > 0 || apiKey.HasRateLimits()
@@ -1695,14 +1703,71 @@ func (h *GatewayHandler) parseUsageDateRange(c *gin.Context) (time.Time, time.Ti
 	return startTime, endTime
 }
 
-// buildUsageData 构建 today/total 用量摘要
-func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin.H {
-	if h.usageService == nil {
-		return nil
+// loadAPIKeyUsageStats 返回 usage_logs 聚合结果，按 API Key 与查询范围短时缓存。
+// 只缓存全部查询成功的结果；任一查询失败时仍返回可用部分，但下次请求会重新查询。
+func (h *GatewayHandler) loadAPIKeyUsageStats(c *gin.Context, userID, apiKeyID int64, days int, startTime, endTime time.Time) apiKeyUsageStats {
+	ctx := c.Request.Context()
+	dailyStart, dailyEnd := apiKeyDailyUsageRange(days, c.Query("timezone"))
+	load := func() (apiKeyUsageStats, bool) {
+		if h.usageService == nil {
+			return apiKeyUsageStats{}, false
+		}
+		var stats apiKeyUsageStats
+		complete := true
+		usageData, err := h.buildUsageData(ctx, apiKeyID)
+		stats.usageData = usageData
+		complete = complete && err == nil
+		if daily, err := h.usageService.GetAPIKeyDailyUsage(ctx, userID, apiKeyID, dailyStart, dailyEnd); err == nil {
+			stats.dailyUsage = daily
+		} else {
+			complete = false
+		}
+		if models, err := h.usageService.GetAPIKeyModelStats(ctx, apiKeyID, startTime, endTime); err != nil {
+			complete = false
+		} else if len(models) > 0 {
+			stats.modelStats = models
+		}
+		return stats, complete
 	}
+	if h.usageStatsCache == nil {
+		stats, _ := load()
+		return stats
+	}
+
+	// 用解析后的范围做 key：无效的 timezone/日期参数会回落到同一个默认 key，
+	// 客户端无法靠随意的参数值撑大缓存。
+	cacheKey := fmt.Sprintf("%d|%d|%d|%s|%s",
+		apiKeyID, dailyStart.Unix(), dailyEnd.Unix(),
+		usageDateCacheKeyPart(c.Query("start_date")), usageDateCacheKeyPart(c.Query("end_date")))
+	if cached, ok := h.usageStatsCache.Get(cacheKey); ok {
+		if stats, ok := cached.(apiKeyUsageStats); ok {
+			return stats
+		}
+	}
+	loaded, _, _ := h.usageStatsSF.Do(cacheKey, func() (any, error) {
+		stats, complete := load()
+		if complete {
+			h.usageStatsCache.Set(cacheKey, stats, apiKeyUsageStatsTTL)
+		}
+		return stats, nil
+	})
+	stats, _ := loaded.(apiKeyUsageStats)
+	return stats
+}
+
+// usageDateCacheKeyPart 只保留 parseUsageDateRange 会接受的日期参数。
+func usageDateCacheKeyPart(raw string) string {
+	if _, err := timezone.ParseInLocation("2006-01-02", raw); err != nil {
+		return ""
+	}
+	return raw
+}
+
+// buildUsageData 构建 today/total 用量摘要
+func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) (gin.H, error) {
 	dashStats, err := h.usageService.GetAPIKeyDashboardStats(ctx, apiKeyID)
 	if err != nil || dashStats == nil {
-		return nil
+		return nil, err
 	}
 	return gin.H{
 		"today": gin.H{
@@ -1728,19 +1793,7 @@ func (h *GatewayHandler) buildUsageData(ctx context.Context, apiKeyID int64) gin
 		"average_duration_ms": dashStats.AverageDurationMs,
 		"rpm":                 dashStats.Rpm,
 		"tpm":                 dashStats.Tpm,
-	}
-}
-
-func (h *GatewayHandler) buildAPIKeyDailyUsage(c *gin.Context, userID, apiKeyID int64, days int) any {
-	if h.usageService == nil {
-		return nil
-	}
-	startTime, endTime := apiKeyDailyUsageRange(days, c.Query("timezone"))
-	stats, err := h.usageService.GetAPIKeyDailyUsage(c.Request.Context(), userID, apiKeyID, startTime, endTime)
-	if err != nil {
-		return nil
-	}
-	return stats
+	}, nil
 }
 
 // usageQuotaLimited 处理 quota_limited 模式的响应
