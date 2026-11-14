@@ -788,6 +788,8 @@ type GatewayService struct {
 	userGroupRateSF       singleflight.Group
 	modelsListCache       *gocache.Cache
 	modelsListCacheTTL    time.Duration
+	// noAntigravityGroups 记住"分组内没有可调度 antigravity 账号"的结论（见 IsSingleAntigravityAccountGroup）。
+	noAntigravityGroups   *gocache.Cache
 	settingService        *SettingService
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
 	debugModelRouting     atomic.Bool
@@ -868,6 +870,7 @@ func NewGatewayService(
 		settingService:        settingService,
 		modelsListCache:       gocache.New(modelsListTTL, time.Minute),
 		modelsListCacheTTL:    modelsListTTL,
+		noAntigravityGroups:   gocache.New(noAntigravityGroupTTL, time.Minute),
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		tlsFPProfileService:   tlsFPProfileService,
 		channelService:        channelService,
