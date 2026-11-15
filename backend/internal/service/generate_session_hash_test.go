@@ -51,12 +51,19 @@ func TestAnthropicAPIOnlyAffinityIsolatesAllSharedSources(t *testing.T) {
 func TestGenerateSessionHashLogsDoNotExposeSessionMaterial(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 	svc := &GatewayService{}
-	for _, metadata := range []string{`{"device_id":"private-device","session_id":"private-session"}`, "private-invalid-metadata"} {
-		svc.GenerateSessionHash(&ParsedRequest{MetadataUserID: metadata})
+	generate := func() {
+		for _, metadata := range []string{`{"device_id":"private-device","session_id":"private-session"}`, "private-invalid-metadata"} {
+			svc.GenerateSessionHash(&ParsedRequest{MetadataUserID: metadata})
+		}
 	}
+	// 粘性会话诊断日志只在 Debug 级别输出，默认 Info 级别下热路径不产生日志。
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	generate()
+	require.Empty(t, logs.String())
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	generate()
 	for _, secret := range []string{"private-device", "private-session", "private-invalid-metadata"} {
 		require.NotContains(t, logs.String(), secret)
 	}
