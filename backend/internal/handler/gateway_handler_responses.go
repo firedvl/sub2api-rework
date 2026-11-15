@@ -204,6 +204,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
+				if cls.UsageLimit != nil {
+					writeOpenAIUsageLimitError(c, cls)
+					return
+				}
 				message := cls.Message
 				if !cls.ModelNotFound {
 					message = "No available accounts: " + err.Error()
@@ -219,6 +223,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				failoverClientGone(c)
 				return
 			default:
+				if !streamStarted {
+					if cls, ok := classifyUsageLimitAfterUpstream429(c, h.gatewayService, apiKey, reqModel, effectiveAPIKeyPlatform(c, apiKey), fs.LastFailoverErr); ok {
+						writeOpenAIUsageLimitError(c, cls)
+						return
+					}
+				}
 				if fs.LastFailoverErr != nil {
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {

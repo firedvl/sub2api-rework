@@ -20,13 +20,41 @@ Run `/status` in Claude Code and confirm the gateway URL and credential source b
 
 For a persistent setup, put the same variables in a private user settings file or an `apiKeyHelper`; keep secrets out of project files. Gateway variables override a saved native login while set; unsetting them restores the native credential path. The separate `tools/claude_accounts.py` native-profile launcher intentionally removes gateway variables, so use ordinary `claude` for this gateway configuration.
 
-When an account is already cooling down or rate-limited, the scheduler selects another eligible account in the same group. If the upstream returns a quota 429 before response content is sent, the handler records the limit and retries the request on another account, preserving the conversation body and attributing usage to the successful account. Both accounts must allow the requested model and have available quota. If all are exhausted, the gateway returns an error. Gateway key/user budgets and rate limits still apply.
+When an account is already cooling down or rate-limited, the scheduler selects another eligible account in the same group. If the upstream returns a quota 429 before response content is sent, the handler records the limit and retries the request on another account, preserving the conversation body and attributing usage to the successful account. Both accounts must allow the requested model and have available quota. If all are exhausted, the gateway answers `429` with the reset time; see [When every account is out of usage](#when-every-account-is-out-of-usage). Gateway key/user budgets and rate limits still apply.
 
 An answer that has already started streaming cannot be invisibly moved to another account: stitching two partial streams could corrupt the answer or replay tool work. Retry that turn after an interrupted response. A new account may also lose the upstream prompt-cache benefit, while the conversation history remains in the client’s request.
 
 Automatic gateway warm-up now uses the shared Sonnet 4.6 connection-test default. A dated Sonnet 4.5 model can be unavailable on an individual account even when another account still accepts it. The warm-up request remains limited to 16 output tokens and confirms the actual upstream reset before reporting a completed window.
 
 The default Anthropic model catalog includes `claude-opus-5-5` (Opus 5.5). Existing account mappings, group model lists and allowlists still apply. Claude Desktop can override discovery with its own Model list (`inferenceModels`); restart Desktop after the gateway update and check that override if the model remains absent. Listing a model does not establish upstream account access.
+
+## When every account is out of usage
+
+If every account that can serve the requested model is blocked until a known time, the gateway answers `429` and says when usage comes back. An account is usable again when its last time-bound block ends: rate-limit reset, overload cooldown, temporary pause, model-level limit, or the window reset behind an OpenAI quota auto-pause. The reported reset is the earliest such time in the pool. An account blocked with no reset time, such as an expired one, adds no time.
+
+The earlier response is unchanged in every other case: `404 model_not_found` when no account serves the model, and `503` when the group has no accounts, when a candidate is still schedulable (concurrency, RPM or profit control stopped the request), or when no candidate has a known reset.
+
+| Route | Response |
+| --- | --- |
+| Messages (`/v1/messages`) | `429` with the Anthropic body `{"type":"error","error":{"type":"rate_limit_error","message":"..."}}`, `Retry-After: <seconds>`, `anthropic-ratelimit-unified-status: rejected` and `anthropic-ratelimit-unified-reset: <Unix seconds>` |
+| Responses and Chat Completions | `429` with `Retry-After` and `{"error":{"type":"usage_limit_reached","message":"...","resets_at":<Unix seconds>,"resets_in_seconds":<seconds>}}` |
+| Gemini native | `429` with `Retry-After` and the Google error body |
+| Other gateway routes | `429` with `Retry-After` and the route's usual error body |
+
+The message always ends with the reset, for example `Usage resets at 2026-11-15T06:06:33Z (in 59m59s).`
+
+On Messages the gateway adds `anthropic-ratelimit-unified-representative-claim` (`five_hour` or `seven_day`) and the matching `anthropic-ratelimit-unified-5h-*` or `-7d-*` `status` and `reset` headers only when the reset equals the five-hour or seven-day window reset stored on that account from Anthropic's own headers. It does not guess a window. A Fable-only weekly limit, an overload cooldown and a non-Anthropic account therefore carry no claim.
+
+Headers go out only with a response that has not started. Once a stream has started, the error stays an in-stream event and carries the same message. The request that discovers the limit gets the same response when its upstream `429` leaves no usable account; an error passthrough rule that matches the upstream error keeps precedence.
+
+### What the clients do with it
+
+Checked on 2026-11-14 with Claude Code 2.1.322 against a loopback stub that returned these responses:
+
+- **Gateway key in `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`** (the setup above). Claude Code ignores the unified headers and shows `API Error: Request rejected (429)` followed by the gateway message, so the reset time is visible. It retries by itself when `Retry-After` is 60 seconds or less and stops at once when it is longer. With `CLAUDE_CODE_RETRY_WATCHDOG=1` it waits for `Retry-After` and then continues the request; this was tested in `-p` mode with a 25-second reset, and a one-hour reset produced a one-hour scheduled retry.
+- **A credential Claude Code treats as plan-limited.** Claude Code reads the unified headers. With the claim it reports `You've hit your 5-hour limit · resets ...` or `You've hit your weekly limit · resets ...`; without it, `Server is temporarily limiting requests (not your usage limit)`. This was exercised with a synthetic token carrying the Claude apps gateway audience. The interactive "wait and continue automatically" feature is [documented](https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset) only while a saved claude.ai login is the active credential, which a gateway key replaces; it was not tested here.
+
+Codex CLI maps a `429` whose `error.type` is `usage_limit_reached` to its usage-limit error and reads `error.resets_at` ([`codex-api/src/api_bridge.rs`](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/api_bridge.rs)). `resets_in_seconds` mirrors the ChatGPT backend body, which this gateway also parses from upstream accounts. No Codex run was made against the gateway.
 
 ## Provider contract, checked 2026-10-19
 

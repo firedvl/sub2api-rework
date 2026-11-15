@@ -194,7 +194,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
 				message := cls.Message
-				if !cls.ModelNotFound {
+				if !cls.ModelNotFound && cls.UsageLimit == nil {
 					message = "No available compatible accounts"
 				}
 				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
@@ -213,7 +213,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				markOpsRoutingCapacityLimited(c)
 			}
 			message := cls.Message
-			if !cls.ModelNotFound {
+			if !cls.ModelNotFound && cls.UsageLimit == nil {
 				message = "No available compatible accounts"
 			}
 			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)

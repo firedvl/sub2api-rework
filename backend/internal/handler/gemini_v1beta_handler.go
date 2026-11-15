@@ -527,7 +527,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
 				message := cls.Message
-				if !cls.ModelNotFound {
+				if !cls.ModelNotFound && cls.UsageLimit == nil {
 					message = "No available Gemini accounts: " + err.Error()
 				}
 				googleError(c, cls.Status, message)

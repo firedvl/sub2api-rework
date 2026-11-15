@@ -368,7 +368,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Error(err),
 					)
 					message := cls.Message
-					if !cls.ModelNotFound {
+					if !cls.ModelNotFound && cls.UsageLimit == nil {
 						message = "No available accounts: " + err.Error()
 					}
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
@@ -384,6 +384,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
+					if h.respondUsageLimitAfterUpstream429(c, apiKey, reqModel, service.PlatformGemini, fs.LastFailoverErr, streamStarted) {
+						return
+					}
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 					} else {
@@ -707,7 +710,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Error(err),
 					)
 					message := cls.Message
-					if !cls.ModelNotFound {
+					if !cls.ModelNotFound && cls.UsageLimit == nil {
 						message = "No available accounts: " + err.Error()
 					}
 					h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
@@ -723,6 +726,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
+					if h.respondUsageLimitAfterUpstream429(c, currentAPIKey, reqModel, platform, fs.LastFailoverErr, streamStarted) {
+						return
+					}
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)
 					} else {

@@ -208,9 +208,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
-				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				h.respondNoAccount(c, cls, streamStarted)
 				return
 			} else {
+				if h.respondUsageLimitAfterUpstream429(c, apiKey, reqModel, requestPlatform, lastFailoverErr, streamStarted) {
+					return
+				}
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
