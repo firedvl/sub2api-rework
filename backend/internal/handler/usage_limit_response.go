@@ -28,7 +28,7 @@ func usageLimitClassification(limit service.UsageExhaustion, now time.Time) noAc
 		Status:  http.StatusTooManyRequests,
 		ErrType: "rate_limit_error",
 		Message: fmt.Sprintf(
-			"Usage limit reached: all accounts that can serve this model are out of usage. Resets at %s (in %s).",
+			"All accounts that can serve this model are rate-limited or out of usage. Usage resets at %s (in %s).",
 			limit.ResetAt.UTC().Format(time.RFC3339),
 			(time.Duration(usageLimitRetryAfterSeconds(limit.ResetAt, now)) * time.Second).String(),
 		),
