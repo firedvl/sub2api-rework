@@ -55,6 +55,8 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	// The usage scan judges quota auto-pause with the scheduler's thresholds.
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	scan := usageExhaustionScan{now: time.Now()}
 	for i := range accounts {
 		diag.HasAccountsInPool = true
