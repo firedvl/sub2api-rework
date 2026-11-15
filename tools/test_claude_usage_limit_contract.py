@@ -18,7 +18,7 @@ import unittest
 
 
 def run_client(reset_in):
-    reset_at = int(time.time()) + reset_in
+    reset_at = None
     message = f"All accounts that can serve this model are rate-limited or out of usage. Usage resets at SYNTHETIC_RESET (in {reset_in}s)."
     attempts = []
 
@@ -36,10 +36,13 @@ def run_client(reset_in):
             self.wfile.write(data)
 
         def do_POST(self):
+            nonlocal reset_at
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
             if self.path.split("?")[0].endswith("/messages/count_tokens"):
                 self.reply(200, "application/json", b'{"input_tokens":8}')
                 return
+            if reset_at is None:
+                reset_at = int(time.time()) + reset_in
             attempts.append(time.time())
             if time.time() < reset_at:
                 data = json.dumps({"type": "error", "error": {"type": "rate_limit_error", "message": message}}).encode()
