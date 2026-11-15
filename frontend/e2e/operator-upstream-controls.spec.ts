@@ -32,7 +32,7 @@ for (const width of [390, 1280]) {
     await expect(dialog).toBeHidden()
   })
 
-  test(`operator priority and usage trend recovery at ${width}px`, async ({ page }, testInfo) => {
+  test(`operator priority and Overview snapshot recovery at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     await seedSession(page)
     await installOperatorApiMock(page)
@@ -62,30 +62,33 @@ for (const width of [390, 1280]) {
     expect(writes).toEqual([{ priority: 12 }, { priority: 12 }])
     await page.screenshot({ path: testInfo.outputPath(`priority-${width}.png`) })
 
-    let spendAttempts = 0
-    await page.route('**/api/v1/admin/dashboard/users-trend*', route => {
-      const spending = new URL(route.request().url()).searchParams.get('metric') === 'actual_cost'
-      if (spending && ++spendAttempts === 1) return route.fulfill({ status: 503, json: { code: 503, message: 'Fixture trend failure' } })
-      return route.fulfill({ json: { code: 0, data: { trend: spending ? [{ date: '2026-10-08', user_id: 1, username: 'Fixture user', tokens: 10, actual_cost: 5 }] : [] } } })
+    // A failed Overview snapshot replaces only the status card; the account cards still load.
+    let snapshotAttempts = 0
+    await page.route('**/api/v1/admin/dashboard/snapshot-v2*', route => {
+      if (++snapshotAttempts === 1) return route.fulfill({ status: 503, json: { code: 503, message: 'Fixture snapshot failure' } })
+      return route.fallback()
     })
     await page.goto('/admin/dashboard')
-    const trend = page.locator('section[aria-labelledby="user-usage-trend-title"]')
-    await expect(trend.getByText('No data available', { exact: true })).toBeVisible()
-    await trend.getByRole('button', { name: 'Actual spending ($)', exact: true }).click()
-    await expect(trend.getByRole('alert')).toBeVisible()
-    await trend.getByRole('button', { name: 'Retry', exact: true }).click()
-    await expect(trend.locator('canvas')).toBeVisible()
-    await expect(trend.getByRole('button', { name: 'Actual spending ($)', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    expect(spendAttempts).toBe(2)
-    let previousPixels = ''
-    let stableFrames = 0
-    await expect.poll(async () => {
-      const pixels = await trend.locator('canvas').evaluate(canvas => (canvas as HTMLCanvasElement).toDataURL())
-      stableFrames = pixels === previousPixels ? stableFrames + 1 : 0
-      previousPixels = pixels
-      return stableFrames
-    }, { intervals: [100, 250, 500, 1000], timeout: 10000 }).toBeGreaterThanOrEqual(4)
-    await page.screenshot({ path: testInfo.outputPath(`spending-trend-${width}.png`) })
+    const loadError = page.getByTestId('dashboard-load-error')
+    const status = page.locator('section[aria-labelledby="overview-status"]')
+    await expect(loadError).toBeVisible()
+    await expect(loadError).toHaveAttribute('role', 'alert')
+    await expect(status).toHaveCount(0)
+    await expect(page.getByTestId('overview-state-limited')).toHaveText('2 Limited')
+    await expect(page.locator('section[aria-labelledby="overview-recent"] .overview-table tbody tr')).toHaveCount(4)
+    expect(snapshotAttempts).toBe(1)
+    await loadError.getByRole('button', { name: 'Retry', exact: true }).click()
+    await expect(loadError).toHaveCount(0)
+    await expect(status.locator('.overview-today')).toContainText('4,286')
+    const hourly = status.getByRole('img', { name: /^Requests per hour over the last 24 hours\./ })
+    await expect(hourly).toBeVisible()
+    expect(snapshotAttempts).toBe(2)
+    await hourly.focus()
+    await page.keyboard.press('ArrowLeft')
+    await expect(status.locator('.trend-tip')).toContainText('Requests')
+    await page.keyboard.press('Escape')
+    await expect(status.locator('.trend-tip')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath(`overview-recovery-${width}.png`) })
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   })
 }

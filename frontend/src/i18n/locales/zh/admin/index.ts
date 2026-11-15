@@ -9,6 +9,7 @@ import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
 import modelOperations from './modelOperations'
+import viz from './viz'
 
 export default {
   ...overview,
@@ -22,6 +23,7 @@ export default {
   ...promptAudit,
   ...plugins,
   ...modelOperations,
+  ...viz,
   operatorAssistant: {
     title: '询问 Gateway',
     ready: '就绪',

@@ -1,8 +1,13 @@
 <template>
-  <div class="auth-codex-shell">
+  <div class="auth-codex-shell auth-codex-split">
     <div v-if="isFixtureReview" class="auth-review-banner app-review-badge" role="status">
       {{ t('nav.fixtureReview') }}
     </div>
+
+    <!-- Decorative routing diagram, wide screens only -->
+    <aside class="auth-codex-art" aria-hidden="true">
+      <AuthFlowArt />
+    </aside>
 
     <!-- Content Container -->
     <div class="auth-codex-frame">
@@ -50,6 +55,7 @@ import {
   resolveOperatorProductName,
 } from '@/utils/branding'
 import { sanitizeUrl } from '@/utils/url'
+import AuthFlowArt from './AuthFlowArt.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()

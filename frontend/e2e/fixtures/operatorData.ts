@@ -1034,6 +1034,18 @@ export function getOperatorFixtureData(
   if (pathname === '/api/v1/admin/dashboard/users-trend') {
     return { trend: [], start_date: '2026-08-29', end_date: '2026-08-30', granularity: 'hour' }
   }
+  if (pathname === '/api/v1/admin/dashboard/api-keys-trend') {
+    return {
+      trend: [
+        { date: '2026-08-29', api_key_id: 21, key_name: 'review-console', requests: 2_106, tokens: 2_704_000 },
+        { date: '2026-08-29', api_key_id: 22, key_name: 'coding-agents', requests: 1_384, tokens: 1_866_500 },
+        { date: '2026-08-29', api_key_id: 23, key_name: 'ci-pipeline', requests: 796, tokens: 905_000 },
+      ],
+      start_date: '2026-08-29',
+      end_date: '2026-08-30',
+      granularity: 'day',
+    }
+  }
   if (pathname === '/api/v1/admin/dashboard/users-ranking') {
     return {
       ranking: [
@@ -1159,9 +1171,9 @@ export function getOperatorFixtureData(
     return {
       total: 24,
       items: [
-        { key: 'rate_limit', label: 'Rate limit', count: 11, percentage: 45.8 },
-        { key: 'upstream', label: 'Upstream', count: 8, percentage: 33.3 },
-        { key: 'client', label: 'Client request', count: 5, percentage: 20.9 },
+        { status_code: 429, total: 11, sla: 0, business_limited: 11 },
+        { status_code: 502, total: 8, sla: 8, business_limited: 0 },
+        { status_code: 400, total: 5, sla: 0, business_limited: 0 },
       ],
     }
   }

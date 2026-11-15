@@ -1,19 +1,46 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import type { Account, DashboardStats, TrendDataPoint } from '@/types'
+import { reactive } from 'vue'
+import type { TrendDataPoint } from '@/types'
 import StatsView from '../StatsView.vue'
 
-const { getSnapshotV2, listAccounts, getBatchUsage } = vi.hoisted(() => ({
+const api = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
+  getApiKeyUsageTrend: vi.fn(),
+  getUsageStats: vi.fn(),
+  getDashboardOverview: vi.fn(),
+  getThroughputTrend: vi.fn(),
+  getLatencyHistogram: vi.fn(),
+  getErrorDistribution: vi.fn(),
   listAccounts: vi.fn(),
   getBatchUsage: vi.fn(),
+  replace: vi.fn(),
+  settings: { opsMonitoringEnabled: true },
 }))
+
+const route = reactive<{ query: Record<string, string | undefined> }>({ query: {} })
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    dashboard: { getSnapshotV2 },
-    accounts: { list: listAccounts, getBatchUsage },
+    dashboard: { getSnapshotV2: api.getSnapshotV2, getApiKeyUsageTrend: api.getApiKeyUsageTrend },
+    usage: { getStats: api.getUsageStats },
+    ops: {
+      getDashboardOverview: api.getDashboardOverview,
+      getThroughputTrend: api.getThroughputTrend,
+      getLatencyHistogram: api.getLatencyHistogram,
+      getErrorDistribution: api.getErrorDistribution,
+    },
+    accounts: { list: api.listAccounts, getBatchUsage: api.getBatchUsage },
   },
+}))
+
+vi.mock('@/stores/adminSettings', () => ({
+  useAdminSettingsStore: () => api.settings,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => route,
+  useRouter: () => ({ replace: api.replace }),
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -21,313 +48,332 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string, params?: Record<string, unknown>) => params
-        ? `${key} ${Object.values(params).join(' ')}`
-        : key,
+      t: (key: string, params?: Record<string, unknown>) => (params ? `${key} ${Object.values(params).join(' ')}` : key),
+      locale: { value: 'en-US' },
     }),
   }
 })
 
-const stats = (overrides: Partial<DashboardStats> = {}): DashboardStats => ({
-  total_users: 0,
-  today_new_users: 0,
-  active_users: 0,
-  hourly_active_users: 0,
-  stats_updated_at: '2026-08-25T00:00:00Z',
-  stats_stale: false,
-  total_api_keys: 0,
-  active_api_keys: 0,
-  total_accounts: 0,
-  normal_accounts: 0,
-  error_accounts: 0,
-  ratelimit_accounts: 0,
-  overload_accounts: 0,
-  total_requests: 0,
-  total_input_tokens: 0,
-  total_output_tokens: 0,
-  total_cache_creation_tokens: 0,
-  total_cache_read_tokens: 0,
-  total_tokens: 0,
-  total_cost: 0,
-  total_actual_cost: 0,
-  total_account_cost: 0,
-  today_requests: 12,
-  today_input_tokens: 100,
-  today_output_tokens: 50,
-  today_cache_creation_tokens: 0,
-  today_cache_read_tokens: 0,
-  today_tokens: 150,
-  today_cost: 2,
-  today_actual_cost: 1.5,
-  today_account_cost: 0.75,
-  average_duration_ms: 420,
-  uptime: 100,
-  rpm: 2,
-  tpm: 25,
+// Noon on Sunday 30 August 2026, in the test machine's own time zone.
+const NOW = new Date(2026, 7, 30, 12, 0, 0)
+
+const point = (date: string, requests: number, overrides: Partial<TrendDataPoint> = {}): TrendDataPoint => ({
+  date,
+  requests,
+  input_tokens: requests * 10,
+  output_tokens: requests * 2,
+  cache_creation_tokens: requests,
+  cache_read_tokens: requests * 30,
+  total_tokens: requests * 43,
+  cost: requests * 0.02,
+  actual_cost: requests * 0.01,
   ...overrides,
 })
 
-const account = (id: number): Account => ({
-  id,
-  name: `Account ${id}`,
-  platform: 'openai',
-  type: 'oauth',
-  proxy_id: null,
-  concurrency: 1,
-  priority: 1,
-  status: 'active',
-  error_message: null,
-  last_used_at: null,
-  expires_at: null,
-  auto_pause_on_expired: false,
-  created_at: '2026-08-25T00:00:00Z',
-  updated_at: '2026-08-25T00:00:00Z',
-  schedulable: true,
-  rate_limited_at: null,
-  rate_limit_reset_at: null,
-  overload_until: null,
-  temp_unschedulable_until: null,
-  temp_unschedulable_reason: null,
-  session_window_start: null,
-  session_window_end: null,
-  session_window_status: null,
-})
-
-const trendPoint = (date: string, requests: number, totalTokens = 0): TrendDataPoint => ({
-  date,
-  requests,
-  input_tokens: 0,
-  output_tokens: 0,
-  cache_creation_tokens: 0,
-  cache_read_tokens: 0,
-  total_tokens: totalTokens,
-  cost: 0,
-  actual_cost: 0,
-})
-
-const mockTrend = (trend: TrendDataPoint[], granularity: 'day' | 'hour' = 'day') => {
-  getSnapshotV2.mockResolvedValueOnce({
-    generated_at: '2026-08-25T12:00:00Z',
-    stats: stats(),
-    granularity,
-    trend,
-  })
+const TrendChartStub = {
+  props: ['labels', 'tips', 'series', 'summary', 'type'],
+  template: '<div class="trend-stub" />',
+}
+const HeatGridStub = { props: ['rows', 'summary'], template: '<div class="heat-stub" />' }
+const CapacityStub = { props: ['accounts', 'loading', 'error'], template: '<div data-testid="capacity-section" />' }
+const ToggleStub = {
+  props: ['modelValue'],
+  emits: ['update:modelValue'],
+  template: '<button data-testid="compare-toggle" @click="$emit(\'update:modelValue\', !modelValue)" />',
 }
 
-const mountView = (attachTo?: Element) => mount(StatsView, {
-  ...(attachTo ? { attachTo } : {}),
+const mountView = () => mount(StatsView, {
   global: {
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
       LoadingSpinner: true,
+      Icon: true,
+      ProviderMark: true,
+      SparkLine: true,
+      Toggle: ToggleStub,
+      TrendChart: TrendChartStub,
+      HeatGrid: HeatGridStub,
+      StatsCapacitySection: CapacityStub,
     },
   },
 })
 
+const snapshot = (trend: TrendDataPoint[], extra: Record<string, unknown> = {}) => ({
+  generated_at: NOW.toISOString(),
+  trend,
+  ...extra,
+})
+
+/** Answers each snapshot request by its date range and granularity. */
+function mockSnapshots(byStart: Record<string, ReturnType<typeof snapshot>>) {
+  api.getSnapshotV2.mockImplementation(async (params: { start_date: string; include_model_stats?: boolean }) => (
+    byStart[`${params.start_date}${params.include_model_stats ? '+models' : ''}`] ?? byStart[params.start_date] ?? snapshot([])
+  ))
+}
+
+const trafficChart = (wrapper: ReturnType<typeof mountView>) => wrapper.get('[data-testid="stats-traffic"]').getComponent(TrendChartStub)
+const kpiText = (wrapper: ReturnType<typeof mountView>) => wrapper.get('[data-testid="stats-kpis"]').findAll('.viz-kpi').map((tile) => tile.text())
+
 describe('admin StatsView', () => {
   beforeEach(() => {
-    getSnapshotV2.mockReset()
-    listAccounts.mockReset()
-    getBatchUsage.mockReset()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    route.query = {}
+    api.settings.opsMonitoringEnabled = true
+    for (const mock of Object.values(api)) {
+      if (typeof mock === 'function') mock.mockReset()
+    }
 
-    getSnapshotV2.mockResolvedValue({
-      generated_at: '2026-08-25T12:00:00Z',
-      stats: stats(),
-      granularity: 'day',
-      trend: [{
-        date: '2026-08-25T00:00:00Z',
-        requests: 12,
-        input_tokens: 100,
-        output_tokens: 50,
-        cache_creation_tokens: 0,
-        cache_read_tokens: 0,
-        total_tokens: 150,
-        cost: 2,
-        actual_cost: 1.5,
-      }],
-    })
-    listAccounts.mockResolvedValue({ items: [account(1)], total: 1, page: 1, page_size: 1000, pages: 1 })
-    getBatchUsage.mockResolvedValue({
-      usage: {
-        '1': {
-          updated_at: '2026-08-25T12:00:00Z',
-          five_hour: { utilization: 25, resets_at: null, remaining_seconds: null },
-          seven_day: null,
-          seven_day_sonnet: null,
+    mockSnapshots({
+      '2026-08-24+models': snapshot(
+        [point('2026-08-29 09:00', 100), point('2026-08-30 08:00', 200)],
+        {
+          models: [
+            { model: 'gpt-5.2-codex', requests: 180, total_tokens: 9000, actual_cost: 2.5 },
+            { model: 'claude-sonnet-4-5', requests: 120, total_tokens: 6000, actual_cost: 3.5 },
+          ],
+          groups: [
+            { group_id: 11, group_name: 'OpenAI Production', requests: 180, total_tokens: 9000 },
+            { group_id: 12, group_name: 'Claude Production', requests: 120, total_tokens: 6000 },
+          ],
         },
-      },
-      errors: {},
+      ),
+      '2026-08-17': snapshot([point('2026-08-22 09:00', 200)]),
+      '2026-08-24': snapshot([point('2026-08-30 08:00', 200), point('2026-08-30 20:00', 999)]),
     })
+    api.getUsageStats.mockImplementation(async (params: { start_date: string }) => (
+      params.start_date === '2026-08-24'
+        ? { total_requests: 300, average_duration_ms: 1200 }
+        : { total_requests: 200, average_duration_ms: 1500 }
+    ))
+    api.getDashboardOverview.mockResolvedValue({
+      request_count_total: 300,
+      error_count_total: 6,
+      error_rate: 0.02,
+      duration: { p50_ms: 800, p90_ms: 1900, p95_ms: 2500, p99_ms: 4800 },
+      ttft: { p50_ms: 250 },
+    })
+    api.getThroughputTrend.mockResolvedValue({
+      bucket: 'hour',
+      points: [],
+      by_platform: [
+        { platform: 'anthropic', request_count: 100, token_consumed: 5000 },
+        { platform: 'openai', request_count: 300, token_consumed: 9000 },
+      ],
+    })
+    api.getLatencyHistogram.mockResolvedValue({ buckets: [{ range: '<500ms', count: 40 }, { range: '500ms-1s', count: 60 }] })
+    api.getErrorDistribution.mockResolvedValue({ total: 6, items: [{ status_code: 502, total: 2 }, { status_code: 429, total: 4 }] })
+    api.getApiKeyUsageTrend.mockResolvedValue({
+      trend: [
+        { date: '2026-08-29', api_key_id: 1, key_name: 'ci-pipeline', requests: 40, tokens: 400 },
+        { date: '2026-08-30', api_key_id: 1, key_name: 'ci-pipeline', requests: 60, tokens: 600 },
+        { date: '2026-08-30', api_key_id: 2, key_name: 'notebooks', requests: 20, tokens: 100 },
+      ],
+    })
+    api.listAccounts.mockResolvedValue({ items: [{ id: 1, name: 'Codex', platform: 'openai', type: 'oauth' }], total: 1, page: 1, page_size: 1000, pages: 1 })
+    api.getBatchUsage.mockResolvedValue({ usage: {}, errors: {} })
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
-    document.body.innerHTML = ''
   })
 
-  it('loads supported metrics, trend, all account pages, and non-force usage', async () => {
-    const wrapper = mountView()
+  it('loads the 7-day period, its previous period, the heatmap, and ops detail, but not the account fleet', async () => {
+    mountView()
     await flushPromises()
 
-    expect(getSnapshotV2).toHaveBeenCalledWith({
-      include_stats: true,
+    const trendOnly = {
+      include_stats: false,
       include_trend: true,
       include_model_stats: false,
       include_group_stats: false,
       include_users_trend: false,
+    }
+    expect(api.getSnapshotV2).toHaveBeenCalledTimes(3)
+    expect(api.getSnapshotV2).toHaveBeenCalledWith({
+      ...trendOnly,
+      start_date: '2026-08-24',
+      end_date: '2026-08-30',
+      granularity: 'hour',
+      include_model_stats: true,
+      include_group_stats: true,
     })
-    expect(listAccounts).toHaveBeenCalledWith(1, 1000, { include_scheduler_score: '0' })
-    expect(getBatchUsage).toHaveBeenCalledWith([1], false)
-    expect(wrapper.text()).toContain('12')
-    expect(wrapper.text()).toContain('$1.50')
-    expect(wrapper.text()).toContain('$0.75')
-    expect(wrapper.text()).toContain('420ms')
-    expect(wrapper.get('[data-testid="stats-request-trend"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="stats-token-trend"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="provider-capacity-openai"]').text()).toContain('Account 1')
-    expect(wrapper.get('.stats-view').element.children[0].classList).toContain('stats-usage-section')
-    expect(wrapper.get('.stats-view').element.children[1].classList).toContain('stats-capacity-section')
+    expect(api.getSnapshotV2).toHaveBeenCalledWith({ ...trendOnly, start_date: '2026-08-17', end_date: '2026-08-23', granularity: 'hour' })
+    expect(api.getUsageStats).toHaveBeenCalledWith({ start_date: '2026-08-24', end_date: '2026-08-30' })
+    expect(api.getUsageStats).toHaveBeenCalledWith({ start_date: '2026-08-17', end_date: '2026-08-23' })
+    expect(api.getDashboardOverview).toHaveBeenCalledWith({
+      start_time: new Date(2026, 7, 24).toISOString(),
+      end_time: new Date(2026, 7, 31).toISOString(),
+    })
+    expect(api.listAccounts).not.toHaveBeenCalled()
+    expect(api.getApiKeyUsageTrend).not.toHaveBeenCalled()
   })
 
-  it('renders coordinated hourly bar charts with exact summaries, tooltips, and keyboard navigation', async () => {
-    mockTrend([
-      trendPoint('2026-08-25T00:00:00Z', 0, 0),
-      trendPoint('2026-08-25T01:00:00Z', 10, 100),
-      trendPoint('2026-08-25T02:00:00Z', 20, 300),
-      trendPoint('2026-08-25T03:00:00Z', 50, 600),
-    ], 'hour')
-
-    const wrapper = mountView(document.body)
+  it('totals each tile and compares it with the same span of the previous period', async () => {
+    const wrapper = mountView()
     await flushPromises()
 
-    const requestChart = wrapper.get('[data-testid="stats-request-trend"]')
-    const tokenChart = wrapper.get('[data-testid="stats-token-trend"]')
-    const requestBars = requestChart.findAll('[data-testid="stats-trend-bar"]')
-    const tokenBars = tokenChart.findAll('[data-testid="stats-trend-bar"]')
+    const [requests, tokens, cost, latency] = kpiText(wrapper)
+    expect(requests).toContain('300')
+    expect(requests).toContain('+50.0%')
+    expect(tokens).toContain('12.9K')
+    expect(cost).toContain('$3.00')
+    expect(latency).toContain('1.20s')
+    expect(latency).toContain('−20.0%')
 
-    expect(requestBars).toHaveLength(4)
-    expect(tokenBars).toHaveLength(4)
-    expect(requestBars.every((bar) => !bar.classes().includes('is-first') && !bar.classes().includes('is-last'))).toBe(true)
-    expect(tokenBars.every((bar) => !bar.classes().includes('is-first') && !bar.classes().includes('is-last'))).toBe(true)
-    expect(requestChart.get('[data-testid="stats-trend-total"]').text()).toBe('80')
-    expect(requestChart.get('[data-testid="stats-trend-average"]').text()).toBe('20')
-    expect(requestChart.get('[data-testid="stats-trend-peak"]').text()).toBe('50')
-    expect(tokenChart.get('[data-testid="stats-trend-total"]').text()).toBe('1.0K')
-    expect(tokenChart.get('[data-testid="stats-trend-average"]').text()).toBe('250')
-    expect(tokenChart.get('[data-testid="stats-trend-peak"]').text()).toBe('600')
-    expect(requestChart.findAll('.stats-bar-grid-line')).toHaveLength(4)
-    expect(requestChart.get('[role="group"]').attributes('aria-label')).toContain('admin.stats.usage.recentHourlyPeriods 4')
-    expect(tokenChart.get('[role="group"]').attributes('aria-label')).toContain('1,000 admin.stats.usage.tokens')
-    expect(requestChart.findAll('.stats-bar-x-label')).toHaveLength(4)
-    expect(requestBars.map((bar) => bar.attributes('aria-label'))).toEqual([
-      expect.stringContaining(': 0 admin.stats.usage.requests'),
-      expect.stringContaining(': 10 admin.stats.usage.requests'),
-      expect.stringContaining(': 20 admin.stats.usage.requests'),
-      expect.stringContaining(': 50 admin.stats.usage.requests'),
-    ])
-    expect(Number.parseFloat(requestBars[0].attributes('style')!.match(/width: ([\d.]+)%/)![1])).toBeGreaterThan(6)
-    expect(wrapper.find('.stats-view select').exists()).toBe(false)
+    // More requests is good; a higher bill and slower responses are not.
+    const tones = wrapper.findAll('.viz-delta').map((delta) => delta.classes().find((name) => name.startsWith('is-')))
+    expect(tones).toEqual(['is-good', 'is-good', 'is-poor', 'is-good'])
 
-    await requestBars[1].trigger('focus')
-    expect(requestBars[1].classes()).toContain('is-active')
-    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('10 admin.stats.usage.requests')
-    await requestBars[1].trigger('keydown', { key: 'ArrowRight' })
-    expect(document.activeElement).toBe(requestBars[2].element)
-    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('20 admin.stats.usage.requests')
-    expect(requestBars[2].attributes('aria-describedby')).toBe('stats-request-trend-tooltip')
-
-    await requestBars[2].trigger('keydown', { key: 'Escape' })
-    expect(requestChart.find('[data-testid="stats-trend-tooltip"]').exists()).toBe(false)
-
-    await tokenBars[2].trigger('mouseenter')
-    expect(tokenChart.get('[data-testid="stats-trend-tooltip"]').text()).toContain('300 admin.stats.usage.tokens')
-    await tokenBars[2].trigger('mouseleave')
-    await requestBars[3].trigger('focus')
-    expect(requestChart.get('[data-testid="stats-trend-tooltip"]').classes()).toContain('is-below')
-    wrapper.unmount()
+    await wrapper.get('[data-testid="compare-toggle"]').trigger('click')
+    expect(kpiText(wrapper)[0]).not.toContain('%')
   })
 
-  it('compacts large tooltip headlines while preserving exact accessible values and timestamps', async () => {
-    const date = '2026-08-25T02:00:00Z'
-    mockTrend([trendPoint(date, 20_800, 2_800_000_000)], 'hour')
-
-    const wrapper = mountView(document.body)
+  it('draws complete six-hour slots up to now, with the previous period behind', async () => {
+    const wrapper = mountView()
     await flushPromises()
 
-    const requestBar = wrapper.get('[data-testid="stats-request-trend"] [data-testid="stats-trend-bar"]')
-    const tokenBar = wrapper.get('[data-testid="stats-token-trend"] [data-testid="stats-trend-bar"]')
+    const chart = trafficChart(wrapper)
+    const [current, previous] = chart.props('series')
+    // Six full days of four slots, then midnight, 6 AM, and the running noon slot.
+    expect(current.values).toHaveLength(27)
+    expect(chart.props('labels')).toHaveLength(27)
+    expect(current.values.reduce((sum: number, value: number) => sum + value, 0)).toBe(300)
+    expect(current.values[25]).toBe(200)
+    expect(previous.muted).toBe(true)
+    expect(previous.values).toHaveLength(27)
+    expect(wrapper.get('[data-testid="stats-traffic"] .viz-card-foot').text()).toContain('300')
 
-    await requestBar.trigger('focus')
-    const requestTooltip = wrapper.get('[data-testid="stats-request-trend"] [data-testid="stats-trend-tooltip"]')
-    expect(requestTooltip.get('strong').text()).toBe('20.8K admin.stats.usage.requests')
-    expect(requestTooltip.get('span').text()).toBe(new Date(date).toLocaleString())
-    expect(requestBar.attributes('aria-label')).toContain('20,800 admin.stats.usage.requests')
-
-    await tokenBar.trigger('focus')
-    const tokenTooltip = wrapper.get('[data-testid="stats-token-trend"] [data-testid="stats-trend-tooltip"]')
-    expect(tokenTooltip.get('strong').text()).toBe('2.8B admin.stats.usage.tokens')
-    expect(tokenTooltip.get('span').text()).toBe(new Date(date).toLocaleString())
-    expect(tokenBar.attributes('aria-label')).toContain('2,800,000,000 admin.stats.usage.tokens')
-    wrapper.unmount()
+    await wrapper.get('[data-testid="stats-metric-cost"]').trigger('click')
+    expect(trafficChart(wrapper).props('series')[0].values[25]).toBe(2)
+    expect(wrapper.get('[data-testid="stats-traffic"] .viz-card-foot').text()).toContain('$3.00')
   })
 
-  it('keeps a single zero-request period on the baseline', async () => {
-    mockTrend([trendPoint('2026-08-25T00:00:00Z', 0)])
+  it('reloads hourly data for today and stops the line at the current hour', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    mockSnapshots({ '2026-08-30+models': snapshot([point('2026-08-30 08:00', 50)]) })
+
+    await wrapper.get('[data-testid="stats-range-today"]').trigger('click')
+    await flushPromises()
+
+    expect(api.getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: '2026-08-30',
+      end_date: '2026-08-30',
+      granularity: 'hour',
+      include_model_stats: true,
+    }))
+    expect(api.getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-08-29', end_date: '2026-08-29' }))
+    const values = trafficChart(wrapper).props('series')[0].values as number[]
+    expect(values).toHaveLength(13)
+    expect(values[8]).toBe(50)
+  })
+
+  it('ranks providers from ops data and falls back to groups when ops monitoring is off', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const share = wrapper.get('[data-testid="stats-share"]')
+    expect(share.get('h2').text()).toBe('admin.viz.providers')
+    expect(share.findAll('.viz-row').map((row) => row.text())).toEqual(['OpenAI75%300', 'Anthropic25%100'])
+    expect(wrapper.findAll('[data-testid^="stats-performance-"]')).toHaveLength(3)
+
+    api.settings.opsMonitoringEnabled = false
+    const offline = mountView()
+    await flushPromises()
+
+    expect(api.getDashboardOverview).toHaveBeenCalledTimes(1)
+    const groups = offline.get('[data-testid="stats-share"]')
+    expect(groups.get('h2').text()).toBe('admin.viz.groups')
+    expect(groups.findAll('.viz-row').map((row) => row.text())).toEqual(['OpenAI Production60%180', 'Claude Production40%120'])
+    // Without ops data only the token breakdown is available.
+    expect(offline.findAll('[data-testid^="stats-performance-"]')).toHaveLength(1)
+    expect(offline.get('[data-testid="stats-performance"]').text()).toContain('75%')
+  })
+
+  it('shows latency percentiles first and error codes by frequency', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid="stats-performance"]')
+    expect(card.findAll('.viz-percentiles b').map((value) => value.text())).toEqual(['800ms', '1.90s', '2.50s', '4.80s'])
+    expect(card.getComponent(TrendChartStub).props('type')).toBe('bar')
+    expect(card.text()).toContain('250ms')
+
+    await wrapper.get('[data-testid="stats-performance-errors"]').trigger('click')
+    expect(card.text()).toContain('2.00%')
+    expect(card.findAll('.viz-hbar').map((row) => row.text())).toEqual(['admin.viz.httpStatus 4294', 'admin.viz.httpStatus 5022'])
+  })
+
+  it('loads API key totals only when their tab opens, once per range', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const top = wrapper.get('[data-testid="stats-top"]')
+    expect(top.findAll('.viz-hbar').map((row) => row.text())).toEqual(['gpt-5.2-codex18060%', 'claude-sonnet-4-512040%'])
+
+    await wrapper.get('[data-testid="stats-top-keys"]').trigger('click')
+    await flushPromises()
+
+    expect(api.getApiKeyUsageTrend).toHaveBeenCalledTimes(1)
+    expect(api.getApiKeyUsageTrend).toHaveBeenCalledWith({ start_date: '2026-08-24', end_date: '2026-08-30', granularity: 'day', limit: 6 })
+    expect(top.findAll('.viz-hbar').map((row) => row.text())).toEqual(['ci-pipeline10083%', 'notebooks2017%'])
+  })
+
+  it('marks the busiest hour and leaves later hours of today empty', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const rows = wrapper.getComponent(HeatGridStub).props('rows') as Array<{ values: Array<number | null> }>
+    expect(rows).toHaveLength(7)
+    const today = rows[6].values
+    expect(today[8]).toBe(200)
+    expect(today[12]).toBe(0)
+    // 8 PM today has not happened yet, even though the fixture carries a value for it.
+    expect(today[20]).toBeNull()
+    expect(wrapper.get('[data-testid="stats-busy"] .viz-card-foot').text()).toContain('8 AM')
+  })
+
+  it('reports a failed usage load and recovers on retry', async () => {
+    api.getUsageStats.mockRejectedValueOnce(new Error('stats unavailable'))
 
     const wrapper = mountView()
     await flushPromises()
 
-    const chart = wrapper.get('[data-testid="stats-request-trend"]')
-    const point = chart.get('[data-testid="stats-trend-bar"]')
-    expect(chart.get('[data-testid="stats-trend-total"]').text()).toBe('0')
-    expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('0')
-    expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('0')
-    expect(point.classes()).toContain('is-zero')
-    // A single period sits in the middle of the plot, which spans 14% to 92%.
-    expect(point.attributes('style')).toContain('left: 53%')
-    expect(point.attributes('style')).toContain('bottom: 22%')
-    expect(point.attributes('style')).toContain('height: 1.25%')
-  })
+    expect(wrapper.get('[data-testid="stats-usage-error"]').text()).toContain('admin.stats.usage.loadFailed')
+    expect(wrapper.find('[data-testid="stats-kpis"]').exists()).toBe(false)
 
-  it('plots equal request values without collapsing the chart', async () => {
-    mockTrend([
-      trendPoint('2026-08-23T00:00:00Z', 7),
-      trendPoint('2026-08-24T00:00:00Z', 7),
-      trendPoint('2026-08-25T00:00:00Z', 7),
-    ])
-
-    const wrapper = mountView()
+    await wrapper.get('[data-testid="stats-usage-error"] button').trigger('click')
     await flushPromises()
 
-    const chart = wrapper.get('[data-testid="stats-request-trend"]')
-    const points = chart.findAll('[data-testid="stats-trend-bar"]')
-    expect(points).toHaveLength(3)
-    expect(new Set(points.map((point) => point.attributes('style')?.match(/height: ([^;]+)/)?.[1]))).toHaveLength(1)
-    expect(chart.get('[data-testid="stats-trend-total"]').text()).toBe('21')
-    expect(chart.get('[data-testid="stats-trend-average"]').text()).toBe('7')
-    expect(chart.get('[data-testid="stats-trend-peak"]').text()).toBe('7')
-  })
-
-  it('keeps capacity visible when the stats snapshot fails', async () => {
-    getSnapshotV2.mockRejectedValueOnce(new Error('snapshot unavailable'))
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="stats-usage-error"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="provider-capacity-openai"]').text()).toContain('Account 1')
-    expect(wrapper.find('[data-testid="stats-capacity-error"]').exists()).toBe(false)
-  })
-
-  it('keeps usage metrics visible when the account fleet fails', async () => {
-    listAccounts.mockRejectedValueOnce(new Error('fleet unavailable'))
-
-    const wrapper = mountView()
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('$1.50')
-    expect(wrapper.get('[data-testid="stats-capacity-error"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="stats-usage-error"]').exists()).toBe(false)
+    expect(kpiText(wrapper)[0]).toContain('300')
+  })
+
+  it('keeps usage when optional ops detail fails', async () => {
+    api.getDashboardOverview.mockRejectedValue(new Error('ops unavailable'))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="stats-usage-error"]').exists()).toBe(false)
+    expect(kpiText(wrapper)[0]).toContain('300')
+    expect(wrapper.findAll('[data-testid^="stats-performance-"]')).toHaveLength(1)
+  })
+
+  it('opens Capacity from the URL and loads the account fleet for it', async () => {
+    route.query = { view: 'capacity' }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(api.listAccounts).toHaveBeenCalledWith(1, 1000, { include_scheduler_score: '0' })
+    expect(wrapper.getComponent(CapacityStub).props('accounts')).toEqual([expect.objectContaining({ name: 'Codex' })])
+    expect(wrapper.find('[data-testid="stats-kpis"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="stats-tab-usage"]').trigger('click')
+    expect(api.replace).toHaveBeenCalledWith({ query: { view: undefined } })
   })
 })

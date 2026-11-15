@@ -15,8 +15,14 @@
         :title="sidebarCollapsed ? siteName : undefined"
         @click="handleMenuItemClick"
       >
-        <span class="sidebar-logo">
-          <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="" aria-hidden="true" />
+        <span class="sidebar-logo" :class="{ 'sidebar-logo-brand': settingsLoaded && !siteLogo }">
+          <img v-if="settingsLoaded && siteLogo" :src="siteLogo" alt="" aria-hidden="true" />
+          <svg v-else-if="settingsLoaded" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7.5 10.5h8.25A4.25 4.25 0 0 1 20 14.75v.5" />
+            <path d="m16.75 12 3.25 3.25L23.25 12" />
+            <path d="M24.5 21.5h-8.25A4.25 4.25 0 0 1 12 17.25v-.5" />
+            <path d="M15.25 20 12 16.75 8.75 20" />
+          </svg>
         </span>
         <span class="sidebar-brand sidebar-brand-title" aria-hidden="true">{{ siteName }}</span>
       </router-link>
@@ -104,19 +110,6 @@
       </div>
     </nav>
 
-    <div class="sidebar-footer hidden lg:flex">
-      <button
-        type="button"
-        class="sidebar-link"
-        :title="sidebarCollapsed ? t('nav.expand') : undefined"
-        :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-        :aria-expanded="sidebarCollapsed ? 'false' : 'true'"
-        @click="toggleSidebar"
-      >
-        <Icon :name="sidebarCollapsed ? 'chevronDoubleRight' : 'chevronDoubleLeft'" class="sidebar-link-icon" />
-        <span class="sidebar-link-label">{{ t('nav.collapse') }}</span>
-      </button>
-    </div>
   </aside>
 
   <Transition name="sidebar-overlay">
@@ -322,15 +315,24 @@ const adminNavItems = computed((): NavItem[] => {
   return items
 })
 
+// The console is built for one operator: daily tools sit in one short list,
+// and secondary admin and personal pages fold into two groups below it.
 const sections = computed((): NavSection[] => {
   if (isAdmin.value) {
-    const adminSections: NavSection[] = [
-      { key: 'operator', title: t('nav.operatorConsole'), items: adminNavItems.value },
-    ]
+    const items = [...adminNavItems.value]
     if (!authStore.isSimpleMode) {
-      adminSections.push({ key: 'personal', title: t('nav.myAccount'), items: finalizeNav(buildSelfNavItems(false)) })
+      const personal = finalizeNav(buildSelfNavItems(false))
+      const keys = personal.find((item) => item.path === '/keys')
+      const more = items.findIndex((item) => item.path === '/admin/more')
+      if (keys) items.splice(more === -1 ? items.length : more, 0, keys)
+      items.push({
+        path: '/account/more',
+        label: t('nav.myAccount'),
+        icon: 'userCircle',
+        children: personal.filter((item) => item.path !== '/keys'),
+      })
     }
-    return adminSections
+    return [{ key: 'operator', items }]
   }
   if (appStore.backendModeEnabled) return []
   return [{ key: 'user', items: finalizeNav(buildSelfNavItems(true)) }]
@@ -369,10 +371,6 @@ function handleGroupClick(item: NavItem) {
     return
   }
   groupExpandOverrides.value.set(item.path, !isGroupExpanded(item))
-}
-
-function toggleSidebar() {
-  appStore.toggleSidebar()
 }
 
 function closeMobile() {
