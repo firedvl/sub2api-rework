@@ -627,7 +627,7 @@ onMounted(loadAll)
 
 @media (max-width: 1100px) {
   .overview-hero-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
