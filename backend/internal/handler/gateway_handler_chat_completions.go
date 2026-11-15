@@ -207,6 +207,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
+				if cls.UsageLimit != nil {
+					writeOpenAIUsageLimitError(c, cls)
+					return
+				}
 				message := cls.Message
 				if !cls.ModelNotFound {
 					message = "No available accounts: " + err.Error()
@@ -222,6 +226,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				failoverClientGone(c)
 				return
 			default:
+				if !streamStarted {
+					if cls, ok := classifyUsageLimitAfterUpstream429(c, h.gatewayService, apiKey, reqModel, groupPlatform, fs.LastFailoverErr); ok {
+						writeOpenAIUsageLimitError(c, cls)
+						return
+					}
+				}
 				if fs.LastFailoverErr != nil {
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {

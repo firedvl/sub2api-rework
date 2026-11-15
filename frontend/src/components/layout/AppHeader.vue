@@ -11,12 +11,24 @@
         <Icon name="menu" size="md" />
       </button>
 
+      <button
+        type="button"
+        class="app-icon-button -ml-2 hidden lg:inline-flex"
+        data-testid="sidebar-toggle"
+        :aria-label="appStore.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        :title="appStore.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-pressed="appStore.sidebarCollapsed ? 'true' : 'false'"
+        @click="appStore.toggleSidebar()"
+      >
+        <Icon name="sidebar" size="sm" />
+      </button>
+
       <nav class="app-breadcrumb" :aria-label="t('nav.breadcrumb')">
         <template v-if="area && area.primaryPath !== route.path">
           <router-link :to="area.primaryPath" class="hidden truncate sm:inline">{{ t(area.labelKey) }}</router-link>
           <Icon name="chevronRight" size="xs" class="hidden flex-shrink-0 sm:block" aria-hidden="true" />
         </template>
-        <span class="app-breadcrumb-current" aria-current="page">{{ title }}</span>
+        <h1 class="app-breadcrumb-current" aria-current="page">{{ title }}</h1>
       </nav>
 
       <span v-if="isFixtureReview" class="app-review-badge app-header-secondary" role="status">
@@ -242,6 +254,13 @@ onClickOutside(userMenuRef, () => {
 
 onKeyStroke('Escape', () => {
   if (userMenuOpen.value) closeUserMenu(true)
+})
+
+// Ctrl or Cmd + B toggles the sidebar, as in most editors.
+onKeyStroke(['b', 'B'], (event) => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+  event.preventDefault()
+  appStore.toggleSidebar()
 })
 
 async function handleLogout() {

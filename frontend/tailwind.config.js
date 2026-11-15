@@ -17,39 +17,51 @@ const withThemeText = (ramp, token, shades) => ({
 const statusShades = [400, 500, 600, 700]
 const mutedShades = [400, 500, 600]
 
-// Neutral ramp for light surfaces and text (zinc).
+// Neutral ramp for light surfaces and text (cool graphite).
 const gray = {
-  50: '#fafafa',
-  100: '#f4f4f5',
-  200: '#e4e4e7',
-  300: '#d4d4d8',
-  400: '#a1a1aa',
-  500: '#71717a',
-  600: '#52525b',
-  700: '#3f3f46',
-  800: '#27272a',
-  900: '#18181b',
-  950: '#09090b'
+  50: '#f6f7f9',
+  100: '#f1f3f6',
+  200: '#e3e6ec',
+  300: '#cfd4dd',
+  400: '#9aa1b0',
+  500: '#6b7383',
+  600: '#4d5463',
+  700: '#363c49',
+  800: '#232733',
+  900: '#171a22',
+  950: '#0b0d12'
 }
 
 // Compressed neutral ramp for dark surfaces: 950 page, 900 surface,
 // 800 raised, 700 border and hover, 600 strong border, 400 muted text.
 const dark = {
-  50: '#f6f6f7',
-  100: '#ececef',
-  200: '#dcdce1',
-  300: '#c4c4cc',
-  400: '#a1a1aa',
-  500: '#52525b',
-  600: '#34343b',
-  700: '#26262b',
-  800: '#1c1c20',
-  900: '#141417',
-  950: '#0b0b0d'
+  50: '#f4f5f8',
+  100: '#e9ebf1',
+  200: '#d5d9e2',
+  300: '#b9bfcc',
+  400: '#a3a9b8',
+  500: '#4e5567',
+  600: '#323a4d',
+  700: '#232836',
+  800: '#181c25',
+  900: '#11141a',
+  950: '#0b0d12'
 }
 
-// One accent for selection, focus, links, and information.
-const primary = { ...defaultColors.blue }
+// One accent (iris) for the primary action, selection, focus, and links.
+const primary = {
+  50: '#f1f0ff',
+  100: '#e6e3ff',
+  200: '#cfcaff',
+  300: '#b0a9ff',
+  400: '#8f85ff',
+  500: '#6d5efc',
+  600: '#5b4ee6',
+  700: '#4a3fd0',
+  800: '#3c33a8',
+  900: '#322c84',
+  950: '#1e1a52'
+}
 
 /** @type {import('tailwindcss').Config} */
 export default {

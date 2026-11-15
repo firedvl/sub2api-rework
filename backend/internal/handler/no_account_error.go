@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,16 +23,25 @@ import (
 //     model). Returning 503 here misleads operators and trips reverse-proxy
 //     health checks; 404 lets the client surface the real problem.
 //
+//   - 429 rate_limit_error with UsageLimit set — every account that could
+//     serve the model is out of usage until a known time (rate limit, quota
+//     window, cooldown). The message states the reset time and
+//     setUsageLimitHeaders adds the per-protocol reset headers, so clients can
+//     wait for the reset instead of failing.
+//
 //   - 503 api_error — accounts that could serve the model exist but are
-//     temporarily exhausted (rate limit, quota auto-pause, runtime block) OR
-//     the group has no accounts at all. Both stay on 503 because retrying
-//     after a backoff can plausibly succeed (or, in the empty-pool case, the
-//     operator may be in the middle of adding accounts).
+//     unavailable with no known reset (runtime block, concurrency, profit
+//     control) OR the group has no accounts at all. Both stay on 503 because
+//     retrying after a backoff can plausibly succeed (or, in the empty-pool
+//     case, the operator may be in the middle of adding accounts).
 type noAccountErrorClassification struct {
 	Status        int
 	ErrType       string
 	Message       string
 	ModelNotFound bool // true when this is a 404 model_not_found classification
+	// UsageLimit is set when this is a 429 usage-limit classification with a
+	// known reset time.
+	UsageLimit *service.UsageExhaustion
 }
 
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
@@ -59,6 +69,11 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	if fallback.ModelNotFound {
 		return fallback
 	}
+	// A usage-limit verdict already carries the reset time; the scheduler's
+	// compact reason would only replace it with the generic message.
+	if fallback.UsageLimit != nil {
+		return fallback
+	}
 	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
 	if len(match) != 2 {
 		return fallback
@@ -74,8 +89,8 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	}
 }
 
-// classifyNoAccountError decides between 404 model_not_found and 503
-// api_error for "no available accounts" failures.
+// classifyNoAccountError decides between 404 model_not_found, 429 usage limit
+// with a known reset, and 503 api_error for "no available accounts" failures.
 //
 // The classifier intentionally does not consume the original error: the
 // selection layer never tells us *why* the pool came up empty (rate-limited
@@ -130,6 +145,9 @@ func classifyNoAccountError(
 			ModelNotFound: true,
 		}
 	}
+	if result.UsageExhaustion != nil {
+		return usageLimitClassification(*result.UsageExhaustion, time.Now())
+	}
 	return fallback
 }
 
@@ -152,6 +170,7 @@ func classifyNoAccountErrorFromGin(
 	if classification.ModelNotFound {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 	}
+	setUsageLimitHeaders(c, classification.UsageLimit)
 	return classification
 }
 

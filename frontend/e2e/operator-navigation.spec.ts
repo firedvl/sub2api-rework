@@ -187,31 +187,41 @@ async function installWritableSettingsMock(page: Page): Promise<WritableSettings
   return state
 }
 
-async function expectStatsBandGeometry(chart: Locator, label: string) {
-  const metrics = await chart.getByRole('group').evaluate((element) => {
-    const bars = [...element.querySelectorAll<HTMLElement>('.stats-trend-bar > span')].map((bar) => {
-      const bounds = bar.getBoundingClientRect()
-      return { left: bounds.left, right: bounds.right, width: bounds.width }
-    })
-    const plot = element.querySelector<HTMLElement>('.stats-bar-grid-line')!.getBoundingClientRect()
-    const labelRight = Math.max(...[...element.querySelectorAll<HTMLElement>('.stats-bar-y-label')]
-      .map((item) => item.getBoundingClientRect().right))
+// Charts re-render after a resize, so both boxes are measured together once layout settles.
+const stackedBelow = (upper: Locator, lower: Locator) => async () => {
+  const [upperBox, lowerBox] = await Promise.all([upper.boundingBox(), lower.boundingBox()])
+  return upperBox !== null && lowerBox !== null && lowerBox.y >= upperBox.y + upperBox.height - 1
+}
+
+/** The SVG chart, its axis labels, and an open tooltip stay inside the chart's card. */
+async function expectTrendChartInside(card: Locator, label: string) {
+  const metrics = await card.evaluate((element) => {
+    const bounds = (node: Element) => {
+      const box = node.getBoundingClientRect()
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom }
+    }
+    const svg = element.querySelector('.trend-chart svg[role="img"]')!
+    const tip = element.querySelector('.trend-tip')
     return {
-      bars,
-      plot: { left: plot.left, right: plot.right },
-      labelRight,
+      card: bounds(element),
+      svg: bounds(svg),
+      labels: [...svg.querySelectorAll('text')].map(bounds),
+      tip: tip ? bounds(tip) : null,
     }
   })
 
-  expect(metrics.bars.length, `${label} bars`).toBeGreaterThan(0)
-  for (const [index, bar] of metrics.bars.entries()) {
-    expect(bar.left, `${label} bar ${index} left bound`).toBeGreaterThanOrEqual(metrics.plot.left - 1)
-    expect(bar.right, `${label} bar ${index} right bound`).toBeLessThanOrEqual(metrics.plot.right + 1)
-    if (index > 0) {
-      expect(bar.left - metrics.bars[index - 1].right, `${label} gap ${index - 1}-${index}`).toBeGreaterThanOrEqual(0.5)
-    }
+  expect(metrics.svg.left, `${label} chart left`).toBeGreaterThanOrEqual(metrics.card.left - 1)
+  expect(metrics.svg.right, `${label} chart right`).toBeLessThanOrEqual(metrics.card.right + 1)
+  expect(metrics.labels.length, `${label} axis labels`).toBeGreaterThan(0)
+  for (const [index, text] of metrics.labels.entries()) {
+    expect(text.left, `${label} label ${index} left`).toBeGreaterThanOrEqual(metrics.card.left - 1)
+    expect(text.right, `${label} label ${index} right`).toBeLessThanOrEqual(metrics.card.right + 1)
   }
-  expect(metrics.bars[0].left, `${label} Y-axis clearance`).toBeGreaterThanOrEqual(metrics.labelRight + 2)
+  if (metrics.tip) {
+    expect(metrics.tip.left, `${label} tooltip left`).toBeGreaterThanOrEqual(metrics.card.left - 1)
+    expect(metrics.tip.right, `${label} tooltip right`).toBeLessThanOrEqual(metrics.card.right + 1)
+    expect(metrics.tip.bottom, `${label} tooltip bottom`).toBeLessThanOrEqual(metrics.svg.bottom + 1)
+  }
 }
 
 async function operatorTokens(page: Page) {
@@ -372,7 +382,13 @@ test.describe('operator console navigation', () => {
 
     await page.goto('/admin/dashboard')
     await expect(page.locator('.sidebar-brand-title')).toContainText('Gateway')
-    await expect(page.locator('.sidebar-logo img')).toHaveAttribute('src', '/logo.svg')
+    // Without a custom site logo the sidebar draws the built-in brand mark inline.
+    const sidebarLogo = page.locator('.sidebar-logo')
+    await expect(sidebarLogo).toHaveClass(/sidebar-logo-brand/)
+    await expect(sidebarLogo.locator('svg')).toBeVisible()
+    await expect(sidebarLogo.locator('svg')).toHaveAttribute('aria-hidden', 'true')
+    await expect(sidebarLogo.locator('img')).toHaveCount(0)
+    await expect(page.locator('.app-header').getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
     await expect(page).toHaveTitle('Overview · Gateway')
   })
 
@@ -972,7 +988,8 @@ test.describe('operator console navigation', () => {
     test(`fills the Capacity row with ${gridCase.name}`, async ({ page }) => {
       await installAccountListMock(page, gridCase.accounts)
       await page.setViewportSize({ width: 1440, height: 900 })
-      await page.goto('/admin/stats')
+      await page.goto('/admin/stats?view=capacity')
+      await expect(page.getByTestId('stats-tab-capacity')).toHaveAttribute('aria-pressed', 'true')
 
       const overview = page.getByTestId('stats-capacity-donut-overview')
       const cards = overview.locator('.stats-capacity-donut')
@@ -1010,7 +1027,7 @@ test.describe('operator console navigation', () => {
     })
   }
 
-  test('promotes Gateway usage and separates short and long capacity on Stats', async ({ page }) => {
+  test('opens Stats capacity from Overview and separates short and long capacity', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const unknownAccount = {
       ...operatorFixtureAccounts[0],
@@ -1026,80 +1043,29 @@ test.describe('operator console navigation', () => {
     await installAccountListMock(page, [...operatorFixtureAccounts, unknownAccount])
     await page.goto('/admin/dashboard')
 
-    const summary = page.getByTestId('account-pool-capacity')
-    await expect(summary).toBeVisible()
-    await expect(summary).toContainText('14%')
-    await expect(summary.locator('[data-testid="capacity-account-segment"]')).toHaveCount(0)
-    await expect(summary.getByRole('link', { name: 'View Stats' })).toHaveAttribute('href', '/admin/stats')
+    // Overview keeps one ring per provider and links to the Stats capacity tab.
+    const capacityCard = page.locator('section[aria-labelledby="overview-capacity"]')
+    await expect(capacityCard.getByRole('heading', { name: 'Capacity left' })).toBeVisible()
+    await expect(capacityCard.locator('.overview-gauges > li')).toHaveCount(4)
+    for (const provider of ['OpenAI', 'Anthropic', 'Gemini', 'Antigravity']) {
+      await expect(capacityCard.getByRole('img', { name: new RegExp(`^${provider}: (?:\\d+%|–)$`) })).toBeVisible()
+    }
+    await expect(page.getByTestId('account-pool-capacity')).toHaveCount(0)
+    const capacityLink = capacityCard.getByRole('link', { name: 'Stats', exact: true })
+    await expect(capacityLink).toHaveAttribute('href', '/admin/stats?view=capacity')
 
     await Promise.all([
-      page.waitForURL(/\/admin\/stats$/),
-      summary.getByRole('link', { name: 'View Stats' }).click(),
+      page.waitForURL(/\/admin\/stats\?view=capacity$/),
+      capacityLink.click(),
     ])
 
-    const usage = page.locator('.stats-usage-section')
-    await expect(usage).toContainText('Gateway usage')
-    await expect(usage).toContainText(/4,286.*RPM/s)
-    await expect(usage).toContainText(/5\.5M.*TPM/s)
-    await expect(usage).toContainText('Actual cost')
-    await expect(usage).toContainText('Account cost')
-    await expect(usage).toContainText('Average response')
-    const requestTrend = page.getByTestId('stats-request-trend')
-    const tokenTrend = page.getByTestId('stats-token-trend')
-    await expect(requestTrend).toBeVisible()
-    await expect(tokenTrend).toBeVisible()
-    await expect(requestTrend.getByTestId('stats-trend-bar')).toHaveCount(6)
-    await expect(tokenTrend.getByTestId('stats-trend-bar')).toHaveCount(6)
-    await expect(requestTrend.getByTestId('stats-trend-total')).toHaveText('4.3K')
-    await expect(requestTrend.getByTestId('stats-trend-average')).toHaveText('714.3')
-    await expect(requestTrend.getByTestId('stats-trend-peak')).toHaveText('946')
-    await expect(tokenTrend.getByTestId('stats-trend-total')).toHaveText('6.4M')
-    await expect(tokenTrend.getByTestId('stats-trend-average')).toHaveText('1.1M')
-    await expect(tokenTrend.getByTestId('stats-trend-peak')).toHaveText('1.4M')
-    await expect(requestTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*4,286 Requests/)
-    await expect(tokenTrend.getByRole('group')).toHaveAccessibleName(/Latest 6 hourly periods.*6,396,500 Tokens/)
-    await expectStatsBandGeometry(requestTrend, '1440px request chart')
-    await expectStatsBandGeometry(tokenTrend, '1440px token chart')
-
-    const requestBars = requestTrend.getByTestId('stats-trend-bar')
-    expect(await requestBars.first().locator('span').evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(20)
-    await requestBars.nth(2).focus()
-    await expect(requestBars.nth(2)).toHaveClass(/is-active/)
-    await expect(requestTrend.getByTestId('stats-trend-tooltip')).toContainText('684 Requests')
-    await page.keyboard.press('ArrowRight')
-    await expect(requestTrend.getByTestId('stats-trend-tooltip')).toContainText('792 Requests')
-    await page.keyboard.press('Escape')
-    await expect(requestTrend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
-
-    const tokenBars = tokenTrend.getByTestId('stats-trend-bar')
-    await tokenBars.nth(2).hover()
-    await expect(tokenBars.nth(2)).toHaveClass(/is-active/)
-    expect(await tokenBars.nth(2).locator('span').evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe('none')
-    await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toContainText('988.0K Tokens')
-    await page.mouse.move(0, 0)
-    await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toHaveCount(0)
-
-    const peakPoint = requestBars.nth(4)
-    await peakPoint.focus()
-    const [chartBox, peakTooltipBox] = await Promise.all([
-      requestTrend.getByRole('group').boundingBox(),
-      requestTrend.getByTestId('stats-trend-tooltip').boundingBox(),
-    ])
-    expect(chartBox).not.toBeNull()
-    expect(peakTooltipBox).not.toBeNull()
-    expect(peakTooltipBox!.y).toBeGreaterThanOrEqual(chartBox!.y)
-    expect(peakTooltipBox!.y + peakTooltipBox!.height).toBeLessThanOrEqual(chartBox!.y + chartBox!.height)
-    await page.keyboard.press('Escape')
-    const [requestTrendBox, tokenTrendBox] = await Promise.all([
-      requestTrend.boundingBox(),
-      tokenTrend.boundingBox(),
-    ])
-    expect(requestTrendBox).not.toBeNull()
-    expect(tokenTrendBox).not.toBeNull()
-    expect(tokenTrendBox!.x).toBeGreaterThanOrEqual(requestTrendBox!.x + requestTrendBox!.width - 1)
-    expect(await usage.evaluate((element, capacitySelector) => (
-      Boolean(element.compareDocumentPosition(document.querySelector(capacitySelector)!) & Node.DOCUMENT_POSITION_FOLLOWING)
-    ), '.stats-capacity-section')).toBe(true)
+    await expect(page.getByTestId('stats-tab-capacity')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('stats-tab-usage')).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.stats-capacity-section')).toBeVisible()
+    // Usage controls and tiles belong to the Usage tab only.
+    await expect(page.getByTestId('stats-kpis')).toHaveCount(0)
+    await expect(page.getByTestId('stats-range-d7')).toHaveCount(0)
+    await expect(page.getByTestId('stats-traffic')).toHaveCount(0)
 
     const shortTerm = page.getByTestId('stats-short-term-capacity')
     const longTerm = page.getByTestId('stats-long-term-capacity')
@@ -1176,7 +1142,7 @@ test.describe('operator console navigation', () => {
     const inspector = page.getByTestId('stats-capacity-inspector')
     const detail = inspector.getByTestId('stats-selected-account-detail')
     const accountTrigger = inspector.getByRole('button', { name: 'Inspect account' })
-    await expect(page.locator('.stats-view select')).toHaveCount(0)
+    await expect(page.locator('main select')).toHaveCount(0)
     await expect(detail).toHaveCount(1)
     await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(0)
     await expect(inspector.getByText('Inspect capacity window')).toHaveCount(0)
@@ -1245,37 +1211,38 @@ test.describe('operator console navigation', () => {
     expect(longBox).not.toBeNull()
     expect(longBox!.x).toBeGreaterThanOrEqual(shortBox!.x + shortBox!.width - 1)
 
-    for (const [viewportIndex, viewport] of [{ width: 1024, height: 768 }, { width: 390, height: 844 }].entries()) {
+    for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport)
       // Charts re-render after the resize, so measure both boxes in one frame once layout settles.
-      const stacked = (upper: Locator, lower: Locator) => async () => {
-        const [upperBox, lowerBox] = await Promise.all([upper.boundingBox(), lower.boundingBox()])
-        return upperBox !== null && lowerBox !== null && lowerBox.y >= upperBox.y + upperBox.height - 1
-      }
-      await expect.poll(stacked(shortTerm, longTerm)).toBe(true)
-      await expect.poll(stacked(requestTrend, tokenTrend)).toBe(true)
-      await requestBars.nth(viewportIndex === 0 ? 0 : 5).focus()
-      await expect(requestTrend.getByTestId('stats-trend-tooltip')).toBeVisible()
-      await page.keyboard.press('Escape')
-      await tokenBars.nth(viewportIndex === 0 ? 5 : 0).focus()
-      await expect(tokenTrend.getByTestId('stats-trend-tooltip')).toBeVisible()
-      await page.keyboard.press('Escape')
-      await expectStatsBandGeometry(requestTrend, `${viewport.width}px request chart`)
-      await expectStatsBandGeometry(tokenTrend, `${viewport.width}px token chart`)
+      await expect.poll(stackedBelow(shortTerm, longTerm)).toBe(true)
       const overflow = await page.evaluate(() => ({
         clientWidth: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth,
       }))
-      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+      expect(overflow.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(overflow.clientWidth + 1)
     }
+
+    // The tabs swap the whole view in place and keep the choice in the URL.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.getByTestId('stats-tab-usage').click()
+    await expect(page).toHaveURL(/\/admin\/stats$/)
+    await expect(page.getByTestId('stats-tab-usage')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('.stats-capacity-section')).toHaveCount(0)
+    await expect(page.getByTestId('stats-kpis')).toBeVisible()
+    await page.getByTestId('stats-tab-capacity').click()
+    await expect(page).toHaveURL(/\/admin\/stats\?view=capacity$/)
+    await expect(page.getByTestId('stats-kpis')).toHaveCount(0)
+    await expect(page.getByTestId('provider-capacity-openai')).toBeVisible()
+    await expect(inspector.getByTestId('stats-selected-account-detail')).toHaveCount(1)
   })
 
   test('bounds large-pool account and Antigravity model diagnostics', async ({ page }) => {
     test.setTimeout(60_000)
     const fixture = await installManyAccountMock(page)
     await page.setViewportSize({ width: 1440, height: 900 })
-    await page.goto('/admin/stats')
+    await page.goto('/admin/stats?view=capacity')
 
+    await expect(page.getByTestId('stats-tab-capacity')).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByTestId('stats-capacity-donut-overview')).toBeVisible()
     await expect(page.getByTestId('stats-capacity-donut-overall')).toBeVisible()
     await expect(page.getByTestId('stats-short-term-capacity')).toBeVisible()
@@ -1291,7 +1258,7 @@ test.describe('operator console navigation', () => {
     const accountTrigger = inspector.getByRole('button', { name: 'Inspect account' })
     await expect(detail).toHaveCount(1)
     await expect(inspector.getByTestId('stats-inspector-account-row')).toHaveCount(0)
-    await expect(page.locator('.stats-view select')).toHaveCount(0)
+    await expect(page.locator('main select')).toHaveCount(0)
     await expect(detail).toContainText('Antigravity Pro')
     await expect(detail.getByTestId('stats-model-limit-row')).toHaveCount(3)
     await expect(detail.getByTestId('stats-model-limit-summary')).toContainText('0% minimum across 20 models')
@@ -1339,7 +1306,7 @@ test.describe('operator console navigation', () => {
         selectedDetails: document.querySelectorAll('[data-testid="stats-selected-account-detail"]').length,
         inspectorRows: document.querySelectorAll('[data-testid="stats-inspector-account-row"]').length,
         modelRows: document.querySelectorAll('[data-testid="stats-model-limit-row"]').length,
-        nativeSelects: document.querySelectorAll('.stats-view select').length,
+        nativeSelects: document.querySelectorAll('main select').length,
       }))
       expect(bounds.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(bounds.clientWidth + 1)
       expect(bounds.selectedDetails).toBe(1)
@@ -1352,14 +1319,37 @@ test.describe('operator console navigation', () => {
   test('drills from Overview into filtered operator states and expands account details', async ({ page }) => {
     await page.goto('/admin/dashboard')
 
-    const fleet = page.locator('.operator-fleet-summary')
-    await expect(fleet.locator('.operator-fleet-metric').nth(0)).toContainText('6')
-    await expect(fleet.locator('.operator-fleet-metric.is-active')).toContainText('2')
-    await expect(fleet.locator('.operator-fleet-metric.is-limited')).toContainText('2')
-    await expect(fleet.locator('.operator-fleet-metric.is-error')).toContainText('1')
-    await expect(fleet.locator('.operator-fleet-disabled')).toContainText('1 disabled')
+    const attention = page.locator('section[aria-labelledby="overview-attention"]')
+    await expect(attention.getByRole('heading', { name: /^Needs attention/ })).toBeVisible()
+    const states = {
+      active: page.getByTestId('overview-state-active'),
+      limited: page.getByTestId('overview-state-limited'),
+      error: page.getByTestId('overview-state-error'),
+    }
+    await expect(states.active).toHaveText('2 Active')
+    await expect(states.limited).toHaveText('2 Limited')
+    await expect(states.error).toHaveText('1 Error')
+    for (const [status, link] of Object.entries(states)) {
+      await expect(link).toHaveAttribute('href', `/admin/accounts?operator_status=${status}`)
+    }
+    // A disabled account is an operator choice, so Overview neither counts nor lists it.
+    await expect(page.getByTestId('overview-state-disabled')).toHaveCount(0)
+    await expect(attention).not.toContainText('Codex Standby')
 
-    await fleet.locator('.operator-fleet-metric.is-limited').click()
+    // Errors come first, then limits; each problem links to Accounts filtered by its state.
+    const problems = attention.locator('.overview-attention-item')
+    await expect(problems).toHaveCount(3)
+    await expect(problems.first()).toHaveAccessibleName('Open Gemini Recovery in Accounts')
+    await expect(problems.first()).toHaveAttribute('href', '/admin/accounts?operator_status=error')
+    await expect(problems.first()).toContainText('Fixture: reauthorization required')
+    for (const name of ['Antigravity Pro', 'Gemini Quota Limited']) {
+      const problem = problems.filter({ hasText: name })
+      await expect(problem).toHaveCount(1)
+      await expect(problem).toHaveAttribute('href', '/admin/accounts?operator_status=limited')
+      await expect(problem).toContainText('Limited')
+    }
+
+    await states.limited.click()
     await expect(page).toHaveURL(/\/admin\/accounts\?operator_status=limited$/)
     const limitedRows = page.locator('[data-testid="account-capacity-row"][data-status="limited"]')
     await expect(limitedRows).toHaveCount(2)
@@ -1378,7 +1368,9 @@ test.describe('operator console navigation', () => {
     await expect(cooldownStatus).toHaveAttribute('title', /Provider cooldown until/)
 
     await page.goto('/admin/dashboard')
-    await page.locator('.operator-fleet-metric.is-error').click()
+    const errorProblem = page.getByRole('link', { name: 'Open Gemini Recovery in Accounts' })
+    await errorProblem.focus()
+    await page.keyboard.press('Enter')
     await expect(page).toHaveURL(/\/admin\/accounts\?operator_status=error$/)
     const errorRows = page.locator('[data-testid="account-capacity-row"][data-status="error"]')
     await expect(errorRows).toHaveCount(1)
@@ -1389,6 +1381,254 @@ test.describe('operator console navigation', () => {
     const disabledRows = page.locator('[data-testid="account-capacity-row"][data-status="disabled"]')
     await expect(disabledRows).toHaveCount(1)
     await expect(disabledRows).toContainText('Codex Standby')
+  })
+
+  // Overview and Stats bucket the fixture trend by local hours and days, so these
+  // checks pin the zone. The fixture traffic runs 20:00 to 01:00 UTC across 29-30 August.
+  test.describe('charts on a UTC calendar', () => {
+    test.use({ timezoneId: 'UTC' })
+
+    test('summarizes today, hourly traffic, capacity, and recent requests on Overview', async ({ page }) => {
+      test.setTimeout(60_000)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.goto('/admin/dashboard')
+
+      await expect(page.locator('.operator-fleet-summary, [data-testid="account-pool-capacity"]')).toHaveCount(0)
+      await expect(page.getByText('Recent Usage (Top 12)')).toHaveCount(0)
+
+      const status = page.locator('section[aria-labelledby="overview-status"]')
+      await expect(status.getByRole('heading', { name: 'Serving traffic' })).toBeVisible()
+      const today = (label: string) => status.locator('.overview-today > div').filter({ has: page.locator('dt', { hasText: label }) }).locator('dd')
+      await expect(today('Requests today')).toHaveText('4,286')
+      await expect(today('Cost')).toHaveText('$19.43')
+      await expect(today('Avg response')).toHaveText('1.28s')
+      await expect(status.locator('.overview-live b')).toHaveText('42')
+      await expect(status.getByRole('link', { name: 'Stats', exact: true })).toHaveAttribute('href', '/admin/stats')
+
+      // The hourly chart is read from the keyboard: the last slot first, then earlier hours.
+      const hourly = status.getByRole('img', { name: 'Requests per hour over the last 24 hours. Use the arrow keys to read values' })
+      const hourlyTip = status.locator('.trend-tip')
+      await hourly.focus()
+      await page.keyboard.press('ArrowLeft')
+      await expect(hourlyTip.locator('.trend-tip-title')).toHaveText(/^Sun,? 1\sAM$/)
+      await expect(hourlyTip.locator('.trend-tip-row')).toHaveText(['Requests946'])
+      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('ArrowLeft')
+      await expect(hourlyTip.locator('.trend-tip-title')).toHaveText(/^Sat,? 11\sPM$/)
+      await expect(hourlyTip.locator('.trend-tip-row b')).toHaveText('792')
+      await page.keyboard.press('ArrowRight')
+      await expect(hourlyTip.locator('.trend-tip-row b')).toHaveText('946')
+      await page.keyboard.press('Escape')
+      await expect(hourlyTip).toHaveCount(0)
+
+      const attention = page.locator('section[aria-labelledby="overview-attention"]')
+      const capacity = page.locator('section[aria-labelledby="overview-capacity"]')
+      await expect(capacity.locator('.overview-gauges > li')).toHaveCount(4)
+      await expect(capacity.getByRole('img', { name: 'OpenAI: 52%', exact: true })).toBeVisible()
+      await expect(capacity.locator('.overview-gauges > li').first()).toContainText('2 accounts')
+
+      const recent = page.locator('section[aria-labelledby="overview-recent"]')
+      const recentRows = recent.locator('.overview-table tbody tr')
+      await expect(recent.locator('.overview-table thead th')).toHaveText(['Model', 'Account', 'Tokens', 'Duration', 'Cost', 'When'])
+      await expect(recentRows).toHaveCount(4)
+      await expect(recentRows.first().locator('code')).toHaveText('gpt-5.2-codex')
+      await expect(recentRows.first().locator('td')).toHaveText(['gpt-5.2-codex', '–', '27,330', '1.48s', '$0.0440', '0s'])
+      await expect(recentRows.nth(3).locator('td').nth(3)).toHaveText('742ms')
+      await expect(recent.getByRole('link', { name: 'All activity' })).toHaveAttribute('href', '/admin/usage')
+
+      const [attentionBox, capacityBox] = await Promise.all([attention.boundingBox(), capacity.boundingBox()])
+      expect(attentionBox).not.toBeNull()
+      expect(capacityBox).not.toBeNull()
+      expect(capacityBox!.x).toBeGreaterThanOrEqual(attentionBox!.x + attentionBox!.width - 1)
+      await expectTrendChartInside(status, '1440px hourly chart')
+
+      for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+        await page.setViewportSize(viewport)
+        await expect.poll(stackedBelow(attention, capacity)).toBe(true)
+        await hourly.focus()
+        await page.keyboard.press('ArrowLeft')
+        await expect(hourlyTip.locator('.trend-tip-row b')).toHaveText('946')
+        await expectTrendChartInside(status, `${viewport.width}px hourly chart`)
+        await page.keyboard.press('Escape')
+        // The narrow table drops the account and cost columns instead of overflowing.
+        const narrow = viewport.width < 640
+        for (const column of [1, 4]) {
+          if (narrow) await expect(recent.locator('thead th').nth(column)).toBeHidden()
+          else await expect(recent.locator('thead th').nth(column)).toBeVisible()
+        }
+        await expect(recentRows).toHaveCount(4)
+        const overflow = await page.evaluate(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }))
+        expect(overflow.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(overflow.clientWidth + 1)
+      }
+    })
+
+    test('reads Stats usage from the fixture totals by keyboard, pointer, and table', async ({ page }) => {
+      test.setTimeout(90_000)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const keyTrendRequests: string[] = []
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/v1/admin/dashboard/api-keys-trend') keyTrendRequests.push(request.url())
+      })
+      await page.goto('/admin/stats')
+
+      await expect(page.getByTestId('stats-tab-usage')).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByTestId('stats-tab-capacity')).toHaveAttribute('aria-pressed', 'false')
+      await expect(page.getByTestId('stats-range-d7')).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.locator('.stats-capacity-section')).toHaveCount(0)
+      await expect(page.locator('[data-testid="stats-request-trend"], [data-testid="stats-trend-grid"]')).toHaveCount(0)
+
+      // Seven days of six-hour slots: 25 slots up to the fixture's 01:45 UTC snapshot.
+      const kpi = (label: string) => page.getByTestId('stats-kpis').locator('.viz-kpi')
+        .filter({ has: page.locator('dt', { hasText: label }) })
+      await expect(kpi('Requests').locator('.viz-kpi-value')).toHaveText('4,286')
+      await expect(kpi('Tokens').locator('.viz-kpi-value')).toHaveText('6.4M')
+      await expect(kpi('Cost').locator('.viz-kpi-value')).toHaveText('$19.43')
+      await expect(kpi('Avg response').locator('.viz-kpi-value')).toHaveText('1.28s')
+      // The previous week has no traffic, so there is no baseline to compare against.
+      await expect(kpi('Requests').locator('.viz-delta')).toHaveText('')
+
+      const traffic = page.getByTestId('stats-traffic')
+      const trafficFoot = traffic.locator('.viz-card-foot')
+      const trafficTip = traffic.locator('.trend-tip')
+      const trafficChart = traffic.getByRole('img', { name: 'Requests · 7 days. Use the arrow keys to read values' })
+      await expect(trafficChart).toBeVisible()
+      await expect(page.getByRole('switch', { name: 'Compare' })).toHaveAttribute('aria-checked', 'true')
+      await expect(traffic.locator('.viz-key')).toHaveText('Previous')
+      await expect(trafficFoot).toContainText('Total 4,286')
+      await expect(trafficFoot).toContainText(/Peak 2,394 · Sat, Aug 29, 6\sPM/)
+
+      await trafficChart.focus()
+      await page.keyboard.press('ArrowLeft')
+      await expect(trafficTip.locator('.trend-tip-title')).toHaveText(/^Sun, Aug 30, 12\sAM$/)
+      await expect(trafficTip.locator('.trend-tip-row')).toHaveText(['This period1,892', 'Previous0'])
+      await page.keyboard.press('ArrowLeft')
+      await expect(trafficTip.locator('.trend-tip-row').first()).toHaveText('This period2,394')
+      await page.keyboard.press('ArrowRight')
+      await expect(trafficTip.locator('.trend-tip-row').first()).toHaveText('This period1,892')
+      await page.keyboard.press('Escape')
+      await expect(trafficTip).toHaveCount(0)
+
+      const chartBox = await trafficChart.boundingBox()
+      expect(chartBox).not.toBeNull()
+      await trafficChart.hover({ position: { x: chartBox!.width - 14, y: chartBox!.height / 2 } })
+      await expect(trafficTip.locator('.trend-tip-row').first()).toHaveText('This period1,892')
+      await expectTrendChartInside(traffic, '1440px traffic chart')
+      await page.mouse.move(0, 0)
+      await expect(trafficTip).toHaveCount(0)
+
+      await page.getByTestId('stats-metric-tokens').click()
+      await expect(page.getByTestId('stats-metric-tokens')).toHaveAttribute('aria-pressed', 'true')
+      await expect(trafficFoot).toContainText('Total 6.4M')
+      await page.getByTestId('stats-metric-cost').click()
+      await expect(traffic.getByRole('img', { name: 'Cost · 7 days. Use the arrow keys to read values' })).toBeVisible()
+      await expect(trafficFoot).toContainText('Total $19.43')
+      await expect(trafficFoot).toContainText(/Peak \$11\.01 · Sat, Aug 29, 6\sPM/)
+
+      await traffic.getByRole('button', { name: 'Show as table' }).click()
+      const trafficTable = traffic.locator('.stats-table')
+      await expect(traffic.locator('.trend-chart')).toHaveCount(0)
+      await expect(trafficTable.locator('thead th')).toHaveText(['Period', 'Cost', 'Previous'])
+      await expect(trafficTable.locator('tbody tr')).toHaveCount(25)
+      await expect(trafficTable.locator('tbody tr').filter({ hasText: /Sat, Aug 29, 6\sPM/ }).locator('td'))
+        .toHaveText([/Sat, Aug 29, 6\sPM/, '$11.01', '$0.00'])
+      await expect(trafficTable.locator('tbody tr').last().locator('td').nth(1)).toHaveText('$8.42')
+      await traffic.getByRole('button', { name: 'Show chart' }).click()
+      await expect(trafficTable).toHaveCount(0)
+
+      await page.getByTestId('stats-metric-requests').click()
+      await page.getByRole('switch', { name: 'Compare' }).click()
+      await expect(traffic.locator('.viz-key')).toHaveCount(0)
+      await trafficChart.focus()
+      await page.keyboard.press('ArrowLeft')
+      await expect(trafficTip.locator('.trend-tip-row')).toHaveText(['This period1,892'])
+      await page.keyboard.press('Escape')
+      await page.getByRole('switch', { name: 'Compare' }).click()
+      await expect(traffic.locator('.viz-key')).toHaveText('Previous')
+
+      const share = page.getByTestId('stats-share')
+      await expect(share.getByRole('heading', { name: 'Providers' })).toBeVisible()
+      await expect(share.locator('.viz-row')).toHaveText(['OpenAI50%1,426', 'Anthropic33%924', 'Antigravity17%488'])
+
+      const top = page.getByTestId('stats-top')
+      await expect(top.locator('.viz-hbar')).toHaveText(['gpt-5.2-codex1,84248%', 'claude-sonnet-4-51,31634%', 'gemini-2.5-pro71418%'])
+      // API-key totals load only when their tab opens.
+      expect(keyTrendRequests).toEqual([])
+      await Promise.all([
+        page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/admin/dashboard/api-keys-trend'),
+        page.getByTestId('stats-top-keys').click(),
+      ])
+      await expect(page.getByTestId('stats-top-keys')).toHaveAttribute('aria-pressed', 'true')
+      await expect(top.locator('.viz-hbar')).toHaveText(['review-console2,10649%', 'coding-agents1,38432%', 'ci-pipeline79619%'])
+
+      const performanceCard = page.getByTestId('stats-performance')
+      const percentile = (label: string) => performanceCard.locator('.viz-percentiles > div').filter({ hasText: label }).locator('b')
+      await expect(page.getByTestId('stats-performance-latency')).toHaveAttribute('aria-pressed', 'true')
+      await expect(percentile('p50')).toHaveText('842ms')
+      await expect(percentile('p90')).toHaveText('1.92s')
+      await expect(percentile('p95')).toHaveText('2.49s')
+      await expect(percentile('p99')).toHaveText('4.81s')
+      await expect(performanceCard.locator('.viz-card-foot')).toHaveText('First token p50 248ms')
+      const latencyChart = performanceCard.getByRole('img', { name: 'Response time distribution. Use the arrow keys to read values' })
+      await latencyChart.focus()
+      await page.keyboard.press('ArrowRight')
+      await expect(performanceCard.locator('.trend-tip')).toHaveText('<500msRequests614')
+      await page.keyboard.press('ArrowRight')
+      await expect(performanceCard.locator('.trend-tip')).toHaveText('500ms-1sRequests1,182')
+      await page.keyboard.press('Escape')
+      await expect(performanceCard.locator('.trend-tip')).toHaveCount(0)
+
+      await page.getByTestId('stats-performance-errors').click()
+      await expect(performanceCard.locator('.viz-big b')).toHaveText('0.85%')
+      await expect(performanceCard.locator('.viz-big span')).toHaveText('24 of 2,838 failed')
+      await expect(performanceCard.locator('.viz-hbar')).toHaveText(['HTTP 42911', 'HTTP 5028', 'HTTP 4005'])
+      await page.getByTestId('stats-performance-tokens').click()
+      await expect(performanceCard.locator('.viz-big')).toContainText('11%')
+      await expect(performanceCard.locator('.viz-row')).toHaveText(['Cache read576K9%', 'Input4.61M72%', 'Output1.12M18%', 'Cache write84K1%'])
+
+      const busy = page.getByTestId('stats-busy')
+      await expect(busy.getByRole('img', { name: /Busiest: Sun,? 12\sAM\.$/ })).toBeVisible()
+      await expect(busy.locator('.heat-cell')).toHaveCount(7 * 24)
+      // Hours after the snapshot are empty, not zero.
+      await expect(busy.locator('.heat-cell.is-empty')).toHaveCount(22)
+      await expect(busy.locator('.heat-cell[title$=" · 946"]')).toHaveCount(2)
+      await expect(busy.locator('.heat-cell[title$=" · 792"]')).toHaveAttribute('title', /^Sat, Aug 29 · 11\sPM · 792$/)
+
+      // Today: two hourly slots so far.
+      await page.getByTestId('stats-range-today').click()
+      await expect(page.getByTestId('stats-range-today')).toHaveAttribute('aria-pressed', 'true')
+      await expect(kpi('Requests').locator('.viz-kpi-value')).toHaveText('1,892')
+      await expect(trafficFoot).toContainText('Total 1,892')
+      const todayChart = traffic.getByRole('img', { name: 'Requests · Today. Use the arrow keys to read values' })
+      await todayChart.focus()
+      await page.keyboard.press('ArrowLeft')
+      await expect(trafficTip.locator('.trend-tip-title')).toHaveText(/^Sun, Aug 30, 1\sAM$/)
+      await expect(trafficTip.locator('.trend-tip-row').first()).toHaveText('This period946')
+      await page.keyboard.press('Escape')
+
+      const [trafficBox, shareBox] = await Promise.all([traffic.boundingBox(), share.boundingBox()])
+      expect(trafficBox).not.toBeNull()
+      expect(shareBox).not.toBeNull()
+      expect(shareBox!.x).toBeGreaterThanOrEqual(trafficBox!.x + trafficBox!.width - 1)
+
+      for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+        await page.setViewportSize(viewport)
+        await expect.poll(stackedBelow(traffic, share)).toBe(true)
+        await expect.poll(stackedBelow(page.getByTestId('stats-performance'), busy)).toBe(true)
+        await todayChart.focus()
+        await page.keyboard.press('ArrowLeft')
+        await expect(trafficTip.locator('.trend-tip-row').first()).toHaveText('This period946')
+        await expectTrendChartInside(traffic, `${viewport.width}px traffic chart`)
+        await page.keyboard.press('Escape')
+        const overflow = await page.evaluate(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }))
+        expect(overflow.scrollWidth, `${viewport.width}px page overflow`).toBeLessThanOrEqual(overflow.clientWidth + 1)
+      }
+    })
   })
 
   test('keeps proxy rows inside the visible table and uses compact named actions', async ({ page }) => {

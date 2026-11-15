@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -21,6 +22,11 @@ type ModelAvailabilityDiagnosis struct {
 	// HasModelSupport is true if at least one account's model mapping admits
 	// the requested model.
 	HasModelSupport bool
+	// UsageExhaustion is the one field that reads transient state. It is set
+	// when every account that admits the requested model is currently blocked
+	// and at least one of those blocks has a known future reset, and nil
+	// otherwise (including on every conservative fallback).
+	UsageExhaustion *UsageExhaustion
 }
 
 // ModelAvailabilityDiagnoser is implemented by gateway services that can
@@ -97,6 +103,7 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	scan := usageExhaustionScan{now: time.Now()}
 	for i := range accounts {
 		if useMixed && accounts[i].Platform == PlatformAntigravity && !accounts[i].IsMixedSchedulingEnabled() {
 			continue
@@ -104,8 +111,11 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 		diag.HasAccountsInPool = true
 		if s.isModelSupportedByAccountWithContext(ctx, &accounts[i], requestedModel) {
 			diag.HasModelSupport = true
-			return diag
+			if allowsAnthropicAPIAccount(ctx, &accounts[i]) {
+				scan.observe(ctx, &accounts[i], requestedModel)
+			}
 		}
 	}
+	diag.UsageExhaustion = scan.result()
 	return diag
 }

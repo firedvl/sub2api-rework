@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
@@ -54,6 +55,9 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	diag := ModelAvailabilityDiagnosis{}
+	// The usage scan judges quota auto-pause with the scheduler's thresholds.
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	scan := usageExhaustionScan{now: time.Now()}
 	for i := range accounts {
 		diag.HasAccountsInPool = true
 		// Mirrors the per-candidate filter used during account selection
@@ -62,8 +66,9 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 		// mapping must match.
 		if accounts[i].IsModelSupported(requestedModel) {
 			diag.HasModelSupport = true
-			return diag
+			scan.observe(ctx, &accounts[i], requestedModel)
 		}
 	}
+	diag.UsageExhaustion = scan.result()
 	return diag
 }

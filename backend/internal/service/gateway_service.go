@@ -788,6 +788,8 @@ type GatewayService struct {
 	userGroupRateSF       singleflight.Group
 	modelsListCache       *gocache.Cache
 	modelsListCacheTTL    time.Duration
+	// noAntigravityGroups 记住"分组内没有可调度 antigravity 账号"的结论（见 IsSingleAntigravityAccountGroup）。
+	noAntigravityGroups   *gocache.Cache
 	settingService        *SettingService
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
 	debugModelRouting     atomic.Bool
@@ -868,6 +870,7 @@ func NewGatewayService(
 		settingService:        settingService,
 		modelsListCache:       gocache.New(modelsListTTL, time.Minute),
 		modelsListCacheTTL:    modelsListTTL,
+		noAntigravityGroups:   gocache.New(noAntigravityGroupTTL, time.Minute),
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		tlsFPProfileService:   tlsFPProfileService,
 		channelService:        channelService,
@@ -904,7 +907,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	if parsed.MetadataUserID != "" {
 		uid := ParseMetadataUserID(parsed.MetadataUserID)
 		if uid != nil && uid.SessionID != "" {
-			slog.Info("sticky.hash_source",
+			slog.Debug("sticky.hash_source",
 				"source", "metadata_user_id",
 				"has_session_id", true,
 				"has_device_id", uid.DeviceID != "",
@@ -912,7 +915,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			)
 			return uid.SessionID
 		}
-		slog.Info("sticky.hash_metadata_parse_failed",
+		slog.Debug("sticky.hash_metadata_parse_failed",
 			"has_metadata_user_id", true,
 			"parsed_nil", uid == nil,
 		)
@@ -922,7 +925,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	cacheableContent := s.extractCacheableContent(parsed)
 	if cacheableContent != "" {
 		hash := s.hashContent(cacheableContent)
-		slog.Info("sticky.hash_source",
+		slog.Debug("sticky.hash_source",
 			"source", "cacheable_content",
 			"hash", hash,
 		)
@@ -950,7 +953,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	}
 	if combined.Len() > 0 {
 		hash := s.hashContent(combined.String())
-		slog.Info("sticky.hash_source",
+		slog.Debug("sticky.hash_source",
 			"source", "message_content_fallback",
 			"hash", hash,
 			"content_len", combined.Len(),

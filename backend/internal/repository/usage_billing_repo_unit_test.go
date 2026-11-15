@@ -24,6 +24,7 @@ const (
 	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
 	apiKeyQuotaIncrementSQL     = `(?s)UPDATE api_keys\s+SET quota_used = quota_used \+ \$1,.*WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING`
 	apiKeyRateLimitIncrementSQL = `(?s)UPDATE api_keys SET\s+usage_5h = .*WHERE id = \$2 AND deleted_at IS NULL`
+	apiKeyQuotaAndRateLimitSQL  = `(?s)UPDATE api_keys\s+SET quota_used = quota_used \+ \$1,.*usage_5h = CASE .* THEN \$5 ELSE usage_5h \+ \$5 END,.*window_7d_start = .*updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING quota > 0 AND quota_used >= quota AND quota_used - \$1 < quota`
 )
 
 func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
@@ -115,12 +116,9 @@ func TestApplyUsageBillingEffects_DeletedAPIKeyStillBillsBalance(t *testing.T) {
 	mock.ExpectQuery(conditionalBalanceDeductSQL).
 		WithArgs(10.0, int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(90.0))
-	mock.ExpectQuery(apiKeyQuotaIncrementSQL).
-		WithArgs(10.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).
+	mock.ExpectQuery(apiKeyQuotaAndRateLimitSQL).
+		WithArgs(10.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted, 10.0).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectExec(apiKeyRateLimitIncrementSQL).
-		WithArgs(10.0, int64(7)).
-		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	result := &service.UsageBillingApplyResult{Applied: true}
@@ -134,6 +132,85 @@ func TestApplyUsageBillingEffects_DeletedAPIKeyStillBillsBalance(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result.NewBalance)
 	require.InDelta(t, 90.0, *result.NewBalance, 0.000001)
+	require.False(t, result.APIKeyQuotaExhausted)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestApplyUsageBillingEffects_MergesAPIKeyQuotaAndRateLimitUpdate(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	// sqlmock 按顺序严格匹配：除这一条合并语句外，对 api_keys 的任何额外 UPDATE 都会失败。
+	mock.ExpectQuery(apiKeyQuotaAndRateLimitSQL).
+		WithArgs(3.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted, 2.0).
+		WillReturnRows(sqlmock.NewRows([]string{"exhausted"}).AddRow(true))
+	mock.ExpectCommit()
+
+	result := &service.UsageBillingApplyResult{Applied: true}
+	err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, &service.UsageBillingCommand{
+		UserID:              42,
+		APIKeyID:            7,
+		APIKeyQuotaCost:     3,
+		APIKeyRateLimitCost: 2,
+	}, result)
+	require.NoError(t, err)
+	require.True(t, result.APIKeyQuotaExhausted)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestApplyUsageBillingEffects_MergedAPIKeyUpdateErrorStillFails(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(apiKeyQuotaAndRateLimitSQL).
+		WithArgs(3.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted, 2.0).
+		WillReturnError(sql.ErrConnDone)
+	mock.ExpectRollback()
+
+	err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, &service.UsageBillingCommand{
+		UserID:              42,
+		APIKeyID:            7,
+		APIKeyQuotaCost:     3,
+		APIKeyRateLimitCost: 2,
+	}, &service.UsageBillingApplyResult{Applied: true})
+	require.ErrorIs(t, err, sql.ErrConnDone)
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestApplyUsageBillingEffects_QuotaOnlyKeepsSingleQuotaUpdate(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(apiKeyQuotaIncrementSQL).
+		WithArgs(3.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).
+		WillReturnRows(sqlmock.NewRows([]string{"exhausted"}).AddRow(false))
+	mock.ExpectCommit()
+
+	result := &service.UsageBillingApplyResult{Applied: true}
+	err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, &service.UsageBillingCommand{
+		UserID:          42,
+		APIKeyID:        7,
+		APIKeyQuotaCost: 3,
+	}, result)
+	require.NoError(t, err)
 	require.False(t, result.APIKeyQuotaExhausted)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())

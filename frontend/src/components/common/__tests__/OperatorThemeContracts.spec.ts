@@ -47,7 +47,7 @@ describe('operator shared theme contracts', () => {
   it('drives every page background from the shared neutral tokens', () => {
     const styles = source('src/style.css')
     expect(styles).toMatch(/body \{[\s\S]*?background: var\(--operator-background\);/)
-    expect(styles).toMatch(/\.dark \{[\s\S]*?--operator-background: #0b0b0d;/)
+    expect(styles).toMatch(/\.dark \{[\s\S]*?--operator-background: #0b0d12;/)
     expect(styles).not.toContain('body[data-operator-console]')
     expect(source('src/views/setup/SetupWizardView.vue')).toContain('class="auth-codex-shell"')
     expect(source('src/views/auth/OAuthCallbackView.vue')).toContain('<AuthLayout>')

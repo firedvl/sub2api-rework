@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	mathrand "math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,8 +141,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 	}
 
-	// [DEBUG-STICKY] 调度器入口日志
-	slog.Info("sticky.scheduler_entry",
+	// 调度器入口日志
+	slog.Debug("sticky.scheduler_entry",
 		"group_id", derefGroupID(groupID),
 		"session_hash", shortSessionHash(sessionHash),
 		"sticky_account_id", stickyAccountID,
@@ -1122,13 +1123,28 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	return accounts, useMixed, nil
 }
 
+// noAntigravityGroupTTL 是"分组内没有可调度 antigravity 账号"结论的进程内缓存时长。
+// 调度快照把空桶视为未命中（避免新分组绑定账号时读到过期的空结果），所以没有 antigravity
+// 账号的分组每次请求都会回退查库。这里只缓存空结果，并用短 TTL 兜底失效：
+// 新绑定的 antigravity 账号最迟在该时长后生效，非空结果仍由快照及其 outbox 失效机制负责。
+const noAntigravityGroupTTL = 5 * time.Second
+
 // IsSingleAntigravityAccountGroup 检查指定分组是否只有一个 antigravity 平台的可调度账号。
 // 用于 Handler 层在首次请求时提前设置 SingleAccountRetry context，
 // 避免单账号分组收到 503 时错误地设置模型限流标记导致后续请求连续快速失败。
 func (s *GatewayService) IsSingleAntigravityAccountGroup(ctx context.Context, groupID *int64) bool {
+	cacheKey := strconv.FormatInt(derefGroupID(groupID), 10)
+	if s.noAntigravityGroups != nil {
+		if _, found := s.noAntigravityGroups.Get(cacheKey); found {
+			return false
+		}
+	}
 	accounts, _, err := s.listSchedulableAccounts(ctx, groupID, PlatformAntigravity, true)
 	if err != nil {
 		return false
+	}
+	if len(accounts) == 0 && s.noAntigravityGroups != nil {
+		s.noAntigravityGroups.Set(cacheKey, struct{}{}, noAntigravityGroupTTL)
 	}
 	return len(accounts) == 1
 }
