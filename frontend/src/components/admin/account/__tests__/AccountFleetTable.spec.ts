@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import AccountFleetTable from '../AccountFleetTable.vue'
@@ -71,6 +71,8 @@ describe('accountFleet helpers', () => {
 })
 
 describe('AccountFleetTable', () => {
+  beforeEach(() => sessionStorage.clear())
+
   const rows = [
     buildFleetRow(makeAccount(1, 'Claude main'), usage(20, 50), null, { requests: 12, tokens: 0, cost: 0 } as never, NOW),
     buildFleetRow(makeAccount(2, 'Claude broken', { status: 'error', error_message: 'token revoked' }), null, null, null, NOW)
@@ -81,7 +83,6 @@ describe('AccountFleetTable', () => {
       rows,
       sort: { key: 'capacity', dir: 1 },
       selected: new Set<number>(),
-      groupByProvider: false,
       loading: false,
       error: null,
       filtered: false,
@@ -120,9 +121,42 @@ describe('AccountFleetTable', () => {
     expect(wrapper.emitted('sort')?.[0]).toEqual(['name'])
   })
 
-  it('shows provider group headers only when grouped', () => {
-    expect(mountTable().find('[data-testid="provider-toggle-anthropic"]').exists()).toBe(false)
-    expect(mountTable({ groupByProvider: true }).get('[data-testid="provider-toggle-anthropic"]').attributes('aria-expanded')).toBe('true')
+  it('always splits rows into provider sections in platform order', async () => {
+    const mixed = [
+      ...rows,
+      buildFleetRow(makeAccount(3, 'Codex main', { platform: 'openai' }), usage(10, 10), null, null, NOW)
+    ]
+    const wrapper = mountTable({ rows: mixed })
+    const sections = wrapper.findAll('tbody.fleet-section')
+    expect(sections.map((section) => section.attributes('data-testid'))).toEqual([
+      'provider-section-anthropic',
+      'provider-section-openai'
+    ])
+    expect(sections[0].findAll('[data-testid="account-capacity-row"]')).toHaveLength(2)
+    expect(sections[1].findAll('[data-testid="account-capacity-row"]')).toHaveLength(1)
+    expect(sections[0].find('.fleet-gap').exists()).toBe(false)
+    expect(sections[1].find('.fleet-gap').exists()).toBe(true)
+
+    const toggle = wrapper.get('[data-testid="provider-toggle-anthropic"]')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    await toggle.trigger('click')
+    expect(wrapper.get('[data-testid="provider-toggle-anthropic"]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.findAll('[data-testid="account-capacity-row"]')).toHaveLength(1)
+  })
+
+  it('shows live reset countdowns under each window meter and drops them once the reset passes', async () => {
+    vi.useFakeTimers({ now: NOW })
+    try {
+      const wrapper = mountTable({ rows: [buildFleetRow(makeAccount(1, 'Claude main'), usage(20, 50), null, null, NOW)] })
+      expect(wrapper.findAll('[data-testid="fleet-reset-countdown"]')).toHaveLength(2)
+
+      vi.setSystemTime(new Date('2026-11-15T15:00:00Z'))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(wrapper.findAll('[data-testid="fleet-reset-countdown"]')).toHaveLength(1)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('offers retry on load errors and reset when filters hide everything', async () => {

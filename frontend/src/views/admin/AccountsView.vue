@@ -42,17 +42,6 @@
           @create="showCreate = true"
         >
           <template #before>
-            <button
-              v-if="accountView === 'capacity'"
-              type="button"
-              class="app-icon-button acct-icon-toggle"
-              :aria-pressed="groupByProvider"
-              :aria-label="t('admin.accountsUi.groupByProvider')"
-              :title="t('admin.accountsUi.groupByProvider')"
-              @click="toggleGroupByProvider"
-            >
-              <Icon name="layers" size="sm" />
-            </button>
             <div
               class="viz-seg acct-view-tabs"
               role="tablist"
@@ -270,7 +259,6 @@
           :rows="visibleFleetRows"
           :sort="fleetSort"
           :selected="selectedSet"
-          :group-by-provider="groupByProvider"
           :loading="fleetLoading"
           :error="fleetError"
           :filtered="hasActiveFleetFilters"
@@ -771,16 +759,6 @@ const handleFleetSort = (key: FleetSortKey) => {
   }
   fleetSort.key = key
   fleetSort.dir = key === 'today' || key === 'last_used' ? -1 : 1
-}
-const GROUP_BY_PROVIDER_KEY = 'account-fleet-group-by-provider'
-const groupByProvider = ref(typeof window !== 'undefined' && localStorage.getItem(GROUP_BY_PROVIDER_KEY) === '1')
-const toggleGroupByProvider = () => {
-  groupByProvider.value = !groupByProvider.value
-  try {
-    localStorage.setItem(GROUP_BY_PROVIDER_KEY, groupByProvider.value ? '1' : '0')
-  } catch {
-    // Preference only; the toggle still works without storage.
-  }
 }
 const capacityViewTabRef = ref<HTMLButtonElement | null>(null)
 const technicalViewTabRef = ref<HTMLButtonElement | null>(null)
@@ -3364,8 +3342,7 @@ onUnmounted(() => {
 }
 
 .acct-status-seg button:active,
-.acct-view-tabs button:active,
-.acct-icon-toggle:active {
+.acct-view-tabs button:active {
   transform: scale(0.95);
 }
 
@@ -3403,11 +3380,6 @@ onUnmounted(() => {
   z-index: 1;
   outline: 2px solid var(--operator-focus);
   outline-offset: 2px;
-}
-
-.acct-icon-toggle[aria-pressed='true'] {
-  background: var(--operator-accent-soft);
-  color: var(--operator-accent-text);
 }
 
 .acct-auto-refresh {

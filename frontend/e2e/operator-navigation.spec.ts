@@ -843,10 +843,8 @@ test.describe('operator console navigation', () => {
       const main = page.locator('main.app-main')
       const capacityRows = page.getByTestId('account-capacity-row')
       await expect(capacityRows).toHaveCount(manyAccounts.length)
-      // Provider headers appear once the table is grouped; the choice persists across reloads.
-      const groupByProvider = page.getByRole('button', { name: 'Group by provider' })
-      if (viewport.width === 1440) await groupByProvider.click()
-      await expect(groupByProvider).toHaveAttribute('aria-pressed', 'true')
+      // Accounts are always split into provider sections.
+      await expect(page.getByRole('button', { name: 'Group by provider' })).toHaveCount(0)
       const providerHeader = page.locator('.fleet-group-toggle').first()
       await expect(providerHeader).toBeVisible()
       const providerStyle = await providerHeader.evaluate((element) => {
@@ -1624,10 +1622,6 @@ test.describe('operator console navigation', () => {
 
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
     await page.goto('/admin/accounts')
-    // The table is flat until the operator groups it by provider.
-    await expect(page.getByTestId('provider-toggle-openai')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Group by provider' }).click()
-
     const toggle = page.getByTestId('provider-toggle-openai')
     const openAIRows = page.getByTestId('account-capacity-row').filter({ hasText: /OpenAI ·/ })
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
@@ -1919,7 +1913,10 @@ test.describe('operator console navigation', () => {
     await expect(menu).toBeVisible()
     await expect(menu.locator('.operator-menu-item').first()).toBeEnabled()
 
-    await page.locator('main.app-main').evaluate((element) => { element.scrollTop += 100 })
+    // The click may already have scrolled the page to its end while rows loaded, so move toward whichever side has room.
+    const main = page.locator('main.app-main')
+    expect(await main.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    await main.evaluate((element) => { element.scrollTop = element.scrollTop > 0 ? 0 : element.scrollHeight })
     await expect.poll(async () => (await trigger.boundingBox())?.y).not.toBe(triggerBefore!.y)
     await expect(menu).toBeHidden()
   })
