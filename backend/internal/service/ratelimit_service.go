@@ -1243,7 +1243,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		if reset != nil && (!reset.After(now) || reset.After(now.Add(8*24*time.Hour))) {
 			reset = nil
 		}
-		if reset == nil && !(allowed("5h") && allowed("7d")) {
+		if reset == nil && (!allowed("5h") || !allowed("7d")) {
 			if aggregate, ok := parseAnthropicAggregateReset(headers, now); ok {
 				reset = &aggregate
 			}
