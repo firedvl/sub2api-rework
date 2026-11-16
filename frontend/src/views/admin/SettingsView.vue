@@ -14165,24 +14165,11 @@ watch(
   font-size: 0.875rem;
 }
 
-/* Field help text: one quiet line until the operator works inside the card.
-   Expand on :focus-visible (keyboard or text entry), not any focus: a pointer press
-   on a toggle or button would otherwise reflow the card between press and release,
-   so the release lands elsewhere and the click is lost. */
+/* Keep help text readable without moving controls when focus changes. */
 .settings-content .card label ~ p.text-gray-500,
 .settings-content .card label ~ p.text-gray-400 {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
   color: var(--operator-subtle-foreground);
   font-size: 0.78rem;
-}
-
-.settings-content .card:has(:focus-visible) label ~ p.text-gray-500,
-.settings-content .card:has(:focus-visible) label ~ p.text-gray-400 {
-  display: block;
-  -webkit-line-clamp: unset;
 }
 
 /* ============ Floating save bar ============ */
