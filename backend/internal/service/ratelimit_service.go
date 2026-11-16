@@ -229,7 +229,7 @@ func (s *RateLimitService) applyAnthropicFableSchedulingThreshold(ctx context.Co
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
 		return
 	}
-	if account.isRateLimitActiveForKey(anthropicFableRateLimitKey) {
+	if account.isRateLimitActiveForKey(anthropicFableRateLimitKey) && account.isAnthropicFamilyRateLimit(anthropicFableRateLimitKey) {
 		return
 	}
 
@@ -1608,6 +1608,9 @@ func (s *RateLimitService) persistAnthropicModelCreditsRequired(ctx context.Cont
 		return true
 	}
 	scope, reason := anthropicModelRateLimitKey(model), "anthropic_model_credits_required"
+	if isAnthropicFamilyScope(scope) {
+		return true
+	}
 	if isAnthropicFableModel(model) {
 		reason = anthropicFableCreditsRequiredReason
 	}
@@ -2646,7 +2649,10 @@ func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Acc
 		return modelKey
 	}
 	if mapped := strings.TrimSpace(account.GetMappedModel(modelKey)); mapped != "" {
-		return mapped
+		modelKey = mapped
+	}
+	if account.Platform == PlatformAnthropic && isAnthropicFamilyScope(modelKey) {
+		return ""
 	}
 	return modelKey
 }
@@ -2813,6 +2819,9 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	// retain the legacy account-wide temporary-unschedulable behavior below.
 	modelKey := firstRequestedModel(requestedModel)
 	if modelKey != "" && statusCode != http.StatusUnauthorized {
+		if account.Platform == PlatformAnthropic && isAnthropicFamilyScope(modelKey) {
+			return true
+		}
 		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, until, reason); err != nil {
 			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", modelKey, "error", err)
 			// The rule matched, so fail over the current request even if persistence

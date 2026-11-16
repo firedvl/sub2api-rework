@@ -180,7 +180,7 @@ func TestHandleUpstreamError_AnthropicFableCreditsRequiredOnlyMarksModelRateLimi
 	require.Zero(t, repo.rateLimitCalls, "Fable entitlement failure must not rate limit the whole account")
 	require.Zero(t, repo.sessionWindowCalls, "Fable entitlement failure must not rewrite the shared session window")
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.Equal(t, "claude-fable-5", repo.lastModelRateLimitScope)
 	require.Equal(t, resetAt, repo.lastModelRateLimitReset)
 }
 
@@ -195,7 +195,7 @@ func TestHandleUpstreamError_AnthropicFableCreditsRequiredFallsBackToRequestedMo
 
 	require.Zero(t, repo.rateLimitCalls)
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.Equal(t, "claude-fable-5", repo.lastModelRateLimitScope)
 	require.True(t, repo.lastModelRateLimitReset.After(startedAt))
 }
 

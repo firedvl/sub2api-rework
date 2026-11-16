@@ -52,7 +52,7 @@ func TestAnthropicOpusWeeklyLimitKeepsOtherFamiliesEligible(t *testing.T) {
 		http.StatusTooManyRequests, headers, nil, "claude-opus-5-5")
 	require.Zero(t, repo.rateLimitCalls)
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, "test", time.Now())
+	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, repo.lastModelRateLimitReason, time.Now())
 	require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-opus-4-6[1m]"))
 	require.False(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-5-5"))
 }
@@ -73,7 +73,7 @@ func TestAnthropicSonnetWeeklyLimitKeepsOtherFamiliesEligible(t *testing.T) {
 	require.Zero(t, repo.sessionWindowCalls)
 	require.Equal(t, 1, repo.modelRateLimitCalls)
 	require.Equal(t, reset, repo.lastModelRateLimitReset)
-	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, "test", time.Now())
+	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, repo.lastModelRateLimitReason, time.Now())
 	for _, model := range []string{"claude-sonnet-4-6", "claude-sonnet-4-5-20250929", "claude-sonnet-5-5[1m]"} {
 		require.True(t, account.isModelRateLimitedWithContext(context.Background(), model), model)
 	}
@@ -109,7 +109,7 @@ func TestAnthropicModelCreditsDoNotBlockOtherModels(t *testing.T) {
 	require.Zero(t, repo.rateLimitCalls)
 	require.Zero(t, repo.sessionWindowCalls)
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, "test", time.Now())
+	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, reset, repo.lastModelRateLimitReason, time.Now())
 	for _, model := range []string{"claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-haiku-4-5[1m]"} {
 		require.True(t, account.isModelRateLimitedWithContext(context.Background(), model), model)
 	}
@@ -311,4 +311,76 @@ func TestAnthropicProxy403DoesNotDisableHealthyAccounts(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestAnthropicInvalidModelCannotPoisonFamilyCooldown(t *testing.T) {
+	for _, scope := range []string{"claude-sonnet", "claude-opus", "claude-fable-5", anthropicFableRateLimitKey, anthropicSonnetRateLimitKey, anthropicOpusRateLimitKey} {
+		t.Run(scope, func(t *testing.T) {
+			repo := &anthropicWindowLimitRepo{}
+			account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+			if isAnthropicFamilyScope(scope) {
+				require.False(t, account.IsModelSupported(scope), "policy keys must not be sent as native model IDs")
+			}
+			body := []byte(`{"error":{"type":"not_found_error","message":"model: ` + scope + `"}}`)
+			NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(), account, http.StatusNotFound, http.Header{}, body, scope)
+			if repo.modelRateLimitCalls > 0 {
+				setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, time.Now().Add(time.Hour), repo.lastModelRateLimitReason, time.Now())
+			}
+			for _, valid := range []string{"claude-sonnet-5-5", "claude-opus-4-6", "claude-fable-5-2"} {
+				require.False(t, account.isModelRateLimitedWithContext(context.Background(), valid), valid)
+			}
+		})
+	}
+}
+
+func TestAnthropicLegacyFableFamilyCooldownRemainsReadable(t *testing.T) {
+	account := &Account{Platform: PlatformAnthropic}
+	setAccountModelRateLimitSnapshot(account, legacyAnthropicFableRateLimitKey, time.Now().Add(time.Hour), "", time.Now())
+	require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-fable-5-2"))
+	setAccountModelRateLimitSnapshot(account, anthropicSonnetRateLimitKey, time.Now().Add(time.Hour), upstreamModelNotFoundReason, time.Now())
+	require.False(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-5-5"))
+}
+
+func TestAnthropicModelErrorsCannotOverwriteExistingFamilyPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"not found", http.StatusNotFound, `{"error":{"type":"not_found_error","message":"model not found"}}`},
+		{"credits", http.StatusTooManyRequests, `{"error":{"details":{"error_code":"credits_required","model":"claude-sonnet-*"}}}`},
+		{"local rule", http.StatusInternalServerError, `{"error":{"message":"reserved test"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &anthropicWindowLimitRepo{}
+			account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"temp_unschedulable_enabled": true, "temp_unschedulable_rules": []any{map[string]any{
+					"error_code": float64(http.StatusInternalServerError), "keywords": []any{"reserved test"}, "duration_minutes": float64(10),
+				}}},
+			}
+			setAccountModelRateLimitSnapshot(account, anthropicSonnetRateLimitKey, time.Now().Add(time.Hour), "anthropic_7d_sonnet_window_exhausted", time.Now())
+			NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(), account, tc.status, http.Header{}, []byte(tc.body), anthropicSonnetRateLimitKey)
+			require.Zero(t, repo.modelRateLimitCalls, "a model error must not replace the family policy")
+			require.Zero(t, repo.tempUnschedCalls)
+			require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-sonnet-5-5"))
+		})
+	}
+}
+
+func TestAnthropicFableEntitlementAndFamilyThresholdHaveIndependentDeadlines(t *testing.T) {
+	now := time.Now()
+	reset := now.Add(72 * time.Hour)
+	account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"account_scheduling_threshold": 60},
+		Extra:       map[string]any{"passive_usage_7d_oi_utilization": 0.61, "passive_usage_7d_oi_reset": float64(reset.Unix())},
+	}
+	setAccountModelRateLimitSnapshot(account, "claude-fable-5", now.Add(15*24*time.Hour), anthropicFableCreditsRequiredReason, now)
+	repo := &anthropicWindowLimitRepo{}
+	NewRateLimitService(repo, nil, nil, nil, nil).applyAnthropicFableSchedulingThreshold(context.Background(), account, nil, now)
+	require.Equal(t, 1, repo.modelRateLimitCalls, "a version entitlement must not suppress a family threshold")
+	require.NotEqual(t, "claude-fable-5", repo.lastModelRateLimitScope)
+	require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-fable-5-2"))
+	setAccountModelRateLimitSnapshot(account, repo.lastModelRateLimitScope, now.Add(-time.Second), repo.lastModelRateLimitReason, now)
+	require.True(t, account.isModelRateLimitedWithContext(context.Background(), "claude-fable-5"))
+	require.False(t, account.isModelRateLimitedWithContext(context.Background(), "claude-fable-5-2"))
 }
