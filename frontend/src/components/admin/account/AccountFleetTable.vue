@@ -125,7 +125,6 @@
                   </div>
                   <small v-if="row.short && windowCaption(row.short)" class="fleet-reset">
                     <span v-if="row.short.current === false" class="fleet-stale">{{ staleLabel(row.short) }}</span>
-                    <span v-if="row.short.current === false && resetCountdown(row.short)" aria-hidden="true"> · </span>
                     <span v-if="resetCountdown(row.short)" data-testid="fleet-reset-countdown">{{ t('admin.accountsUi.resetsIn', { time: resetCountdown(row.short) }) }}</span>
                   </small>
                 </div>
@@ -137,7 +136,6 @@
                   </div>
                   <small v-if="row.long && windowCaption(row.long)" class="fleet-reset">
                     <span v-if="row.long.current === false" class="fleet-stale">{{ staleLabel(row.long) }}</span>
-                    <span v-if="row.long.current === false && resetCountdown(row.long)" aria-hidden="true"> · </span>
                     <span v-if="resetCountdown(row.long)" data-testid="fleet-reset-countdown">{{ t('admin.accountsUi.resetsIn', { time: resetCountdown(row.long) }) }}</span>
                   </small>
                 </div>
@@ -417,8 +415,10 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 
+/* Stale windows put the warning and the countdown on their own short lines so neither overflows the column. */
 .fleet-reset {
-  display: block;
+  display: flex;
+  flex-direction: column;
   margin-top: 0.125rem;
   color: var(--operator-subtle-foreground);
   font-size: 0.6875rem;
