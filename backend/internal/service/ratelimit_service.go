@@ -1231,27 +1231,35 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	}
 
 	if account.Platform == PlatformAnthropic {
+		if s.persistAnthropicExhaustedWindowLimit(ctx, account, headers) {
+			return
+		}
 		now := time.Now()
-		if selectAnthropicExhaustedWindow(headers, now) == nil {
-			if reset := parseRetryAfterResetTime(headers, now); reset != nil && reset.After(now) && !reset.After(now.Add(8*24*time.Hour)) {
-				s.notifyAccountSchedulingBlocked(account, *reset, "429_retry_after")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, *reset); err != nil {
-					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
-				}
-				return
-			}
-			allowed := func(window string) bool {
-				status := strings.ToLower(strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-" + window + "-status")))
-				return (status == "allowed" || status == "allowed_warning") && !isAnthropicWindowExceeded(headers, window)
-			}
-			if allowed("5h") && allowed("7d") {
-				s.apply429FallbackRateLimit(ctx, account, "anthropic_shared_windows_allowed")
-				return
+		allowed := func(window string) bool {
+			status := strings.ToLower(strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-" + window + "-status")))
+			return (status == "allowed" || status == "allowed_warning") && !isAnthropicWindowExceeded(headers, window)
+		}
+		reset := parseRetryAfterResetTime(headers, now)
+		if reset != nil && (!reset.After(now) || reset.After(now.Add(8*24*time.Hour))) {
+			reset = nil
+		}
+		if reset == nil && !(allowed("5h") && allowed("7d")) {
+			if aggregate, ok := parseAnthropicAggregateReset(headers, now); ok {
+				reset = &aggregate
 			}
 		}
+		if reset == nil {
+			s.apply429FallbackRateLimit(ctx, account, "anthropic_no_binding_reset")
+			return
+		}
+		s.notifyAccountSchedulingBlocked(account, *reset, "429")
+		if err := s.accountRepo.SetRateLimited(ctx, account.ID, *reset); err != nil {
+			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+		}
+		return
 	}
 
-	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
+	// Other compatible providers retain their legacy Anthropic-header handling.
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
 		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {

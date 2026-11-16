@@ -157,6 +157,7 @@ func TestAnthropicRateLimitMillisecondsDoNotBecomeYears(t *testing.T) {
 			key := "anthropic-ratelimit-unified-reset"
 			if window != "aggregate" {
 				key = "anthropic-ratelimit-unified-" + window + "-reset"
+				headers.Set("anthropic-ratelimit-unified-"+window+"-status", "rejected")
 			}
 			headers.Set(key, strconv.FormatInt(reset.UnixMilli(), 10))
 			repo := &anthropicWindowLimitRepo{}
@@ -264,4 +265,15 @@ func TestAnthropicMissingFamilyResetWithFallbackDisabledKeepsAccountEligible(t *
 	svc.HandleUpstreamError(context.Background(), &Account{ID: 1, Platform: PlatformAnthropic}, http.StatusTooManyRequests, headers, nil)
 	require.Zero(t, repo.rateLimitCalls)
 	require.Zero(t, repo.modelRateLimitCalls)
+}
+
+func TestAnthropicAggregateResetDoesNotInventFiveHourWindow(t *testing.T) {
+	repo := &anthropicWindowLimitRepo{}
+	reset := time.Now().Add(72 * time.Hour).Truncate(time.Second)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(reset.Unix(), 10))
+	NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(),
+		&Account{ID: 1, Platform: PlatformAnthropic}, http.StatusTooManyRequests, headers, nil)
+	require.Equal(t, reset, repo.lastRateLimitReset)
+	require.Zero(t, repo.sessionWindowCalls, "an aggregate reset does not identify the five-hour window")
 }
