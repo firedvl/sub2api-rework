@@ -161,9 +161,9 @@ func TestHandleUpstreamError_OpenAIStructured403StillPenalizes(t *testing.T) {
 	})
 }
 
-// 作用域守卫：放行只针对 OpenAI 平台。其他平台的 403 处理不受影响。
+// Gemini's existing 403 policy remains separate from native Claude and OpenAI.
 func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
-	for _, platform := range []string{PlatformAnthropic, PlatformGemini} {
+	for _, platform := range []string{PlatformGemini} {
 		t.Run(platform, func(t *testing.T) {
 			repo := &rateLimitAccountRepoStub{}
 			svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

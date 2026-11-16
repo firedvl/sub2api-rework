@@ -277,3 +277,38 @@ func TestAnthropicAggregateResetDoesNotInventFiveHourWindow(t *testing.T) {
 	require.Equal(t, reset, repo.lastRateLimitReset)
 	require.Zero(t, repo.sessionWindowCalls, "an aggregate reset does not identify the five-hour window")
 }
+
+type anthropicProxy403Repo struct {
+	anthropicWindowLimitRepo
+	authErrorCalls int
+}
+
+func (r *anthropicProxy403Repo) SetError(_ context.Context, _ int64, _ string) error {
+	r.authErrorCalls++
+	return nil
+}
+
+func TestAnthropicProxy403DoesNotDisableHealthyAccounts(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, tc := range []struct {
+			name, body string
+			disable    bool
+		}{
+			{"edge HTML", `<html><title>403 Forbidden</title>Cloudflare challenge</html>`, false},
+			{"edge bot block", openAI403Cloudflare1010Body, false},
+			{"account permission", `{"error":{"type":"permission_error","message":"Organization has been disabled"}}`, true},
+		} {
+			t.Run(accountType+"/"+tc.name, func(t *testing.T) {
+				repo := &anthropicProxy403Repo{}
+				disabled := NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(),
+					&Account{ID: 1, Platform: PlatformAnthropic, Type: accountType}, http.StatusForbidden, http.Header{}, []byte(tc.body), "claude-opus-4-6")
+				require.Equal(t, tc.disable, disabled)
+				if tc.disable {
+					require.Equal(t, 1, repo.authErrorCalls)
+				} else {
+					require.Zero(t, repo.authErrorCalls)
+				}
+			})
+		}
+	}
+}
