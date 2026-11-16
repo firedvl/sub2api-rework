@@ -35,7 +35,7 @@
       </button>
     </div>
 
-    <div ref="popoverRoot" class="relative">
+    <div ref="popoverRoot">
       <button
         type="button"
         class="btn btn-secondary acct-filter-trigger"
@@ -111,7 +111,6 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { onKeyStroke } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -207,11 +206,6 @@ const close = (focusTrigger = false) => {
   if (focusTrigger) popoverRoot.value?.querySelector<HTMLElement>('.acct-filter-trigger')?.focus()
 }
 
-// Escape from a Select's teleported menu must also dismiss its filter panel.
-onKeyStroke('Escape', () => {
-  if (open.value) close(true)
-})
-
 // Close on outside press; Select menus are teleported to <body>, so they count as inside.
 const onPointerDown = (event: PointerEvent) => {
   const target = event.target as Element | null
@@ -263,6 +257,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerDown,
 }
 
 .acct-filter-pop {
+  /* Anchor below the whole toolbar so wrapped actions stay clickable. */
   position: absolute;
   top: calc(100% + 0.375rem);
   left: 0;

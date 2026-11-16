@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
+
+enableAutoUnmount(afterEach)
 
 const {
   listKeys,
@@ -532,9 +534,12 @@ describe('user KeysView column settings', () => {
     await flushPromises()
 
     const search = wrapper.get('[data-testid="keys-search"]')
+    const callsBeforeSearch = listKeys.mock.calls.length
     ;(search.element as HTMLInputElement).value = 'target'
     await search.trigger('input')
     await search.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    await vi.waitFor(() => expect(listKeys).toHaveBeenCalledTimes(callsBeforeSearch + 2))
     await flushPromises()
 
     const selects = wrapper.findAllComponents({ name: 'Select' })
