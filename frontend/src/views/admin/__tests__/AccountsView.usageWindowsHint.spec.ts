@@ -234,13 +234,11 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.text()).toContain('OpenAI reserve fleet row')
     expect(wrapper.text()).toContain('Gemini fleet row')
     expect(wrapper.findAll('[data-testid="account-capacity-row"]')).toHaveLength(3)
-    expect(wrapper.find('[data-testid^="provider-toggle-"]').exists()).toBe(false)
-    await wrapper.get('button[aria-label="admin.accountsUi.groupByProvider"]').trigger('click')
+    expect(wrapper.find('button[aria-label="admin.accountsUi.groupByProvider"]').exists()).toBe(false)
     expect(wrapper.findAll('.fleet-group-name').map((node) => node.text())).toEqual([
       'OpenAI',
       'Gemini',
     ])
-    expect(localStorage.getItem('account-fleet-group-by-provider')).toBe('1')
     expect(listAccounts).toHaveBeenCalledWith(1, 1000, {
       platform: '',
       type: '',

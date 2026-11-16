@@ -68,8 +68,6 @@ for (const width of [390, 1280]) {
     await page.goto('/admin/accounts?view=capacity')
     const panel = page.getByRole('tabpanel', { name: 'Capacity', exact: true })
     const row = panel.getByTestId('account-capacity-row')
-    // Provider summaries only render in the grouped layout.
-    await page.getByRole('button', { name: 'Group by provider', exact: true }).click()
     const provider = panel.getByTestId('provider-toggle-anthropic')
     await expect(provider).toContainText('0 with quota')
     await expect(provider).toContainText('1 unknown')

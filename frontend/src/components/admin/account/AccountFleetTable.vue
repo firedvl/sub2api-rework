@@ -49,8 +49,14 @@
             <th class="fleet-more"><span class="sr-only">{{ t('admin.accounts.columns.actions') }}</span></th>
           </tr>
         </thead>
-        <tbody v-for="group in groups" :key="group.key" class="ui-rows-enter">
-          <tr v-if="group.platform" class="fleet-group">
+        <tbody
+          v-for="(group, index) in groups"
+          :key="group.platform"
+          class="ui-rows-enter fleet-section"
+          :data-testid="`provider-section-${group.platform}`"
+        >
+          <tr v-if="index > 0" class="fleet-gap" aria-hidden="true"><td :colspan="columns.length + 2"></td></tr>
+          <tr class="fleet-group">
             <td :colspan="columns.length + 2">
               <button
                 type="button"
@@ -60,7 +66,7 @@
                 @click="toggleGroup(group.platform)"
               >
                 <Icon name="chevronDown" size="sm" class="fleet-group-chevron" :class="{ 'is-collapsed': collapsed.has(group.platform) }" />
-                <ProviderMark :platform="group.platform" :size="22" />
+                <ProviderMark :platform="group.platform" :size="26" />
                 <span class="fleet-group-name">{{ providerLabel(group.platform) }}</span>
                 <span class="fleet-group-count">
                   {{ group.rows.length }}
@@ -75,7 +81,7 @@
               </button>
             </td>
           </tr>
-          <template v-if="!group.platform || !collapsed.has(group.platform)">
+          <template v-if="!collapsed.has(group.platform)">
             <tr
               v-for="row in group.rows"
               :key="row.account.id"
@@ -117,7 +123,11 @@
                   <div :class="{ 'is-stale': row.short?.current === false }">
                     <QuotaMeter :value="row.short?.remainingPercent ?? null" :label="row.short?.label ?? t('admin.accountsUi.shortWindow')" />
                   </div>
-                  <small v-if="row.short?.current === false" class="fleet-stale">{{ staleLabel(row.short) }}</small>
+                  <small v-if="row.short && windowCaption(row.short)" class="fleet-reset">
+                    <span v-if="row.short.current === false" class="fleet-stale">{{ staleLabel(row.short) }}</span>
+                    <span v-if="row.short.current === false && resetCountdown(row.short)" aria-hidden="true"> · </span>
+                    <span v-if="resetCountdown(row.short)" data-testid="fleet-reset-countdown">{{ t('admin.accountsUi.resetsIn', { time: resetCountdown(row.short) }) }}</span>
+                  </small>
                 </div>
               </td>
               <td :data-label="t('admin.accountsUi.longWindow')">
@@ -125,7 +135,11 @@
                   <div :class="{ 'is-stale': row.long?.current === false }">
                     <QuotaMeter :value="row.long?.remainingPercent ?? null" :label="row.long?.label ?? t('admin.accountsUi.longWindow')" />
                   </div>
-                  <small v-if="row.long?.current === false" class="fleet-stale">{{ staleLabel(row.long) }}</small>
+                  <small v-if="row.long && windowCaption(row.long)" class="fleet-reset">
+                    <span v-if="row.long.current === false" class="fleet-stale">{{ staleLabel(row.long) }}</span>
+                    <span v-if="row.long.current === false && resetCountdown(row.long)" aria-hidden="true"> · </span>
+                    <span v-if="resetCountdown(row.long)" data-testid="fleet-reset-countdown">{{ t('admin.accountsUi.resetsIn', { time: resetCountdown(row.long) }) }}</span>
+                  </small>
                 </div>
               </td>
               <td class="is-num" :data-label="t('admin.accountsUi.today')">
@@ -160,7 +174,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProviderMark from '@/components/viz/ProviderMark.vue'
 import QuotaMeter from '@/components/ui/QuotaMeter.vue'
 import { aggregateNormalizedCapacity, type OperatorAccountStatus, type OperatorCapacityWindow } from '@/utils/operatorCapacity'
-import { formatDayAwareDateTime, formatRelativeTime } from '@/utils/format'
+import { formatCountdown, formatDayAwareDateTime, formatRelativeTime } from '@/utils/format'
 import type { Account, AccountPlatform } from '@/types'
 import {
   PLATFORM_ORDER,
@@ -178,13 +192,11 @@ const props = withDefaults(defineProps<{
   rows: FleetRow[]
   sort: FleetSort
   selected: Set<number>
-  groupByProvider?: boolean
   loading?: boolean
   error?: boolean
   filtered?: boolean
   todayLoading?: boolean
 }>(), {
-  groupByProvider: false,
   loading: false,
   error: false,
   filtered: false,
@@ -243,9 +255,18 @@ const windowTitle = (window: OperatorCapacityWindow | null) => {
   return parts.join(' · ')
 }
 
+// Reset countdowns tick once a minute so "Resets in 2h 14m" stays honest without re-fetching.
+const now = ref(Date.now())
+const nowTimer = setInterval(() => { now.value = Date.now() }, 30_000)
+const resetCountdown = (window: OperatorCapacityWindow) => {
+  void now.value
+  return formatCountdown(window.resetsAt)
+}
+const windowCaption = (window: OperatorCapacityWindow) => window.current === false || Boolean(resetCountdown(window))
+
 const formatCount = (value: number | null | undefined) => (value == null ? '–' : value.toLocaleString())
 
-// Provider grouping (collapsed state survives reloads within the session).
+// Rows are always split into provider sections (collapsed state survives reloads within the session).
 const COLLAPSE_KEY = 'account-fleet-collapsed-providers'
 const loadCollapsed = () => {
   try {
@@ -268,8 +289,7 @@ const toggleGroup = (platform: string) => {
 }
 
 interface FleetGroup {
-  key: string
-  platform: AccountPlatform | null
+  platform: AccountPlatform
   rows: FleetRow[]
   remaining: number | null
   knownCount: number
@@ -277,7 +297,6 @@ interface FleetGroup {
 }
 
 const groups = computed<FleetGroup[]>(() => {
-  if (!props.groupByProvider) return [{ key: 'all', platform: null, rows: props.rows, remaining: null, knownCount: 0, unknownCount: 0 }]
   const byPlatform = new Map<AccountPlatform, FleetRow[]>()
   for (const row of props.rows) {
     const list = byPlatform.get(row.account.platform) ?? []
@@ -293,7 +312,6 @@ const groups = computed<FleetGroup[]>(() => {
     .map(([platform, rows]) => {
       const aggregate = aggregateNormalizedCapacity(rows.map((row) => row.summary))
       return {
-        key: platform,
         platform,
         rows,
         remaining: aggregate.remainingPercent,
@@ -337,6 +355,7 @@ watch(
 
 onBeforeUnmount(() => {
   flashTimers.forEach((timer) => clearTimeout(timer))
+  clearInterval(nowTimer)
 })
 </script>
 
@@ -398,19 +417,44 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 
-.fleet-stale {
+.fleet-reset {
   display: block;
   margin-top: 0.125rem;
-  color: var(--operator-warning);
+  color: var(--operator-subtle-foreground);
   font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1rem;
   white-space: nowrap;
 }
 
+.fleet-stale {
+  color: var(--operator-warning);
+}
+
+.fleet-table tbody tr.fleet-gap,
+.fleet-table tbody tr.fleet-gap:hover {
+  background: transparent;
+}
+
+.fleet-table tbody tr.fleet-gap td {
+  height: 1.25rem;
+  padding: 0;
+  border-bottom: 0;
+}
+
 .fleet-group td {
-  height: 2.75rem;
+  position: sticky;
+  top: 2.5rem;
+  z-index: 1;
+  height: 3rem;
   padding: 0 0.5rem;
+  border-top: 1px solid var(--operator-border);
+  border-bottom: 1px solid var(--operator-border);
   background: var(--operator-raised);
+}
+
+.fleet-section:first-of-type .fleet-group td {
+  border-top: 0;
 }
 
 .fleet-table tbody tr.fleet-group:hover {
@@ -425,9 +469,13 @@ onBeforeUnmount(() => {
   padding: 0 0.5rem;
   border-radius: var(--operator-radius);
   color: var(--operator-foreground);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   text-align: left;
+}
+
+.fleet-group-name {
+  font-size: 0.9375rem;
 }
 
 .fleet-group-chevron {
@@ -514,8 +562,15 @@ onBeforeUnmount(() => {
   }
 
   .fleet-table tbody tr.fleet-group td {
+    position: static;
     display: block;
     padding: 0.375rem;
+  }
+
+  .fleet-table tbody tr.fleet-gap,
+  .fleet-table tbody tr.fleet-gap td {
+    display: block;
+    height: 1rem;
   }
 
   .fleet-table tbody tr.is-clickable td {
