@@ -8,7 +8,7 @@ const fulfill = (route: Route, data: unknown) =>
     body: JSON.stringify({ code: 0, message: 'ok', data })
   })
 
-test('qualifies OpenAI vision in two explicit gates before separate promotion', async ({ page }) => {
+test('qualifies OpenAI vision in two explicit gates before separate promotion', async ({ page }, testInfo) => {
   await seedSession(page)
   await installOperatorApiMock(page)
 
@@ -44,7 +44,7 @@ test('qualifies OpenAI vision in two explicit gates before separate promotion', 
 
   await qualification.getByRole('button', { name: 'Run reliability' }).click()
   await expect(page.getByTestId('vision-qualification-status')).toHaveText('Qualified 10/10')
-  await page.screenshot({ path: '/tmp/sub2api-vision-qualified-wide.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('vision-qualified-wide.png'), fullPage: true })
   expect(promoted).toBe(false)
 
   await qualification.getByRole('button', { name: 'Add vision input' }).click()
@@ -53,7 +53,7 @@ test('qualifies OpenAI vision in two explicit gates before separate promotion', 
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(qualification).toBeVisible()
-  await page.screenshot({ path: '/tmp/sub2api-vision-qualified-narrow.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('vision-qualified-narrow.png'), fullPage: true })
   const overflow = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth

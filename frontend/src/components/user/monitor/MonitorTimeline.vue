@@ -1,7 +1,7 @@
 <template>
-  <div class="mt-4 pt-3 border-t border-gray-100 dark:border-dark-700/60">
+  <div class="mt-3">
     <div
-      class="flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2"
+      class="mb-1.5 flex justify-between gap-2 text-[11px] text-gray-500"
     >
       <span>{{ t('monitorCommon.history60pts', { n: length }) }}</span>
       <span class="tabular-nums">{{ t('monitorCommon.nextUpdateIn', { n: countdownSeconds }) }}</span>
@@ -25,7 +25,7 @@
     </div>
 
     <div
-      class="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-gray-400"
+      class="mt-1 flex justify-between text-[10px] text-gray-400"
     >
       <span>{{ t('monitorCommon.past') }}</span>
       <span>{{ t('monitorCommon.now') }}</span>

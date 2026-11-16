@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
 
 import RiskControlView from '../RiskControlView.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import enChannels from '@/i18n/locales/en/admin/channels'
 import zhChannels from '@/i18n/locales/zh/admin/channels'
 import type { ContentModerationAPIKeyStatus, ContentModerationConfig, UpdateContentModerationConfig } from '@/api/admin/riskControl'
@@ -191,6 +192,10 @@ const ModelWhitelistSelectorStub = defineComponent({
   },
 })
 
+function helpTexts(wrapper: VueWrapper): string[] {
+  return wrapper.findAllComponents(HelpTooltip).map((item) => String(item.props('content')))
+}
+
 function findButtonByText(wrapper: VueWrapper, text: string): DOMWrapper<HTMLButtonElement> {
   const button = wrapper.findAll<HTMLButtonElement>('button').find((item) => item.text().includes(text))
   if (!button) {
@@ -250,7 +255,9 @@ describe('admin RiskControlView', () => {
     const panel = () => wrapper.get('[data-test="audit-key-statuses"]')
     expect(panel().text()).toContain(profiles[otherEngine].api_key_statuses[0].masked)
     expect(panel().text()).not.toContain(profiles[activeEngine].api_key_statuses[0].masked)
-    await findButtonByText(wrapper, 'admin.riskControl.refreshStatus').trigger('click')
+    const refresh = wrapper.get('[data-test="risk-refresh"]')
+    expect(refresh.attributes('aria-label')).toBe('admin.riskControl.refreshStatus')
+    await refresh.trigger('click')
     await flushPromises()
     expect(panel().text()).toContain(profiles[otherEngine].api_key_statuses[0].masked)
     engineSelect.vm.$emit('update:modelValue', activeEngine)
@@ -426,7 +433,7 @@ describe('admin RiskControlView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('admin.riskControl.workerStatusHint')
+    expect(helpTexts(wrapper)).toContain('admin.riskControl.workerStatusHint')
     expect(wrapper.text()).not.toContain('admin.riskControl.preBlockSyncStatus')
     expect(wrapper.text()).toContain('admin.riskControl.records')
     expect(wrapper.text()).toContain('12')
@@ -495,7 +502,7 @@ describe('admin RiskControlView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('admin.riskControl.preBlockSyncStatus')
-    expect(wrapper.text()).toContain('admin.riskControl.preBlockSyncHint')
+    expect(helpTexts(wrapper)).toContain('admin.riskControl.preBlockSyncHint')
     expect(wrapper.text()).not.toContain('admin.riskControl.workerStatus')
     expect(wrapper.text()).toContain('admin.riskControl.records')
     expect(wrapper.text()).toContain('128')
@@ -513,22 +520,48 @@ describe('admin RiskControlView', () => {
     const syncCard = wrapper.get('[data-test="pre-block-sync-card"]')
     const apiKeyLoadCard = wrapper.get('[data-test="pre-block-api-key-load-card"]')
 
-    expect(runtimeCards.classes()).toEqual(expect.arrayContaining([
-      'grid',
-      'grid-cols-1',
-      'xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]',
-    ]))
+    expect(runtimeCards.classes()).toContain('viz-grid')
     expect(syncCard.element.parentElement).toBe(runtimeCards.element)
     expect(apiKeyLoadCard.element.parentElement).toBe(runtimeCards.element)
-    expect(syncCard.classes()).toContain('card')
-    expect(apiKeyLoadCard.classes()).toContain('card')
+    expect(syncCard.classes()).toEqual(expect.arrayContaining(['viz-card', 'viz-span-5']))
+    expect(apiKeyLoadCard.classes()).toEqual(expect.arrayContaining(['viz-card', 'viz-span-7']))
     expect(syncCard.get('h2').text()).toBe('admin.riskControl.preBlockSyncStatus')
-    expect(syncCard.text()).toContain('admin.riskControl.preBlockSyncHint')
     expect(apiKeyLoadCard.get('h2').text()).toBe('admin.riskControl.preBlockAPIKeyLoad')
-    expect(apiKeyLoadCard.text()).toContain('admin.riskControl.preBlockAPIKeyLoadHint')
+    expect(helpTexts(wrapper)).toContain('admin.riskControl.preBlockAPIKeyLoadHint')
     expect(wrapper.get('[data-test="pre-block-api-key-load-list"]').classes()).toEqual(expect.arrayContaining([
       'max-h-[280px]',
       'overflow-y-auto',
     ]))
+  })
+
+  it('lists audit records on the records tab and opens a row in the detail drawer', async () => {
+    const logRow = {
+      id: 7, request_id: 'req-7', user_id: 42, user_email: 'risk@example.com', api_key_id: 3, api_key_name: 'ops-key',
+      group_id: 1, group_name: 'claude-pool', endpoint: '/v1/messages', provider: 'anthropic', model: 'claude-sonnet',
+      mode: 'pre_block', action: 'block', flagged: true, highest_category: 'violence', highest_score: 0.97,
+      matched_keyword: '', category_scores: { violence: 0.97 }, threshold_snapshot: { violence: 0.95 },
+      input_excerpt: 'full flagged input', upstream_latency_ms: 120, error: '', violation_count: 2,
+      auto_banned: true, email_sent: true, user_status: 'disabled', queue_delay_ms: null, created_at: '2026-11-01T00:00:00Z',
+    }
+    listLogs.mockResolvedValue({ items: [logRow], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mount(RiskControlView, { attachTo: document.body, global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+
+    await wrapper.get('[data-test="risk-tab-records"]').trigger('click')
+    expect(wrapper.get('[data-test="risk-tab-records"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).toContain('risk@example.com')
+    expect(wrapper.text()).toContain('admin.riskControl.action.block')
+
+    await findButtonByText(wrapper, 'admin.riskControl.result.hit').trigger('click')
+    await flushPromises()
+    expect(listLogs).toHaveBeenLastCalledWith(expect.objectContaining({ result: 'hit', page: 1 }))
+
+    await wrapper.get('tbody tr.is-clickable').trigger('click')
+    await flushPromises()
+    const drawer = document.body.querySelector('.ui-drawer')
+    expect(drawer?.textContent).toContain('full flagged input')
+    expect(drawer?.textContent).toContain('ops-key')
+    expect(drawer?.querySelector('[data-test="audit-engine-meta"]')?.textContent).toContain('admin.riskControl.legacyAuditSource')
+    wrapper.unmount()
   })
 })

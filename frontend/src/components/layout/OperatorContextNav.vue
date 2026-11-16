@@ -1,9 +1,16 @@
 <template>
   <nav
     v-if="area && visibleSections.length > 1"
+    ref="navRef"
     class="operator-context-nav"
     :aria-label="t('nav.areaSections', { area: t(area.labelKey) })"
   >
+    <span
+      v-if="pill.width"
+      class="operator-context-pill"
+      aria-hidden="true"
+      :style="{ width: `${pill.width}px`, transform: `translateX(${pill.left}px)` }"
+    ></span>
     <div class="flex min-w-max gap-6">
       <router-link
         v-for="section in visibleSections"
@@ -20,9 +27,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { useResizeObserver } from '@vueuse/core'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { useAuthStore } from '@/stores/auth'
 import { usePageMeta } from '@/composables/usePageMeta'
@@ -50,4 +58,23 @@ function isCurrent(section: OperatorSection): boolean {
 }
 
 const visibleSections = computed(() => area.value?.sections.filter(isVisible) ?? [])
+
+// The active tab's surface slides between tabs.
+const navRef = ref<HTMLElement | null>(null)
+const pill = reactive({ left: 0, width: 0 })
+
+function measure() {
+  const nav = navRef.value
+  const active = nav?.querySelector<HTMLElement>('.operator-context-link-active')
+  if (!nav || !active) {
+    pill.width = 0
+    return
+  }
+  pill.left = active.offsetLeft
+  pill.width = active.offsetWidth
+}
+
+watch(() => [route.path, visibleSections.value.length], () => void nextTick(measure))
+onMounted(() => void nextTick(measure))
+useResizeObserver(navRef, measure)
 </script>

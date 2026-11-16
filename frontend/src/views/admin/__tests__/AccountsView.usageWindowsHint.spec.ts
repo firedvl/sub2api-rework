@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { routeLocationKey } from 'vue-router'
 
-import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
 import AccountsView from '../AccountsView.vue'
 
 const {
@@ -110,10 +109,10 @@ function mountView(attachTo?: Element, query: Record<string, string> = {}) {
         HelpTooltip: HelpTooltipStub,
         Pagination: true,
         ConfirmDialog: true,
-        AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+        AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
         AccountTableFilters: {
           props: ['groups'],
-          template: '<div data-test="account-filters" :data-group-count="groups.length"></div>'
+          template: '<div data-test="account-filters" :data-group-count="groups.length"><slot /></div>'
         },
         AccountBulkActionsBar: { template: '<div data-test="bulk-actions"></div>' },
         AccountActionMenu: true,
@@ -234,10 +233,14 @@ describe('admin AccountsView usage windows hint', () => {
     expect(wrapper.get('[data-test="table-rows"]').text()).toBe('Current table page')
     expect(wrapper.text()).toContain('OpenAI reserve fleet row')
     expect(wrapper.text()).toContain('Gemini fleet row')
-    expect(wrapper.findAll('.operator-capacity-provider-name').map((node) => node.text())).toEqual([
+    expect(wrapper.findAll('[data-testid="account-capacity-row"]')).toHaveLength(3)
+    expect(wrapper.find('[data-testid^="provider-toggle-"]').exists()).toBe(false)
+    await wrapper.get('button[aria-label="admin.accountsUi.groupByProvider"]').trigger('click')
+    expect(wrapper.findAll('.fleet-group-name').map((node) => node.text())).toEqual([
       'OpenAI',
       'Gemini',
     ])
+    expect(localStorage.getItem('account-fleet-group-by-provider')).toBe('1')
     expect(listAccounts).toHaveBeenCalledWith(1, 1000, {
       platform: '',
       type: '',
@@ -261,7 +264,7 @@ describe('admin AccountsView usage windows hint', () => {
     await wrapper.get('#account-technical-tab').trigger('click')
     expect(capacityPanel.attributes('style')).toContain('display: none')
     expect(technicalPanel.attributes('style')).not.toContain('display: none')
-    expect(technicalPanel.find('[data-test="bulk-actions"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="bulk-actions"]').exists()).toBe(true)
     expect(technicalPanel.find('[data-test="data-table"]').exists()).toBe(true)
     expect(listAccounts).toHaveBeenCalledTimes(listCalls)
     expect(getBatchUsage).toHaveBeenCalledTimes(usageCalls)
@@ -271,7 +274,8 @@ describe('admin AccountsView usage windows hint', () => {
     const wrapper = mountView(undefined, { operator_status: 'limited' })
     await flushPromises()
 
-    expect(wrapper.getComponent(OperatorCapacityOverview).props('status')).toBe('limited')
+    expect(wrapper.get('[data-testid="account-status-limited"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="account-status-all"]').attributes('aria-pressed')).toBe('false')
   })
 
   it('renders an explanatory tooltip next to the usage windows column header', async () => {

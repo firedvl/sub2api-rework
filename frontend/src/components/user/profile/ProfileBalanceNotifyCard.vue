@@ -1,24 +1,28 @@
 <template>
-  <div class="card">
-    <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-      <h2 class="text-lg font-medium text-gray-900 dark:text-white">
+  <section class="viz-card" aria-labelledby="profile-balance-notify-title">
+    <header class="viz-card-head">
+      <h2
+        id="profile-balance-notify-title"
+        class="viz-card-title inline-flex items-center gap-2"
+        :title="t('profile.balanceNotify.description')"
+      >
+        <Icon name="bell" size="sm" class="text-gray-400" />
         {{ t('profile.balanceNotify.title') }}
       </h2>
-      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-        {{ t('profile.balanceNotify.description') }}
-      </p>
-    </div>
-    <div class="px-6 py-6 space-y-6">
-      <!-- Enable toggle -->
-      <div class="flex items-center justify-between">
-        <label class="input-label mb-0">{{ t('profile.balanceNotify.enabled') }}</label>
+      <div class="viz-card-tools">
         <label class="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" v-model="notifyEnabled" @change="handleToggle" class="sr-only peer" />
-          <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-600 peer-checked:bg-primary-600"></div>
+          <input
+            type="checkbox"
+            v-model="notifyEnabled"
+            @change="handleToggle"
+            class="sr-only peer"
+            :aria-label="t('profile.balanceNotify.enabled')"
+          />
+          <div class="w-11 h-6 bg-gray-200 peer-focus-visible:ring-2 peer-focus-visible:ring-primary-500 peer-focus-visible:ring-offset-2 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-600 peer-checked:bg-primary-600 motion-reduce:after:transition-none"></div>
         </label>
       </div>
-
-      <template v-if="notifyEnabled">
+    </header>
+    <div v-if="notifyEnabled" class="viz-card-body space-y-5">
         <!-- Custom threshold with save button -->
         <div>
           <label class="input-label">
@@ -151,9 +155,8 @@
             {{ t('profile.balanceNotify.maxEmailsReached') }}
           </p>
         </div>
-      </template>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -162,6 +165,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { userAPI } from '@/api'
+import Icon from '@/components/icons/Icon.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { NotifyEmailEntry } from '@/types'
 

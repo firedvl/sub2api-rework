@@ -33,7 +33,9 @@ for (const width of [390, 1280]) {
       return route.fulfill({ json: { code: 0, data: account } })
     })
     await page.goto('/admin/accounts')
-    await page.getByRole('button', { name: 'Edit Grok Eligibility Fixture', exact: true }).click()
+    // Row click opens the account drawer; its footer Edit opens the editor.
+    await page.getByTestId('account-capacity-row').filter({ hasText: 'Grok Eligibility Fixture' }).click()
+    await page.getByRole('dialog', { name: 'Grok Eligibility Fixture', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Edit Account', exact: true })
     const panel = dialog.getByTestId('grok-media-eligibility-card')
     await expect(panel).toContainText('Eligibility unavailable')

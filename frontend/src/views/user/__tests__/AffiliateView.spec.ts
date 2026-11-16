@@ -102,8 +102,10 @@ describe('AffiliateView', () => {
       ]))
     }
 
-    await copyButtons[0].trigger('click')
-    await copyButtons[1].trigger('click')
+    const copyCodeButton = copyButtons.find((button) => button.text() === 'affiliate.copyCode')!
+    const copyLinkButton = copyButtons.find((button) => button.text() === 'affiliate.copyLink')!
+    await copyCodeButton.trigger('click')
+    await copyLinkButton.trigger('click')
     await flushPromises()
 
     expect(copyToClipboard).toHaveBeenNthCalledWith(1, affiliateCode, 'affiliate.codeCopied')
@@ -112,5 +114,17 @@ describe('AffiliateView', () => {
       `${window.location.origin}/register?aff=${encodeURIComponent(affiliateCode)}`,
       'affiliate.linkCopied',
     )
+  })
+
+  it('confirms a successful copy with a check icon', async () => {
+    const wrapper = mount(AffiliateView, {
+      global: { stubs: { AppLayout: { template: '<main><slot /></main>' } } },
+    })
+    await flushPromises()
+    const linkButton = wrapper.findAll('button').find((button) => button.text() === 'affiliate.copyLink')!
+    expect(linkButton.find('.copy-pop').exists()).toBe(false)
+    await linkButton.trigger('click')
+    await flushPromises()
+    expect(linkButton.find('.copy-pop').exists()).toBe(true)
   })
 })

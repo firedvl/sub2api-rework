@@ -1,48 +1,41 @@
 <template>
   <AppLayout>
-    <div class="w-full min-w-0 space-y-6 pb-8">
-      <header class="page-header mb-0 flex flex-wrap items-center justify-between gap-3">
-        <p class="page-description mt-0 max-w-2xl">
-          {{
-            isV1Mode
-              ? t('channelMonitorV2.admin.descriptionV1')
-              : t('channelMonitorV2.admin.descriptionV2')
-          }}
-        </p>
-        <div>
-          <div
-            class="tabs inline-flex w-full max-w-xl flex-wrap sm:w-auto"
-            role="tablist"
-            :aria-label="t('channelMonitorV2.admin.tabAria')"
+    <div class="ui-page monitor-page">
+      <div class="monitor-head">
+        <div
+          class="viz-seg"
+          role="tablist"
+          :aria-label="t('channelMonitorV2.admin.tabAria')"
+        >
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="adminMonitorTab === 'v2'"
+            :aria-pressed="adminMonitorTab === 'v2'"
+            :title="t('channelMonitorV2.admin.tabV2')"
+            @click="adminMonitorTab = 'v2'"
           >
-            <button
-              type="button"
-              role="tab"
-              class="tab flex-1 sm:flex-none"
-              :class="adminMonitorTab === 'v2' ? 'tab-active' : ''"
-              :aria-selected="adminMonitorTab === 'v2'"
-              @click="adminMonitorTab = 'v2'"
-            >
-              {{ t('channelMonitorV2.admin.tabV2') }}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="tab flex-1 sm:flex-none"
-              :class="adminMonitorTab === 'legacy' ? 'tab-active' : ''"
-              :aria-selected="adminMonitorTab === 'legacy'"
-              @click="adminMonitorTab = 'legacy'"
-            >
-              {{ isV1Mode ? t('channelMonitorV2.admin.tabV1Active') : t('channelMonitorV2.admin.tabV1History') }}
-            </button>
-          </div>
+            {{ t('admin.routingUi.monitorTabs.passive') }}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="adminMonitorTab === 'legacy'"
+            :aria-pressed="adminMonitorTab === 'legacy'"
+            :title="isV1Mode ? t('channelMonitorV2.admin.tabV1Active') : t('channelMonitorV2.admin.tabV1History')"
+            @click="adminMonitorTab = 'legacy'"
+          >
+            {{ isV1Mode ? t('admin.routingUi.monitorTabs.probes') : t('admin.routingUi.monitorTabs.history') }}
+          </button>
         </div>
-      </header>
+        <HelpTooltip interactive :aria-label="t('admin.routingUi.info')"
+          :content="isV1Mode ? t('channelMonitorV2.admin.descriptionV1') : t('channelMonitorV2.admin.descriptionV2')"
+        />
+      </div>
 
       <MonitorSettingsPanel v-if="adminMonitorTab === 'v2'" />
 
-      <TablePageLayout v-else>
-      <template #filters>
+      <template v-else>
         <MonitorFiltersBar
           v-model:search="searchQuery"
           v-model:provider="providerFilter"
@@ -53,69 +46,102 @@
           @manage-templates="showTemplateManager = true"
           @search-input="handleSearch"
         />
-      </template>
 
-      <template #table>
-        <DataTable :columns="columns" :data="monitors" :loading="loading">
-          <template #cell-name="{ row, value }">
-            <div class="flex items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-              <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
-                <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
-              </HelpTooltip>
-            </div>
-          </template>
+        <section class="ui-card monitor-card" :class="{ 'is-refreshing': loading && monitors.length > 0 }" :aria-busy="loading">
+          <div class="ui-table-wrap">
+            <table class="ui-table monitor-table">
+              <thead>
+                <tr>
+                  <th v-for="col in columns" :key="col.key" :class="monitorColumnClass[col.key]" :data-col="col.key">
+                    <span v-if="col.key === 'actions'" class="sr-only">{{ col.label }}</span>
+                    <template v-else>{{ col.label }}</template>
+                  </th>
+                </tr>
+              </thead>
+              <tbody v-if="loading && monitors.length === 0">
+                <tr v-for="n in 4" :key="`s${n}`" aria-hidden="true">
+                  <td v-for="col in columns" :key="col.key" :class="monitorColumnClass[col.key]">
+                    <span class="skeleton monitor-skel" :class="col.key === 'name' ? 'is-wide' : ''"></span>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody v-else class="ui-rows-enter">
+                <tr v-for="row in monitors" :key="row.id" :class="{ 'is-off': !row.enabled }">
+                  <td v-for="col in columns" :key="col.key" :class="monitorColumnClass[col.key]" :data-col="col.key">
+                    <div v-if="col.key === 'name'" class="monitor-name">
+                      <span class="monitor-mark">
+                        <ProviderMark :platform="row.provider" :size="30" />
+                        <i class="ui-dot monitor-mark-dot" :class="statusDot(row.primary_status)" :title="statusLabel(row.primary_status)"></i>
+                      </span>
+                      <span class="min-w-0">
+                        <span class="ui-cell-main monitor-title">
+                          <span class="truncate">{{ row.name }}</span>
+                          <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
+                            <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
+                          </HelpTooltip>
+                        </span>
+                        <span class="monitor-sub">
+                          <span>{{ providerLabel(row.provider) }}</span>
+                          <span class="monitor-mode" :class="checkModeBadgeClass(row.check_mode)">{{ checkModeLabel(row.check_mode) }}</span>
+                        </span>
+                      </span>
+                    </div>
 
-          <template #cell-provider="{ row }">
-            <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium" :class="providerBadgeClass(row.provider)">
-              {{ providerLabel(row.provider) }}
-            </span>
-            <!-- 三种检测模式并列展示，quota 系配额数据源与纯探活一眼可分 -->
-            <span class="ml-1 inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium" :class="checkModeBadgeClass(row.check_mode)">
-              {{ checkModeLabel(row.check_mode) }}
-            </span>
-          </template>
+                    <MonitorPrimaryModelCell v-else-if="col.key === 'primary_model'" :row="row" />
 
-          <template #cell-primary_model="{ row }">
-            <MonitorPrimaryModelCell :row="row" />
-          </template>
+                    <span
+                      v-else-if="col.key === 'availability_7d'"
+                      class="monitor-avail"
+                      :class="availabilityTone(row)"
+                      :title="formatAvailability(row)"
+                    >
+                      <span class="monitor-avail-track"><i v-if="row.primary_status" :style="{ width: `${Math.max(2, Math.min(100, row.availability_7d || 0))}%` }"></i></span>
+                      <b>{{ formatAvailability(row) }}</b>
+                    </span>
 
-          <template #cell-availability_7d="{ row }">
-            <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatAvailability(row) }}</span>
-          </template>
+                    <span v-else-if="col.key === 'latency'" class="monitor-latency">
+                      {{ formatLatency(row.primary_latency_ms) }}<small v-if="row.primary_latency_ms != null">ms</small>
+                    </span>
 
-          <template #cell-latency="{ row }">
-            <span class="text-sm text-gray-900 dark:text-gray-100">{{ formatLatency(row.primary_latency_ms) }}</span>
-          </template>
+                    <Toggle
+                      v-else-if="col.key === 'enabled'"
+                      :modelValue="row.enabled"
+                      :aria-label="`${row.name}: ${t('admin.channelMonitor.columns.enabled')}`"
+                      @update:modelValue="toggleEnabled(row)"
+                    />
 
-          <template #cell-enabled="{ row }">
-            <Toggle :modelValue="row.enabled" @update:modelValue="toggleEnabled(row)" />
-          </template>
+                    <MonitorActionsCell
+                      v-else-if="col.key === 'actions'"
+                      class="monitor-row-actions"
+                      :row="row"
+                      :running="runningId === row.id"
+                      :duplicating="duplicatingIds.has(row.id)"
+                      @run="handleRunNow"
+                      @duplicate="handleDuplicate"
+                      @edit="openEditDialog"
+                      @delete="handleDelete"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-          <template #cell-actions="{ row }">
-            <MonitorActionsCell
-              :row="row"
-              :running="runningId === row.id"
-              :duplicating="duplicatingIds.has(row.id)"
-              @run="handleRunNow"
-              @duplicate="handleDuplicate"
-              @edit="openEditDialog"
-              @delete="handleDelete"
-            />
-          </template>
+          <div v-if="!loading && monitors.length === 0" class="ui-empty">
+            <span class="ui-empty-icon"><Icon name="signal" size="md" /></span>
+            <template v-if="searchQuery.trim() || providerFilter || enabledFilter">
+              <b>{{ t('admin.routingUi.noMatches') }}</b>
+              <button type="button" class="btn btn-secondary btn-sm" @click="resetFilters">{{ t('admin.routingUi.reset') }}</button>
+            </template>
+            <template v-else>
+              <b>{{ t('admin.channelMonitor.noMonitorsYet') }}</b>
+              <button type="button" class="btn btn-primary btn-sm" @click="openCreateDialog">
+                <Icon name="plus" size="sm" />{{ t('admin.routingUi.newMonitor') }}
+              </button>
+            </template>
+          </div>
+        </section>
 
-          <template #empty>
-            <EmptyState
-              :title="t('admin.channelMonitor.noMonitorsYet')"
-              :description="t('admin.channelMonitor.createFirstMonitor')"
-              :action-text="t('admin.channelMonitor.createButton')"
-              @action="openCreateDialog"
-            />
-          </template>
-        </DataTable>
-      </template>
-
-      <template #pagination>
         <Pagination
           v-if="pagination.total > 0"
           :page="pagination.page"
@@ -125,7 +151,6 @@
           @update:pageSize="onPageSizeChange"
         />
       </template>
-      </TablePageLayout>
     </div>
 
     <MonitorFormDialog
@@ -174,11 +199,9 @@ import type {
 } from '@/api/admin/channelMonitor'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
-import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import EmptyState from '@/components/common/EmptyState.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -199,7 +222,7 @@ const isV1Mode = computed(() => isChannelMonitorV1Mode())
 const adminMonitorTab = ref<'v2' | 'legacy'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
 const {
   providerLabel,
-  providerBadgeClass,
+  statusLabel,
   checkModeLabel,
   checkModeBadgeClass,
   formatLatency,
@@ -226,15 +249,40 @@ const duplicatingIds = reactive(new Set<number>())
 let abortController: AbortController | null = null
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
+// Provider and check mode render under the monitor name.
 const columns = computed<Column[]>(() => [
   { key: 'name', label: t('admin.channelMonitor.columns.name'), sortable: false },
-  { key: 'provider', label: t('admin.channelMonitor.columns.provider'), sortable: false },
   { key: 'primary_model', label: t('admin.channelMonitor.columns.primaryModel'), sortable: false },
   { key: 'availability_7d', label: t('admin.channelMonitor.columns.availability7d'), sortable: false },
   { key: 'latency', label: t('admin.channelMonitor.columns.latency'), sortable: false },
   { key: 'enabled', label: t('admin.channelMonitor.columns.enabled'), sortable: false },
   { key: 'actions', label: t('admin.channelMonitor.columns.actions'), sortable: false },
 ])
+
+const monitorColumnClass: Record<string, string> = {
+  name: 'monitor-col-name',
+  primary_model: 'is-optional',
+  latency: 'is-optional',
+  enabled: 'monitor-col-enabled',
+  actions: 'monitor-col-actions',
+}
+
+const statusDots: Record<string, string> = { operational: 'is-ok', degraded: 'is-warn', failed: 'is-bad', error: 'is-bad' }
+const statusDot = (status: ChannelMonitor['primary_status']) => statusDots[status] ?? ''
+
+function availabilityTone(row: ChannelMonitor): string {
+  if (!row.primary_status) return 'is-none'
+  const value = row.availability_7d ?? 0
+  return value >= 99 ? 'is-ok' : value >= 95 ? 'is-warn' : 'is-bad'
+}
+
+function resetFilters() {
+  searchQuery.value = ''
+  providerFilter.value = ''
+  enabledFilter.value = ''
+  pagination.page = 1
+  reload()
+}
 
 const deleteConfirmMessage = computed(() => {
   const name = deleting.value?.name || ''
@@ -385,3 +433,191 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.monitor-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.monitor-head .viz-seg button {
+  height: 1.875rem;
+  padding: 0 0.875rem;
+  font-size: 0.8125rem;
+}
+
+.monitor-card {
+  overflow: hidden;
+  transition: opacity var(--operator-duration) var(--operator-ease-out);
+}
+
+.monitor-card.is-refreshing {
+  opacity: 0.7;
+}
+
+.monitor-table td {
+  height: 3.75rem;
+}
+
+.monitor-table tr.is-off .monitor-name {
+  opacity: 0.55;
+}
+
+.monitor-col-name {
+  min-width: 15rem;
+}
+
+.monitor-col-enabled,
+.monitor-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.monitor-skel {
+  display: block;
+  width: 4rem;
+  height: 0.75rem;
+  border-radius: 999px;
+}
+
+.monitor-skel.is-wide {
+  width: 11rem;
+}
+
+.monitor-name {
+  display: flex;
+  min-width: 0;
+  max-width: 24rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.monitor-mark {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.monitor-mark-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 0.5625rem;
+  height: 0.5625rem;
+  box-shadow: 0 0 0 2px var(--operator-card) !important;
+}
+
+.monitor-title {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.monitor-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.monitor-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.125rem;
+}
+
+.monitor-avail {
+  display: flex;
+  min-width: 8rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.monitor-avail-track {
+  position: relative;
+  height: 0.375rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--operator-track);
+}
+
+.monitor-avail-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--operator-success-fill);
+  transform-origin: left center;
+  animation: viz-grow-x 700ms var(--operator-ease-out) both;
+}
+
+.monitor-avail.is-warn .monitor-avail-track i { background: var(--operator-warning-fill); }
+.monitor-avail.is-bad .monitor-avail-track i { background: var(--operator-destructive-fill); }
+
+.monitor-avail b {
+  min-width: 3.5rem;
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.monitor-avail.is-none b {
+  color: var(--operator-subtle-foreground);
+}
+
+.monitor-latency {
+  font-variant-numeric: tabular-nums;
+}
+
+.monitor-latency small {
+  margin-left: 0.125rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.monitor-row-actions {
+  opacity: 0;
+  transition: opacity var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.monitor-table tr:hover .monitor-row-actions,
+.monitor-table tr:focus-within .monitor-row-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .monitor-row-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .monitor-table .is-optional {
+    display: none;
+  }
+
+  .monitor-col-name {
+    min-width: 12rem;
+  }
+
+  .monitor-table th,
+  .monitor-table td {
+    padding: 0 0.625rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monitor-avail-track i {
+    animation: none;
+  }
+}
+</style>

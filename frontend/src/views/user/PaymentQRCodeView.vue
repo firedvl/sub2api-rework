@@ -1,10 +1,10 @@
 <template>
   <AppLayout>
-    <div class="mx-auto flex max-w-md flex-col items-center space-y-6 py-8">
+    <div class="ui-page ui-stagger mx-auto w-full max-w-md items-center py-8">
       <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
         {{ qrUrl ? scanTitle : t('payment.qr.payInNewWindow') }}
       </h2>
-      <div v-if="qrUrl" class="rounded-2xl bg-white p-6 shadow-lg dark:bg-dark-800">
+      <div v-if="qrUrl" class="ui-card p-5">
         <canvas ref="qrCanvas" class="mx-auto"></canvas>
       </div>
       <!-- Scan prompt for QR code -->
@@ -12,7 +12,7 @@
         {{ scanHint }}
       </p>
       <div v-if="expired" class="text-center">
-        <p class="text-lg font-medium text-red-500">{{ t('payment.qr.expired') }}</p>
+        <p class="text-lg font-medium text-red-600">{{ t('payment.qr.expired') }}</p>
         <button class="btn btn-primary mt-4" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
       </div>
       <div v-else class="text-center">

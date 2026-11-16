@@ -1,144 +1,189 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <!-- Left: Search + Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.channels.searchChannels', 'Search channels...')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
-
-            <Select
-              v-model="filters.status"
-              :options="statusFilterOptions"
-              :placeholder="t('admin.channels.allStatus', 'All Status')"
-              class="w-40"
-              @change="loadChannels"
-            />
-          </div>
-
-          <!-- Right: Actions -->
-          <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
-            <button
-              @click="loadChannels"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh', 'Refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button @click="openCreateDialog" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('admin.channels.createChannel', 'Create Channel') }}
-            </button>
-          </div>
+    <div class="ui-page channels-page">
+      <div class="ui-toolbar channels-toolbar" role="toolbar" :aria-label="t('admin.routingUi.filters')">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="t('admin.routingUi.search')"
+            :aria-label="t('admin.channels.searchChannels', 'Search channels...')"
+            @input="handleSearch"
+          />
+        </label>
+        <div class="viz-seg" role="group" :aria-label="t('admin.channels.columns.status', 'Status')">
+          <button
+            v-for="option in statusFilterOptions"
+            :key="option.value"
+            type="button"
+            :aria-pressed="filters.status === option.value"
+            @click="setStatusFilter(option.value)"
+          >
+            {{ option.value ? option.label : t('admin.routingUi.all') }}
+          </button>
         </div>
-      </template>
-
-      <template #table>
-        <DataTable
-          :columns="columns"
-          :data="channels"
-          :loading="loading"
-          :server-side-sort="true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
-          @sort="handleSort"
+        <span class="ui-grow"></span>
+        <button
+          type="button"
+          class="app-icon-button channels-tool"
+          :disabled="loading"
+          :aria-label="t('common.refresh', 'Refresh')"
+          :title="t('common.refresh', 'Refresh')"
+          @click="loadChannels"
         >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-          </template>
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button type="button" class="btn btn-primary" @click="openCreateDialog">
+          <Icon name="plus" size="sm" />
+          <span>{{ t('admin.routingUi.newChannel') }}</span>
+        </button>
+      </div>
 
-          <template #cell-description="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">{{ value || '-' }}</span>
-          </template>
-
-          <template #cell-status="{ row }">
-            <Toggle
-              :modelValue="row.status === 'active'"
-              @update:modelValue="toggleChannelStatus(row)"
-            />
-          </template>
-
-          <template #cell-group_count="{ row }">
-            <span
-              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-            >
-              {{ (row.group_ids || []).length }}
-              {{ t('admin.channels.groupsUnit', 'groups') }}
-            </span>
-          </template>
-
-          <template #cell-pricing_count="{ row }">
-            <span
-              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-            >
-              {{ (row.model_pricing || []).length }}
-              {{ t('admin.channels.pricingUnit', 'pricing rules') }}
-            </span>
-          </template>
-
-          <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-600 dark:text-gray-400">
-              {{ formatDate(value) }}
-            </span>
-          </template>
-
-          <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button
+      <section class="ui-card channels-card" :class="{ 'is-refreshing': loading && channels.length > 0 }" :aria-busy="loading">
+        <div class="ui-table-wrap">
+          <table class="ui-table channels-table">
+            <thead>
+              <tr>
+                <th
+                  v-for="col in columns"
+                  :key="col.key"
+                  :class="channelColumnClass[col.key]"
+                  :data-col="col.key"
+                  :aria-sort="col.sortable && sortState.sort_by === col.key ? (sortState.sort_order === 'asc' ? 'ascending' : 'descending') : undefined"
+                >
+                  <span v-if="col.key === 'actions'" class="sr-only">{{ col.label }}</span>
+                  <button
+                    v-else-if="col.sortable"
+                    type="button"
+                    class="ui-sort"
+                    :aria-pressed="sortState.sort_by === col.key"
+                    @click="toggleHeaderSort(col.key)"
+                  >
+                    {{ col.label }}
+                    <Icon
+                      :name="sortState.sort_by === col.key ? (sortState.sort_order === 'asc' ? 'arrowUp' : 'arrowDown') : 'arrowsUpDown'"
+                      size="xs"
+                      :class="sortState.sort_by === col.key ? '' : 'opacity-40'"
+                    />
+                  </button>
+                  <template v-else>{{ col.label }}</template>
+                </th>
+              </tr>
+            </thead>
+            <tbody v-if="loading && channels.length === 0">
+              <tr v-for="n in 4" :key="`s${n}`" aria-hidden="true">
+                <td v-for="col in columns" :key="col.key" :class="channelColumnClass[col.key]">
+                  <span class="skeleton channels-skel" :class="col.key === 'name' ? 'is-wide' : ''"></span>
+                </td>
+              </tr>
+            </tbody>
+            <tbody v-else class="ui-rows-enter">
+              <tr
+                v-for="row in channels"
+                :key="row.id"
+                class="is-clickable"
+                :class="{ 'is-inactive': row.status !== 'active' }"
+                tabindex="0"
+                :aria-label="`${t('common.edit', 'Edit')} ${row.name}`"
+                :data-testid="`channel-row-${row.id}`"
                 @click="openEditDialog(row)"
-                class="row-action"
-                :title="t('common.edit', 'Edit')"
+                @keydown.enter.self.prevent="openEditDialog(row)"
               >
-                <Icon name="edit" size="sm" />
-                <span class="row-action-label">{{ t('common.edit', 'Edit') }}</span>
-              </button>
-              <button
-                @click="handleDelete(row)"
-                class="row-action row-action-danger"
-                :title="t('common.delete', 'Delete')"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="row-action-label">{{ t('common.delete', 'Delete') }}</span>
-              </button>
-            </div>
-          </template>
+                <td v-for="col in columns" :key="col.key" :class="channelColumnClass[col.key]" :data-col="col.key">
+                  <span v-if="col.key === 'name'" class="channels-name">
+                    <span class="ui-cell-main">{{ row.name }}</span>
+                    <span v-if="row.description" class="ui-cell-sub" :title="row.description">{{ row.description }}</span>
+                  </span>
 
-          <template #empty>
-            <EmptyState
-              :title="t('admin.channels.noChannelsYet', 'No Channels Yet')"
-              :description="t('admin.channels.createFirstChannel', 'Create your first channel to manage model pricing')"
-              :action-text="t('admin.channels.createChannel', 'Create Channel')"
-              @action="openCreateDialog"
-            />
-          </template>
-        </DataTable>
-      </template>
+                  <span v-else-if="col.key === 'providers'" class="channels-marks" :title="channelPlatforms(row).map(platformName).join(', ')">
+                    <ProviderMark
+                      v-for="platform in channelPlatforms(row).slice(0, 4)"
+                      :key="platform"
+                      :platform="platform"
+                      :size="24"
+                      :label="platformName(platform)"
+                    />
+                    <small v-if="channelPlatforms(row).length > 4">+{{ channelPlatforms(row).length - 4 }}</small>
+                    <span v-if="channelPlatforms(row).length === 0" class="text-gray-400">—</span>
+                  </span>
 
-      <template #pagination>
-        <Pagination
-          v-if="pagination.total > 0"
-          :page="pagination.page"
-          :total="pagination.total"
-          :page-size="pagination.page_size"
-          @update:page="handlePageChange"
-          @update:pageSize="handlePageSizeChange"
-        />
-      </template>
-    </TablePageLayout>
+                  <span
+                    v-else-if="col.key === 'group_count'"
+                    class="channels-count"
+                    :title="groupNames(row)"
+                  >
+                    <Icon name="layers" size="xs" />{{ (row.group_ids || []).length }}
+                  </span>
+
+                  <span
+                    v-else-if="col.key === 'pricing_count'"
+                    class="channels-count"
+                    :title="`${(row.model_pricing || []).length} ${t('admin.channels.pricingUnit', 'pricing rules')}`"
+                  >
+                    <Icon name="dollar" size="xs" />{{ (row.model_pricing || []).length }}
+                  </span>
+
+                  <span v-else-if="col.key === 'status'" class="channels-status" @click.stop @keydown.stop>
+                    <Toggle
+                      :modelValue="row.status === 'active'"
+                      :aria-label="`${row.name}: ${row.status === 'active' ? t('admin.channels.statusActive', 'Active') : t('admin.channels.statusDisabled', 'Disabled')}`"
+                      @update:modelValue="toggleChannelStatus(row)"
+                    />
+                  </span>
+
+                  <span v-else-if="col.key === 'created_at'" class="ui-cell-sub">{{ formatDate(row.created_at) }}</span>
+
+                  <div v-else-if="col.key === 'actions'" class="channels-actions" @click.stop @keydown.stop>
+                    <button
+                      type="button"
+                      class="app-icon-button"
+                      :aria-label="t('common.edit', 'Edit')"
+                      :title="t('common.edit', 'Edit')"
+                      @click="openEditDialog(row)"
+                    >
+                      <Icon name="edit" size="sm" />
+                    </button>
+                    <button
+                      type="button"
+                      class="app-icon-button channels-danger"
+                      :aria-label="t('common.delete', 'Delete')"
+                      :title="t('common.delete', 'Delete')"
+                      @click="handleDelete(row)"
+                    >
+                      <Icon name="trash" size="sm" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="!loading && channels.length === 0" class="ui-empty">
+          <span class="ui-empty-icon"><Icon name="dollar" size="md" /></span>
+          <template v-if="searchQuery.trim() || filters.status">
+            <b>{{ t('admin.routingUi.noMatches') }}</b>
+            <button type="button" class="btn btn-secondary btn-sm" @click="resetFilters">{{ t('admin.routingUi.reset') }}</button>
+          </template>
+          <template v-else>
+            <b>{{ t('admin.channels.noChannelsYet', 'No Channels Yet') }}</b>
+            <button type="button" class="btn btn-primary btn-sm" @click="openCreateDialog">
+              <Icon name="plus" size="sm" />{{ t('admin.routingUi.newChannel') }}
+            </button>
+          </template>
+        </div>
+      </section>
+
+      <Pagination
+        v-if="pagination.total > 0"
+        :page="pagination.page"
+        :total="pagination.total"
+        :page-size="pagination.page_size"
+        @update:page="handlePageChange"
+        @update:pageSize="handlePageSizeChange"
+      />
+    </div>
 
     <!-- Create/Edit Dialog -->
     <BaseDialog
@@ -641,12 +686,11 @@ import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass } from '@/utils/platformColors'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
-import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import EmptyState from '@/components/common/EmptyState.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
+import { providerName } from '@/utils/providerSeries'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
@@ -694,11 +738,12 @@ interface PlatformSection {
 
 // ── Table columns ──
 const columns = computed<Column[]>(() => [
+  // Description renders under the name; providers come from mappings, pricing, and groups.
   { key: 'name', label: t('admin.channels.columns.name', 'Name'), sortable: true },
-  { key: 'description', label: t('admin.channels.columns.description', 'Description'), sortable: false },
-  { key: 'status', label: t('admin.channels.columns.status', 'Status'), sortable: true },
+  { key: 'providers', label: t('admin.routingUi.columns.providers'), sortable: false },
   { key: 'group_count', label: t('admin.channels.columns.groups', 'Groups'), sortable: false },
   { key: 'pricing_count', label: t('admin.channels.columns.pricing', 'Pricing'), sortable: false },
+  { key: 'status', label: t('admin.channels.columns.status', 'Status'), sortable: true },
   { key: 'created_at', label: t('admin.channels.columns.createdAt', 'Created'), sortable: true },
   { key: 'actions', label: t('admin.channels.columns.actions', 'Actions'), sortable: false }
 ])
@@ -1351,6 +1396,56 @@ function handleSort(key: string, order: 'asc' | 'desc') {
   loadChannels()
 }
 
+// ── List presentation ──
+const channelColumnClass: Record<string, string> = {
+  name: 'channels-col-name',
+  providers: 'channels-col-providers',
+  group_count: 'is-optional',
+  pricing_count: 'is-optional',
+  created_at: 'is-optional',
+  actions: 'channels-col-actions',
+}
+
+const groupsById = computed(() => new Map(allGroups.value.map((group) => [group.id, group])))
+const platformName = (platform: string) => t('admin.groups.platforms.' + platform, providerName(platform))
+
+/** Providers a channel touches, in the canonical platform order. */
+function channelPlatforms(channel: Channel): string[] {
+  const found = new Set<string>()
+  Object.keys(channel.model_mapping || {}).forEach((platform) => found.add(platform))
+  ;(channel.model_pricing || []).forEach((entry) => entry.platform && found.add(entry.platform))
+  ;(channel.group_ids || []).forEach((id) => {
+    const platform = groupsById.value.get(id)?.platform
+    if (platform && platform !== 'composite') found.add(platform)
+  })
+  const order = platformOrder as string[]
+  return [...found].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
+}
+
+function groupNames(channel: Channel): string {
+  const ids = channel.group_ids || []
+  const names = ids.map((id) => groupsById.value.get(id)?.name).filter(Boolean)
+  return names.length ? names.join(', ') : `${ids.length} ${t('admin.channels.groupsUnit', 'groups')}`
+}
+
+function toggleHeaderSort(key: string) {
+  handleSort(key, sortState.sort_by === key && sortState.sort_order === 'asc' ? 'desc' : 'asc')
+}
+
+function setStatusFilter(status: string) {
+  if (filters.status === status) return
+  filters.status = status
+  pagination.page = 1
+  loadChannels()
+}
+
+function resetFilters() {
+  searchQuery.value = ''
+  filters.status = ''
+  pagination.page = 1
+  loadChannels()
+}
+
 // ── Dialog ──
 function resetForm() {
   form.name = ''
@@ -1701,6 +1796,151 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.channels-tool {
+  border: 1px solid var(--operator-border);
+  background: var(--operator-card);
+}
+
+.channels-card {
+  overflow: hidden;
+  transition: opacity var(--operator-duration) var(--operator-ease-out);
+}
+
+.channels-card.is-refreshing {
+  opacity: 0.7;
+}
+
+.channels-table tr.is-inactive .channels-name {
+  opacity: 0.6;
+}
+
+.channels-table tr.is-clickable:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+
+.channels-col-name {
+  min-width: 14rem;
+}
+
+.channels-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.channels-name {
+  display: block;
+  max-width: 28rem;
+}
+
+.channels-skel {
+  display: block;
+  width: 4rem;
+  height: 0.75rem;
+  border-radius: 999px;
+}
+
+.channels-skel.is-wide {
+  width: 11rem;
+}
+
+.channels-marks {
+  display: inline-flex;
+  align-items: center;
+}
+
+.channels-marks > :deep(.provider-mark) {
+  box-shadow:
+    0 0 0 2px var(--operator-card),
+    inset 0 0 0 1.5px color-mix(in srgb, var(--mark-color) 62%, transparent);
+  transition: transform 200ms var(--operator-spring);
+}
+
+.channels-marks > :deep(.provider-mark + .provider-mark) {
+  margin-left: -0.375rem;
+}
+
+.channels-table tr:hover .channels-marks > :deep(.provider-mark) {
+  transform: translateY(-1px);
+}
+
+.channels-marks small {
+  margin-left: 0.375rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.channels-count {
+  display: inline-flex;
+  height: 1.5rem;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.channels-count :deep(svg) {
+  color: var(--operator-subtle-foreground);
+}
+
+.channels-status {
+  display: inline-flex;
+}
+
+.channels-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.125rem;
+  opacity: 0;
+  transition: opacity var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.channels-table tr:hover .channels-actions,
+.channels-table tr:focus-within .channels-actions {
+  opacity: 1;
+}
+
+.channels-danger:hover {
+  color: var(--operator-destructive);
+}
+
+@media (hover: none) {
+  .channels-actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .channels-table {
+    table-layout: fixed;
+  }
+
+  .channels-table .is-optional,
+  .channels-table .channels-col-actions {
+    display: none;
+  }
+
+  .channels-col-name {
+    min-width: 0;
+    width: 52%;
+  }
+
+  .channels-table th,
+  .channels-table td {
+    padding: 0 0.625rem;
+  }
+
+  .channels-toolbar .ui-search {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+
 .channel-dialog-body {
   display: flex;
   flex-direction: column;

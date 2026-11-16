@@ -32,7 +32,8 @@ for (const width of [390, 1280]) {
       })) })
     })
     await page.goto('/admin/users')
-    await page.getByRole('button', { name: 'More', exact: true }).click()
+    // Scope to the page: the 390px mobile tab bar also has a "More" button.
+    await page.getByRole('main').getByRole('button', { name: 'More', exact: true }).click()
     await page.getByRole('button', { name: 'Platform Quotas', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Platform Quotas' })
     await expect(dialog.locator('tbody tr')).toHaveCount(platforms.length)
@@ -81,7 +82,9 @@ for (const width of [390, 1280]) {
       return fulfill(route, { ...key, status: 'active', quota_used: 0 })
     })
     await page.goto('/keys')
-    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    // Edit moved into the key row's ⋯ menu.
+    await page.getByTestId('key-more-1').click()
+    await page.getByRole('menuitem', { name: 'Edit', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Edit API Key' })
     await dialog.locator('#key-form input[type="text"]').fill('Draft name')
     await dialog.getByTitle('Reset used quota to 0', { exact: true }).click()

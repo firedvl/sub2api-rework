@@ -1,190 +1,178 @@
 <template>
-  <section class="mx-auto w-full max-w-6xl space-y-5 px-1 py-2 sm:px-2">
-    <header
-      class="page-header card mb-0 flex flex-wrap items-center justify-between gap-3 p-5 dark:ring-dark-700 sm:p-6"
-    >
-      <div class="min-w-0">
-        <h2 class="page-title flex items-center gap-2 text-xl font-black text-gray-900 dark:text-white">
-          <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
-            <Icon name="chart" size="sm" />
-          </span>
-          {{ t('channelMonitorV2.settings.title') }}
-        </h2>
-        <p class="page-description mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('channelMonitorV2.settings.description') }}
-        </p>
+  <section class="msp ui-stagger">
+    <div class="ui-card msp-bar">
+      <span class="viz-pulse" :class="draft?.enabled && systemModeV2 ? '' : 'is-idle'" aria-hidden="true"></span>
+      <strong class="msp-bar-title">{{ t('channelMonitorV2.settings.enableTitle') }}</strong>
+      <HelpTooltip interactive :aria-label="t('admin.routingUi.info')" :content="`${t('channelMonitorV2.settings.description')} ${t('channelMonitorV2.settings.enableHint')}`" />
+      <Toggle
+        v-if="draft"
+        v-model="draft.enabled"
+        :aria-label="t('channelMonitorV2.settings.enableTitle')"
+      />
+      <span class="msp-divider" aria-hidden="true"></span>
+      <div
+        v-if="draft"
+        class="viz-seg"
+        role="group"
+        :aria-label="t('channelMonitorV2.settings.refreshAria')"
+        :title="t('channelMonitorV2.settings.refreshHint')"
+      >
+        <button
+          type="button"
+          :aria-pressed="draft.refresh_interval_seconds === 60"
+          @click="draft.refresh_interval_seconds = 60"
+        >
+          1 min
+        </button>
+        <button
+          type="button"
+          :aria-pressed="draft.refresh_interval_seconds === 300"
+          @click="draft.refresh_interval_seconds = 300"
+        >
+          5 min
+        </button>
       </div>
+      <span class="ui-grow"></span>
+      <span v-if="draft" class="msp-named" :title="namedModelCount === 0 ? t('channelMonitorV2.settings.namedModelsEmpty') : t('channelMonitorV2.settings.namedModelsCount', { count: namedModelCount })">
+        <Icon name="cube" size="xs" />{{ namedModelCount || t('channelMonitorV2.settings.badgeAllModels') }}
+      </span>
+      <HelpTooltip width-class="w-80" interactive :aria-label="t('channelMonitorV2.settings.userContractTitle')">
+        <template #trigger>
+          <Icon name="infoCircle" size="sm" class="msp-info" />
+        </template>
+        <div class="space-y-1.5 text-xs">
+          <p class="font-medium">{{ t('channelMonitorV2.settings.userContractTitle') }}</p>
+          <ul class="list-disc space-y-0.5 pl-4">
+            <li>{{ t('channelMonitorV2.settings.userContract.health') }}</li>
+            <li>{{ t('channelMonitorV2.settings.userContract.trend') }}</li>
+            <li>{{ t('channelMonitorV2.settings.userContract.latency') }}</li>
+            <li>{{ t('channelMonitorV2.settings.userContract.models') }}</li>
+          </ul>
+        </div>
+      </HelpTooltip>
       <button
         type="button"
         class="btn btn-primary"
+        :class="{ 'msp-dirty': dirty }"
         :disabled="saving || !dirty"
         @click="save"
       >
         <Icon name="check" size="sm" />
         {{ t('channelMonitorV2.settings.save') }}
       </button>
-    </header>
-
-    <div
-      v-if="!systemModeV2"
-      class="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-100"
-      role="status"
-    >
-      {{
-        t('channelMonitorV2.settings.modeBanner', {
-          mode: systemModeLabel,
-          modeV2: t('channelMonitorV2.settings.modeV2'),
-        })
-      }}
-      <router-link class="ml-1 font-medium underline" to="/admin/settings">{{ t('admin.settings.tabs.features') }}</router-link>
     </div>
 
-    <div
-      v-if="loading"
-      class="card flex min-h-[200px] items-center justify-center text-sm text-gray-400"
-    >
-      <span class="animate-pulse">{{ t('channelMonitorV2.settings.loading') }}</span>
+    <div v-if="!systemModeV2" class="msp-notice" role="status">
+      <Icon name="exclamationTriangle" size="sm" />
+      <span>
+        {{
+          t('channelMonitorV2.settings.modeBanner', {
+            mode: systemModeLabel,
+            modeV2: t('channelMonitorV2.settings.modeV2'),
+          })
+        }}
+        <router-link class="font-medium underline" to="/admin/settings">{{ t('admin.settings.tabs.features') }}</router-link>
+      </span>
     </div>
 
-    <template v-else-if="draft">
-      <div class="card divide-y divide-gray-100 !rounded-3xl !border-0 shadow-sm ring-1 ring-gray-900/5 dark:divide-dark-700 dark:!bg-dark-800 dark:ring-dark-700">
-        <div class="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <div>
-            <strong class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.enableTitle') }}</strong>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-              {{ t('channelMonitorV2.settings.enableHint') }}
-            </p>
-          </div>
-          <Toggle v-model="draft.enabled" />
-        </div>
-        <div class="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <div>
-            <strong class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.refreshTitle') }}</strong>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ t('channelMonitorV2.settings.refreshHint') }}</p>
-          </div>
-          <div class="tabs inline-flex w-auto" role="group" :aria-label="t('channelMonitorV2.settings.refreshAria')">
-            <button
-              type="button"
-              class="tab"
-              :class="draft.refresh_interval_seconds === 60 ? 'tab-active' : ''"
-              @click="draft.refresh_interval_seconds = 60"
-            >
-              1 min
-            </button>
-            <button
-              type="button"
-              class="tab"
-              :class="draft.refresh_interval_seconds === 300 ? 'tab-active' : ''"
-              @click="draft.refresh_interval_seconds = 300"
-            >
-              5 min
-            </button>
-          </div>
-        </div>
+    <div v-if="loading" class="viz-grid" aria-busy="true">
+      <div v-for="n in 4" :key="n" class="ui-card msp-skel-card" :class="n % 2 === 0 ? 'viz-span-5' : 'viz-span-7'">
+        <span class="skeleton msp-skel"></span>
+        <span class="skeleton msp-skel is-short"></span>
       </div>
+    </div>
 
-      <div class="card overflow-hidden">
-        <div class="card-header !py-3">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.platformsTitle') }}</h3>
-          <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('channelMonitorV2.settings.platformsHint') }}
-          </p>
-        </div>
-        <div class="divide-y divide-gray-100 dark:divide-dark-700">
+    <div v-else-if="draft" class="viz-grid">
+      <section class="ui-card viz-span-7">
+        <header class="viz-card-head">
+          <h3 class="viz-card-title">{{ t('channelMonitorV2.settings.platformsTitle') }}</h3>
+          <HelpTooltip interactive :aria-label="t('admin.routingUi.info')" :content="t('channelMonitorV2.settings.platformsHint')" />
+        </header>
+        <div class="viz-card-body msp-platforms">
           <div
             v-for="platform in draft.platforms"
             :key="platform.platform"
-            class="grid grid-cols-1 items-center gap-3 px-5 py-3 sm:grid-cols-[auto_7rem_minmax(0,1fr)_auto]"
+            class="msp-platform"
+            :class="{ 'is-off': !platform.enabled }"
           >
-            <Toggle v-model="platform.enabled" />
-            <strong class="text-sm font-medium text-gray-900 dark:text-white">{{ platformLabel(platform.platform) }}</strong>
+            <Toggle v-model="platform.enabled" :aria-label="platformLabel(platform.platform)" />
+            <ProviderMark :platform="platform.platform" :size="24" />
+            <strong>{{ platformLabel(platform.platform) }}</strong>
             <input
-              class="input"
+              class="input msp-models"
               :value="platform.models.join(', ')"
               type="text"
-              :placeholder="t('channelMonitorV2.settings.modelsPlaceholder')"
+              :placeholder="t('channelMonitorV2.settings.badgeAllModels')"
+              :title="t('channelMonitorV2.settings.modelsPlaceholder')"
+              :aria-label="`${platformLabel(platform.platform)} · ${t('channelMonitorV2.settings.modelsPlaceholder')}`"
               @change="setModels(platform, $event)"
             />
             <span
-              class="badge justify-self-start sm:justify-self-end"
-              :class="platform.models.length ? 'badge-gray' : 'badge badge-primary'"
+              class="badge"
+              :class="platform.models.length ? 'badge-gray' : 'badge-primary'"
             >
               {{ platform.models.length ? t('channelMonitorV2.settings.badgeOther') : t('channelMonitorV2.settings.badgeAllModels') }}
             </span>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div class="card overflow-hidden">
-        <div class="card-header flex flex-wrap items-center justify-between gap-2 !py-3">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.groupsTitle') }}</h3>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-              {{
-                draft.group_ids.length
-                  ? t('channelMonitorV2.settings.groupsSelected', { count: draft.group_ids.length })
-                  : t('channelMonitorV2.settings.groupsAll')
-              }}
-            </p>
-          </div>
-          <button
-            v-if="draft.group_ids.length"
-            type="button"
-            class="btn btn-ghost btn-sm"
-            @click="draft.group_ids = []"
-          >
-            {{ t('channelMonitorV2.settings.groupsAll') }}
-          </button>
-        </div>
-        <div class="max-h-[min(40vh,280px)] overflow-y-auto px-3 py-2 sm:px-4">
-          <div class="grid grid-cols-1 gap-1 sm:grid-cols-2">
-            <label
-              v-for="group in groups"
-              :key="group.id"
-              class="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition hover:bg-gray-50 dark:hover:bg-dark-800/60"
+      <section class="ui-card viz-span-5">
+        <header class="viz-card-head">
+          <h3 class="viz-card-title">{{ t('channelMonitorV2.settings.groupsTitle') }}</h3>
+          <span class="badge" :class="draft.group_ids.length ? 'badge-primary' : 'badge-gray'">
+            {{
+              draft.group_ids.length
+                ? t('channelMonitorV2.settings.groupsSelected', { count: draft.group_ids.length })
+                : t('channelMonitorV2.settings.groupsAll')
+            }}
+          </span>
+          <div class="viz-card-tools">
+            <button
+              v-if="draft.group_ids.length"
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="draft.group_ids = []"
             >
+              {{ t('channelMonitorV2.settings.groupsAll') }}
+            </button>
+          </div>
+        </header>
+        <div class="viz-card-body max-h-[min(40vh,280px)] overflow-y-auto">
+          <div class="msp-checks">
+            <label v-for="group in groups" :key="group.id" class="msp-check">
               <input
                 type="checkbox"
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500/40"
                 :checked="draft.group_ids.includes(group.id)"
                 @change="toggleGroup(group.id)"
               />
-              <span class="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100">{{ group.name }}</span>
-              <small class="shrink-0 text-xs text-gray-400">{{ platformLabel(group.platform) }} · #{{ group.id }}</small>
+              <ProviderMark :platform="group.platform" :size="18" :label="platformLabel(group.platform)" />
+              <span class="msp-check-name">{{ group.name }}</span>
+              <small>#{{ group.id }}</small>
             </label>
           </div>
-          <p v-if="groups.length === 0" class="empty-state py-8 text-sm text-gray-400">{{ t('channelMonitorV2.settings.groupsEmpty') }}</p>
+          <p v-if="groups.length === 0" class="msp-empty">{{ t('channelMonitorV2.settings.groupsEmpty') }}</p>
         </div>
-      </div>
+      </section>
 
-      <div class="card overflow-hidden">
-        <div class="card-header !py-3">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.errorsTitle') }}</h3>
-          <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('channelMonitorV2.settings.errorsHint') }}
-          </p>
-        </div>
-        <div class="max-h-[min(40vh,320px)] overflow-y-auto px-3 py-2 sm:px-4">
-          <div class="grid grid-cols-1 gap-1 sm:grid-cols-2">
-            <label
-              v-for="category in errorCategories"
-              :key="category"
-              class="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition hover:bg-gray-50 dark:hover:bg-dark-800/60"
-            >
+      <section class="ui-card viz-span-7">
+        <header class="viz-card-head">
+          <h3 class="viz-card-title">{{ t('channelMonitorV2.settings.errorsTitle') }}</h3>
+          <HelpTooltip interactive :aria-label="t('admin.routingUi.info')" :content="t('channelMonitorV2.settings.errorsHint')" />
+        </header>
+        <div class="viz-card-body max-h-[min(40vh,320px)] overflow-y-auto">
+          <div class="msp-checks">
+            <label v-for="category in errorCategories" :key="category" class="msp-check" :title="category">
               <input
                 type="checkbox"
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500/40"
                 :checked="isCategoryIgnored(category)"
                 @change="toggleIgnoredCategory(category)"
               />
-              <span class="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100">
-                {{ categoryLabel(category) }}
-              </span>
-              <small class="shrink-0 font-mono text-[10px] text-gray-400">{{ category }}</small>
+              <span class="msp-check-name">{{ categoryLabel(category) }}</span>
             </label>
           </div>
         </div>
-        <div class="border-t border-gray-100 px-5 py-3 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400">
+        <div class="viz-card-foot">
           {{
             t('channelMonitorV2.settings.ignoredSummary', {
               ignored: draft.ignored_error_categories?.length || 0,
@@ -192,71 +180,49 @@
             })
           }}
         </div>
-      </div>
+      </section>
 
-      <div class="card overflow-hidden">
-        <div class="card-header !py-3">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('channelMonitorV2.settings.healthTitle') }}</h3>
-          <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('channelMonitorV2.settings.healthHint') }}
-          </p>
-        </div>
-        <div class="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label class="block">
+      <section class="ui-card viz-span-5">
+        <header class="viz-card-head">
+          <h3 class="viz-card-title">{{ t('channelMonitorV2.settings.healthTitle') }}</h3>
+          <HelpTooltip interactive :aria-label="t('admin.routingUi.info')" :content="t('channelMonitorV2.settings.healthHint')" />
+        </header>
+        <div class="viz-card-body msp-fields">
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.minimumSample') }}</span>
             <input v-model.number="draft.health_thresholds.minimum_sample" class="input" type="number" min="1" max="10000" />
           </label>
-          <label class="block">
-            <span class="input-label">{{ t('channelMonitorV2.settings.fields.warningError') }}</span>
-            <input v-model.number="warningErrorPercent" class="input" type="number" min="0" max="100" step="0.1" />
-          </label>
-          <label class="block">
-            <span class="input-label">{{ t('channelMonitorV2.settings.fields.criticalError') }}</span>
-            <input v-model.number="criticalErrorPercent" class="input" type="number" min="0" max="100" step="0.1" />
-          </label>
-          <label class="block">
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.targetTtft') }}</span>
             <input v-model.number="draft.health_thresholds.target_ttft_ms" class="input" type="number" min="1" step="100" />
           </label>
-          <label class="block">
+          <label>
+            <span class="input-label">{{ t('channelMonitorV2.settings.fields.warningError') }}</span>
+            <input v-model.number="warningErrorPercent" class="input" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            <span class="input-label">{{ t('channelMonitorV2.settings.fields.criticalError') }}</span>
+            <input v-model.number="criticalErrorPercent" class="input" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.warningTtft') }}</span>
             <input v-model.number="draft.health_thresholds.warning_ttft_ms" class="input" type="number" min="1" step="100" />
           </label>
-          <label class="block">
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.criticalTtft') }}</span>
             <input v-model.number="draft.health_thresholds.critical_ttft_ms" class="input" type="number" min="1" step="100" />
           </label>
-          <label class="block">
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.warningCache') }}</span>
             <input v-model.number="warningCachePercent" class="input" type="number" min="0" max="100" step="0.1" />
           </label>
-          <label class="block">
+          <label>
             <span class="input-label">{{ t('channelMonitorV2.settings.fields.criticalCache') }}</span>
             <input v-model.number="criticalCachePercent" class="input" type="number" min="0" max="100" step="0.1" />
           </label>
         </div>
-      </div>
-
-      <div class="space-y-2">
-        <div class="rounded-2xl border border-primary-200 bg-primary-50/80 px-4 py-3 text-sm text-primary-900 dark:border-primary-800/50 dark:bg-primary-900/20 dark:text-primary-100">
-          <template v-if="namedModelCount === 0">
-            {{ t('channelMonitorV2.settings.namedModelsEmpty') }}
-          </template>
-          <template v-else>
-            {{ t('channelMonitorV2.settings.namedModelsCount', { count: namedModelCount }) }}
-          </template>
-        </div>
-        <div class="rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-xs text-gray-600 dark:border-dark-600 dark:bg-dark-800/50 dark:text-gray-300">
-          <p class="font-medium text-gray-800 dark:text-gray-100">{{ t('channelMonitorV2.settings.userContractTitle') }}</p>
-          <ul class="mt-1.5 list-disc space-y-0.5 pl-4">
-            <li>{{ t('channelMonitorV2.settings.userContract.health') }}</li>
-            <li>{{ t('channelMonitorV2.settings.userContract.trend') }}</li>
-            <li>{{ t('channelMonitorV2.settings.userContract.latency') }}</li>
-            <li>{{ t('channelMonitorV2.settings.userContract.models') }}</li>
-          </ul>
-        </div>
-      </div>
-    </template>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -265,6 +231,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { getChannelMonitorMode, isChannelMonitorV2Mode } from '@/utils/featureFlags'
@@ -443,3 +411,194 @@ async function save() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.msp {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.msp-bar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.msp-bar-title {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.msp-divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--operator-border);
+}
+
+.msp-named {
+  display: inline-flex;
+  height: 1.5rem;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--operator-muted);
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.msp-info {
+  color: var(--operator-subtle-foreground);
+  cursor: help;
+}
+
+.msp-dirty {
+  animation: ui-pop 360ms var(--operator-spring);
+}
+
+.msp-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgb(var(--operator-warning-rgb) / 0.35);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-warning-soft);
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+}
+
+.msp-notice > :first-child {
+  flex: none;
+  margin-top: 0.125rem;
+  color: var(--operator-warning);
+}
+
+.msp-skel-card {
+  gap: 0.75rem;
+  padding: 1.25rem;
+}
+
+.msp-skel {
+  display: block;
+  height: 0.875rem;
+  border-radius: 999px;
+}
+
+.msp-skel.is-short {
+  width: 60%;
+}
+
+.msp-platforms {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.msp-platform {
+  display: grid;
+  grid-template-columns: auto auto 6.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.375rem 0;
+  transition: opacity var(--operator-duration) var(--operator-ease-out);
+}
+
+.msp-platform.is-off > :not(:first-child) {
+  opacity: 0.5;
+}
+
+.msp-platform strong {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msp-models {
+  height: 2rem;
+  font-size: 0.8125rem;
+}
+
+.msp-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.125rem;
+}
+
+.msp-check {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.4375rem 0.5rem;
+  border-radius: var(--operator-radius);
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.msp-check:hover {
+  background: var(--operator-muted);
+}
+
+.msp-check input {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  accent-color: rgb(var(--operator-accent-rgb));
+}
+
+.msp-check-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msp-check small {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.6875rem;
+}
+
+.msp-empty {
+  padding: 2rem 0;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.msp-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .msp-platform {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+
+  .msp-models {
+    grid-column: 1 / -1;
+  }
+
+  .msp-divider {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msp-dirty {
+    animation: none;
+  }
+}
+</style>

@@ -10,8 +10,13 @@ test('shows catalog membership separately from current availability', async ({ p
   await expect(page.getByText('gpt-6-astra', { exact: true })).toBeVisible()
   await expect(page.getByText('unavailable', { exact: true })).toBeVisible()
   await expect(page.getByText('P50 1,280 ms', { exact: false })).toBeVisible()
-  await expect(page.getByText('46.7 tok/s', { exact: true })).toBeVisible()
-  await expect(page.getByText('Timing samples 12', { exact: false })).toBeVisible()
+  // Output speed and timing-sample counts now sit in the model's row drawer.
+  await page.getByRole('row', { name: 'gpt-6-astra', exact: true }).click()
+  const drawer = page.getByRole('dialog', { name: 'gpt-6-astra' })
+  await expect(drawer.getByText('46.7 tok/s', { exact: true })).toBeVisible()
+  await expect(drawer.locator('dt', { hasText: 'Timing samples' }).locator('xpath=following-sibling::dd[1]')).toHaveText('12')
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeHidden()
   await expect(page.getByText('Grok', { exact: true })).toHaveCount(0)
 
   await page.getByRole('searchbox', { name: 'Filter models' }).fill('missing-model')

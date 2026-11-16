@@ -79,7 +79,9 @@ describe('account action menu viewport bounds', () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width)
     const viewportHeight = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(400)
     const menuHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600)
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 208, 600))
+    // Layout width is 208px; the bounding rect is still scaled by the menu-in entrance animation.
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(208)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 208 * 0.98, 600 * 0.98))
     const onClose = vi.fn()
     const wrapper = mount(AccountActionMenu, {
       props: { show: true, account: makeAccount({}), position: { top: 390, left: width - 1 }, onClose },

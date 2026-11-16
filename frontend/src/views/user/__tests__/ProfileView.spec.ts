@@ -96,4 +96,32 @@ describe('ProfileView', () => {
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-password-form')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-totp-card')
   })
+
+  it('reveals the password form from the Security card toggle', async () => {
+    const wrapper = mount(ProfileView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ProfileInfoCard: true,
+          ProfileBalanceNotifyCard: true,
+          ProfilePasskeyCard: true,
+          ProfilePasswordForm: { template: '<div data-testid="profile-password-form" />' },
+          ProfileTotpCard: { template: '<div data-testid="profile-totp-card" />' },
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+
+    const toggle = wrapper.get('[data-testid="profile-password-toggle"]')
+    const panel = wrapper.get('#profile-password-panel')
+    expect((panel.element as HTMLElement).style.display).toBe('none')
+    expect(toggle.text()).toBe('personalUi.profile.change')
+
+    await toggle.trigger('click')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect((panel.element as HTMLElement).style.display).toBe('')
+    expect(toggle.text()).toBe('common.cancel')
+  })
 })

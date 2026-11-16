@@ -1,0 +1,17 @@
+export default {
+  search: '搜索插件',
+  issues: '异常',
+  about: '关于插件',
+  traffic: '{percent}% 流量',
+  key: '标识',
+  author: '作者',
+  version: '版本',
+  installedAt: '安装时间',
+  updatedAt: '更新时间',
+  enabledAt: '启用时间',
+  sha256: 'SHA-256',
+  capabilities: '能力',
+  protocol: '协议',
+  overview: '概览',
+  metadata: '元数据',
+}

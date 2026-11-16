@@ -15,6 +15,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const DialogStub = defineComponent({ props: ['show', 'title'], emits: ['close'], template: '<div v-if="show" data-test="dialog"><slot /><slot name="footer" /></div>' })
+const DrawerStub = defineComponent({ props: ['open', 'title'], emits: ['close'], template: '<div v-if="open" data-test="drawer"><slot name="badge" /><slot /></div>' })
 const PaginationStub = defineComponent({ props: ['total', 'page', 'pageSize'], emits: ['update:page', 'update:pageSize'], template: '<div data-test="pagination" />' })
 
 const endpoint = (): PromptAuditEndpointDraft => ({
@@ -32,9 +33,7 @@ describe('Prompt Audit components', () => {
       global: { stubs: { BaseDialog: DialogStub } },
     })
     expect(wrapper.text()).toContain('admin.promptAudit.pool.configured')
-    const edit = wrapper.findAll('button').find((button) => button.text().includes('common.edit'))
-    expect(edit).toBeTruthy()
-    await edit!.trigger('click')
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
     const token = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]')
     expect(token.element.value).toBe('')
     expect(token.attributes('placeholder')).toContain('admin.promptAudit.pool.keepSecret')
@@ -59,8 +58,7 @@ describe('Prompt Audit components', () => {
     expect(wrapper.text()).toContain('admin.promptAudit.pool.invalid')
     expect(wrapper.text()).not.toContain('admin.promptAudit.pool.configured')
 
-    const edit = wrapper.findAll('button').find((button) => button.text().includes('common.edit'))
-    await edit!.trigger('click')
+    await wrapper.get('[aria-label="common.edit"]').trigger('click')
     const token = wrapper.get<HTMLInputElement>('[aria-label="admin.promptAudit.pool.apiKey"]')
     expect(token.attributes('placeholder')).toContain('admin.promptAudit.pool.reenterSecret')
   })
@@ -75,7 +73,10 @@ describe('Prompt Audit components', () => {
       props: { draft, groups: [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }] },
     })
     expect(wrapper.text()).toContain('99')
-    expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
+    const scannerChips = wrapper.findAll('button[aria-pressed]').filter((chip) => SCANNER_CATALOG.some((scanner) => chip.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))
+    expect(scannerChips).toHaveLength(9)
+    await scannerChips[0].trigger('click')
+    expect((wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft).scanners).not.toContain(SCANNER_CATALOG[0].id)
     await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
     expect(wrapper.text()).toContain('Beta')
     expect(wrapper.text()).not.toContain('Alpha')
@@ -91,18 +92,24 @@ describe('Prompt Audit components', () => {
     }
     const wrapper = mount(EventWorkspace, {
       props: { events: [event], total: 1, page: 1, pageSize: 20, filters: emptyEventFilters(), selectedIds: [], loading: false, error: '' },
-      global: { stubs: { Pagination: PaginationStub } },
+      global: { stubs: { Pagination: PaginationStub, teleport: true } },
     })
     expect(wrapper.text()).toContain('alice')
     expect(wrapper.text()).toContain('alice@example.test')
     expect(wrapper.text()).toContain('alice-key')
     expect(wrapper.text()).toContain('admin.promptAudit.decisions.critical · admin.promptAudit.riskLevels.critical')
     expect(wrapper.text()).toContain('admin.promptAudit.scanners.pii')
+    await wrapper.get('[data-test="events-more"]').trigger('click')
     expect(wrapper.get('[data-test="filter-delete"]').attributes()).not.toHaveProperty('disabled')
     await wrapper.get('[data-test="filter-delete"]').trigger('click')
     expect(wrapper.emitted('preview-delete')).toHaveLength(1)
     await wrapper.get('[aria-label="admin.promptAudit.events.selectEvent"]').setValue(true)
     expect(wrapper.emitted('selection')?.at(-1)?.[0]).toEqual([1])
+    expect(wrapper.emitted('view')).toBeUndefined()
+    await wrapper.get('[data-test="event-1"]').trigger('click')
+    expect(wrapper.emitted('view')?.[0]).toEqual([1])
+    await wrapper.get('[data-test="decision-critical"]').trigger('click')
+    expect((wrapper.emitted('search')?.at(-1)?.[0] as PromptEventFilters).decision).toBe('critical')
   })
 
   it('resolves delete range presets to an epoch start and a cutoff end', () => {
@@ -227,16 +234,13 @@ describe('Prompt Audit components', () => {
     }
     const wrapper = mount(EventDetailDialog, {
       props: { show: true, event, loading: false },
-      global: { stubs: { BaseDialog: DialogStub } },
+      global: { stubs: { SideDrawer: DrawerStub, HelpTooltip: true } },
     })
-    const panel = wrapper.get('[data-test="event-detail-tab-panel"]')
-    expect(panel.classes()).toContain('h-[min(62vh,36rem)]')
-    expect(panel.classes()).toContain('overflow-y-auto')
+    expect(wrapper.get('[data-test="drawer"]').text()).toContain('admin.promptAudit.decisions.critical')
+    expect(wrapper.get('[data-test="detail-tab-summary"]').attributes('aria-pressed')).toBe('true')
 
-    const riskTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('admin.promptAudit.events.tabs.risks'))
-    expect(riskTab).toBeTruthy()
-    await riskTab!.trigger('click')
-    expect(wrapper.get('[data-test="event-detail-tab-panel"]').classes()).toContain('h-[min(62vh,36rem)]')
+    await wrapper.get('[data-test="detail-tab-risks"]').trigger('click')
+    expect(wrapper.get('[data-test="detail-tab-risks"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-test="risk-prompt-preview"]').text()).toContain('complete unmasked prompt body')
     expect(wrapper.get('[data-test="risk-prompt-preview"]').text()).not.toContain('redacted prompt body')
     expect(wrapper.get('[data-test="risk-prompt-full"]').classes()).toContain('overflow-auto')
@@ -262,10 +266,9 @@ describe('Prompt Audit components', () => {
     }
     const wrapper = mount(EventDetailDialog, {
       props: { show: true, event, loading: false },
-      global: { stubs: { BaseDialog: DialogStub } },
+      global: { stubs: { SideDrawer: DrawerStub, HelpTooltip: true } },
     })
-    const riskTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('admin.promptAudit.events.tabs.risks'))
-    await riskTab!.trigger('click')
+    await wrapper.get('[data-test="detail-tab-risks"]').trigger('click')
     expect(wrapper.get('[data-test="risk-prompt-full"]').text()).toContain('legacy redacted preview')
   })
 })

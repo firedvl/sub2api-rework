@@ -57,19 +57,6 @@ const AppLayoutStub = defineComponent({
   template: '<main><slot /></main>',
 })
 
-const TablePageLayoutStub = defineComponent({
-  template: '<section><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>',
-})
-
-const DataTableStub = defineComponent({
-  props: {
-    data: { type: Array, default: () => [] },
-    columns: { type: Array, default: () => [] },
-    loading: { type: Boolean, default: false },
-  },
-  template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-actions" :row="row" /></div></div>',
-})
-
 function makeMonitor(overrides: Partial<ChannelMonitor> = {}): ChannelMonitor {
   return {
     id: 42,
@@ -109,12 +96,9 @@ function mountView() {
     global: {
       stubs: {
         AppLayout: AppLayoutStub,
-        TablePageLayout: TablePageLayoutStub,
-        DataTable: DataTableStub,
         MonitorFiltersBar: true,
         Pagination: true,
         ConfirmDialog: true,
-        EmptyState: true,
         HelpTooltip: true,
         Toggle: true,
         MonitorFormDialog: true,

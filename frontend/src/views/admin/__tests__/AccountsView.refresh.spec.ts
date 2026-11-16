@@ -116,6 +116,19 @@ const AccountTableActionsStub = {
   `,
 }
 
+// The fleet table receives one normalized row per account; read the 5h window and error from it.
+const fleetRow = (wrapper: VueWrapper, id: number) => (
+  wrapper.getComponent({ name: 'AccountFleetTable' }).props('rows') as Array<{
+    account: { id: number }
+    short: { key: string; remainingPercent: number } | null
+    summary: { error: string | null }
+  }>
+).find((row) => row.account.id === id)
+const fleetFiveHourUsed = (wrapper: VueWrapper, id: number) => {
+  const short = fleetRow(wrapper, id)?.short
+  return short?.key === 'five_hour' ? 100 - short.remainingPercent : undefined
+}
+
 const mountedWrappers: VueWrapper[] = []
 const mountView = () => {
   const wrapper = mount(AccountsView, {
@@ -266,7 +279,7 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     expect(cell.props('batchedUsage')).toEqual(fresh)
     expect(cell.props('batchedUsageLoading')).toBe(false)
-    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1']).toEqual(fresh)
+    expect(fleetFiveHourUsed(wrapper, 1)).toBe(fresh.five_hour.utilization)
   })
 
   it.each(['manual', 'automatic'] as const)('refreshes eligible Claude accounts across filtered fleet pages with %s policy', async (mode) => {
@@ -288,10 +301,9 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     expect(getBatchUsage).toHaveBeenLastCalledWith([1, 2, 3], mode === 'manual')
     expect(listAccounts).toHaveBeenCalledWith(2, 1000, expect.objectContaining({ platform: 'anthropic', search: 'Claude' }))
-    const fleet = wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')
-    expect(fleet['1'].five_hour.utilization).toBe(20)
-    expect(fleet['2'].five_hour.utilization).toBe(60)
-    expect(fleet['3'].five_hour.utilization).toBe(70)
+    expect(fleetFiveHourUsed(wrapper, 1)).toBe(20)
+    expect(fleetFiveHourUsed(wrapper, 2)).toBe(60)
+    expect(fleetFiveHourUsed(wrapper, 3)).toBe(70)
   })
 
   it('preserves newer windows when a subsequent passive batch starts after Query', async () => {
@@ -310,7 +322,7 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     expect(cell.props('batchedUsage').five_hour).toEqual(fresh.five_hour)
     expect(cell.props('batchedUsage').updated_at).toBe(fresh.updated_at)
-    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1']).toEqual(cell.props('batchedUsage'))
+    expect(fleetFiveHourUsed(wrapper, 1)).toBe(cell.props('batchedUsage').five_hour.utilization)
   })
 
   it('reports partial failures in both views and keeps independent successful accounts', async () => {
@@ -327,11 +339,10 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     expect(showError).toHaveBeenCalledTimes(1)
     const cells = wrapper.findAllComponents({ name: 'AccountUsageCell' })
-    const overview = wrapper.getComponent({ name: 'OperatorCapacityOverview' })
     expect(cells[0].props('batchedUsage').five_hour.utilization).toBe(20)
     expect(cells[0].props('batchedUsageError')).toBe('Claude temporarily unavailable')
-    expect(overview.props('errorsByAccountId')['1']).toBe('Claude temporarily unavailable')
-    expect(overview.props('usageByAccountId')['2'].five_hour.utilization).toBe(40)
+    expect(fleetRow(wrapper, 1)?.summary.error).toBe('Claude temporarily unavailable')
+    expect(fleetFiveHourUsed(wrapper, 2)).toBe(40)
     cells[0].props('requestBatchedUsage')(first)
     await flushPromises()
     expect(cells[0].props('batchedUsageError')).toBe('Claude temporarily unavailable')
@@ -339,7 +350,7 @@ describe('admin AccountsView refresh behavior', () => {
     await wrapper.get('[data-test="manual-refresh"]').trigger('click')
     await flushPromises()
     expect(cells[0].props('batchedUsageError')).toBeNull()
-    expect(overview.props('errorsByAccountId')['1']).toBeNull()
+    expect(fleetRow(wrapper, 1)?.summary.error).toBeNull()
   })
 
   it('shares batch policy and results with mobile Technical rows', async () => {
@@ -351,7 +362,7 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     const cell = wrapper.getComponent({ name: 'AccountUsageCell' })
     expect(cell.props('requestBatchedUsage')).toBeTypeOf('function')
-    expect(cell.props('batchedUsage')).toEqual(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('usageByAccountId')['1'])
+    expect(fleetFiveHourUsed(wrapper, 1)).toBe(cell.props('batchedUsage').five_hour.utilization)
     cell.props('requestBatchedUsage')(serverAccount)
     await vi.advanceTimersByTimeAsync(0)
     expect(getBatchUsage).toHaveBeenCalledTimes(1)
@@ -368,7 +379,7 @@ describe('admin AccountsView refresh behavior', () => {
     await wrapper.get('[data-test="manual-refresh"]').trigger('click')
     await flushPromises()
     expect(cell.props('queryError')).toBe('Query failed')
-    expect(wrapper.getComponent({ name: 'OperatorCapacityOverview' }).props('errorsByAccountId')['1']).toBe('Query failed')
+    expect(fleetRow(wrapper, 1)?.summary.error).toBe('Query failed')
     getBatchUsage.mockResolvedValueOnce({ usage: { '1': { ...makeUsage(30), source: 'active', cached: false } }, errors: {} })
     await wrapper.get('[data-test="manual-refresh"]').trigger('click')
     await flushPromises()
@@ -393,9 +404,8 @@ describe('admin AccountsView refresh behavior', () => {
     await flushPromises()
     resolveBatch({ usage: { '1': { ...makeUsage(96), source: 'passive' }, '2': makeUsage(60) }, errors: {} })
     await flushPromises()
-    const overview = wrapper.getComponent({ name: 'OperatorCapacityOverview' })
-    expect(overview.props('usageByAccountId')['1']).toEqual(fresh)
-    expect(overview.props('usageByAccountId')['2'].five_hour.utilization).toBe(60)
+    expect(fleetFiveHourUsed(wrapper, 1)).toBe(fresh.five_hour.utilization)
+    expect(fleetFiveHourUsed(wrapper, 2)).toBe(60)
     wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 1)
     await flushPromises()
     expect(wrapper.getComponent({ name: 'AccountUsageCell' }).props('batchedUsage')).toEqual(fresh)
@@ -434,7 +444,7 @@ describe('admin AccountsView refresh behavior', () => {
     usageUtilization = 53
     await vi.advanceTimersByTimeAsync(4_000)
     expect(listWithEtag).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Auto refresh: 1s')
+    expect(wrapper.get('button[title="admin.accounts.autoRefresh"]').attributes('aria-label')).toBe('Auto refresh: 1s')
 
     await vi.advanceTimersByTimeAsync(1_000)
     await flushPromises()
@@ -442,7 +452,7 @@ describe('admin AccountsView refresh behavior', () => {
     expect(listWithEtag).toHaveBeenCalledTimes(1)
     expect(getBatchUsage).toHaveBeenLastCalledWith([1], false)
     expect(wrapper.text()).toContain('47%')
-    expect(wrapper.text()).toContain('Auto refresh: 5s')
+    expect(wrapper.get('button[title="admin.accounts.autoRefresh"]').attributes('aria-label')).toBe('Auto refresh: 5s')
   })
 
   it('applies every interval change without accumulating timers across repeated toggles', async () => {
@@ -485,7 +495,7 @@ describe('admin AccountsView refresh behavior', () => {
       await vi.advanceTimersByTimeAsync(1_000)
       await flushPromises()
       expect(listWithEtag).toHaveBeenCalledTimes(callsBefore + 1)
-      expect(wrapper.text()).toContain(`Auto refresh: ${seconds}s`)
+      expect(trigger.attributes('aria-label')).toBe(`Auto refresh: ${seconds}s`)
     }
 
     await toggleEnabled()
@@ -516,7 +526,7 @@ describe('admin AccountsView refresh behavior', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     await flushPromises()
 
-    expect(wrapper.findAll('.operator-capacity-account')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="account-capacity-row"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Structurally updated account')
     expect(wrapper.text()).toContain('65%')
   })

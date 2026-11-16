@@ -21,6 +21,11 @@ const BaseDialogStub = {
   template: '<div v-if="show"><slot /><slot name="footer" /></div>',
 }
 
+const SideDrawerStub = {
+  props: ['open', 'title', 'subtitle'],
+  template: '<div v-if="open"><slot name="badge" /><slot /><slot name="footer" /></div>',
+}
+
 const DataTableStub = {
   props: ['data'],
   template: `
@@ -60,7 +65,7 @@ describe('admin order currency display', () => {
       },
       global: {
         stubs: {
-          BaseDialog: BaseDialogStub,
+          SideDrawer: SideDrawerStub,
         },
       },
     })
@@ -137,10 +142,8 @@ describe('admin order currency display', () => {
       },
       global: {
         stubs: {
-          DataTable: DataTableStub,
           Icon: true,
           Pagination: true,
-          Select: true,
         },
       },
     })

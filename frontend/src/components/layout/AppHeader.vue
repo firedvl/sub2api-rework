@@ -1,5 +1,5 @@
 <template>
-  <header class="app-header">
+  <header class="app-header" :class="{ 'is-scrolled': scrolled }">
     <div class="app-header-context">
       <button
         type="button"
@@ -38,14 +38,24 @@
 
     <div class="app-header-actions">
       <button
-        v-if="authStore.isAdmin"
         type="button"
-        class="app-icon-button app-assistant-trigger"
-        :aria-label="t('admin.operatorAssistant.title')"
-        @click="assistantOpen = true"
+        class="app-search-trigger hidden md:inline-flex"
+        data-testid="command-palette-trigger"
+        :aria-label="t('nav.search')"
+        aria-keyshortcuts="Meta+K Control+K"
+        @click="palette.show()"
       >
-        <Icon name="chat" size="sm" />
-        <span class="hidden xl:inline">{{ t('admin.operatorAssistant.title') }}</span>
+        <Icon name="search" size="sm" />
+        <span>{{ t('nav.search') }}</span>
+        <kbd class="ui-kbd">{{ shortcutLabel }}</kbd>
+      </button>
+      <button
+        type="button"
+        class="app-icon-button md:hidden"
+        :aria-label="t('nav.search')"
+        @click="palette.show()"
+      >
+        <Icon name="search" size="sm" />
       </button>
 
       <a
@@ -133,6 +143,33 @@
               </span>
             </div>
 
+            <div class="app-menu-section" role="group" :aria-label="t('nav.appearance')">
+              <div class="ui-section-label px-2.5 pt-1.5" aria-hidden="true">{{ t('nav.appearance') }}</div>
+              <div class="viz-seg mx-2.5 mb-1 flex" role="group" :aria-label="t('nav.toggleTheme')">
+                <button type="button" class="flex-1" :aria-pressed="isDark ? 'false' : 'true'" @click="setTheme(false)">
+                  <Icon name="sun" size="xs" />
+                  {{ t('nav.themeLight') }}
+                </button>
+                <button type="button" class="flex-1" :aria-pressed="isDark ? 'true' : 'false'" @click="setTheme(true)">
+                  <Icon name="moon" size="xs" />
+                  {{ t('nav.themeDark') }}
+                </button>
+              </div>
+              <div class="ui-swatches" role="group" :aria-label="t('nav.accent')">
+                <button
+                  v-for="option in accentOptions"
+                  :key="option.id"
+                  type="button"
+                  class="ui-swatch"
+                  :style="{ '--swatch': option.swatch }"
+                  :aria-label="option.label"
+                  :title="option.label"
+                  :aria-pressed="accent === option.id ? 'true' : 'false'"
+                  @click="setAccent(option.id)"
+                ></button>
+              </div>
+            </div>
+
             <div class="app-menu-section">
               <router-link to="/profile" class="dropdown-item" @click="closeUserMenu()">
                 <Icon name="user" size="sm" />
@@ -171,24 +208,26 @@
       </div>
     </div>
   </header>
-  <OperatorAssistantDrawer v-if="authStore.isAdmin" :show="assistantOpen" @close="assistantOpen = false" />
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { onClickOutside, onKeyStroke } from '@vueuse/core'
+import { onClickOutside, onKeyStroke, useMutationObserver } from '@vueuse/core'
 import { useAppStore, useAuthStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
-import OperatorAssistantDrawer from '@/components/admin/OperatorAssistantDrawer.vue'
+import { useCommandPalette } from '@/composables/useCommandPalette'
+import { ACCENTS, ACCENT_SWATCH, applyAccent, readAccent, type Accent } from '@/utils/accent'
 import Icon from '@/components/icons/Icon.vue'
 import { usePageMeta } from '@/composables/usePageMeta'
 import { sanitizeUrl } from '@/utils/url'
 import { applyTheme } from '@/utils/viewTransition'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+
+defineProps<{ scrolled?: boolean }>()
 
 const router = useRouter()
 const route = useRoute()
@@ -198,10 +237,21 @@ const authStore = useAuthStore()
 const { title, area } = usePageMeta()
 
 const user = computed(() => authStore.user)
-const assistantOpen = ref(false)
+const palette = useCommandPalette()
+const accent = ref<Accent>(readAccent())
+const shortcutLabel = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'
+const accentOptions = computed(() => ACCENTS.map((id) => ({
+  id,
+  swatch: ACCENT_SWATCH[id],
+  label: t(`nav.accent${id[0].toUpperCase()}${id.slice(1)}`),
+})))
 const userMenuOpen = ref(false)
 const userMenuRef = ref<HTMLElement | null>(null)
 const isDark = ref(document.documentElement.classList.contains('dark'))
+// The palette and other surfaces can switch the theme too; follow <html>.
+useMutationObserver(document.documentElement, () => {
+  isDark.value = document.documentElement.classList.contains('dark')
+}, { attributes: true, attributeFilter: ['class'] })
 const isFixtureReview = window.__OPERATOR_REVIEW_MODE__ === true
 
 const contactInfo = computed(() => appStore.contactInfo)
@@ -237,8 +287,18 @@ function formatHeaderMoney(value: number) {
 }
 
 function toggleTheme() {
-  isDark.value = !isDark.value
-  applyTheme(isDark.value)
+  setTheme(!isDark.value)
+}
+
+function setTheme(dark: boolean) {
+  if (dark === isDark.value) return
+  isDark.value = dark
+  applyTheme(dark)
+}
+
+function setAccent(next: Accent) {
+  accent.value = next
+  applyAccent(next)
 }
 
 function closeUserMenu(restoreFocus = false) {
@@ -274,16 +334,3 @@ async function handleLogout() {
   await router.push('/login')
 }
 </script>
-
-<style scoped>
-.app-assistant-trigger {
-  border: 1px solid var(--operator-border);
-  background: var(--operator-card);
-  color: var(--operator-foreground);
-  box-shadow: var(--operator-shadow-xs);
-}
-
-.app-assistant-trigger:hover {
-  background: var(--operator-raised);
-}
-</style>

@@ -1,46 +1,26 @@
 <template>
-  <div class="empty-state">
-    <!-- Icon -->
-    <div class="empty-state-badge">
+  <div class="ui-empty empty-state">
+    <span class="ui-empty-icon" aria-hidden="true">
       <slot name="icon">
-        <component v-if="icon" :is="icon" class="empty-state-icon h-6 w-6" aria-hidden="true" />
-        <svg
-          v-else
-          class="empty-state-icon h-6 w-6"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          stroke-width="1.5"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-          />
-        </svg>
+        <Icon v-if="typeof icon === 'string'" :name="icon as any" size="lg" />
+        <component :is="icon" v-else-if="icon" class="h-6 w-6" />
+        <Icon v-else name="inbox" size="lg" />
       </slot>
-    </div>
+    </span>
 
-    <!-- Title -->
-    <h3 class="empty-state-title">
-      {{ displayTitle }}
-    </h3>
+    <b class="empty-state-title">{{ displayTitle }}</b>
 
-    <!-- Description -->
-    <p class="empty-state-description">
-      {{ description }}
-    </p>
+    <p v-if="description" class="empty-state-description">{{ description }}</p>
 
-    <!-- Action -->
-    <div v-if="actionText || $slots.action" class="mt-5">
+    <div v-if="actionText || $slots.action" class="empty-state-action">
       <slot name="action">
         <component
           :is="actionTo ? 'RouterLink' : 'button'"
           v-if="actionText"
           :to="actionTo"
+          :type="actionTo ? undefined : 'button'"
+          class="btn btn-primary btn-sm"
           @click="!actionTo && $emit('action')"
-          class="btn btn-primary"
         >
           <Icon v-if="actionIcon" name="plus" size="sm" />
           {{ actionText }}
@@ -59,6 +39,7 @@ import Icon from '@/components/icons/Icon.vue'
 const { t } = useI18n()
 
 interface Props {
+  /** A component, or an `Icon` name such as "search" or "users". */
   icon?: Component | string
   title?: string
   description?: string
@@ -79,14 +60,15 @@ defineEmits(['action'])
 </script>
 
 <style scoped>
-.empty-state-badge {
-  display: grid;
-  width: 3rem;
-  height: 3rem;
-  margin-bottom: 1rem;
-  place-items: center;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius-lg);
-  background: var(--operator-muted);
+.empty-state-description {
+  max-width: 22rem;
+  margin-top: -0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.empty-state-action {
+  margin-top: 0.375rem;
 }
 </style>

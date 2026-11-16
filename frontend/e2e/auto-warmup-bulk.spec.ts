@@ -90,6 +90,7 @@ for (const viewport of [
     await page.goto('/admin/accounts?view=technical&auto_warmup=disabled', { waitUntil: 'domcontentloaded' })
 
     await expect(page.getByText('Warm-up: Off', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'More Actions', exact: true }).click()
     await page.getByTestId('edit-auto-warmup-eligible').click()
 
     const dialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })

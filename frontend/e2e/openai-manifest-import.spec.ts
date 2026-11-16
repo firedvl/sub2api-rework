@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { installOperatorApiMock, seedSession } from './fixtures/operatorApi'
 
 async function openOpenAICodexImport(page: Page) {
-  await page.getByRole('button', { name: 'Create Account' }).click()
+  await page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Add', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Create Account' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'OpenAI', exact: true }).click()

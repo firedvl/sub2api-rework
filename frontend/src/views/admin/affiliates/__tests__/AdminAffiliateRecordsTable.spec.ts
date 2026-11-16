@@ -29,10 +29,6 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-const TablePageLayoutStub = {
-  template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>',
-}
-
 const DataTableStub = {
   props: ['columns', 'data'],
   template: `
@@ -59,12 +55,11 @@ function mountTable(type: 'invites' | 'rebates' | 'transfers') {
     global: {
       stubs: {
         AppLayout: { template: '<main><slot /></main>' },
-        TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,
         Pagination: true,
         Icon: true,
         OrderStatusBadge: true,
-        BaseDialog: true,
+        SideDrawer: true,
         AffiliateOfflineWithdrawDialog: WithdrawDialogStub,
       },
     },

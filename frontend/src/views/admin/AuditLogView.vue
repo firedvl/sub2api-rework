@@ -1,273 +1,307 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <!-- Filters -->
-      <template #filters>
-        <div class="card p-4 sm:p-6">
-          <div class="flex flex-wrap items-end justify-between gap-4">
-            <!-- Left: filter fields -->
-            <div class="flex flex-1 flex-wrap items-end gap-4">
-              <div class="w-full sm:w-auto sm:min-w-[240px]">
-                <label class="input-label">{{ t('admin.audit.filters.q') }}</label>
-                <div class="relative">
-                  <Icon
-                    name="search"
-                    size="md"
-                    class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-                  <input
-                    v-model.trim="filters.q"
-                    type="text"
-                    class="input pl-10"
-                    :placeholder="t('admin.audit.filters.qPlaceholder')"
-                    @keyup.enter="search"
-                  />
+    <div class="ui-page ui-stagger">
+      <section class="ui-card audit-card">
+        <div class="audit-toolbar">
+          <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.activityUi.filters')">
+            <div class="audit-range">
+              <Select
+                :model-value="timeRange"
+                :options="timeRangeOptions"
+                :aria-label="t('admin.dashboard.timeRange')"
+                @update:model-value="handleTimeRangeChange"
+              />
+            </div>
+            <label class="ui-search audit-search">
+              <Icon name="search" size="sm" />
+              <input
+                v-model.trim="filters.q"
+                type="search"
+                :aria-label="t('admin.audit.filters.q')"
+                :placeholder="t('admin.audit.filters.qPlaceholder')"
+                @keyup.enter="search"
+                @search="search"
+              />
+            </label>
+            <div class="viz-seg" role="group" :aria-label="t('admin.audit.filters.result')">
+              <button
+                v-for="option in resultOptions"
+                :key="option.value"
+                type="button"
+                :aria-pressed="filters.success === option.value"
+                @click="setResult(option.value)"
+              >{{ option.label }}</button>
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm audit-filter-toggle"
+              data-testid="audit-filters-toggle"
+              :aria-expanded="panelOpen"
+              aria-controls="audit-filter-panel"
+              @click="panelOpen = !panelOpen"
+            >
+              <Icon name="filter" size="sm" />
+              <span>{{ t('admin.activityUi.filters') }}</span>
+              <span v-if="panelCount" class="audit-filter-count">{{ panelCount }}</span>
+            </button>
+            <span class="ui-grow"></span>
+            <button
+              type="button"
+              class="app-icon-button"
+              :aria-label="t('common.refresh')"
+              :title="t('common.refresh')"
+              :disabled="loading"
+              @click="fetchLogs"
+            >
+              <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />
+            </button>
+            <div ref="moreMenuRef" class="relative">
+              <button
+                type="button"
+                class="app-icon-button"
+                data-testid="audit-more-actions"
+                aria-haspopup="menu"
+                :aria-expanded="moreOpen"
+                :aria-label="t('admin.activityUi.moreActions')"
+                :title="t('admin.activityUi.moreActions')"
+                @click="moreOpen = !moreOpen"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+              <Transition name="menu-pop">
+                <div v-if="moreOpen" class="operator-menu absolute right-0 top-full z-50 mt-1 w-52 py-1" role="menu" @keydown.esc.stop="moreOpen = false">
+                  <button type="button" role="menuitem" class="operator-menu-item audit-menu-item" :disabled="loading" @click="moreOpen = false; resetFilters()">
+                    <Icon name="sync" size="sm" />{{ t('common.reset') }}
+                  </button>
+                  <div class="operator-menu-divider my-1 h-px"></div>
+                  <button type="button" role="menuitem" class="operator-menu-item operator-menu-item-destructive audit-menu-item" @click="moreOpen = false; openClearDialog()">
+                    <Icon name="trash" size="sm" />{{ t('admin.audit.clearAll') }}
+                  </button>
                 </div>
-              </div>
+              </Transition>
+            </div>
+          </div>
 
-              <div class="w-full sm:w-auto sm:min-w-[200px]">
-                <label class="input-label">{{ t('admin.audit.filters.actorEmail') }}</label>
-                <input v-model.trim="filters.actor_email" type="text" class="input" @keyup.enter="search" />
+          <Transition name="audit-panel">
+            <form v-if="panelOpen" id="audit-filter-panel" class="audit-filter-panel" @submit.prevent="search">
+              <div>
+                <label class="input-label" for="audit-actor">{{ t('admin.audit.filters.actorEmail') }}</label>
+                <input id="audit-actor" v-model.trim="filters.actor_email" type="text" class="input" />
               </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[180px]">
-                <label class="input-label">{{ t('admin.audit.filters.action') }}</label>
-                <input v-model.trim="filters.action" type="text" class="input" @keyup.enter="search" />
+              <div>
+                <label class="input-label" for="audit-action">{{ t('admin.audit.filters.action') }}</label>
+                <input id="audit-action" v-model.trim="filters.action" type="text" class="input" />
               </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[160px]">
-                <label class="input-label">{{ t('admin.audit.filters.clientIp') }}</label>
-                <input v-model.trim="filters.client_ip" type="text" class="input" @keyup.enter="search" />
+              <div>
+                <label class="input-label" for="audit-ip">{{ t('admin.audit.filters.clientIp') }}</label>
+                <input id="audit-ip" v-model.trim="filters.client_ip" type="text" class="input" />
               </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[140px]">
+              <div>
                 <label class="input-label">{{ t('admin.audit.filters.method') }}</label>
                 <Select v-model="filters.method" :options="methodOptions" @change="search" />
               </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[170px]">
+              <div>
                 <label class="input-label">{{ t('admin.audit.filters.authMethod') }}</label>
                 <Select v-model="filters.auth_method" :options="authMethodOptions" @change="search" />
               </div>
-
-              <div class="w-full sm:w-auto sm:min-w-[140px]">
-                <label class="input-label">{{ t('admin.audit.filters.result') }}</label>
-                <Select v-model="filters.success" :options="resultOptions" @change="search" />
+              <div class="audit-filter-actions">
+                <button type="submit" class="btn btn-primary btn-sm" :disabled="loading">{{ t('common.search') }}</button>
               </div>
+            </form>
+          </Transition>
 
-              <div class="w-full sm:w-auto sm:min-w-[170px]">
-                <label class="input-label">{{ t('admin.dashboard.timeRange') }}</label>
-                <Select
-                  :model-value="timeRange"
-                  :options="timeRangeOptions"
-                  @update:model-value="handleTimeRangeChange"
-                />
-              </div>
-            </div>
-
-            <!-- Right: actions -->
-            <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
-              <button type="button" class="btn btn-primary" :disabled="loading" @click="search">
-                {{ t('common.search') }}
-              </button>
-              <button type="button" class="btn btn-secondary" :disabled="loading" @click="resetFilters">
-                {{ t('common.reset') }}
-              </button>
-              <button type="button" class="btn btn-danger" @click="openClearDialog">
-                <Icon name="trash" size="sm" class="mr-1.5" />
-                {{ t('admin.audit.clearAll') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- Table -->
-      <template #table>
-        <DataTable :columns="columns" :data="logs" :loading="loading" row-key="id">
-          <template #cell-created_at="{ value }">
-            <span class="whitespace-nowrap text-gray-600 dark:text-gray-300">{{ formatTime(value) }}</span>
-          </template>
-
-          <template #cell-actor="{ row }">
-            <div class="min-w-0 max-w-[220px]">
-              <div class="truncate font-medium text-gray-900 dark:text-white" :title="row.actor_email">
-                {{ row.actor_email || '—' }}
-              </div>
-              <div class="mt-0.5 truncate text-xs text-gray-400">
-                {{ row.actor_role }}<span v-if="row.auth_method"> · {{ authMethodLabel(row.auth_method) }}</span>
-              </div>
-            </div>
-          </template>
-
-          <template #cell-action="{ row }">
-            <div class="min-w-0 max-w-xs">
-              <div class="truncate font-mono text-sm text-gray-800 dark:text-gray-200" :title="row.action">
-                {{ row.action }}
-              </div>
-              <div class="mt-0.5 truncate font-mono text-xs text-gray-400" :title="`${row.method} ${row.path}`">
-                {{ row.method }} {{ row.path }}
-              </div>
-            </div>
-          </template>
-
-          <template #cell-status_code="{ row }">
-            <span :class="statusBadgeClass(row.status_code)">
-              <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(row.status_code)"></span>
-              {{ row.status_code }}
-            </span>
-          </template>
-
-          <template #cell-latency_ms="{ value }">
-            <span class="whitespace-nowrap text-gray-500 dark:text-gray-400">{{ value }} ms</span>
-          </template>
-
-          <template #cell-client_ip="{ value }">
-            <span class="whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">{{ value || '—' }}</span>
-          </template>
-
-          <template #cell-actions="{ row }">
+          <TransitionGroup v-if="chips.length" name="ui-list" tag="div" class="ui-chips" :aria-label="t('admin.activityUi.activeFilters')">
             <button
+              v-for="chip in chips"
+              :key="chip.key"
               type="button"
-              class="inline-flex items-center gap-1 font-medium text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              @click="openDetail(row.id)"
+              class="ui-chip is-active"
+              :aria-label="t('admin.activityUi.clearFilter', { name: `${chip.label}: ${chip.value}` })"
+              @click="clearChip(chip.key)"
             >
-              <Icon name="eye" size="sm" />
-              {{ t('admin.audit.columns.detail') }}
+              <span class="text-gray-500">{{ chip.label }}</span>
+              <span class="max-w-[12rem] truncate">{{ chip.value }}</span>
+              <Icon name="x" size="xs" />
             </button>
-          </template>
+            <button key="__clear" type="button" class="btn btn-ghost btn-sm" @click="resetFilters">{{ t('admin.activityUi.clearAll') }}</button>
+          </TransitionGroup>
+        </div>
 
-          <template #empty>
-            <div class="flex flex-col items-center py-8">
-              <Icon name="shield" size="xl" class="mb-4 h-12 w-12 text-gray-300 dark:text-dark-600" />
-              <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('admin.audit.empty') }}</p>
-            </div>
-          </template>
-        </DataTable>
-      </template>
+        <div class="audit-body">
+          <!-- Desktop table -->
+          <div class="ui-table-wrap audit-table hidden md:block" :class="{ 'is-busy': loading && logs.length > 0 }">
+            <table class="ui-table">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('admin.audit.columns.time') }}</th>
+                  <th scope="col">{{ t('admin.audit.columns.result') }}</th>
+                  <th scope="col">{{ t('admin.audit.columns.action') }}</th>
+                  <th scope="col">{{ t('admin.audit.columns.actor') }}</th>
+                  <th scope="col" class="is-num">{{ t('admin.audit.detail.latency') }}</th>
+                  <th scope="col">{{ t('admin.audit.columns.clientIp') }}</th>
+                </tr>
+              </thead>
+              <tbody v-if="loading && logs.length === 0">
+                <tr v-for="i in 6" :key="i">
+                  <td v-for="j in 6" :key="j"><div class="skeleton h-4 w-3/4 rounded"></div></td>
+                </tr>
+              </tbody>
+              <tbody v-else-if="logs.length === 0">
+                <tr>
+                  <td colspan="6" class="audit-empty-cell">
+                    <div class="ui-empty">
+                      <span class="ui-empty-icon"><Icon name="shield" size="md" /></span>
+                      <b>{{ t('admin.audit.empty') }}</b>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody v-else class="ui-rows-enter">
+                <tr
+                  v-for="row in logs"
+                  :key="row.id"
+                  class="is-clickable"
+                  :class="{ 'is-selected': detailVisible && detailRowId === row.id }"
+                  tabindex="0"
+                  :data-row-id="row.id"
+                  @click="openDetail(row.id, row)"
+                  @keydown.enter.prevent="openDetail(row.id, row)"
+                  @keydown.space.prevent="openDetail(row.id, row)"
+                >
+                  <td><time :datetime="row.created_at" :title="formatTime(row.created_at)" class="audit-time">{{ formatRelativeTime(row.created_at) }}</time></td>
+                  <td>
+                    <span class="audit-status">
+                      <span class="ui-dot" :class="statusDot(row.status_code)" aria-hidden="true"></span>
+                      <span class="tabular-nums">{{ row.status_code }}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="ui-cell-main audit-clip font-mono text-[0.8125rem]" :title="row.action">{{ row.action }}</span>
+                    <span class="ui-cell-sub audit-clip font-mono" :title="`${row.method} ${row.path}`"><b class="audit-method">{{ row.method }}</b> {{ row.path }}</span>
+                  </td>
+                  <td>
+                    <span class="ui-cell-main audit-clip" :title="row.actor_email">{{ row.actor_email || '—' }}</span>
+                    <span class="ui-cell-sub">{{ row.actor_role }}<template v-if="row.auth_method"> · {{ authMethodLabel(row.auth_method) }}</template></span>
+                  </td>
+                  <td class="is-num text-gray-500">{{ row.latency_ms }} ms</td>
+                  <td><span class="font-mono text-xs text-gray-500">{{ row.client_ip || '—' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-      <!-- Pagination -->
-      <template #pagination>
-        <Pagination
-          v-if="total > 0"
-          :total="total"
-          :page="page"
-          :page-size="pageSize"
-          @update:page="onPageChange"
-          @update:pageSize="onPageSizeChange"
-        />
-      </template>
-    </TablePageLayout>
+          <!-- Mobile list -->
+          <ul class="audit-list md:hidden" :class="{ 'is-busy': loading && logs.length > 0 }">
+            <template v-if="loading && logs.length === 0">
+              <li v-for="i in 5" :key="i" class="audit-item"><div class="skeleton h-9 w-full rounded"></div></li>
+            </template>
+            <li v-else-if="logs.length === 0" class="ui-empty">
+              <span class="ui-empty-icon"><Icon name="shield" size="md" /></span>
+              <b>{{ t('admin.audit.empty') }}</b>
+            </li>
+            <template v-else>
+              <li v-for="row in logs" :key="row.id">
+                <button type="button" class="audit-item" @click="openDetail(row.id, row)">
+                  <span class="ui-dot" :class="statusDot(row.status_code)" aria-hidden="true"></span>
+                  <span class="min-w-0 flex-1 text-left">
+                    <span class="ui-cell-main font-mono text-[0.8125rem]">{{ row.action }}</span>
+                    <span class="ui-cell-sub">{{ row.actor_email || '—' }} · {{ formatRelativeTime(row.created_at) }}</span>
+                  </span>
+                  <span class="ui-cell-sub tabular-nums">{{ row.status_code }}</span>
+                </button>
+              </li>
+            </template>
+          </ul>
 
-    <!-- Detail dialog -->
-    <BaseDialog
-      :show="detailVisible"
-      :title="t('admin.audit.detail.title')"
-      width="wide"
-      :close-on-click-outside="true"
+          <Pagination
+            v-if="total > 0"
+            :total="total"
+            :page="page"
+            :page-size="pageSize"
+            @update:page="onPageChange"
+            @update:pageSize="onPageSizeChange"
+          />
+        </div>
+      </section>
+    </div>
+
+    <!-- Detail drawer -->
+    <SideDrawer
+      :open="detailVisible"
+      :title="detailView?.action || t('admin.audit.detail.title')"
+      :subtitle="detailView ? formatTime(detailView.created_at) : ''"
+      width="36rem"
       @close="detailVisible = false"
     >
-      <div v-if="detailLoading" class="flex items-center justify-center py-16">
-        <div class="flex flex-col items-center gap-3">
-          <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
-          <div class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('common.loading') }}</div>
-        </div>
-      </div>
+      <template #leading>
+        <span v-if="detailView" class="audit-drawer-mark" :class="statusTone(detailView.status_code)">
+          <Icon :name="detailView.status_code < 400 ? 'checkCircle' : 'exclamationCircle'" size="md" />
+        </span>
+      </template>
+      <template #badge>
+        <span v-if="detailView" class="badge" :class="statusBadge(detailView.status_code)">{{ detailView.status_code }} {{ statusText(detailView.status_code) }}</span>
+      </template>
 
-      <div v-else-if="detail" class="space-y-5 py-2">
-        <!-- Hero: action + result at a glance -->
-        <div class="rounded-2xl border border-gray-200 bg-gray-50/60 p-5 dark:border-dark-700 dark:bg-dark-900/60">
-          <div class="flex flex-wrap items-center gap-3">
-            <span :class="statusBadgeClass(detail.status_code)">
-              <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(detail.status_code)"></span>
-              {{ detail.status_code }} {{ statusText(detail.status_code) }}
-            </span>
-            <span class="break-all font-mono text-base font-semibold text-gray-900 dark:text-white">
-              {{ detail.action }}
-            </span>
-          </div>
-
-          <div class="mt-3 flex items-center gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-gray-200 dark:bg-dark-800 dark:ring-dark-600">
-            <span class="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-bold text-gray-700 dark:bg-dark-700 dark:text-gray-200">
-              {{ detail.method }}
-            </span>
-            <span class="break-all font-mono text-xs text-gray-600 dark:text-gray-300">{{ detail.path }}</span>
-          </div>
-
-          <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <span class="inline-flex items-center gap-1.5">
-              <Icon name="clock" size="xs" />
-              {{ formatTime(detail.created_at) }}
-            </span>
-            <span>{{ t('admin.audit.detail.latency') }} {{ detail.latency_ms }} ms</span>
-            <span v-if="detail.request_id" class="inline-flex items-center gap-1">
-              {{ t('admin.audit.detail.requestId') }}
-              <span class="break-all font-mono">{{ detail.request_id }}</span>
-            </span>
-          </div>
+      <template v-if="detailView">
+        <div class="audit-drawer-path">
+          <b>{{ detailView.method }}</b>
+          <span>{{ detailView.path }}</span>
         </div>
 
-        <!-- Actor / auth / source -->
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-            <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-              {{ t('admin.audit.columns.actor') }}
-            </div>
-            <div class="mt-1 break-all text-sm font-medium text-gray-900 dark:text-white">
-              {{ detail.actor_email || '—' }}
-            </div>
-            <div class="mt-0.5 text-xs text-gray-400">{{ detail.actor_role }}</div>
-          </div>
+        <dl class="ui-dl">
+          <dt>{{ t('admin.audit.columns.actor') }}</dt>
+          <dd>{{ detailView.actor_email || '—' }}<span v-if="detailView.actor_user_id" class="text-gray-400"> #{{ detailView.actor_user_id }}</span></dd>
+          <dt>{{ t('admin.audit.detail.actorRole') }}</dt>
+          <dd>{{ detailView.actor_role || '—' }}</dd>
+          <dt>{{ t('admin.audit.filters.authMethod') }}</dt>
+          <dd>{{ authMethodLabel(detailView.auth_method) || '—' }}</dd>
+          <template v-if="detailView.credential_masked">
+            <dt>{{ t('admin.audit.detail.credential') }}</dt>
+            <dd class="font-mono text-xs">{{ detailView.credential_masked }}</dd>
+          </template>
+          <dt>{{ t('admin.audit.columns.clientIp') }}</dt>
+          <dd class="font-mono text-xs">{{ detailView.client_ip || '—' }}</dd>
+          <dt>{{ t('admin.audit.detail.latency') }}</dt>
+          <dd class="tabular-nums">{{ detailView.latency_ms }} ms</dd>
+          <template v-if="detailView.request_id">
+            <dt>{{ t('admin.audit.detail.requestId') }}</dt>
+            <dd class="audit-copy-row">
+              <code>{{ detailView.request_id }}</code>
+              <button type="button" class="app-icon-button audit-copy" :aria-label="`${t('keys.copyToClipboard')}: ${t('admin.audit.detail.requestId')}`" @click="copy(detailView.request_id)">
+                <Icon :name="copiedValue === detailView.request_id ? 'check' : 'copy'" size="sm" />
+              </button>
+            </dd>
+          </template>
+          <dt>{{ t('admin.audit.detail.userAgent') }}</dt>
+          <dd class="text-xs">{{ detailView.user_agent || '—' }}</dd>
+        </dl>
 
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-            <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-              {{ t('admin.audit.filters.authMethod') }}
-            </div>
-            <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
-              {{ authMethodLabel(detail.auth_method) || '—' }}
-            </div>
-            <div v-if="detail.credential_masked" class="mt-0.5 break-all font-mono text-xs text-gray-400">
-              {{ detail.credential_masked }}
-            </div>
-          </div>
-
-          <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-            <div class="text-xs font-bold uppercase tracking-wider text-gray-400">
-              {{ t('admin.audit.columns.clientIp') }}
-            </div>
-            <div class="mt-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white">
-              {{ detail.client_ip || '—' }}
-            </div>
-          </div>
+        <div v-if="detailLoading" class="space-y-2" aria-busy="true">
+          <div class="skeleton h-4 w-1/3 rounded"></div>
+          <div class="skeleton h-28 w-full rounded"></div>
         </div>
-
-        <!-- User-Agent -->
-        <section>
-          <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ t('admin.audit.detail.userAgent') }}
-          </h4>
-          <div class="break-all rounded-xl bg-gray-50 p-3 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">
-            {{ detail.user_agent || '—' }}
-          </div>
-        </section>
-
-        <!-- Request body (redacted) -->
-        <section v-if="detail.request_body">
-          <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ t('admin.audit.detail.requestBody') }}
-          </h4>
-          <pre class="max-h-72 overflow-auto rounded-xl bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ prettyBody(detail.request_body) }}</pre>
-        </section>
-
-        <!-- Extra -->
-        <section v-if="detail.extra && Object.keys(detail.extra).length">
-          <h4 class="mb-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-            {{ t('admin.audit.detail.extra') }}
-          </h4>
-          <pre class="max-h-48 overflow-auto rounded-xl bg-gray-50 p-4 font-mono text-xs leading-relaxed text-gray-600 dark:bg-dark-900 dark:text-gray-400">{{ JSON.stringify(detail.extra, null, 2) }}</pre>
-        </section>
-      </div>
-    </BaseDialog>
+        <template v-else-if="detail">
+          <section v-if="detail.request_body">
+            <div class="audit-code-head">
+              <h3 class="ui-section-label mb-0">{{ t('admin.audit.detail.requestBody') }}</h3>
+              <button type="button" class="app-icon-button audit-copy" :aria-label="`${t('keys.copyToClipboard')}: ${t('admin.audit.detail.requestBody')}`" @click="copy(prettyBody(detail.request_body))">
+                <Icon :name="copiedValue === prettyBody(detail.request_body) ? 'check' : 'copy'" size="sm" />
+              </button>
+            </div>
+            <pre class="audit-code"><code>{{ prettyBody(detail.request_body) }}</code></pre>
+          </section>
+          <section v-if="detail.extra && Object.keys(detail.extra).length">
+            <div class="audit-code-head">
+              <h3 class="ui-section-label mb-0">{{ t('admin.audit.detail.extra') }}</h3>
+              <button type="button" class="app-icon-button audit-copy" :aria-label="`${t('keys.copyToClipboard')}: ${t('admin.audit.detail.extra')}`" @click="copy(JSON.stringify(detail.extra, null, 2))">
+                <Icon name="copy" size="sm" />
+              </button>
+            </div>
+            <pre class="audit-code"><code>{{ JSON.stringify(detail.extra, null, 2) }}</code></pre>
+          </section>
+        </template>
+      </template>
+    </SideDrawer>
 
     <!-- Custom time range dialog (与 /admin/ops 时间下拉一致的自定义范围，支持时分) -->
     <BaseDialog
@@ -352,20 +386,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type AuditLog } from '@/api/admin'
 import { totpAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
-import DataTable from '@/components/common/DataTable.vue'
-import type { Column } from '@/components/common/types'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import { formatRelativeTime } from '@/utils/format'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -463,16 +496,6 @@ function handleCustomTimeRangeCancel() {
   showCustomTimeRangeDialog.value = false
 }
 
-const columns = computed<Column[]>(() => [
-  { key: 'created_at', label: t('admin.audit.columns.time') },
-  { key: 'actor', label: t('admin.audit.columns.actor') },
-  { key: 'action', label: t('admin.audit.columns.action') },
-  { key: 'status_code', label: t('admin.audit.columns.result') },
-  { key: 'latency_ms', label: t('admin.audit.detail.latency') },
-  { key: 'client_ip', label: t('admin.audit.columns.clientIp') },
-  { key: 'actions', label: t('common.actions') }
-])
-
 const methodOptions = computed(() => [
   { value: '', label: t('admin.audit.filters.all') },
   { value: 'POST', label: 'POST' },
@@ -548,8 +571,51 @@ async function fetchLogs() {
 
 function search() {
   page.value = 1
+  Object.assign(appliedFilters, filters)
   fetchLogs()
 }
+
+// Toolbar: Filters panel, active chips, and the overflow menu.
+const panelOpen = ref(false)
+const moreOpen = ref(false)
+const moreMenuRef = ref<HTMLElement | null>(null)
+const appliedFilters = reactive({ ...filters })
+
+type FilterKey = keyof typeof filters
+
+const chipDefs = computed<Array<{ key: FilterKey; label: string; format?: (v: string) => string }>>(() => [
+  { key: 'q', label: t('admin.audit.filters.q') },
+  { key: 'actor_email', label: t('admin.audit.filters.actorEmail') },
+  { key: 'action', label: t('admin.audit.filters.action') },
+  { key: 'client_ip', label: t('admin.audit.filters.clientIp') },
+  { key: 'method', label: t('admin.audit.filters.method') },
+  { key: 'auth_method', label: t('admin.audit.filters.authMethod'), format: authMethodLabel },
+  { key: 'success', label: t('admin.audit.filters.result'), format: (v) => (v === 'true' ? t('admin.audit.filters.resultSuccess') : t('admin.audit.filters.resultFailure')) },
+])
+
+const chips = computed(() => chipDefs.value
+  .filter((def) => appliedFilters[def.key])
+  .map((def) => ({ key: def.key, label: def.label, value: def.format ? def.format(appliedFilters[def.key]) : appliedFilters[def.key] })))
+
+const panelCount = computed(() => chips.value.filter((chip) => !['q', 'success'].includes(chip.key)).length)
+
+function clearChip(key: FilterKey) {
+  filters[key] = ''
+  search()
+}
+
+function setResult(value: string) {
+  if (filters.success === value) return
+  filters.success = value
+  search()
+}
+
+function handleMenuClickOutside(event: MouseEvent) {
+  if (moreMenuRef.value && !event.composedPath().includes(moreMenuRef.value)) moreOpen.value = false
+}
+
+onMounted(() => document.addEventListener('click', handleMenuClickOutside))
+onUnmounted(() => document.removeEventListener('click', handleMenuClickOutside))
 
 function resetFilters() {
   filters.q = ''
@@ -576,22 +642,42 @@ function onPageSizeChange(ps: number) {
   fetchLogs()
 }
 
-// Detail dialog
+// Detail drawer: the list row renders at once; the full entry (body, extra) loads behind it.
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<AuditLog | null>(null)
+const detailRow = ref<AuditLog | null>(null)
+const detailRowId = ref<number | null>(null)
+const detailView = computed(() => detail.value ?? detailRow.value)
 
-async function openDetail(id: number) {
+async function openDetail(id: number, row?: AuditLog) {
   detailVisible.value = true
   detailLoading.value = true
   detail.value = null
+  detailRow.value = row ?? null
+  detailRowId.value = id
   try {
-    detail.value = await adminAPI.audit.get(id)
+    const entry = await adminAPI.audit.get(id)
+    if (detailRowId.value === id) detail.value = entry
   } catch (err: any) {
     appStore.showError(err?.message || t('admin.audit.loadFailed'))
-    detailVisible.value = false
+    if (!row) detailVisible.value = false
   } finally {
-    detailLoading.value = false
+    if (detailRowId.value === id) detailLoading.value = false
+  }
+}
+
+const copiedValue = ref<string | null>(null)
+async function copy(value: string) {
+  try {
+    await navigator.clipboard.writeText(value)
+    copiedValue.value = value
+    appStore.showSuccess(t('keys.copied'))
+    window.setTimeout(() => {
+      if (copiedValue.value === value) copiedValue.value = null
+    }, 2000)
+  } catch {
+    appStore.showError(t('common.copyFailed'))
   }
 }
 
@@ -668,18 +754,245 @@ function statusText(status: number): string {
   return status < 400 ? t('admin.audit.filters.resultSuccess') : t('admin.audit.filters.resultFailure')
 }
 
-function statusBadgeClass(status: number): string {
-  const base = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold '
-  if (status >= 500) return base + 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-  if (status >= 400) return base + 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-  return base + 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-}
+type StatusTone = 'ok' | 'warn' | 'bad'
+const toneOf = (status: number): StatusTone => (status >= 500 ? 'bad' : status >= 400 ? 'warn' : 'ok')
+const DOT: Record<StatusTone, string> = { ok: 'is-ok', warn: 'is-warn', bad: 'is-bad' }
+const BADGE: Record<StatusTone, string> = { ok: 'badge-success', warn: 'badge-warning', bad: 'badge-danger' }
+const TONE: Record<StatusTone, string> = { ok: 'is-ok', warn: 'is-warn', bad: 'is-bad' }
 
-function statusDotClass(status: number): string {
-  if (status >= 500) return 'bg-red-500'
-  if (status >= 400) return 'bg-amber-500'
-  return 'bg-green-500'
-}
+const statusDot = (status: number) => DOT[toneOf(status)]
+const statusBadge = (status: number) => BADGE[toneOf(status)]
+const statusTone = (status: number) => TONE[toneOf(status)]
 
 onMounted(fetchLogs)
 </script>
+
+<style scoped>
+.audit-body {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 0 0 var(--operator-radius-lg) var(--operator-radius-lg);
+}
+.audit-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--operator-border);
+}
+.audit-range {
+  width: 10.5rem;
+  flex: 0 0 auto;
+}
+.audit-range :deep(.select-trigger) {
+  height: 2.25rem;
+}
+.audit-search {
+  max-width: 20rem;
+}
+.audit-filter-toggle {
+  gap: 0.375rem;
+}
+.audit-filter-toggle[aria-expanded='true'] {
+  border-color: rgb(var(--operator-accent-rgb) / 0.55);
+  background: var(--operator-accent-soft);
+}
+.audit-filter-count {
+  display: inline-grid;
+  min-width: 1.125rem;
+  height: 1.125rem;
+  place-items: center;
+  padding: 0 0.3125rem;
+  border-radius: 999px;
+  background: var(--operator-accent);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.audit-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0 0.875rem;
+  text-align: left;
+}
+.audit-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  align-items: end;
+  gap: 0.75rem 1rem;
+  padding: 0.875rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-raised);
+}
+.audit-filter-panel .input-label {
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+.audit-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.audit-panel-enter-active,
+.audit-panel-leave-active {
+  transition: opacity var(--operator-duration) var(--operator-ease-out), transform var(--operator-duration) var(--operator-ease-out);
+}
+.audit-panel-enter-from,
+.audit-panel-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.audit-table,
+.audit-list {
+  transition: opacity var(--operator-duration) var(--operator-ease-out);
+}
+.is-busy {
+  opacity: 0.55;
+}
+.audit-table {
+  max-height: min(72vh, 52rem);
+}
+.audit-table tr:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+.audit-empty-cell {
+  height: auto;
+}
+.audit-time {
+  color: var(--operator-muted-foreground);
+  white-space: nowrap;
+}
+.audit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+.audit-clip {
+  max-width: 22rem;
+}
+.audit-method {
+  color: var(--operator-muted-foreground);
+  font-weight: 600;
+}
+.audit-list > li + li {
+  border-top: 1px solid var(--operator-border-subtle);
+}
+.audit-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+.audit-item:hover {
+  background: var(--table-row-hover-background);
+}
+.audit-item:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+.audit-list > li {
+  animation: ui-rise 320ms var(--operator-ease-out) backwards;
+}
+.audit-drawer-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: 0.625rem;
+}
+.audit-drawer-mark.is-ok {
+  background: var(--operator-success-soft);
+  color: var(--operator-success);
+}
+.audit-drawer-mark.is-warn {
+  background: var(--operator-warning-soft);
+  color: var(--operator-warning);
+}
+.audit-drawer-mark.is-bad {
+  background: var(--operator-destructive-soft);
+  color: var(--operator-destructive);
+}
+.audit-drawer-path {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+.audit-drawer-path b {
+  color: var(--operator-accent-text);
+  font-weight: 700;
+}
+.audit-drawer-path span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--operator-foreground);
+}
+.audit-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.audit-copy-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+.audit-copy {
+  min-width: 2rem;
+  height: 2rem;
+}
+.audit-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.375rem;
+}
+.audit-code {
+  max-height: 22rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+  color: var(--operator-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+@media (max-width: 640px) {
+  .audit-toolbar {
+    padding: 0.75rem;
+  }
+  .audit-range {
+    width: 100%;
+  }
+  .audit-search {
+    max-width: none;
+  }
+  .audit-filter-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .audit-list > li {
+    animation: none;
+  }
+  .audit-panel-enter-active,
+  .audit-panel-leave-active {
+    transition: none;
+  }
+}
+</style>

@@ -1,289 +1,369 @@
 <template>
-    <div class="space-y-6">
-      <!-- S3 Storage Config -->
-      <div class="card p-6">
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.backup.s3.title') }}
-            </h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.backup.s3.descriptionPrefix') }}
-              <button type="button" class="text-primary-600 underline hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300" @click="showR2Guide = true">Cloudflare R2</button>
-              {{ t('admin.backup.s3.descriptionSuffix') }}
-            </p>
-          </div>
+    <div class="ui-page ui-stagger">
+      <dl class="viz-kpis backup-kpis" data-testid="backup-kpis">
+        <div class="viz-card viz-kpi">
+          <dt class="viz-kpi-label"><Icon name="clock" size="sm" />{{ t('admin.adminUi.backup.lastBackup') }}</dt>
+          <dd class="viz-kpi-row">
+            <span class="viz-kpi-value">{{ lastCompleted ? relativeAge(lastCompleted.finished_at || lastCompleted.started_at) : t('common.time.never') }}</span>
+          </dd>
         </div>
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.endpoint') }}</label>
+        <div class="viz-card viz-kpi">
+          <dt class="viz-kpi-label"><Icon name="database" size="sm" />{{ t('admin.adminUi.backup.backups') }}</dt>
+          <dd class="viz-kpi-row"><span class="viz-kpi-value"><CountUp :value="backups.length" /></span></dd>
+        </div>
+        <div class="viz-card viz-kpi">
+          <dt class="viz-kpi-label"><Icon name="layers" size="sm" />{{ t('admin.adminUi.backup.totalSize') }}</dt>
+          <dd class="viz-kpi-row"><span class="viz-kpi-value"><CountUp :value="totalBytes" :format="formatSize" /></span></dd>
+        </div>
+        <div class="viz-card viz-kpi">
+          <dt class="viz-kpi-label"><Icon name="calendar" size="sm" />{{ t('admin.adminUi.backup.schedule') }}</dt>
+          <dd class="viz-kpi-row min-w-0">
+            <button type="button" class="viz-kpi-value backup-schedule-value" data-testid="backup-open-schedule" @click="openSettings('schedule')">
+              <span :class="savedScheduleEnabled ? 'ui-dot is-ok' : 'ui-dot'" />
+              <span class="truncate" :class="savedScheduleEnabled ? 'font-mono' : ''">{{ savedScheduleEnabled ? scheduleForm.cron_expr : t('admin.adminUi.backup.off') }}</span>
+              <Icon name="chevronRight" size="sm" class="backup-schedule-chevron" />
+            </button>
+          </dd>
+        </div>
+      </dl>
+
+      <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.backup.operations.title')">
+        <div class="viz-seg max-w-full overflow-x-auto" role="group" :aria-label="t('admin.backup.columns.status')">
+          <button
+            v-for="option in statusOptions"
+            :key="option.id"
+            type="button"
+            :aria-pressed="statusFilter === option.id"
+            :data-testid="`backup-status-${option.id}`"
+            @click="statusFilter = option.id"
+          >
+            {{ option.label }}<span class="backup-seg-count">{{ statusCounts[option.id] }}</span>
+          </button>
+        </div>
+        <span class="ui-grow" />
+        <button
+          type="button"
+          class="app-icon-button"
+          :disabled="loadingBackups"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          @click="loadBackups"
+        >
+          <Icon name="refresh" size="sm" :class="loadingBackups ? 'animate-spin' : ''" />
+        </button>
+        <ToolbarPopover :label="t('admin.adminUi.moreActions')" icon="more" icon-only menu test-id="backup-more">
+          <button type="button" role="menuitem" class="dropdown-item" @click="openSettings('schedule')">
+            <Icon name="calendar" size="sm" />{{ t('admin.backup.schedule.title') }}
+          </button>
+          <button type="button" role="menuitem" class="dropdown-item" @click="openSettings('storage')">
+            <Icon name="cloud" size="sm" />{{ t('admin.backup.s3.title') }}
+          </button>
+          <button type="button" role="menuitem" class="dropdown-item" @click="openSettings('images')">
+            <Icon name="camera" size="sm" />{{ t('admin.backup.imageStorage.title') }}
+          </button>
+          <button type="button" role="menuitem" class="dropdown-item" @click="showR2Guide = true">
+            <Icon name="book" size="sm" />{{ t('admin.adminUi.backup.r2Guide') }}
+          </button>
+        </ToolbarPopover>
+        <label class="backup-expire" :title="t('admin.backup.operations.expireDays')">
+          <Icon name="clock" size="sm" />
+          <input
+            v-model.number="manualExpireDays"
+            type="number"
+            min="0"
+            :aria-label="t('admin.backup.operations.expireDays')"
+          />
+          <span aria-hidden="true">d</span>
+        </label>
+        <button type="button" class="btn btn-primary" :disabled="creatingBackup" data-testid="backup-create" @click="createBackup">
+          <Icon :name="creatingBackup ? 'sync' : 'plus'" size="sm" :class="creatingBackup ? 'animate-spin' : ''" />
+          {{ creatingBackup ? t('admin.backup.operations.backing') : t('admin.backup.operations.createBackup') }}
+        </button>
+      </div>
+
+      <section class="ui-card overflow-hidden">
+        <div v-if="loadingBackups && backups.length === 0" class="space-y-2 p-4" aria-busy="true">
+          <div v-for="index in 3" :key="index" class="skeleton h-10" />
+        </div>
+        <div v-else-if="visibleBackups.length === 0" class="ui-empty">
+          <span class="ui-empty-icon"><Icon name="database" size="lg" /></span>
+          <b>{{ backups.length ? t('admin.adminUi.noMatches') : t('admin.backup.empty') }}</b>
+          <button v-if="backups.length" type="button" class="btn btn-ghost btn-sm" @click="statusFilter = 'all'">
+            {{ t('admin.adminUi.clearFilters') }}
+          </button>
+        </div>
+        <div v-else class="ui-table-wrap">
+          <table class="ui-table">
+            <thead>
+              <tr>
+                <th>{{ t('admin.backup.columns.status') }}</th>
+                <th>{{ t('admin.backup.columns.fileName') }}</th>
+                <th class="is-num">{{ t('admin.backup.columns.size') }}</th>
+                <th class="is-num">{{ t('admin.backup.columns.parts') }}</th>
+                <th>{{ t('admin.backup.columns.expiresAt') }}</th>
+                <th>{{ t('admin.backup.columns.startedAt') }}</th>
+                <th><span class="sr-only">{{ t('admin.backup.columns.actions') }}</span></th>
+              </tr>
+            </thead>
+            <tbody class="ui-rows-enter">
+              <tr v-for="record in visibleBackups" :key="record.id" :data-testid="`backup-row-${record.id}`">
+                <td>
+                  <span class="badge" :class="statusBadgeClass(record.status)" :title="record.status === 'failed' ? record.error_message || undefined : undefined">
+                    {{ record.status === 'running' && record.progress
+                      ? t(`admin.backup.progress.${record.progress}`)
+                      : t(`admin.backup.status.${record.status}`) }}
+                  </span>
+                  <span v-if="restoringId === record.id || record.restore_status === 'running'" class="ui-cell-sub mt-1 flex items-center gap-1">
+                    <Icon name="sync" size="xs" class="animate-spin" />{{ t('admin.adminUi.backup.restoring') }}
+                  </span>
+                </td>
+                <td class="max-w-[22rem]">
+                  <div class="ui-cell-main flex min-w-0 items-center gap-2">
+                    <span class="truncate" :title="record.file_name">{{ record.file_name }}</span>
+                    <span v-if="record.monthly_archive" class="badge badge-primary shrink-0">{{ t('admin.backup.archive.badge') }}</span>
+                  </div>
+                  <div class="ui-cell-sub truncate">
+                    <span class="font-mono">{{ record.id }}</span>
+                    · {{ record.triggered_by === 'scheduled' ? t('admin.backup.trigger.scheduled') : t('admin.backup.trigger.manual') }}
+                    <template v-if="record.monthly_archive"> · {{ record.monthly_archive.dates.join(' / ') }}</template>
+                  </div>
+                </td>
+                <td class="is-num">{{ formatSize(record.size_bytes) }}</td>
+                <td class="is-num">{{ record.parts?.length || (record.status === 'running' ? '-' : 1) }}</td>
+                <td class="whitespace-nowrap">
+                  {{ record.monthly_archive
+                    ? record.monthly_archive.retain_count === 0 ? t('admin.backup.archive.forever') : t('admin.backup.archive.retainLatest', { count: record.monthly_archive.retain_count })
+                    : record.expires_at ? formatDate(record.expires_at) : t('admin.backup.neverExpire') }}
+                </td>
+                <td class="whitespace-nowrap" :title="formatDate(record.started_at)">{{ relativeAge(record.started_at) }}</td>
+                <td>
+                  <div class="flex items-center justify-end gap-1">
+                    <button
+                      v-if="record.status === 'completed'"
+                      type="button"
+                      class="app-icon-button"
+                      :aria-label="t('admin.backup.actions.download')"
+                      :title="t('admin.backup.actions.download')"
+                      @click="downloadBackup(record.id)"
+                    >
+                      <Icon name="download" size="sm" />
+                    </button>
+                    <ToolbarPopover
+                      v-if="record.status !== 'running'"
+                      :label="t('admin.adminUi.moreActions')"
+                      icon="more"
+                      icon-only
+                      menu
+                      :test-id="`backup-more-${record.id}`"
+                    >
+                      <button
+                        v-if="record.status === 'completed'"
+                        type="button"
+                        role="menuitem"
+                        class="dropdown-item"
+                        :disabled="restoringId === record.id"
+                        @click="restoreBackup(record.id)"
+                      >
+                        <Icon name="swap" size="sm" />{{ restoringId === record.id ? t('common.loading') : t('admin.backup.actions.restore') }}
+                      </button>
+                      <button type="button" role="menuitem" class="dropdown-item text-red-600 dark:text-red-400" @click="removeBackup(record.id)">
+                        <Icon name="trash" size="sm" />{{ t('common.delete') }}
+                      </button>
+                    </ToolbarPopover>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <SideDrawer :open="settingsOpen" :title="t('admin.adminUi.backup.settings')" width="34rem" @close="settingsOpen = false">
+      <template #leading>
+        <span class="backup-drawer-icon" aria-hidden="true"><Icon name="cog" size="md" /></span>
+      </template>
+      <div class="viz-seg mb-5 w-full" role="group" :aria-label="t('admin.adminUi.backup.settings')">
+        <button
+          v-for="tab in settingsTabs"
+          :key="tab.id"
+          type="button"
+          class="flex-1"
+          :aria-pressed="settingsTab === tab.id"
+          :data-testid="`backup-settings-${tab.id}`"
+          @click="settingsTab = tab.id"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <!-- Schedule Config -->
+      <div v-show="settingsTab === 'schedule'" class="space-y-5" data-testid="backup-schedule">
+        <label class="backup-switch">
+          <input v-model="scheduleForm.enabled" type="checkbox" />
+          <span>{{ t('admin.backup.schedule.enabled') }}</span>
+        </label>
+        <div>
+          <label class="backup-label">
+            {{ t('admin.backup.schedule.cronExpr') }}
+            <HelpTooltip :content="t('admin.backup.schedule.cronHint')" />
+          </label>
+          <input v-model="scheduleForm.cron_expr" class="input w-full font-mono" placeholder="0 2 * * *" />
+        </div>
+        <section>
+          <h4 class="ui-section-label flex items-center">
+            {{ t('admin.backup.schedule.ordinaryRetention') }}
+            <HelpTooltip :content="t('admin.backup.schedule.ordinaryHint')" />
+          </h4>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="backup-label">
+                {{ t('admin.backup.schedule.retainDays') }}
+                <HelpTooltip :content="t('admin.backup.schedule.retainDaysHint')" />
+              </label>
+              <input v-model.number="scheduleForm.retain_days" data-testid="backup-retain-days" type="number" min="0" step="1" class="input w-full" />
+            </div>
+            <div>
+              <label class="backup-label">
+                {{ t('admin.backup.schedule.retainCount') }}
+                <HelpTooltip :content="t('admin.backup.schedule.retainCountHint')" />
+              </label>
+              <input v-model.number="scheduleForm.retain_count" data-testid="backup-retain-count" type="number" min="0" step="1" class="input w-full" />
+            </div>
+          </div>
+        </section>
+        <BackupArchiveSettings v-model="archiveForm" />
+        <p v-if="scheduleValidationError" class="text-sm text-red-600 dark:text-red-400" role="alert">{{ scheduleValidationError }}</p>
+        <div class="backup-preview" aria-live="polite">
+          <p class="ui-section-label mb-1">{{ t('admin.backup.schedule.preview') }}</p>
+          <p>{{ retentionPreview }}</p>
+        </div>
+      </div>
+
+      <!-- S3 Storage Config -->
+      <div v-show="settingsTab === 'storage'" class="space-y-4" data-testid="backup-storage">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="ui-section-label mb-0">{{ t('admin.backup.s3.title') }}</h3>
+          <button type="button" class="btn btn-ghost btn-sm" @click="showR2Guide = true">
+            <Icon name="book" size="sm" />{{ t('admin.adminUi.backup.r2Guide') }}
+          </button>
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="backup-label">{{ t('admin.backup.s3.endpoint') }}</label>
             <input v-model="s3Form.endpoint" class="input w-full" placeholder="https://<account_id>.r2.cloudflarestorage.com" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.region') }}</label>
+            <label class="backup-label">{{ t('admin.backup.s3.region') }}</label>
             <input v-model="s3Form.region" class="input w-full" placeholder="auto" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.bucket') }}</label>
+            <label class="backup-label">{{ t('admin.backup.s3.bucket') }}</label>
             <input v-model="s3Form.bucket" class="input w-full" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.prefix') }}</label>
+            <label class="backup-label">{{ t('admin.backup.s3.prefix') }}</label>
             <input v-model="s3Form.prefix" class="input w-full" placeholder="backups/" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.accessKeyId') }}</label>
+            <label class="backup-label">{{ t('admin.backup.s3.accessKeyId') }}</label>
             <input v-model="s3Form.access_key_id" class="input w-full" />
           </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.secretAccessKey') }}</label>
+          <div class="sm:col-span-2">
+            <label class="backup-label">{{ t('admin.backup.s3.secretAccessKey') }}</label>
             <input v-model="s3Form.secret_access_key" type="password" class="input w-full" :placeholder="s3SecretConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
           </div>
-          <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
+          <label class="backup-switch sm:col-span-2">
             <input v-model="s3Form.force_path_style" type="checkbox" />
             <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
           </label>
         </div>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" :disabled="testingS3" @click="testS3">
-            {{ testingS3 ? t('common.loading') : t('admin.backup.s3.testConnection') }}
-          </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingS3" @click="saveS3Config">
-            {{ savingS3 ? t('common.loading') : t('common.save') }}
-          </button>
-        </div>
       </div>
 
       <!-- Async image object storage -->
-      <div class="card p-6">
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.backup.imageStorage.title') }}
-            </h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.backup.imageStorage.description') }}
-            </p>
-          </div>
-          <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <div v-show="settingsTab === 'images'" class="space-y-4" data-testid="backup-images">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 class="ui-section-label mb-0 flex items-center">
+            {{ t('admin.backup.imageStorage.title') }}
+            <HelpTooltip :content="t('admin.backup.imageStorage.description')" />
+          </h3>
+          <label class="backup-switch">
             <input v-model="imageStorageForm.enabled" type="checkbox" />
             <span>{{ t('admin.backup.imageStorage.enabled') }}</span>
           </label>
         </div>
-
-        <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <label class="backup-switch">
           <input v-model="imageStorageForm.reuse_backup_s3" type="checkbox" />
           <span>{{ t('admin.backup.imageStorage.reuseBackupS3') }}</span>
         </label>
-
-        <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.bucket') }}</label>
+            <label class="backup-label">{{ t('admin.backup.imageStorage.bucket') }}</label>
             <input v-model="imageStorageForm.bucket" class="input w-full" :placeholder="imageStorageForm.reuse_backup_s3 ? t('admin.backup.imageStorage.bucketInherited') : ''" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.prefix') }}</label>
+            <label class="backup-label">{{ t('admin.backup.imageStorage.prefix') }}</label>
             <input v-model="imageStorageForm.prefix" class="input w-full" placeholder="images/" />
           </div>
 
           <template v-if="!imageStorageForm.reuse_backup_s3">
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.endpoint') }}</label>
+            <div class="sm:col-span-2">
+              <label class="backup-label">{{ t('admin.backup.s3.endpoint') }}</label>
               <input v-model="imageStorageForm.endpoint" class="input w-full" placeholder="https://<account_id>.r2.cloudflarestorage.com" />
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.region') }}</label>
+              <label class="backup-label">{{ t('admin.backup.s3.region') }}</label>
               <input v-model="imageStorageForm.region" class="input w-full" placeholder="auto" />
             </div>
             <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.accessKeyId') }}</label>
+              <label class="backup-label">{{ t('admin.backup.s3.accessKeyId') }}</label>
               <input v-model="imageStorageForm.access_key_id" class="input w-full" />
             </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.s3.secretAccessKey') }}</label>
+            <div class="sm:col-span-2">
+              <label class="backup-label">{{ t('admin.backup.s3.secretAccessKey') }}</label>
               <input v-model="imageStorageForm.secret_access_key" type="password" class="input w-full" :placeholder="imageStorageSecretConfigured ? t('admin.backup.s3.secretConfigured') : ''" />
             </div>
-            <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
+            <label class="backup-switch sm:col-span-2">
               <input v-model="imageStorageForm.force_path_style" type="checkbox" />
               <span>{{ t('admin.backup.s3.forcePathStyle') }}</span>
             </label>
           </template>
 
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.publicBaseUrl') }}</label>
+            <label class="backup-label">{{ t('admin.backup.imageStorage.publicBaseUrl') }}</label>
             <input v-model="imageStorageForm.public_base_url" class="input w-full" :placeholder="t('admin.backup.imageStorage.publicBaseUrlPlaceholder')" />
           </div>
           <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.imageStorage.presignExpiryHours') }}</label>
+            <label class="backup-label">{{ t('admin.backup.imageStorage.presignExpiryHours') }}</label>
             <input v-model.number="imageStorageForm.presign_expiry_hours" type="number" min="1" class="input w-full" />
           </div>
         </div>
-
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" :disabled="testingImageStorage" @click="testImageStorage">
-            {{ testingImageStorage ? t('common.loading') : t('admin.backup.s3.testConnection') }}
-          </button>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingImageStorage" @click="saveImageStorageConfig">
-            {{ savingImageStorage ? t('common.loading') : t('common.save') }}
-          </button>
-        </div>
       </div>
 
-      <!-- Schedule Config -->
-      <div class="card p-6" data-testid="backup-schedule">
-        <div class="mb-4">
-          <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-            {{ t('admin.backup.schedule.title') }}
-          </h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {{ t('admin.backup.schedule.description') }}
-          </p>
-        </div>
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 md:col-span-2">
-            <input v-model="scheduleForm.enabled" type="checkbox" />
-            <span>{{ t('admin.backup.schedule.enabled') }}</span>
-          </label>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.schedule.cronExpr') }}</label>
-            <input v-model="scheduleForm.cron_expr" class="input w-full" placeholder="0 2 * * *" />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.schedule.cronHint') }}</p>
-          </div>
-          <h4 class="mt-2 text-sm font-medium text-gray-900 dark:text-white md:col-span-2">{{ t('admin.backup.schedule.ordinaryRetention') }}</h4>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.schedule.retainDays') }}</label>
-            <input v-model.number="scheduleForm.retain_days" data-testid="backup-retain-days" type="number" min="0" step="1" class="input w-full" />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.schedule.retainDaysHint') }}</p>
-          </div>
-          <div>
-            <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{{ t('admin.backup.schedule.retainCount') }}</label>
-            <input v-model.number="scheduleForm.retain_count" data-testid="backup-retain-count" type="number" min="0" step="1" class="input w-full" />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.schedule.retainCountHint') }}</p>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.backup.schedule.ordinaryHint') }}</p>
-        <BackupArchiveSettings v-model="archiveForm" />
-        <p v-if="scheduleValidationError" class="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">{{ scheduleValidationError }}</p>
-        <div class="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-700 dark:bg-dark-800 dark:text-gray-300" aria-live="polite">
-          <p class="font-medium">{{ t('admin.backup.schedule.preview') }}</p>
-          <p>{{ retentionPreview }}</p>
-        </div>
-        <div class="mt-4">
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingSchedule || !!scheduleValidationError" @click="saveSchedule">
+      <template #footer>
+        <template v-if="settingsTab === 'schedule'">
+          <button type="button" class="btn btn-primary" data-testid="backup-schedule-save" :disabled="savingSchedule || !!scheduleValidationError" @click="saveSchedule">
             {{ savingSchedule ? t('common.loading') : t('common.save') }}
           </button>
-        </div>
-      </div>
-
-      <!-- Backup Operations -->
-      <div class="card p-6">
-        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.backup.operations.title') }}
-            </h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.backup.operations.description') }}
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="flex items-center gap-1">
-              <label class="text-xs text-gray-600 dark:text-gray-400">{{ t('admin.backup.operations.expireDays') }}</label>
-              <input v-model.number="manualExpireDays" type="number" min="0" class="input w-20 text-xs" />
-            </div>
-            <button type="button" class="btn btn-primary btn-sm" :disabled="creatingBackup" @click="createBackup">
-              {{ creatingBackup ? t('admin.backup.operations.backing') : t('admin.backup.operations.createBackup') }}
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="loadingBackups" @click="loadBackups">
-              {{ loadingBackups ? t('common.loading') : t('common.refresh') }}
-            </button>
-          </div>
-        </div>
-
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[800px] text-sm">
-            <thead>
-              <tr class="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-dark-700 dark:text-gray-400">
-                <th class="py-2 pr-4">ID</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.status') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.fileName') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.size') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.parts') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.expiresAt') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.triggeredBy') }}</th>
-                <th class="py-2 pr-4">{{ t('admin.backup.columns.startedAt') }}</th>
-                <th class="py-2">{{ t('admin.backup.columns.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="record in backups" :key="record.id" class="border-b border-gray-100 align-top dark:border-dark-800">
-                <td class="py-3 pr-4 font-mono text-xs">{{ record.id }}</td>
-                <td class="py-3 pr-4">
-                  <span
-                    class="rounded px-2 py-0.5 text-xs"
-                    :class="statusClass(record.status)"
-                  >
-                    {{ record.status === 'running' && record.progress
-                      ? t(`admin.backup.progress.${record.progress}`)
-                      : t(`admin.backup.status.${record.status}`) }}
-                  </span>
-                </td>
-                <td class="py-3 pr-4 text-xs">
-                  {{ record.file_name }}
-                  <span v-if="record.monthly_archive" class="ml-1 inline-block rounded bg-primary-50 px-1.5 py-0.5 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">{{ t('admin.backup.archive.badge') }}</span>
-                  <div v-if="record.monthly_archive" class="mt-1 text-gray-500 dark:text-gray-400">{{ record.monthly_archive.dates.join(' / ') }}</div>
-                </td>
-                <td class="py-3 pr-4 text-xs">{{ formatSize(record.size_bytes) }}</td>
-                <td class="py-3 pr-4 text-xs">{{ record.parts?.length || (record.status === 'running' ? '-' : 1) }}</td>
-                <td class="py-3 pr-4 text-xs">
-                  {{ record.monthly_archive
-                    ? record.monthly_archive.retain_count === 0 ? t('admin.backup.archive.forever') : t('admin.backup.archive.retainLatest', { count: record.monthly_archive.retain_count })
-                    : record.expires_at ? formatDate(record.expires_at) : t('admin.backup.neverExpire') }}
-                </td>
-                <td class="py-3 pr-4 text-xs">
-                  {{ record.triggered_by === 'scheduled' ? t('admin.backup.trigger.scheduled') : t('admin.backup.trigger.manual') }}
-                </td>
-                <td class="py-3 pr-4 text-xs">{{ formatDate(record.started_at) }}</td>
-                <td class="py-3 text-xs">
-                  <div class="flex flex-wrap gap-1">
-                    <button
-                      v-if="record.status === 'completed'"
-                      type="button"
-                      class="btn btn-secondary btn-xs"
-                      @click="downloadBackup(record.id)"
-                    >
-                      {{ t('admin.backup.actions.download') }}
-                    </button>
-                    <button
-                      v-if="record.status === 'completed'"
-                      type="button"
-                      class="btn btn-secondary btn-xs"
-                      :disabled="restoringId === record.id"
-                      @click="restoreBackup(record.id)"
-                    >
-                      {{ restoringId === record.id ? t('common.loading') : t('admin.backup.actions.restore') }}
-                    </button>
-                    <button
-                      v-if="record.status !== 'running'"
-                      type="button"
-                      class="btn btn-danger btn-xs"
-                      @click="removeBackup(record.id)"
-                    >
-                      {{ t('common.delete') }}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="backups.length === 0">
-                <td colspan="9" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                  {{ t('admin.backup.empty') }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+        </template>
+        <template v-else-if="settingsTab === 'storage'">
+          <button type="button" class="btn btn-primary" :disabled="savingS3" @click="saveS3Config">
+            {{ savingS3 ? t('common.loading') : t('common.save') }}
+          </button>
+          <button type="button" class="btn btn-secondary" :disabled="testingS3" @click="testS3">
+            {{ testingS3 ? t('common.loading') : t('admin.backup.s3.testConnection') }}
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="btn btn-primary" :disabled="savingImageStorage" @click="saveImageStorageConfig">
+            {{ savingImageStorage ? t('common.loading') : t('common.save') }}
+          </button>
+          <button type="button" class="btn btn-secondary" :disabled="testingImageStorage" @click="testImageStorage">
+            {{ testingImageStorage ? t('common.loading') : t('admin.backup.s3.testConnection') }}
+          </button>
+        </template>
+      </template>
+    </SideDrawer>
 
     <!-- Cloudflare R2 Setup Guide Modal -->
     <teleport to="body">
@@ -429,6 +509,11 @@ import type {
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import BackupArchiveSettings from '@/components/admin/BackupArchiveSettings.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import Icon from '@/components/icons/Icon.vue'
+import CountUp from '@/components/ui/CountUp.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -487,6 +572,8 @@ const scheduleForm = ref<BackupScheduleConfig>({
   retain_count: 10,
 })
 const savingSchedule = ref(false)
+// The KPI tile reflects the persisted schedule, not unsaved drawer edits.
+const savedScheduleEnabled = ref(false)
 const archiveForm = ref<BackupMonthlyArchiveConfig>({ enabled: false, days: [1], include_month_end: false, retain_count: 0 })
 // Disabling hides the archive parameters, so a save while disabled keeps the
 // persisted parameters and only turns the rule off.
@@ -532,6 +619,47 @@ const restoringId = ref('')
 const manualExpireDays = ref(14)
 const downloadParts = ref<BackupDownloadPart[]>([])
 const downloadPartsModalOpen = ref(false)
+
+// List filter, summary tiles, and the settings drawer
+type StatusFilter = 'all' | 'completed' | 'running' | 'failed'
+type SettingsTab = 'schedule' | 'storage' | 'images'
+const statusFilter = ref<StatusFilter>('all')
+const settingsOpen = ref(false)
+const settingsTab = ref<SettingsTab>('schedule')
+const statusOptions = computed<Array<{ id: StatusFilter; label: string }>>(() => [
+  { id: 'all', label: t('common.all') },
+  { id: 'completed', label: t('admin.backup.status.completed') },
+  { id: 'running', label: t('admin.backup.status.running') },
+  { id: 'failed', label: t('admin.backup.status.failed') },
+])
+const settingsTabs = computed<Array<{ id: SettingsTab; label: string }>>(() => [
+  { id: 'schedule', label: t('admin.adminUi.backup.schedule') },
+  { id: 'storage', label: t('admin.adminUi.backup.storage') },
+  { id: 'images', label: t('admin.adminUi.backup.images') },
+])
+function statusBucket(record: BackupRecord): Exclude<StatusFilter, 'all'> {
+  if (record.status === 'completed' || record.status === 'failed') return record.status
+  return 'running'
+}
+const statusCounts = computed(() => {
+  const counts: Record<StatusFilter, number> = { all: backups.value.length, completed: 0, running: 0, failed: 0 }
+  for (const record of backups.value) counts[statusBucket(record)] += 1
+  return counts
+})
+const visibleBackups = computed(() =>
+  statusFilter.value === 'all' ? backups.value : backups.value.filter(record => statusBucket(record) === statusFilter.value),
+)
+const lastCompleted = computed(() =>
+  backups.value
+    .filter(record => record.status === 'completed')
+    .reduce<BackupRecord | null>((latest, record) =>
+      !latest || Date.parse(record.started_at) > Date.parse(latest.started_at) ? record : latest, null),
+)
+const totalBytes = computed(() => backups.value.reduce((sum, record) => sum + (record.size_bytes || 0), 0))
+function openSettings(tab: SettingsTab) {
+  settingsTab.value = tab
+  settingsOpen.value = true
+}
 
 // Polling
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
@@ -765,6 +893,7 @@ async function loadSchedule() {
       retain_count: cfg.monthly_archive?.retain_count ?? 0,
     }
     savedArchive.value = cloneArchive(archiveForm.value)
+    savedScheduleEnabled.value = scheduleForm.value.enabled
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
   }
@@ -777,6 +906,7 @@ async function saveSchedule() {
     const archive = archivePayload.value
     await adminAPI.backup.updateSchedule({ ...scheduleForm.value, monthly_archive: archive })
     savedArchive.value = cloneArchive(archive)
+    savedScheduleEnabled.value = scheduleForm.value.enabled
     appStore.showSuccess(t('admin.backup.schedule.saved'))
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('errors.networkError'))
@@ -885,24 +1015,30 @@ async function removeBackup(id: string) {
   }
 }
 
-function statusClass(status: string): string {
-  switch (status) {
-    case 'completed':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-    case 'running':
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-    case 'failed':
-      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-    default:
-      return 'bg-gray-100 text-gray-700 dark:bg-dark-800 dark:text-gray-300'
-  }
+function statusBadgeClass(status: string): string {
+  if (status === 'completed') return 'badge-success'
+  if (status === 'running') return 'badge-primary'
+  if (status === 'failed') return 'badge-danger'
+  return 'badge-gray'
+}
+
+function relativeAge(value?: string): string {
+  const time = value ? Date.parse(value) : Number.NaN
+  if (Number.isNaN(time)) return '-'
+  const minutes = Math.floor((Date.now() - time) / 60000)
+  if (minutes < 1) return t('common.time.justNow')
+  if (minutes < 60) return t('common.time.minutesAgo', { n: minutes })
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return t('common.time.hoursAgo', { n: hours })
+  return t('common.time.daysAgo', { n: Math.floor(hours / 24) })
 }
 
 function formatSize(bytes: number): string {
   if (!bytes || bytes <= 0) return '-'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 function formatDate(value?: string): string {
@@ -937,6 +1073,99 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.backup-schedule-value {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  text-align: left;
+}
+
+.backup-schedule-value:hover {
+  color: var(--operator-accent-text);
+}
+
+.backup-schedule-value:focus-visible {
+  outline: 2px solid var(--operator-accent-text);
+  outline-offset: 2px;
+}
+
+.backup-schedule-chevron {
+  flex: none;
+  color: var(--operator-subtle-foreground);
+}
+
+.backup-seg-count {
+  margin-left: 0.375rem;
+  color: var(--operator-subtle-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.backup-expire {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  color: var(--operator-subtle-foreground);
+  font-size: 0.8125rem;
+}
+
+.backup-expire input {
+  width: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--operator-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+}
+
+.backup-expire:focus-within {
+  border-color: var(--operator-accent-text);
+}
+
+.backup-drawer-icon {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--operator-radius);
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.backup-label {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.backup-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+}
+
+.backup-preview {
+  padding: 0.75rem;
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.2s ease;

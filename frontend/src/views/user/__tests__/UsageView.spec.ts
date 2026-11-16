@@ -150,10 +150,12 @@ const usageLog = {
   native_compaction_v2: false,
 }
 
-function mountUsageView() {
+function mountUsageView(extraStubs: Record<string, unknown> = {}) {
   return mount(UsageView, {
     global: {
       stubs: {
+        Teleport: true,
+        Transition: true,
         AppLayout: simpleStub,
         Pagination: true,
         Select: true,
@@ -166,6 +168,7 @@ function mountUsageView() {
         GroupDistributionChart: chartStub,
         EndpointDistributionChart: chartStub,
         TokenUsageTrend: chartStub,
+        ...extraStubs,
       },
     },
   })
@@ -645,6 +648,36 @@ describe('UsageView subscription feature flag', () => {
     expect(billingTypeSelect(wrapper)).toBeUndefined()
     expect(query).toHaveBeenCalledTimes(previousQueries + 1)
     expect(query.mock.calls.at(-1)?.[0]?.billing_type).toBeNull()
+    wrapper.unmount()
+  })
+})
+
+describe('UsageView redesigned controls', () => {
+  it('opens a record drawer when a table row is clicked', async () => {
+    const wrapper = mountUsageView({
+      UsageTable: { template: '<table><tbody><tr class="data-row" data-index="0"><td>row</td></tr></tbody></table>' },
+    })
+    await flushPromises()
+    await wrapper.get('tr.data-row').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('req-user-export')
+    expect(wrapper.text()).toContain('demo-key')
+    wrapper.unmount()
+  })
+
+  it('shows an active chip for each filter and clears it with one click', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    ;(wrapper.vm as any).filters.billing_mode = 'image'
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    const chip = wrapper.findAll('button.ui-chip')[0]
+    expect(chip).toBeDefined()
+    expect(wrapper.get('[data-testid="usage-more-filters"]').text()).toContain('1')
+    query.mockClear()
+    await chip!.trigger('click')
+    await flushPromises()
+    expect(query.mock.calls.at(-1)?.[0]?.billing_mode).toBeNull()
     wrapper.unmount()
   })
 })

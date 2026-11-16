@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { routeLocationKey } from 'vue-router'
 
 import AccountsView from '../AccountsView.vue'
 
@@ -100,8 +101,11 @@ const AccountTableFiltersStub = {
   template: '<button data-test="change-filter" @click="$emit(\'change\')">change filter</button>'
 }
 
-const mountView = () => mount(AccountsView, {
+const mountView = (query: Record<string, string> = { view: 'technical' }) => mount(AccountsView, {
   global: {
+    provide: {
+      [routeLocationKey as symbol]: { query }
+    },
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
       TablePageLayout: {
@@ -110,7 +114,7 @@ const mountView = () => mount(AccountsView, {
       DataTable: { props: ['data'], template: '<div data-test="data-table"></div>' },
       Pagination: true,
       ConfirmDialog: true,
-      AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+      AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
       AccountTableFilters: AccountTableFiltersStub,
       AccountBulkActionsBar: AccountBulkActionsBarStub,
       AccountActionMenu: true,
@@ -159,6 +163,29 @@ describe('admin AccountsView select all filtered results', () => {
     getUpstreamBillingProbeSettings.mockResolvedValue({ enabled: true, interval_minutes: 30 })
     getAllProxies.mockResolvedValue([])
     getAllGroups.mockResolvedValue([])
+  })
+
+  it('selects every visible fleet row without another request in the capacity view', async () => {
+    const allAccounts = makeAccounts(45)
+    listAccounts.mockImplementation(async (_page: number, pageSize: number) => ({
+      items: pageSize === 1000 ? allAccounts : allAccounts.slice(0, 20),
+      total: 45,
+      page: 1,
+      page_size: pageSize,
+      pages: pageSize === 1000 ? 1 : 3
+    }))
+
+    const wrapper = mountView({})
+    await flushPromises()
+    const callsBefore = listAccounts.mock.calls.length
+
+    expect(wrapper.get('[data-test="total-results"]').text()).toBe('45')
+    await wrapper.get('[data-test="select-all-results"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="selected-count"]').text()).toBe('45')
+    expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('true')
+    expect(listAccounts.mock.calls.length).toBe(callsBefore)
   })
 
   it('selects all matching IDs in one commit and clears the selection when filters change', async () => {

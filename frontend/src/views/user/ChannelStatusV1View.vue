@@ -1,23 +1,49 @@
 <template>
   <AppLayout>
-    <MonitorHero
-      :overall-status="overallStatus"
-      :interval-seconds="DEFAULT_INTERVAL_SECONDS"
-      :window="currentWindow"
-      :loading="loading"
-      :auto-refresh="autoRefresh"
-      @update:window="handleWindowChange"
-      @refresh="manualReload"
-    />
+    <div class="ui-page">
+      <MonitorHero
+        :overall-status="overallStatus"
+        :interval-seconds="DEFAULT_INTERVAL_SECONDS"
+        :window="currentWindow"
+        :loading="loading"
+        :auto-refresh="autoRefresh"
+        @update:window="handleWindowChange"
+        @refresh="manualReload"
+      >
+        <div
+          v-if="providers.length > 1"
+          class="ui-chips"
+          role="group"
+          :aria-label="t('channelStatus.columns.provider')"
+        >
+          <button type="button" class="ui-chip" :aria-pressed="providerFilter === ''" @click="providerFilter = ''">
+            {{ t('channelStatus.allProviders') }}
+          </button>
+          <button
+            v-for="entry in providers"
+            :key="entry.provider"
+            type="button"
+            class="ui-chip"
+            :aria-pressed="providerFilter === entry.provider"
+            :aria-label="providerLabel(entry.provider)"
+            :title="providerLabel(entry.provider)"
+            @click="providerFilter = providerFilter === entry.provider ? '' : entry.provider"
+          >
+            <ProviderMark :platform="entry.provider" :size="18" />
+            <span class="ui-chip-count">{{ entry.count }}</span>
+          </button>
+        </div>
+      </MonitorHero>
 
-    <MonitorCardGrid
-      :items="items"
-      :window="currentWindow"
-      :countdown-seconds="countdown"
-      :loading="loading"
-      :detail-cache="detailCache"
-      @card-click="openDetail"
-    />
+      <MonitorCardGrid
+        :items="visibleItems"
+        :window="currentWindow"
+        :countdown-seconds="countdown"
+        :loading="loading"
+        :detail-cache="detailCache"
+        @card-click="openDetail"
+      />
+    </div>
 
     <MonitorDetailDialog
       :show="showDetail"
@@ -48,9 +74,12 @@ import MonitorCardGrid from '@/components/user/monitor/MonitorCardGrid.vue'
 import MonitorDetailDialog from '@/components/user/MonitorDetailDialog.vue'
 import { DEFAULT_INTERVAL_SECONDS, STATUS_OPERATIONAL } from '@/constants/channelMonitor'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
+import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { providerLabel } = useChannelMonitorFormat()
 
 // ── State ──
 const items = ref<UserMonitorView[]>([])
@@ -73,6 +102,18 @@ const autoRefresh = useAutoRefresh({
 const countdown = autoRefresh.countdown
 
 // ── Computed ──
+const providerFilter = ref('')
+
+const providers = computed(() => {
+  const counts = new Map<string, number>()
+  for (const it of items.value) counts.set(it.provider, (counts.get(it.provider) ?? 0) + 1)
+  return [...counts.entries()].map(([provider, count]) => ({ provider, count }))
+})
+
+const visibleItems = computed(() =>
+  providerFilter.value ? items.value.filter((it) => it.provider === providerFilter.value) : items.value
+)
+
 const overallStatus = computed<OverallStatus>(() => {
   if (items.value.length === 0) return 'operational'
   for (const it of items.value) {

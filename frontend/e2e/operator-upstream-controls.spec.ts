@@ -8,7 +8,7 @@ for (const width of [390, 1280]) {
     await seedSession(page)
     await installOperatorApiMock(page)
     await page.goto('/admin/accounts')
-    await page.getByRole('button', { name: 'Create Account', exact: true }).click()
+    await page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Add', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Create Account', exact: true })
     await dialog.getByRole('button', { name: 'Claude Console API Key', exact: true }).click()
     await dialog.getByRole('button', { name: 'Model Mapping', exact: true }).click()

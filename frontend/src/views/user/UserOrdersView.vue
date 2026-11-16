@@ -1,34 +1,53 @@
 <template>
   <AppLayout>
-    <div class="space-y-4">
-      <!-- Filters -->
-      <div class="card p-4">
-        <div class="flex flex-wrap items-center gap-3">
-          <Select v-model="currentFilter" :options="statusFilters" class="w-36" @change="handlePageChange(1)" />
-          <div class="flex flex-1 items-center justify-end gap-2">
-            <button @click="fetchOrders" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button class="btn btn-primary" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
-          </div>
+    <div class="ui-page ui-stagger">
+      <div class="ui-toolbar">
+        <div class="ui-chips" role="group" :aria-label="t('payment.orders.status')">
+          <button
+            v-for="option in statusFilters"
+            :key="option.value || 'all'"
+            type="button"
+            class="ui-chip"
+            :aria-pressed="currentFilter === option.value"
+            :data-testid="`order-filter-${option.value || 'all'}`"
+            @click="setFilter(option.value)"
+          >
+            {{ option.label }}
+          </button>
         </div>
+        <span class="ui-grow"></span>
+        <button
+          type="button"
+          class="app-icon-button"
+          :disabled="loading"
+          :title="t('common.refresh')"
+          :aria-label="t('common.refresh')"
+          @click="fetchOrders"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" @click="router.push('/purchase')">
+          <Icon name="plus" size="sm" />
+          {{ t('payment.result.backToRecharge') }}
+        </button>
       </div>
 
-      <!-- Table -->
-      <OrderTable :orders="orders" :loading="loading">
-        <template #actions="{ row }">
-          <div class="flex items-center gap-2">
-            <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
-              <Icon name="x" size="sm" />
-              <span>{{ t('payment.orders.cancel') }}</span>
-            </button>
-            <button v-if="canRequestRefund(row)" @click="openRefundDialog(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/20">
-              <Icon name="dollar" size="sm" />
-              <span>{{ t('payment.orders.requestRefund') }}</span>
-            </button>
-          </div>
-        </template>
-      </OrderTable>
+      <section class="orders-table min-w-0">
+        <OrderTable :orders="orders" :loading="loading">
+          <template #actions="{ row }">
+            <div class="flex items-center gap-1">
+              <button v-if="row.status === 'PENDING'" type="button" class="btn btn-ghost btn-sm text-amber-600" @click="handleCancel(row.id)">
+                <Icon name="x" size="sm" />
+                <span>{{ t('payment.orders.cancel') }}</span>
+              </button>
+              <button v-if="canRequestRefund(row)" type="button" class="btn btn-ghost btn-sm text-primary-600 dark:text-primary-300" @click="openRefundDialog(row)">
+                <Icon name="dollar" size="sm" />
+                <span>{{ t('payment.orders.requestRefund') }}</span>
+              </button>
+            </div>
+          </template>
+        </OrderTable>
+      </section>
 
       <!-- Pagination -->
       <Pagination
@@ -55,16 +74,12 @@
     <!-- Refund Dialog -->
     <BaseDialog :show="!!refundTarget" :title="t('payment.orders.requestRefund')" @close="refundTarget = null">
       <div v-if="refundTarget" class="space-y-4">
-        <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-800">
-          <div class="flex justify-between text-sm">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
-            <span class="font-mono text-gray-900 dark:text-white">#{{ refundTarget.id }}</span>
-          </div>
-          <div class="mt-2 flex justify-between text-sm">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-            <span class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
-          </div>
-        </div>
+        <dl class="ui-dl rounded-lg bg-gray-50 p-4 dark:bg-dark-800">
+          <dt>{{ t('payment.orders.orderId') }}</dt>
+          <dd class="text-right font-mono">#{{ refundTarget.id }}</dd>
+          <dt>{{ t('payment.orders.amount') }}</dt>
+          <dd class="text-right tabular-nums">${{ refundTarget.amount.toFixed(2) }}</dd>
+        </dl>
         <div>
           <label class="input-label">{{ t('payment.refundReason') }}</label>
           <textarea v-model="refundReason" rows="3" class="input mt-1 w-full" :placeholder="t('payment.refundReasonPlaceholder')" />
@@ -91,7 +106,6 @@ import type { PaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'
 
@@ -132,6 +146,12 @@ async function fetchOrders() {
   } finally {
     loading.value = false
   }
+}
+
+function setFilter(value: string) {
+  if (currentFilter.value === value) return
+  currentFilter.value = value
+  handlePageChange(1)
 }
 
 function handlePageChange(page: number) { pagination.page = page; fetchOrders() }
@@ -187,3 +207,16 @@ async function loadRefundEligibility() {
 
 onMounted(() => { fetchOrders(); loadRefundEligibility() })
 </script>
+
+<style scoped>
+/* DataTable renders its own cards below 768px; frame only the desktop table. */
+@media (min-width: 768px) {
+  .orders-table {
+    overflow: hidden;
+    border: 1px solid var(--operator-border);
+    border-radius: var(--operator-radius-lg);
+    background: var(--operator-card);
+    box-shadow: var(--operator-shadow-xs);
+  }
+}
+</style>

@@ -141,6 +141,17 @@ async function selectAutoResetMode(dialog: ReturnType<Page['getByRole']>, mode: 
   await dialog.page().getByRole('option', { name: mode, exact: true }).click()
 }
 
+// The bulk bar appears once rows are selected; its primary Edit action opens the selected-scope editor.
+async function openBulkEditForSelection(page: Page) {
+  await page.getByTestId('account-bulk-bar').getByRole('button', { name: 'Edit', exact: true }).click()
+}
+
+// "Edit all filtered" lives in the toolbar More Actions menu.
+async function openFilteredBulkEditor(page: Page) {
+  await page.getByRole('button', { name: 'More Actions', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit all filtered', exact: true }).click()
+}
+
 async function openSelectedBulkEditor(page: Page, accountNames: string[]) {
   await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
   await page.getByRole('tab', { name: 'Technical' }).click()
@@ -148,7 +159,7 @@ async function openSelectedBulkEditor(page: Page, accountNames: string[]) {
     const row = page.locator('.operator-account-table tr').filter({ hasText: name })
     await row.locator('input[type="checkbox"]').check()
   }
-  await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+  await openBulkEditForSelection(page)
   return page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
 }
 
@@ -243,7 +254,7 @@ test('reviews selected and filtered bulk changes with their exact scope at narro
   await expect(checkboxes).toHaveCount(5)
   await checkboxes.nth(0).check()
   await checkboxes.nth(1).check()
-  await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+  await openBulkEditForSelection(page)
   let dialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
   await page.setViewportSize({ width: 390, height: 844 })
   await selectAutoResetMode(dialog, 'Enable')
@@ -271,7 +282,7 @@ test('reviews selected and filtered bulk changes with their exact scope at narro
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
   await page.getByRole('tab', { name: 'Technical' }).click()
-  await page.getByRole('button', { name: 'Update Accounts', exact: true }).click()
+  await openFilteredBulkEditor(page)
   dialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
   await dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('75')
   await dialog.getByRole('button', { name: 'Update Accounts' }).click()
@@ -411,7 +422,7 @@ test('reviews a filtered bulk update when exactly one applicable OpenAI OAuth pa
   const { bulkUpdates } = await installResetCreditMock(page, filteredAccounts)
   await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
   await page.getByRole('tab', { name: 'Technical' }).click()
-  await page.getByRole('button', { name: 'Update Accounts', exact: true }).click()
+  await openFilteredBulkEditor(page)
   const dialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
   await dialog.locator('#bulk-edit-auto-reset-credit-5h').fill('85')
   await dialog.getByRole('button', { name: 'Update Accounts' }).click()
@@ -443,8 +454,9 @@ test('projects model retry, second observation, and current-window completion in
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('tab', { name: 'Capacity' }).click()
   const row = page.getByTestId('account-capacity-row').filter({ hasText: 'Codex Model Retry' })
-  await row.getByRole('button', { name: /Show details/ }).click()
-  await expect(row.getByTestId('auto-warmup-reason')).toContainText('No eligible model available; bounded retry pending')
+  await row.click()
+  const drawer = page.getByRole('dialog', { name: 'Codex Model Retry', exact: true })
+  await expect(drawer.getByTestId('auto-warmup-reason')).toContainText('No eligible model available; bounded retry pending')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('warmup-status-capacity-mobile.png'), fullPage: true, animations: 'disabled' })
 })

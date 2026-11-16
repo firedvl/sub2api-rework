@@ -82,21 +82,23 @@ describe('channel-monitor-v2 design system structure', () => {
     expect(src).toContain('dropdown-item')
   })
 
-  it('MonitorSettingsPanel uses page-header, card, btn-primary, tabs', () => {
+  it('MonitorSettingsPanel uses the operator UI kit cards, segmented control, and btn-primary', () => {
     const src = read('features/channel-monitor-v2/MonitorSettingsPanel.vue')
-    expect(src).toContain('page-header')
+    expect(src).not.toContain('<h1')
     expect(src).toContain('btn btn-primary')
-    expect(src).toContain('class="card')
-    expect(src).toContain('tab-active')
+    expect(src).toContain('class="ui-card')
+    expect(src).toContain('viz-card-head')
+    expect(src).toContain('viz-seg')
+    expect(src).toContain('aria-pressed')
     expect(src).toMatch(/max-h-\[min\(40vh/)
   })
 
-  it('admin ChannelMonitorView V2 tab chrome uses project tabs', () => {
+  it('admin ChannelMonitorView switches views with a segmented tab list', () => {
     const src = read('views/admin/ChannelMonitorView.vue')
-    expect(src).toContain('page-header')
     expect(src).not.toContain('<h1')
-    expect(src).toContain('class="tabs')
-    expect(src).toContain('tab-active')
+    expect(src).toContain('class="viz-seg"')
+    expect(src).toContain('role="tablist"')
+    expect(src).toContain('aria-selected')
     expect(src).toContain('MonitorSettingsPanel')
   })
 })

@@ -37,7 +37,15 @@ for (const width of [390, 1280]) {
 
     await page.goto('/admin/groups')
     for (const name of ['RPM Overrides', 'Rate Multipliers']) {
-      await page.getByRole('button', { name, exact: true }).first().click()
+      // Secondary group actions live in a ⋯ menu: on the row (desktop) or, where the
+      // actions column is hidden (<=760px), in the group drawer opened by the row.
+      if (width <= 760) {
+        await page.locator('[data-testid^="group-row-"]').first().click()
+        await page.getByTestId('group-drawer-more').click()
+      } else {
+        await page.locator('[data-testid^="group-more-"]').first().click()
+      }
+      await page.getByRole('menuitem', { name, exact: true }).click()
       const dialog = page.getByRole('dialog')
       const search = dialog.getByPlaceholder('Search user email...')
       await search.fill('operator')

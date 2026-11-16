@@ -115,15 +115,17 @@ const ProbeDataTableStub = {
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
-  emits: ['edit-filtered', 'edit-auto-warmup-eligible', 'probe-upstream-billing'],
+  emits: ['probe-upstream-billing'],
   template: `
     <div>
-      <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
-      <button data-test="edit-auto-warmup-eligible" @click="$emit('edit-auto-warmup-eligible')">edit warm-up eligible</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
     </div>
   `
 }
+
+// Edit-filtered and the Auto Warm-up fleet edit live in the toolbar's More menu.
+const openMoreMenu = (wrapper: { get: (selector: string) => { trigger: (event: string) => Promise<void> } }) =>
+  wrapper.get('button[aria-label="admin.accounts.moreActions"]').trigger('click')
 
 const PaginationStub = {
   emits: ['update:page'],
@@ -191,7 +193,8 @@ describe('admin AccountsView bulk edit scope', () => {
           DataTable: DataTableStub,
           Pagination: true,
           ConfirmDialog: true,
-          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
+          teleport: true,
           AccountTableFilters: { template: '<div></div>' },
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
@@ -219,6 +222,7 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
+    await openMoreMenu(wrapper)
     await wrapper.get('[data-test="edit-filtered"]').trigger('click')
     await flushPromises()
 
@@ -242,7 +246,8 @@ describe('admin AccountsView bulk edit scope', () => {
           DataTable: DataTableStub,
           Pagination: true,
           ConfirmDialog: true,
-          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
+          teleport: true,
           AccountTableFilters: { template: '<div></div>' },
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
@@ -270,7 +275,8 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-test="edit-auto-warmup-eligible"]').trigger('click')
+    await openMoreMenu(wrapper)
+    await wrapper.get('[data-testid="edit-auto-warmup-eligible"]').trigger('click')
     await flushPromises()
 
     const modal = wrapper.getComponent(BulkEditAccountModalStub)
@@ -315,7 +321,8 @@ describe('admin AccountsView bulk edit scope', () => {
           DataTable: DataTableStub,
           Pagination: true,
           ConfirmDialog: true,
-          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
+          teleport: true,
           AccountTableFilters: { template: '<div></div>' },
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,
@@ -381,7 +388,8 @@ describe('admin AccountsView bulk edit scope', () => {
           DataTable: DataTableStub,
           Pagination: true,
           ConfirmDialog: true,
-          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableActions: { template: '<div><slot name="before" /><slot name="beforeCreate" /><slot name="after" /></div>' },
+          teleport: true,
           AccountTableFilters: { template: '<div></div>' },
           AccountBulkActionsBar: AccountBulkActionsBarStub,
           AccountActionMenu: true,

@@ -193,6 +193,15 @@ const stackedBelow = (upper: Locator, lower: Locator) => async () => {
   return upperBox !== null && lowerBox !== null && lowerBox.y >= upperBox.y + upperBox.height - 1
 }
 
+// Crossing the sidebar breakpoint animates the shell, so a card keeps moving after it has stacked.
+const settledBox = (locator: Locator) => () => locator.evaluate((element) => new Promise<boolean>((resolve) => {
+  const before = element.getBoundingClientRect()
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const after = element.getBoundingClientRect()
+    resolve(before.left === after.left && before.width === after.width)
+  }))
+}))
+
 /** The SVG chart, its axis labels, and an open tooltip stay inside the chart's card. */
 async function expectTrendChartInside(card: Locator, label: string) {
   const metrics = await card.evaluate((element) => {
@@ -244,6 +253,7 @@ async function operatorTokens(page: Page) {
       borderSubtle: color('--operator-border-subtle'),
       muted: color('--operator-muted'),
       mutedForeground: color('--operator-muted-foreground'),
+      subtleForeground: color('--operator-subtle-foreground'),
       foreground: color('--operator-foreground'),
       focus: color('--operator-focus'),
       accent: color('--operator-accent'),
@@ -336,6 +346,14 @@ async function openPopupSelect(page: Page, trigger: Locator) {
   await expect(popup).toHaveCount(0)
 }
 
+/** Account filter selects live in the toolbar Filters popover; opens it and returns the named trigger. */
+async function openAccountFilters(page: Page) {
+  await page.locator('.acct-toolbar .acct-filter-trigger').click()
+  const filters = page.getByRole('dialog', { name: 'Filters' })
+  await expect(filters).toBeVisible()
+  return filters
+}
+
 async function expectTokenDialog(page: Page, dialog: Locator) {
   const tokens = await operatorTokens(page)
   const shell = dialog.locator('.operator-dialog')
@@ -408,7 +426,6 @@ test.describe('operator console navigation', () => {
     await expect(loginPage.locator('.driver-overlay, .driver-popover, .driver-active-element')).toHaveCount(0)
     await expect(loginPage.getByText(/Restart Onboarding Tour|Start setup|onboarding guide/i)).toHaveCount(0)
     expect(await loginPage.evaluate(() => Object.keys(localStorage).some((key) => /guide|onboarding|tour/i.test(key)))).toBe(false)
-    await expect(loginPage.getByRole('button', { name: 'Ask Gateway' })).toBeVisible()
     await freshSession.close()
   })
 
@@ -453,118 +470,10 @@ test.describe('operator console navigation', () => {
 
     const sidebar = page.locator('aside.sidebar')
     await expect(sidebar).toBeVisible()
-    await sidebar.locator('a[href="/admin/accounts"]').click()
+    await sidebar.locator('nav[aria-label="Main navigation"] a[href="/admin/accounts"]').click()
     await expect(page).toHaveURL(/\/admin\/accounts$/)
     await expect(sidebar).toHaveClass(/-translate-x-full/)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-  })
-
-  test('has no legacy startup tour and keeps Ask Gateway usable across operator widths', async ({ page }) => {
-    test.setTimeout(60_000)
-    const cases = [
-      { width: 1440, height: 900, route: '/admin/dashboard' },
-      { width: 1024, height: 768, route: '/admin/accounts' },
-      { width: 390, height: 844, route: '/admin/usage' },
-    ]
-
-    for (const reviewCase of cases) {
-      await page.setViewportSize({ width: reviewCase.width, height: reviewCase.height })
-      await page.goto(reviewCase.route)
-      await expect(page.locator('.driver-overlay, .driver-popover, .driver-active-element')).toHaveCount(0)
-      await expect(page.getByText(/Restart Onboarding Tour|Start setup|onboarding guide/i)).toHaveCount(0)
-
-      const trigger = page.getByRole('button', { name: 'Ask Gateway' })
-      await expect(trigger).toBeVisible()
-
-      const triggerBox = await trigger.boundingBox()
-      expect(triggerBox).not.toBeNull()
-      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(reviewCase.width)
-      await expect(page.locator('.app-header').getByRole('button', { name: 'Ask Gateway' })).toBeVisible()
-
-      await trigger.click()
-
-      const dialog = page.getByRole('dialog', { name: 'Ask Gateway' })
-      await expect(dialog).toBeVisible()
-      await expect(dialog.getByRole('textbox')).toBeFocused()
-      await expect.poll(async () => {
-        const box = await dialog.locator('.operator-assistant-panel').boundingBox()
-        return box ? Math.round(box.x + box.width) : Number.POSITIVE_INFINITY
-      }).toBeLessThanOrEqual(reviewCase.width + 1)
-      const panelBox = await dialog.locator('.operator-assistant-panel').boundingBox()
-      expect(panelBox).not.toBeNull()
-      expect(panelBox!.width).toBeLessThanOrEqual(reviewCase.width)
-      expect(await dialog.locator('.operator-assistant-panel').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
-
-      await page.keyboard.press('Tab')
-      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
-      await page.keyboard.press('Escape')
-      await expect(dialog).toBeHidden()
-      await expect(trigger).toBeFocused()
-    }
-
-    expect(await page.evaluate(() => Object.keys(localStorage).some((key) => /guide|onboarding|tour/i.test(key)))).toBe(false)
-  })
-
-  test('streams, stops, retries, clears, sanitizes, and keeps assistant history ephemeral', async ({ page, context }) => {
-    test.setTimeout(60_000)
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await page.goto('/admin/dashboard')
-    await page.getByRole('button', { name: 'Ask Gateway' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Ask Gateway' })
-    const composer = dialog.getByRole('textbox')
-
-    await expect(dialog.getByRole('button', { name: 'What needs attention?' })).toBeVisible()
-    await expect(dialog.locator('.select-value')).toHaveText('Auto')
-    await dialog.getByRole('button', { name: 'What needs attention?' }).click()
-    let answer = dialog.locator('.operator-assistant-message-assistant').last()
-    await expect(answer).toContainText('One OpenAI account needs attention')
-    await expect(answer.locator('.operator-assistant-metadata')).toContainText(/Auto -> gpt-5\.4 \/ openai \/ [\d.]+s/)
-
-    await answer.getByRole('button', { name: 'Copy' }).click()
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('One OpenAI account')
-
-    await dialog.getByRole('button', { name: 'Model' }).click()
-    await page.getByRole('option', { name: /claude-sonnet-4-6/ }).click()
-    expect(await page.evaluate(() => localStorage.getItem('operator_assistant_model'))).toBe('12:claude-sonnet-4-6')
-    await expect(dialog.locator('.operator-assistant-message-assistant').first().locator('.operator-assistant-metadata'))
-      .toContainText(/Auto -> gpt-5\.4 \/ openai \/ [\d.]+s/)
-    await composer.fill('What version is running?')
-    await dialog.getByRole('button', { name: 'Send message' }).click()
-    answer = dialog.locator('.operator-assistant-message-assistant').last()
-    await expect(answer).toContainText('0.1.183-rework.12')
-    await expect(answer.locator('.operator-assistant-metadata')).toContainText(/claude-sonnet-4-6 \/ anthropic/)
-
-    await composer.fill('Show markdown fixture')
-    await dialog.getByRole('button', { name: 'Send message' }).click()
-    answer = dialog.locator('.operator-assistant-message-assistant').last()
-    await expect(answer.locator('strong')).toHaveText('operator answer')
-    await expect(answer.locator('img')).toHaveCount(0)
-    await expect(answer.locator('a[href^="javascript:"]')).toHaveCount(0)
-    const runbook = answer.getByRole('link', { name: 'Runbook' })
-    await expect(runbook).toHaveAttribute('target', '_blank')
-    await expect(runbook).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(await page.evaluate(() => (window as Window & { fixtureXss?: boolean }).fixtureXss)).toBeUndefined()
-
-    await composer.fill('Retry fixture')
-    await dialog.getByRole('button', { name: 'Send message' }).click()
-    answer = dialog.locator('.operator-assistant-message-assistant').last()
-    await expect(answer).toContainText('No eligible model capacity is currently available.')
-    await answer.getByRole('button', { name: 'Retry' }).click()
-    await expect(dialog.locator('.operator-assistant-message-assistant').last()).toContainText('One OpenAI account needs attention')
-
-    await composer.fill('Slow fixture')
-    await dialog.getByRole('button', { name: 'Send message' }).click()
-    await dialog.getByRole('button', { name: 'Stop response' }).click()
-    await expect(dialog.locator('.operator-assistant-message-assistant').last()).toContainText('Stopped')
-
-    await dialog.getByRole('button', { name: 'Clear conversation' }).click()
-    await expect(dialog.locator('.operator-assistant-message')).toHaveCount(0)
-    await expect(dialog.getByRole('button', { name: 'What needs attention?' })).toBeVisible()
-    const storage = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))
-    expect(Object.keys(storage).some((key) => /conversation|messages|prompt/i.test(key))).toBe(false)
-    expect(JSON.stringify(storage)).not.toContain('Retry fixture')
-    expect(JSON.stringify(storage)).not.toContain('One OpenAI account needs attention')
   })
 
   test('uses the same shell for operator and personal routes', async ({ page }) => {
@@ -580,10 +489,11 @@ test.describe('operator console navigation', () => {
   test('keeps teleported popup layers on the active theme tokens', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('theme', 'light'))
     await page.setViewportSize({ width: 1440, height: 900 })
-    await page.goto('/admin/accounts')
+    // The searchable Status filter is the toolbar's teleported select with a search field.
+    await page.goto('/admin/accounts?view=technical')
     await expect(page.locator('html')).not.toHaveClass(/dark/)
 
-    await page.locator('.operator-accounts-toolbar .select-trigger').first().click()
+    await (await openAccountFilters(page)).getByRole('button', { name: 'Status', exact: true }).click()
     const popup = page.locator('body > .select-dropdown-portal.operator-select-menu.operator-menu')
     await expect(popup).toBeVisible()
     const tokens = await operatorTokens(page)
@@ -617,7 +527,7 @@ test.describe('operator console navigation', () => {
     expect(await selectedOption.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe(tokens.popupSelected)
 
-    await popup.locator('.select-search-input').fill('__no_platform_match__')
+    await popup.locator('.select-search-input').fill('__no_status_match__')
     const empty = popup.locator('.select-empty')
     await expect(empty).toBeVisible()
     expect(await empty.evaluate((element) => getComputedStyle(element).color)).toBe(tokens.popupMuted)
@@ -643,41 +553,63 @@ test.describe('operator console navigation', () => {
       await expect(menu).toHaveCount(0)
     }
 
+    // Accounts selects sit in the Filters popover; Activity keeps its Model quick select in the toolbar.
+    const openAccountSelect = async (name: string) => {
+      const filters = await openAccountFilters(page)
+      await openPopupSelect(page, filters.getByRole('button', { name, exact: true }))
+      await filters.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(filters).toHaveCount(0)
+    }
+    const openUsageModelSelect = () => openPopupSelect(
+      page,
+      page.locator('.usage-records-toolbar').getByRole('button', { name: 'Model', exact: true }),
+    )
+    // Models & Routing has no toolbar select; its View options menu is the toolbar popup.
+    const openGroupsViewMenu = async () => {
+      await expect(page.locator('[data-testid^="group-row-"]').first()).toBeVisible()
+      const trigger = page.getByTestId('group-view-menu')
+      await trigger.click()
+      const menu = page.getByRole('menu', { name: 'View options' })
+      await expectPopupMenu(page, menu, menu.getByRole('menuitemcheckbox').first())
+      await trigger.click()
+      await expect(menu).toHaveCount(0)
+    }
+
     await page.goto('/admin/accounts')
     await expect(page.locator('html')).not.toHaveClass(/dark/)
     await expect(page.locator('aside.sidebar')).toBeVisible()
-    await openPopupSelect(page, page.locator('.select-trigger').first())
+    await openAccountSelect('Type')
 
     await navigate('/admin/usage')
-    await openPopupSelect(page, page.locator('.select-trigger').filter({ hasText: 'Hour' }))
+    await openUsageModelSelect()
 
     await navigate('/admin/accounts')
-    await openPopupSelect(page, page.locator('.select-trigger').first())
+    await openAccountSelect('Type')
     const moreActionsButton = page.getByRole('button', { name: 'More Actions' })
     await moreActionsButton.click()
     const moreActionsMenu = page.locator('.account-tools-menu')
     await expectPopupMenu(page, moreActionsMenu, moreActionsMenu.locator('.operator-menu-item').first())
     await moreActionsButton.click()
     await expect(moreActionsMenu).toHaveCount(0)
-    await openPopupSelect(page, page.locator('.select-trigger').nth(2))
+    await openAccountSelect('Warm-up')
 
     await navigate('/admin/stats')
     await openLocaleMenu()
     await navigate('/admin/groups')
-    await openPopupSelect(page, page.locator('.select-trigger').first())
+    await openGroupsViewMenu()
     await navigate('/admin/usage')
-    await openPopupSelect(page, page.locator('.select-trigger').filter({ hasText: 'Hour' }))
+    await openUsageModelSelect()
     await navigate('/admin/settings')
     await page.getByRole('tab', { name: 'Gateway' }).click()
     await openPopupSelect(page, page.locator('.select-trigger:visible').first())
     await navigate('/admin/accounts')
-    await openPopupSelect(page, page.locator('.select-trigger').first())
+    await openAccountSelect('Type')
 
     for (let iteration = 0; iteration < 3; iteration += 1) {
       await navigate('/admin/groups')
-      await openPopupSelect(page, page.locator('.select-trigger').first())
+      await openGroupsViewMenu()
       await navigate('/admin/accounts')
-      await openPopupSelect(page, page.locator('.select-trigger').first())
+      await openAccountSelect('Type')
     }
   })
 
@@ -691,9 +623,11 @@ test.describe('operator console navigation', () => {
     await expect(capacityTab).toHaveAttribute('aria-selected', 'true')
     await expect(capacityPanel).toBeVisible()
     await expect(technicalPanel).toBeHidden()
-    const capacityDetails = page.getByTestId('account-technical-details')
-    await expect(capacityDetails).toHaveCount(6)
-    await expect(capacityDetails.first()).toBeHidden()
+    // Capacity rows open their details in a drawer on demand, so none is open after the switch.
+    const capacityRows = page.getByTestId('account-capacity-row')
+    const accountDrawer = page.locator('.ui-drawer')
+    await expect(capacityRows).toHaveCount(6)
+    await expect(accountDrawer).toHaveCount(0)
 
     await capacityTab.focus()
     await page.keyboard.press('ArrowRight')
@@ -702,7 +636,7 @@ test.describe('operator console navigation', () => {
     await expect(capacityPanel).toBeHidden()
     await expect(technicalPanel).toBeVisible()
 
-    const technicalStatus = page.locator('.operator-accounts-toolbar .select-trigger').nth(2)
+    const technicalStatus = (await openAccountFilters(page)).getByRole('button', { name: 'Status', exact: true })
     await technicalStatus.click()
     await page.getByRole('option', { name: 'Active', exact: true }).click()
     await expect(technicalStatus).toContainText('Active')
@@ -712,7 +646,8 @@ test.describe('operator console navigation', () => {
     await expect(capacityTab).toBeFocused()
     await expect(capacityPanel).toBeVisible()
     await expect(technicalPanel).toBeHidden()
-    await expect(capacityDetails).toHaveCount(6)
+    await expect(capacityRows).toHaveCount(6)
+    await expect(accountDrawer).toHaveCount(0)
   })
 
   test('keeps Google One quota help interactive across pointer, keyboard, and mobile input', async ({ page }) => {
@@ -775,8 +710,7 @@ test.describe('operator console navigation', () => {
       updated_at: '2026-09-02T00:01:00Z',
     }
     state.utilization = 46
-    const createButton = page.getByRole('button', { name: 'Create Account' })
-    const manualRefresh = createButton.locator('..').locator('button').first()
+    const manualRefresh = page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Refresh', exact: true })
     await manualRefresh.click()
     await expect(capacityRow).toContainText('Refresh fixture manual')
     await expect(capacityRow).toContainText('54%')
@@ -790,11 +724,13 @@ test.describe('operator console navigation', () => {
     await page.getByRole('button', { name: '5 seconds', exact: true }).click()
     await page.getByRole('button', { name: 'Enable auto refresh' }).click()
     await autoRefresh.click()
-    await expect(autoRefresh).toContainText('Auto refresh: 5s')
+    // The joined auto-refresh button shows the bare countdown and names the interval for assistive tech.
+    await expect(autoRefresh).toHaveAccessibleName('Auto refresh: 5s')
+    await expect(autoRefresh).toContainText('5s')
 
     await page.clock.runFor(5_000)
     await expect.poll(() => state.tableStatuses).toEqual([200])
-    await expect(autoRefresh).toContainText('Auto refresh: 5s')
+    await expect(autoRefresh).toHaveAccessibleName('Auto refresh: 5s')
 
     state.utilization = 53
     await page.clock.runFor(5_000)
@@ -907,7 +843,12 @@ test.describe('operator console navigation', () => {
       const main = page.locator('main.app-main')
       const capacityRows = page.getByTestId('account-capacity-row')
       await expect(capacityRows).toHaveCount(manyAccounts.length)
-      const providerHeader = page.locator('.operator-capacity-provider-header').first()
+      // Provider headers appear once the table is grouped; the choice persists across reloads.
+      const groupByProvider = page.getByRole('button', { name: 'Group by provider' })
+      if (viewport.width === 1440) await groupByProvider.click()
+      await expect(groupByProvider).toHaveAttribute('aria-pressed', 'true')
+      const providerHeader = page.locator('.fleet-group-toggle').first()
+      await expect(providerHeader).toBeVisible()
       const providerStyle = await providerHeader.evaluate((element) => {
         const style = getComputedStyle(element)
         return {
@@ -915,28 +856,25 @@ test.describe('operator console navigation', () => {
           boxShadow: style.boxShadow,
           borderLeftWidth: style.borderLeftWidth,
           borderRightWidth: style.borderRightWidth,
-          borderStyle: style.borderStyle,
         }
       })
       expect(providerStyle.radius).toBeGreaterThan(0)
       expect(providerStyle.radius).toBeLessThanOrEqual(8)
       expect(providerStyle.boxShadow).toBe('none')
       expect(providerStyle.borderLeftWidth).toBe(providerStyle.borderRightWidth)
-      expect(providerStyle.borderStyle).toContain('solid')
 
+      // The row shows the limiting model window; every model window is listed in the account drawer.
       const antigravityRow = capacityRows.filter({ hasText: 'Antigravity Pro' })
-      await expect(antigravityRow.locator('.operator-capacity-row-window')).toHaveCount(3)
-      await expect(antigravityRow).toContainText('0% minimum across 20 models')
+      await expect(antigravityRow.getByRole('img', { name: 'claude-opus-4-1: 0%' })).toBeVisible()
       if (viewport.width === 1440) {
-        await antigravityRow.locator('.operator-capacity-details-toggle').click()
-        const details = antigravityRow.getByTestId('account-technical-details')
-        await expect(details.locator('.operator-capacity-window')).toHaveCount(3)
-        await expect(details).toContainText('More model limits (17)')
-        await details.getByRole('button', { name: 'Inspect a model limit' }).click()
-        await page.getByRole('textbox', { name: 'Search model limits' }).fill('hidden-model-search-target')
-        await page.getByRole('option', { name: 'hidden-model-search-target' }).click()
-        await expect(details.locator('.operator-capacity-window')).toHaveCount(3)
-        await expect(details).toContainText('hidden-model-search-target')
+        await antigravityRow.click()
+        const drawer = page.getByRole('dialog', { name: 'Antigravity Pro' })
+        const windows = drawer.getByTestId('account-drawer-windows')
+        await expect(windows).toContainText('hidden-model-search-target')
+        await expect(windows.locator('li')).toHaveCount(19)
+        expect(await drawer.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+        await page.keyboard.press('Escape')
+        await expect(drawer).toHaveCount(0)
       }
 
       const initialMetrics = await page.evaluate(() => ({
@@ -1336,16 +1274,17 @@ test.describe('operator console navigation', () => {
     await expect(page.getByTestId('overview-state-disabled')).toHaveCount(0)
     await expect(attention).not.toContainText('Codex Standby')
 
-    // Errors come first, then limits; each problem links to Accounts filtered by its state.
+    // Errors come first, then limits; each problem opens its own account in the Accounts drawer.
+    const accountId = (name: string) => operatorFixtureAccounts.find((account) => account.name === name)!.id
     const problems = attention.locator('.overview-attention-item')
     await expect(problems).toHaveCount(3)
     await expect(problems.first()).toHaveAccessibleName('Open Gemini Recovery in Accounts')
-    await expect(problems.first()).toHaveAttribute('href', '/admin/accounts?operator_status=error')
+    await expect(problems.first()).toHaveAttribute('href', `/admin/accounts?account=${accountId('Gemini Recovery')}`)
     await expect(problems.first()).toContainText('Fixture: reauthorization required')
     for (const name of ['Antigravity Pro', 'Gemini Quota Limited']) {
       const problem = problems.filter({ hasText: name })
       await expect(problem).toHaveCount(1)
-      await expect(problem).toHaveAttribute('href', '/admin/accounts?operator_status=limited')
+      await expect(problem).toHaveAttribute('href', `/admin/accounts?account=${accountId(name)}`)
       await expect(problem).toContainText('Limited')
     }
 
@@ -1356,26 +1295,31 @@ test.describe('operator console navigation', () => {
     await expect(limitedRows.filter({ hasText: 'Antigravity Pro' })).toHaveCount(1)
     await expect(limitedRows.filter({ hasText: 'Gemini Quota Limited' })).toHaveCount(1)
 
+    // Each row opens its details drawer from the keyboard.
     const cooldownRow = limitedRows.filter({ hasText: 'Antigravity Pro' })
-    const detailsToggle = cooldownRow.locator('.operator-capacity-details-toggle')
-    await expect(detailsToggle).toHaveAccessibleName('Show details for Antigravity Pro')
-    await detailsToggle.focus()
+    await expect(cooldownRow).toHaveAccessibleName('Open Antigravity Pro')
+    await expect(cooldownRow.locator('.badge')).toHaveAttribute('title', /^Provider cooldown · until /)
+    await cooldownRow.focus()
     await page.keyboard.press('Enter')
-    await expect(detailsToggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(cooldownRow.getByTestId('account-technical-details')).toBeVisible()
-    const cooldownStatus = cooldownRow.locator('.operator-capacity-account-status small')
-    await expect(cooldownStatus).toContainText('Resets')
-    await expect(cooldownStatus).toHaveAttribute('title', /Provider cooldown until/)
+    const cooldownDrawer = page.getByRole('dialog', { name: 'Antigravity Pro' })
+    await expect(cooldownDrawer).toBeVisible()
+    await expect(cooldownDrawer.getByTestId('account-drawer-status')).toHaveText('Limited')
+    const cooldownStatus = cooldownDrawer.locator('.acct-notice')
+    await expect(cooldownStatus).toContainText('Provider cooldown')
+    await expect(cooldownStatus.locator('small')).toContainText('until')
+    await page.keyboard.press('Escape')
+    await expect(cooldownDrawer).toHaveCount(0)
+    await expect(cooldownRow).toBeFocused()
 
     await page.goto('/admin/dashboard')
     const errorProblem = page.getByRole('link', { name: 'Open Gemini Recovery in Accounts' })
     await errorProblem.focus()
     await page.keyboard.press('Enter')
-    await expect(page).toHaveURL(/\/admin\/accounts\?operator_status=error$/)
-    const errorRows = page.locator('[data-testid="account-capacity-row"][data-status="error"]')
-    await expect(errorRows).toHaveCount(1)
-    await expect(errorRows).toContainText('Gemini Recovery')
-    await expect(errorRows).toContainText('Fixture: reauthorization required')
+    await expect(page).toHaveURL(new RegExp(`/admin/accounts\\?account=${accountId('Gemini Recovery')}$`))
+    const errorDrawer = page.getByRole('dialog', { name: 'Gemini Recovery' })
+    await expect(errorDrawer).toBeVisible()
+    await expect(errorDrawer.getByTestId('account-drawer-status')).toHaveText('Error')
+    await expect(errorDrawer).toContainText('Fixture: reauthorization required')
 
     await page.goto('/admin/accounts?operator_status=disabled')
     const disabledRows = page.locator('[data-testid="account-capacity-row"][data-status="disabled"]')
@@ -1445,6 +1389,7 @@ test.describe('operator console navigation', () => {
       for (const viewport of [{ width: 1024, height: 768 }, { width: 390, height: 844 }]) {
         await page.setViewportSize(viewport)
         await expect.poll(stackedBelow(attention, capacity)).toBe(true)
+        await expect.poll(settledBox(status)).toBe(true)
         await hourly.focus()
         await page.keyboard.press('ArrowLeft')
         await expect(hourlyTip.locator('.trend-tip-row b')).toHaveText('946')
@@ -1650,11 +1595,20 @@ test.describe('operator console navigation', () => {
       expect(bounds.scrollWidth, `${width}px table overflow`).toBeLessThanOrEqual(bounds.clientWidth + 1)
       expect(bounds.rowWidth, `${width}px row hover surface`).toBeLessThanOrEqual(bounds.clientWidth + 1)
 
-      for (const name of ['Test Connection', 'Quality Check', 'Edit', 'Delete']) {
+      for (const name of ['Test Connection', 'Edit', 'More actions']) {
         const action = row.getByRole('button', { name: new RegExp(`^${name} US West relay$`) })
         await expect(action).toBeVisible()
         await expect(action).toHaveText('')
       }
+      // Less frequent row actions moved into the row's overflow menu.
+      const more = row.getByRole('button', { name: 'More actions US West relay' })
+      await more.click()
+      const rowMenu = page.getByRole('menu', { name: 'More actions US West relay' })
+      for (const name of ['Quality Check', 'Delete']) {
+        await expect(rowMenu.getByRole('menuitem', { name })).toBeVisible()
+      }
+      await page.keyboard.press('Escape')
+      await expect(rowMenu).toHaveCount(0)
     }
 
     await page.setViewportSize({ width: 390, height: 844 })
@@ -1670,24 +1624,28 @@ test.describe('operator console navigation', () => {
 
   test('collapses provider groups from the keyboard and remembers the session state', async ({ page }) => {
     await page.goto('/admin/accounts')
+    // The table is flat until the operator groups it by provider.
+    await expect(page.getByTestId('provider-toggle-openai')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Group by provider' }).click()
 
     const toggle = page.getByTestId('provider-toggle-openai')
-    const panel = page.locator('#operator-provider-openai-accounts')
+    const openAIRows = page.getByTestId('account-capacity-row').filter({ hasText: /OpenAI ·/ })
     await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await expect(toggle).toContainText('52% normalized remaining')
-    await expect(toggle).toContainText('Lowest 52% - Codex Team West')
-    await expect(toggle).toContainText('Next limiting reset')
+    await expect(openAIRows).toHaveCount(2)
+    await expect(toggle.getByRole('img', { name: 'OpenAI: 52%', exact: true })).toBeVisible()
+    await expect(toggle).toContainText(/OpenAI\s*2\s*·\s*1 with quota/)
     await toggle.focus()
     await page.keyboard.press('Enter')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    await expect(panel).toBeHidden()
+    await expect(openAIRows).toHaveCount(0)
 
     await page.reload()
     await expect(page.getByTestId('provider-toggle-openai')).toHaveAttribute('aria-expanded', 'false')
+    await expect(openAIRows).toHaveCount(0)
     await page.getByTestId('provider-toggle-openai').focus()
     await page.keyboard.press('Space')
     await expect(page.getByTestId('provider-toggle-openai')).toHaveAttribute('aria-expanded', 'true')
-    await expect(panel).toBeVisible()
+    await expect(openAIRows).toHaveCount(2)
   })
 
   test('uses accent switches and token-driven open-menu states across operator areas', async ({ page }) => {
@@ -1749,7 +1707,8 @@ test.describe('operator console navigation', () => {
       return { background: style.backgroundColor, color: style.color }
     })).toEqual({ background: tokens.muted, color: tokens.mutedForeground })
 
-    const platformSelect = page.locator('.select-trigger').first()
+    // The searchable Status filter in the toolbar Filters popover.
+    const platformSelect = (await openAccountFilters(page)).getByRole('button', { name: 'Status', exact: true })
     const triggerColors = () => platformSelect.evaluate((element) => {
       const style = getComputedStyle(element)
       return { background: style.backgroundColor, border: style.borderColor, color: style.color }
@@ -1797,9 +1756,10 @@ test.describe('operator console navigation', () => {
     expect(await moreActionsMenu.locator('.operator-menu-divider').first().evaluate(
       (element) => getComputedStyle(element).borderTopColor,
     )).toBe(tokens.popupBorder)
-    expect(await moreActionsMenu.locator('.text-xs.font-semibold.uppercase').first().evaluate(
+    // Menu section labels share the redesigned overflow menus' subtle label token.
+    expect(await moreActionsMenu.locator('.account-tools-menu-label').first().evaluate(
       (element) => getComputedStyle(element).color,
-    )).toBe(tokens.popupMuted)
+    )).toBe(tokens.subtleForeground)
     const moreActionsBox = await moreActionsMenu.boundingBox()
     expect(moreActionsBox).not.toBeNull()
     expect(moreActionsBox!.y + moreActionsBox!.height).toBeLessThanOrEqual(viewportBottom)
@@ -1859,36 +1819,65 @@ test.describe('operator console navigation', () => {
     await page.keyboard.press('Escape')
 
     await page.goto('/admin/groups')
-    const neutralBadge = page.locator('.badge-gray').first()
+    await expect(page.getByTestId('group-row-11')).toBeVisible()
+    expect(await page.locator('.groups-table tbody > tr:first-child > td').first().evaluate(
+      (element) => getComputedStyle(element).borderBottomColor,
+    )).toBe(tokens.borderSubtle)
+    // Column settings live in View options as checkable menu items.
+    await page.getByTestId('group-view-menu').click()
+    const groupsMenu = page.getByRole('menu', { name: 'View options' })
+    await expectPopupMenu(page, groupsMenu, groupsMenu.locator('[aria-checked="true"]').first(), 'checked')
+    const typeColumn = groupsMenu.getByTestId('group-column-is_exclusive')
+    await expect(typeColumn).toHaveAttribute('aria-checked', 'false')
+    await typeColumn.click()
+    await expect(typeColumn).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await expect(groupsMenu).toHaveCount(0)
+    const neutralBadge = page.locator('.groups-table td[data-col="is_exclusive"] .badge-gray').first()
     expect(await neutralBadge.evaluate((element) => {
       const style = getComputedStyle(element)
       return { background: style.backgroundColor, color: style.color }
     })).toEqual({ background: tokens.muted, color: tokens.mutedForeground })
-    expect(await page.locator('.table-body > tr + tr > td').first().evaluate(
-      (element) => getComputedStyle(element).borderTopColor,
-    )).toBe(tokens.borderSubtle)
-    await page.getByRole('button', { name: 'Column Settings' }).click()
-    const groupsMenu = page.locator('.operator-menu:visible')
-    await expectPopupMenu(page, groupsMenu, groupsMenu.locator('[aria-pressed="true"]').first(), 'checked')
 
     await page.goto('/admin/settings')
+    // The section nav is no muted box: below 1100px it is a frosted page-colored sticky row,
+    // and a sliding card-colored pill sits under the active tab.
+    const settingsIndicator = page.locator('.settings-tabs .settings-tab-indicator')
+    await expect(settingsIndicator).toHaveClass(/settings-tab-indicator-ready/)
     const settingsTheme = await page.locator('.settings-tabs-shell').evaluate((element) => {
       const active = element.querySelector('.settings-tab-active') as HTMLElement
+      const inactive = element.querySelector('.settings-tab:not(.settings-tab-active)') as HTMLElement
+      const pill = element.querySelector('.settings-tab-indicator') as HTMLElement
+      const activeBox = active.getBoundingClientRect()
+      const pillBox = pill.getBoundingClientRect()
+      const probe = document.createElement('span')
+      probe.style.backgroundColor = 'color-mix(in srgb, var(--operator-background) 88%, transparent)'
+      element.append(probe)
+      const frosted = getComputedStyle(probe).backgroundColor
+      probe.remove()
       return {
-        background: getComputedStyle(element).backgroundColor,
-        border: getComputedStyle(element).borderColor,
-        activeBackground: getComputedStyle(active).backgroundColor,
+        frostedBackground: getComputedStyle(element).backgroundColor === frosted,
+        pillBackground: getComputedStyle(pill).backgroundColor,
         activeColor: getComputedStyle(active).color,
+        inactiveColor: getComputedStyle(inactive).color,
+        pillCoversActive: Math.abs(pillBox.left - activeBox.left) <= 1
+          && Math.abs(pillBox.top - activeBox.top) <= 1
+          && Math.abs(pillBox.width - activeBox.width) <= 1
+          && Math.abs(pillBox.height - activeBox.height) <= 1,
       }
     })
     expect(settingsTheme).toEqual({
-      background: tokens.muted,
-      border: tokens.border,
-      activeBackground: tokens.card,
+      frostedBackground: true,
+      pillBackground: tokens.card,
       activeColor: tokens.foreground,
+      inactiveColor: tokens.mutedForeground,
+      pillCoversActive: true,
     })
     await page.getByRole('tab', { name: 'Gateway' }).click()
-    await page.locator('.select-trigger:visible').first().click()
+    // Open from the keyboard: ArrowDown opens on the selected option, the next ArrowDown moves past it.
+    await page.locator('.select-trigger:visible').first().focus()
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('.select-dropdown-portal .select-option-selected.select-option-focused')).toBeVisible()
     await page.keyboard.press('ArrowDown')
     await expectPopupMenu(
       page,
@@ -1940,7 +1929,7 @@ test.describe('operator console navigation', () => {
     await page.addInitScript(() => localStorage.setItem('theme', 'dark'))
     await page.goto('/admin/accounts')
 
-    const createTrigger = page.getByRole('button', { name: 'Create Account', exact: true }).first()
+    const createTrigger = page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Add', exact: true })
     await createTrigger.click()
     const createDialog = page.getByRole('dialog', { name: 'Create Account' })
     await expectTokenDialog(page, createDialog)
@@ -1956,8 +1945,9 @@ test.describe('operator console navigation', () => {
     await expectTokenDialog(page, editDialog)
     await page.keyboard.press('Escape')
 
+    // The bulk bar appears once a row is selected; its Edit opens Bulk Edit.
     await page.locator('.operator-account-table tbody input[type="checkbox"]').first().check()
-    await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+    await page.getByTestId('account-bulk-bar').getByRole('button', { name: 'Edit', exact: true }).click()
     const bulkDialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
     await expectTokenDialog(page, bulkDialog)
 
@@ -2073,14 +2063,19 @@ test.describe('operator console navigation', () => {
     const header = await page.locator('.app-header').boundingBox()
     const mainRegion = await main.boundingBox()
     const tabBar = await tabs.boundingBox()
+    // Pages sit in an inset app frame, so the header pins to the frame's inner top edge.
+    const frameTop = await page.locator('.app-frame').evaluate((element) => (
+      element.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(element).borderTopWidth)
+    ))
 
     expect(scroll.scrollTop).toBeGreaterThan(0)
     expect(scroll.windowScrollY).toBe(0)
     expect(header).not.toBeNull()
     expect(mainRegion).not.toBeNull()
     expect(tabBar).not.toBeNull()
-    expect(header!.y).toBeGreaterThanOrEqual(-1)
-    expect(header!.y).toBeLessThanOrEqual(1)
+    expect(frameTop).toBeLessThanOrEqual(10)
+    expect(header!.y).toBeGreaterThanOrEqual(frameTop - 1)
+    expect(header!.y).toBeLessThanOrEqual(frameTop + 1)
     expect(tabBar!.y).toBeGreaterThanOrEqual(mainRegion!.y + scroll.paddingTop - 1)
     expect(tabBar!.y).toBeLessThanOrEqual(mainRegion!.y + scroll.paddingTop + 1)
   })
@@ -2179,7 +2174,7 @@ test.describe('operator console navigation', () => {
 
   test('traps and restores focus for an account dialog', async ({ page }) => {
     await page.goto('/admin/accounts')
-    const trigger = page.getByRole('button', { name: 'Create Account', exact: true }).first()
+    const trigger = page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Add', exact: true })
     await trigger.click()
 
     const dialog = page.getByRole('dialog', { name: 'Create Account' })
@@ -2226,6 +2221,5 @@ test('production guards remain authoritative for hidden or unauthorized links', 
   await installOperatorApiMock(personalPage, 'user')
   await personalPage.goto('/admin/accounts')
   await expect(personalPage).toHaveURL(/\/dashboard$/)
-  await expect(personalPage.getByRole('button', { name: 'Ask Gateway' })).toHaveCount(0)
   await personal.close()
 })

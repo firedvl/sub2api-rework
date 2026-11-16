@@ -48,20 +48,10 @@ const dark = {
   950: '#0b0d12'
 }
 
-// One accent (iris) for the primary action, selection, focus, and links.
-const primary = {
-  50: '#f1f0ff',
-  100: '#e6e3ff',
-  200: '#cfcaff',
-  300: '#b0a9ff',
-  400: '#8f85ff',
-  500: '#6d5efc',
-  600: '#5b4ee6',
-  700: '#4a3fd0',
-  800: '#3c33a8',
-  900: '#322c84',
-  950: '#1e1a52'
-}
+// The accent ramp reads CSS channels so the operator can switch accents at runtime.
+const primary = Object.fromEntries(
+  [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map((shade) => [shade, `rgb(var(--accent-${shade}) / <alpha-value>)`])
+)
 
 /** @type {import('tailwindcss').Config} */
 export default {

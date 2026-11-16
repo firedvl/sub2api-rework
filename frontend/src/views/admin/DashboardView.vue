@@ -4,7 +4,7 @@
       <LoadingSpinner />
     </div>
 
-    <div v-else class="viz-grid overview">
+    <div v-else class="viz-grid overview ui-stagger">
       <!-- A failed snapshot replaces only the status card; accounts and requests still load. -->
       <section v-if="snapshotError && !stats" class="viz-card viz-span-12 viz-state" role="alert" data-testid="dashboard-load-error">
         <Icon name="exclamationCircle" size="xl" class="text-red-500" />
@@ -38,29 +38,35 @@
             </ul>
 
             <dl class="overview-today">
-              <div>
-                <dt>{{ t('admin.viz.requestsToday') }}</dt>
-                <dd>{{ formatInt(stats.today_requests) }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('admin.viz.tokens') }}</dt>
-                <dd>{{ formatCompact(stats.today_tokens) }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('admin.viz.cost') }}</dt>
-                <dd>{{ formatMoney(stats.today_actual_cost) }}</dd>
-              </div>
-              <div>
-                <dt>{{ t('admin.viz.avgResponse') }}</dt>
-                <dd>{{ formatDuration(stats.average_duration_ms) }}</dd>
+              <div v-for="figure in todayFigures" :key="figure.key">
+                <dt>{{ figure.label }}</dt>
+                <dd><CountUp :value="figure.value" :format="figure.format" /></dd>
+                <span
+                  v-if="figure.delta"
+                  class="viz-delta"
+                  :class="`is-${figure.delta.tone}`"
+                  :title="t('admin.viz.vsYesterday')"
+                >{{ figure.delta.text }}</span>
               </div>
             </dl>
           </div>
 
           <div>
             <div class="overview-live">
-              <b>{{ formatInt(stats.rpm) }}</b>
+              <b><CountUp :value="stats.rpm" :format="formatInt" /></b>
               <span>{{ t('admin.viz.requestsPerMin') }}</span>
+              <button
+                type="button"
+                class="overview-live-toggle"
+                :class="{ 'is-on': live }"
+                :aria-pressed="live ? 'true' : 'false'"
+                :title="t('admin.viz.liveHint')"
+                data-testid="overview-live"
+                @click="live = !live"
+              >
+                <span class="viz-pulse" :class="live ? '' : 'is-idle'" aria-hidden="true"></span>
+                {{ t('admin.viz.live') }}
+              </button>
               <RouterLink to="/admin/stats" class="viz-link">
                 {{ t('nav.stats') }}
                 <Icon name="arrowRight" size="xs" />
@@ -112,7 +118,7 @@
           <ul v-else class="overview-attention">
             <li v-for="item in attention.slice(0, 6)" :key="item.id">
               <RouterLink
-                :to="accountStatusLink(item.status)"
+                :to="{ path: '/admin/accounts', query: { account: String(item.id) } }"
                 class="overview-attention-item"
                 :aria-label="t('admin.viz.openAccount', { name: item.name })"
               >
@@ -184,7 +190,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in recent" :key="row.id">
+                <tr v-for="row in recent" :key="row.id" :class="{ 'ui-flash': freshIds.has(row.id) }">
                   <td>
                     <span class="overview-model">
                       <ProviderMark :platform="providerOfModel(row.model)" :size="22">
@@ -209,8 +215,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue'
-import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { useDocumentVisibility, useIntervalFn, useLocalStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -221,13 +227,15 @@ import Icon from '@/components/icons/Icon.vue'
 import ProviderMark from '@/components/viz/ProviderMark.vue'
 import RingGauge from '@/components/viz/RingGauge.vue'
 import TrendChart from '@/components/viz/TrendChart.vue'
+import CountUp from '@/components/ui/CountUp.vue'
 import { useAccountFleet } from '@/composables/useAccountFleet'
 import { buildProviderCapacity, classifyOperatorAccount, type OperatorAccountStatus } from '@/utils/operatorCapacity'
 import { providerName, providerOfModel } from '@/utils/providerSeries'
-import { addDays, addHours, bucketTrend, localDateString, slotStarts } from '@/utils/trendBuckets'
-import { formatCompact, formatDuration, formatInt, formatMoney } from '@/utils/vizFormat'
+import { addDays, addHours, bucketTrend, localDateString, parseTrendDate, slotStarts, startOfDay } from '@/utils/trendBuckets'
+import { formatCompact, formatDuration, formatInt, formatMoney, relativeChange } from '@/utils/vizFormat'
 
 const REFRESH_MS = 60_000
+const LIVE_REFRESH_MS = 15_000
 const RECENT_ROWS = 6
 
 const { t, locale } = useI18n()
@@ -241,6 +249,8 @@ const recent = shallowRef<AdminUsageLog[]>([])
 const loading = ref(false)
 const snapshotError = ref(false)
 const now = ref(new Date())
+const live = useLocalStorage('overview-live', false)
+const freshIds = shallowRef(new Set<number>())
 let snapshotSequence = 0
 
 const hasTraffic = computed(() => (stats.value?.rpm ?? 0) > 0 || (stats.value?.tpm ?? 0) > 0)
@@ -317,6 +327,53 @@ const hourly = computed(() => {
   }
 })
 
+// Today so far against the same stretch of yesterday, from the 48h hourly trend.
+// The current hour is partial, so yesterday's matching hour is prorated.
+const sameTimeYesterday = computed(() => {
+  const current = now.value
+  const todayStart = startOfDay(current).getTime()
+  const hourStart = new Date(current)
+  hourStart.setMinutes(0, 0, 0)
+  const yesterdayHour = addHours(hourStart, -24).getTime()
+  const fraction = (current.getTime() - hourStart.getTime()) / 3_600_000
+  const totals = { requests: 0, tokens: 0, cost: 0 }
+  for (const point of trend.value) {
+    const time = parseTrendDate(point.date).getTime()
+    let weight = 0
+    if (time >= todayStart - 86_400_000 && time < yesterdayHour) weight = 1
+    else if (time === yesterdayHour) weight = fraction
+    if (!weight) continue
+    totals.requests += point.requests * weight
+    totals.tokens += point.total_tokens * weight
+    totals.cost += point.actual_cost * weight
+  }
+  return totals
+})
+
+function delta(current: number, previous: number, goodWhenUp = true) {
+  if (current === 0 && previous === 0) return null
+  const change = relativeChange(current, previous)
+  if (change === null) return null
+  const flat = Math.abs(change) < 0.005
+  const up = change > 0
+  return {
+    tone: flat ? 'flat' : up === goodWhenUp ? 'good' : 'poor',
+    text: `${up && !flat ? '+' : ''}${(change * 100).toFixed(Math.abs(change) >= 10 ? 0 : 1)}%`.replace('-', '−'),
+  }
+}
+
+const todayFigures = computed(() => {
+  const current = stats.value
+  if (!current) return []
+  const before = sameTimeYesterday.value
+  return [
+    { key: 'requests', label: t('admin.viz.requestsToday'), value: current.today_requests, format: formatInt, delta: delta(current.today_requests, before.requests) },
+    { key: 'tokens', label: t('admin.viz.tokens'), value: current.today_tokens, format: formatCompact, delta: delta(current.today_tokens, before.tokens) },
+    { key: 'cost', label: t('admin.viz.cost'), value: current.today_actual_cost, format: formatMoney, delta: delta(current.today_actual_cost, before.cost) },
+    { key: 'latency', label: t('admin.viz.avgResponse'), value: current.average_duration_ms, format: formatDuration, delta: null },
+  ]
+})
+
 const accountStatusLink = (status: OperatorAccountStatus) => ({
   path: '/admin/accounts',
   query: { operator_status: status },
@@ -370,7 +427,11 @@ async function loadSnapshot(silent = false) {
 async function loadRecent() {
   try {
     const response = await adminAPI.usage.list({ page: 1, page_size: RECENT_ROWS })
-    recent.value = response.items.slice(0, RECENT_ROWS)
+    const rows = response.items.slice(0, RECENT_ROWS)
+    // Highlight rows that arrived since the last refresh (none on first load).
+    const known = new Set(recent.value.map((row) => row.id))
+    freshIds.value = recent.value.length ? new Set(rows.filter((row) => !known.has(row.id)).map((row) => row.id)) : new Set()
+    recent.value = rows
   } catch (error) {
     // The table is secondary; the rest of the page stays usable.
     console.error('Error loading recent requests:', error)
@@ -381,11 +442,17 @@ async function loadAll() {
   await Promise.all([loadSnapshot(), fleet.load(), loadRecent()])
 }
 
-useIntervalFn(() => {
+function refreshVisible() {
   if (visibility.value !== 'visible') return
   void loadSnapshot(true)
   void loadRecent()
-}, REFRESH_MS)
+}
+
+const refreshMs = computed(() => (live.value ? LIVE_REFRESH_MS : REFRESH_MS))
+useIntervalFn(refreshVisible, refreshMs)
+watch(live, (on) => {
+  if (on) refreshVisible()
+})
 
 onMounted(loadAll)
 </script>
@@ -495,8 +562,38 @@ onMounted(loadAll)
   letter-spacing: -0.03em;
 }
 
-.overview-live .viz-link {
+.overview-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   margin-left: auto;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--operator-border);
+  border-radius: 999px;
+  color: var(--operator-muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition: color var(--operator-duration-fast) var(--operator-ease-out),
+    border-color var(--operator-duration-fast) var(--operator-ease-out),
+    background-color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.overview-live-toggle:hover {
+  color: var(--operator-foreground);
+}
+
+.overview-live-toggle.is-on {
+  border-color: rgb(var(--operator-accent-rgb) / 0.4);
+  background: rgb(var(--operator-accent-rgb) / 0.1);
+  color: var(--operator-accent-text);
+}
+
+.overview-live-toggle .viz-pulse {
+  transform: scale(0.75);
+}
+
+.overview-live .viz-link {
+  margin-left: 0.5rem;
 }
 
 .overview-states {

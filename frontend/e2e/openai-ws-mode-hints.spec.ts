@@ -34,7 +34,7 @@ for (const width of [390, 1280]) {
     await installOperatorApiMock(page)
     await page.goto('/admin/accounts?view=technical', { waitUntil: 'domcontentloaded' })
 
-    await page.getByRole('button', { name: 'Create Account', exact: true }).first().click()
+    await page.getByRole('toolbar', { name: 'Account controls' }).getByRole('button', { name: 'Add', exact: true }).click()
     const createDialog = page.getByRole('dialog', { name: 'Create Account' })
     await createDialog.getByRole('button', { name: 'OpenAI', exact: true }).click()
     await checkModeHints(page, createDialog.getByTestId('create-openai-ws-mode'))
@@ -51,7 +51,8 @@ for (const width of [390, 1280]) {
     await page.keyboard.press('Escape')
 
     await accountRow.locator('input[type="checkbox"]').check()
-    await page.getByRole('button', { name: 'Bulk Edit', exact: true }).click()
+    // The bulk bar appears once a row is selected; its Edit opens Bulk Edit.
+    await page.getByTestId('account-bulk-bar').getByRole('button', { name: 'Edit', exact: true }).click()
     const bulkDialog = page.getByRole('dialog', { name: 'Bulk Edit Accounts' })
     await bulkDialog.locator('#bulk-edit-openai-ws-mode-enabled').check()
     await checkModeHints(page, bulkDialog.locator('#bulk-edit-openai-ws-mode'))

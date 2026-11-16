@@ -1,30 +1,51 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="relative w-full md:w-80">
-            <Icon name="search" size="md" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input v-model="filters.search" type="text" class="input pl-10" :placeholder="t('admin.affiliates.records.searchPlaceholder')" @input="debounceLoad" />
-          </div>
-          <input v-model="filters.start_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.startAt')" @change="reloadFromFirstPage" />
-          <input v-model="filters.end_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.endAt')" @change="reloadFromFirstPage" />
-          <button class="btn btn-secondary px-2 md:px-3" :disabled="loading" :title="t('common.refresh')" @click="loadRecords">
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+    <div class="ui-page ui-stagger">
+      <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.affiliates.records.search')">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
+          <input
+            v-model="filters.search"
+            type="search"
+            :placeholder="t('admin.affiliates.records.searchPlaceholder')"
+            :aria-label="t('admin.affiliates.records.search')"
+            @input="debounceLoad"
+          />
+        </label>
+        <ToolbarPopover :label="t('admin.adminUi.filters')" icon="calendar" :count="activeFilterCount" test-id="affiliate-filters">
+          <label class="affiliate-filter-field">
+            <span class="input-label">{{ t('admin.affiliates.records.startAt') }}</span>
+            <input v-model="filters.start_at" type="date" class="input" data-test="affiliate-start-at" @change="reloadFromFirstPage" />
+          </label>
+          <label class="affiliate-filter-field">
+            <span class="input-label">{{ t('admin.affiliates.records.endAt') }}</span>
+            <input v-model="filters.end_at" type="date" class="input" data-test="affiliate-end-at" @change="reloadFromFirstPage" />
+          </label>
+          <button v-if="activeFilterCount" type="button" class="btn btn-ghost btn-sm self-start" @click="clearDates">
+            {{ t('admin.adminUi.clearFilters') }}
           </button>
-          <button
-            v-if="props.type === 'transfers'"
-            type="button"
-            class="btn btn-primary ml-auto"
-            data-test="affiliate-withdraw-open"
-            @click="withdrawDialog = true"
-          >
-            {{ t('admin.affiliates.withdraw.button') }}
-          </button>
-        </div>
-      </template>
+        </ToolbarPopover>
+        <span class="ui-grow" />
+        <button
+          type="button"
+          class="app-icon-button"
+          :disabled="loading"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          @click="loadRecords"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button
+          v-if="props.type === 'transfers'"
+          type="button"
+          class="btn btn-primary"
+          data-test="affiliate-withdraw-open"
+          @click="withdrawDialog = true"
+        >{{ t('admin.affiliates.withdraw.button') }}</button>
+      </div>
 
-      <template #table>
+      <div class="ui-page">
         <DataTable
           :columns="columns"
           :data="records"
@@ -69,17 +90,19 @@
           </template>
           <template #cell-order="{ row }">
             <span v-if="row.order_id == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
-            <div v-else class="space-y-0.5">
-              <div class="font-mono text-sm text-gray-900 dark:text-white">#{{ row.order_id }}</div>
-              <div class="max-w-56 truncate text-sm text-gray-500 dark:text-dark-400">{{ row.out_trade_no }}</div>
+            <div v-else class="max-w-56">
+              <span class="ui-cell-main font-mono">#{{ row.order_id }}</span>
+              <span class="ui-cell-sub" :title="row.out_trade_no">{{ row.out_trade_no }}</span>
             </div>
           </template>
           <template #cell-payment_type="{ row }">
-            <template v-if="row.payment_type">{{ t('payment.methods.' + row.payment_type, row.payment_type) }}</template>
+            <PaymentMethodMark v-if="row.payment_type" :type="row.payment_type" class="text-sm" />
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-order_status="{ row }">
-            <OrderStatusBadge v-if="row.order_status" :status="row.order_status" />
+            <span v-if="row.order_status" :class="orderStatusBadgeClass(row.order_status)" class="whitespace-nowrap">
+              {{ t('payment.status.' + String(row.order_status).toLowerCase(), row.order_status) }}
+            </span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-total_rebate="{ row }">
@@ -90,13 +113,13 @@
           </template>
           <template #cell-pay_amount="{ row }">
             <span v-if="row.pay_amount == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
-            <span v-else class="text-sm text-gray-900 dark:text-white">¥{{ formatAmount(row.pay_amount) }}</span>
+            <span v-else class="text-sm tabular-nums text-gray-900 dark:text-white">¥{{ formatAmount(row.pay_amount) }}</span>
           </template>
           <template #cell-rebate_amount="{ row }">
             <AmountText :value="row.rebate_amount" strong />
           </template>
           <template #cell-action="{ row }">
-            <span :class="['badge whitespace-nowrap', row.action === 'withdraw' ? 'badge-warning' : 'badge-primary']">
+            <span :class="row.action === 'withdraw' ? 'badge badge-warning whitespace-nowrap' : 'badge badge-primary whitespace-nowrap'">
               {{ outflowTypeLabel(row.action) }}
             </span>
           </template>
@@ -116,12 +139,10 @@
             <NullableAmountText :value="row.history_quota_after" />
           </template>
           <template #cell-created_at="{ row }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTime(row.created_at) }}</span>
           </template>
         </DataTable>
-      </template>
 
-      <template #pagination>
         <Pagination
           v-if="pagination.total > 0"
           :page="pagination.page"
@@ -130,8 +151,8 @@
           @update:page="handlePageChange"
           @update:pageSize="handlePageSizeChange"
         />
-      </template>
-    </TablePageLayout>
+      </div>
+    </div>
 
     <AffiliateOfflineWithdrawDialog
       v-if="props.type === 'transfers'"
@@ -140,31 +161,46 @@
       @success="handleWithdrawSuccess"
     />
 
-    <BaseDialog
-      :show="overviewDialog"
-      :title="t('admin.affiliates.overview.title')"
-      width="normal"
+    <SideDrawer
+      :open="overviewDialog"
+      :title="selectedOverview?.email || t('admin.affiliates.overview.title')"
+      :subtitle="selectedOverview ? overviewSubtitle(selectedOverview) : undefined"
+      width="28rem"
       @close="overviewDialog = false"
     >
-      <div v-if="overviewLoading" class="flex justify-center py-8">
-        <div class="h-6 w-6 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
+      <template #leading>
+        <span class="affiliate-avatar"><Icon name="userCircle" size="md" /></span>
+      </template>
+      <div v-if="overviewLoading" class="grid gap-3" role="status" :aria-label="t('common.loading')">
+        <div class="skeleton h-20 rounded-lg"></div>
+        <div class="skeleton h-32 rounded-lg"></div>
       </div>
-      <div v-else-if="selectedOverview" class="space-y-4">
-        <div class="rounded-lg border border-gray-100 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800">
-          <div class="font-mono text-sm text-gray-900 dark:text-white">#{{ selectedOverview.user_id }}</div>
-          <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">{{ selectedOverview.email || '-' }}</div>
-          <div class="mt-0.5 text-sm text-gray-500 dark:text-dark-400">{{ selectedOverview.username || '-' }}</div>
-        </div>
-        <div class="grid gap-3 sm:grid-cols-2">
-          <OverviewStat :label="t('admin.affiliates.overview.affCode')" :value="selectedOverview.aff_code || '-'" mono />
-          <OverviewStat :label="t('admin.affiliates.overview.rebateRate')" :value="formatPercent(selectedOverview.rebate_rate_percent)" />
-          <OverviewStat :label="t('admin.affiliates.overview.invitedCount')" :value="String(selectedOverview.invited_count)" />
-          <OverviewStat :label="t('admin.affiliates.overview.rebatedInviteeCount')" :value="String(selectedOverview.rebated_invitee_count)" />
-          <OverviewStat :label="t('admin.affiliates.overview.availableQuota')" :value="'$' + formatAmount(selectedOverview.available_quota)" />
-          <OverviewStat :label="t('admin.affiliates.overview.historyQuota')" :value="'$' + formatAmount(selectedOverview.history_quota)" />
-        </div>
-      </div>
-    </BaseDialog>
+      <template v-else-if="selectedOverview">
+        <dl class="affiliate-quota">
+          <div>
+            <dt>{{ t('admin.affiliates.overview.availableQuota') }}</dt>
+            <dd><CountUp :value="selectedOverview.available_quota" :format="formatUsd" /></dd>
+          </div>
+          <div>
+            <dt>{{ t('admin.affiliates.overview.historyQuota') }}</dt>
+            <dd><CountUp :value="selectedOverview.history_quota" :format="formatUsd" /></dd>
+          </div>
+        </dl>
+        <section>
+          <h3 class="ui-section-label">{{ t('admin.adminUi.details') }}</h3>
+          <dl class="ui-dl">
+            <dt>{{ t('admin.affiliates.overview.affCode') }}</dt>
+            <dd class="font-mono">{{ selectedOverview.aff_code || '-' }}</dd>
+            <dt>{{ t('admin.affiliates.overview.rebateRate') }}</dt>
+            <dd class="tabular-nums">{{ formatPercent(selectedOverview.rebate_rate_percent) }}</dd>
+            <dt>{{ t('admin.affiliates.overview.invitedCount') }}</dt>
+            <dd class="tabular-nums">{{ selectedOverview.invited_count }}</dd>
+            <dt>{{ t('admin.affiliates.overview.rebatedInviteeCount') }}</dt>
+            <dd class="tabular-nums">{{ selectedOverview.rebated_invitee_count }}</dd>
+          </dl>
+        </section>
+      </template>
+    </SideDrawer>
   </AppLayout>
 </template>
 
@@ -172,12 +208,14 @@
 import { computed, defineComponent, h, onMounted, reactive, ref, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
+import CountUp from '@/components/ui/CountUp.vue'
 import Icon from '@/components/icons/Icon.vue'
-import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import PaymentMethodMark from '@/components/admin/payment/PaymentMethodMark.vue'
+import { orderStatusBadgeClass } from '@/components/admin/payment/orderDisplay'
 import AffiliateOfflineWithdrawDialog from './AffiliateOfflineWithdrawDialog.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
@@ -204,6 +242,14 @@ const overviewLoading = ref(false)
 const selectedOverview = ref<AffiliateUserOverview | null>(null)
 const withdrawDialog = ref(false)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+const activeFilterCount = computed(() => Number(!!filters.start_at) + Number(!!filters.end_at))
+
+function clearDates() {
+  filters.start_at = ''
+  filters.end_at = ''
+  reloadFromFirstPage()
+}
 
 const columns = computed<Column[]>(() => {
   if (props.type === 'invites') {
@@ -348,6 +394,14 @@ function formatAmount(value: number | null | undefined): string {
   return Number(value || 0).toFixed(2)
 }
 
+function formatUsd(value: number): string {
+  return `$${formatAmount(value)}`
+}
+
+function overviewSubtitle(overview: AffiliateUserOverview): string {
+  return overview.username ? `#${overview.user_id} · ${overview.username}` : `#${overview.user_id}`
+}
+
 function formatPercent(value: number | null | undefined): string {
   const rounded = Math.round(Number(value || 0) * 100) / 100
   return `${Number.isInteger(rounded) ? rounded.toString() : rounded.toString()}%`
@@ -381,16 +435,16 @@ const UserCell = defineComponent({
   },
   emits: ['open'],
   setup(cellProps, { emit }) {
-    return () => h('div', { class: 'space-y-0.5' }, [
-      h('div', { class: 'font-mono text-sm text-gray-900 dark:text-white' }, `#${cellProps.id}`),
-      h(cellProps.clickable ? 'button' : 'div', {
+    return () => h('div', { class: 'max-w-56 min-w-0' }, [
+      h(cellProps.clickable ? 'button' : 'span', {
         class: cellProps.clickable
-          ? 'max-w-56 truncate text-left text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300'
-          : 'max-w-56 truncate text-sm text-gray-700 dark:text-gray-300',
+          ? 'ui-cell-main max-w-full text-left text-primary-600 hover:underline dark:text-primary-400'
+          : 'ui-cell-main',
         type: cellProps.clickable ? 'button' : undefined,
+        title: cellProps.email || undefined,
         onClick: cellProps.clickable ? () => emit('open', cellProps.id) : undefined,
       }, cellProps.email || '-'),
-      h('div', { class: 'max-w-56 truncate text-sm text-gray-500 dark:text-dark-400' }, cellProps.username || '-'),
+      h('span', { class: 'ui-cell-sub' }, cellProps.username ? `#${cellProps.id} · ${cellProps.username}` : `#${cellProps.id}`),
     ])
   },
 })
@@ -403,8 +457,8 @@ const AmountText = defineComponent({
   setup(amountProps) {
     return () => h('span', {
       class: amountProps.strong
-        ? 'text-sm font-semibold text-emerald-600 dark:text-emerald-400'
-        : 'text-sm text-gray-900 dark:text-white',
+        ? 'text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400'
+        : 'text-sm tabular-nums text-gray-900 dark:text-white',
     }, `$${formatAmount(amountProps.value)}`)
   },
 })
@@ -424,25 +478,52 @@ const NullableAmountText = defineComponent({
   },
 })
 
-const OverviewStat = defineComponent({
-  props: {
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-    mono: { type: Boolean, default: false },
-  },
-  setup(statProps) {
-    return () => h('div', { class: 'rounded-lg border border-gray-100 bg-white p-3 dark:border-dark-700 dark:bg-dark-900' }, [
-      h('div', { class: 'text-sm text-gray-500 dark:text-dark-400' }, statProps.label),
-      h('div', {
-        class: statProps.mono
-          ? 'mt-1 font-mono text-base font-semibold text-gray-900 dark:text-white'
-          : 'mt-1 text-base font-semibold text-gray-900 dark:text-white',
-      }, statProps.value),
-    ])
-  },
-})
-
 onMounted(() => {
   void loadRecords()
 })
 </script>
+
+<style scoped>
+.affiliate-filter-field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.affiliate-avatar {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.affiliate-quota {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.affiliate-quota > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-raised);
+}
+
+.affiliate-quota dt {
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+}
+
+.affiliate-quota dd {
+  color: var(--operator-foreground);
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+</style>

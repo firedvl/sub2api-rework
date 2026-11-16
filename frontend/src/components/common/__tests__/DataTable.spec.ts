@@ -47,7 +47,7 @@ describe('DataTable', () => {
     localStorage.clear()
   })
 
-  it('renders paired sort arrows and highlights the active direction', async () => {
+  it('shows one flipping chevron on the sorted column and an idle glyph elsewhere', async () => {
     const wrapper = mount(DataTable, {
       props: {
         columns: [
@@ -71,16 +71,75 @@ describe('DataTable', () => {
     const nameHeader = wrapper.findAll('th')[0]
     expect(nameHeader.find('[data-test="custom-name-header"]').exists()).toBe(true)
     expect(nameHeader.attributes('aria-sort')).toBe('ascending')
-    expect(nameHeader.findAll('svg')).toHaveLength(2)
-    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-primary-600')
-    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-gray-300')
+    const indicator = () => nameHeader.get('.sort-indicator')
+    expect(indicator().attributes('data-sort-state')).toBe('asc')
+    expect(indicator().classes()).toContain('is-active')
+    expect(indicator().find('.sort-active').exists()).toBe(true)
+    const createdHeader = wrapper.findAll('th')[1]
+    expect(createdHeader.get('.sort-indicator').attributes('data-sort-state')).toBe('none')
+    expect(createdHeader.find('.sort-idle').exists()).toBe(true)
 
     await nameHeader.trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(nameHeader.attributes('aria-sort')).toBe('descending')
-    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-gray-300')
-    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
+    expect(indicator().attributes('data-sort-state')).toBe('desc')
+    expect(indicator().classes()).toEqual(expect.arrayContaining(['is-active', 'is-desc']))
+
+    // Sortable headers are keyboard operable.
+    expect(createdHeader.attributes('tabindex')).toBe('0')
+    await createdHeader.trigger('keydown', { key: 'Enter' })
+    expect(createdHeader.attributes('aria-sort')).toBe('ascending')
+    expect(nameHeader.attributes('aria-sort')).toBe('none')
+  })
+
+  it('opens clickable rows from the keyboard but not from controls inside them', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [{ id: 1, name: 'One' }],
+        rowKey: 'id',
+        clickableRows: true
+      },
+      slots: {
+        'cell-name': '<button type="button" data-test="inner">{{ params.row.name }}</button>'
+      }
+    })
+
+    const row = wrapper.get('tbody tr[data-index]')
+    expect(row.attributes('tabindex')).toBe('0')
+    await row.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('rowClick')).toEqual([[{ id: 1, name: 'One' }]])
+
+    await wrapper.get('[data-test="inner"]').trigger('click')
+    expect(wrapper.emitted('rowClick')).toHaveLength(1)
+
+    await row.get('td').trigger('click')
+    expect(wrapper.emitted('rowClick')).toHaveLength(2)
+  })
+
+  it('leads mobile cards with the first column as a title', () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'name', label: 'Name' },
+          { key: 'status', label: 'Status' },
+          { key: 'actions', label: 'Actions' }
+        ],
+        data: [{ id: 1, name: 'One', status: 'ok' }],
+        rowKey: 'id'
+      },
+      slots: { 'cell-actions': '<button type="button">Edit</button>' }
+    })
+
+    const card = wrapper.get('.data-card')
+    expect(card.get('.data-card-head').attributes('data-field')).toBe('name')
+    expect(card.get('.data-card-head').text()).toBe('One')
+    const fields = card.findAll('.data-card-field')
+    expect(fields).toHaveLength(1)
+    expect(fields[0].text()).toContain('Status')
+    expect(card.get('.data-card-actions').text()).toBe('Edit')
   })
 
   it('sizes the desktop empty state to the visible table viewport', async () => {

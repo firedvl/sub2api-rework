@@ -1,41 +1,51 @@
 <template>
-  <div class="card p-4">
-    <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">
-      {{ t('payment.admin.dailyRevenue') }}
-    </h3>
-    <div class="h-64">
-      <div v-if="loading" class="flex h-full items-center justify-center">
-        <LoadingSpinner size="md" />
+  <section class="viz-card" aria-labelledby="payment-revenue-title" data-testid="payment-revenue">
+    <header class="viz-card-head">
+      <h2 id="payment-revenue-title" class="viz-card-title">{{ t('payment.admin.dailyRevenue') }}</h2>
+      <div v-if="metrics.length > 1" class="viz-card-tools">
+        <div class="viz-seg" role="group" :aria-label="t('payment.admin.dailyRevenue')">
+          <button
+            v-for="option in metrics"
+            :key="option.key"
+            type="button"
+            :aria-pressed="activeMetric === option.key"
+            @click="metric = option.key"
+          >
+            {{ option.label }}
+          </button>
+        </div>
       </div>
-      <Line v-else-if="chartData" :data="chartData" :options="chartOptions" />
-      <div
-        v-else
-        class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-gray-400"
-      >
-        {{ t('payment.admin.noData') }}
+    </header>
+    <div class="viz-card-body">
+      <div v-if="loading" class="skeleton h-64 rounded-lg"></div>
+      <TrendChart
+        v-else-if="chart"
+        :type="chart.type"
+        :labels="chart.labels"
+        :tips="chart.tips"
+        :series="chart.series"
+        :summary="chart.summary"
+        :height="256"
+        :format-value="chart.format"
+      />
+      <div v-else class="ui-empty">
+        <span class="ui-empty-icon"><Icon name="chart" size="md" /></span>
+        <b>{{ t('payment.admin.noData') }}</b>
       </div>
     </div>
-  </div>
+    <footer v-if="chart" class="viz-card-foot">
+      <span v-for="item in totals" :key="item.key">{{ item.label }} <b>{{ item.value }}</b></span>
+    </footer>
+  </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js'
-import { Line } from 'vue-chartjs'
-import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Icon from '@/components/icons/Icon.vue'
+import TrendChart, { type TrendSeries } from '@/components/viz/TrendChart.vue'
 import type { DailyPaymentStats } from '@/types/payment'
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
+import { formatMoney } from './orderDisplay'
 
 const { t } = useI18n()
 
@@ -44,68 +54,62 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
-const colors = [
-  ['rgb(59, 130, 246)', 'rgba(59, 130, 246, 0.1)'],
-  ['rgb(168, 85, 247)', 'rgba(168, 85, 247, 0.1)'],
-  ['rgb(245, 158, 11)', 'rgba(245, 158, 11, 0.1)'],
-  ['rgb(239, 68, 68)', 'rgba(239, 68, 68, 0.1)'],
-]
+const ORDERS = '__orders'
 
-const chartData = computed(() => {
-  if (!props.data || props.data.length === 0) return null
-  const currencies = [...new Set(props.data.flatMap(day => Object.keys(day.amount)))].sort()
+const currencies = computed(() => [...new Set(props.data.flatMap((day) => Object.keys(day.amount || {})))].sort())
+
+/** One button per currency (amounts never share an axis) plus the order count. */
+const metrics = computed(() => [
+  ...currencies.value.map((currency) => ({ key: currency, label: currency })),
+  { key: ORDERS, label: t('payment.admin.orders') },
+])
+
+const metric = ref('')
+const activeMetric = computed(() =>
+  metrics.value.some((option) => option.key === metric.value) ? metric.value : metrics.value[0].key,
+)
+
+const chart = computed(() => {
+  if (!props.data?.length) return null
+  const labels = props.data.map((day) => day.date.slice(5))
+  const tips = props.data.map((day) => day.date)
+  if (activeMetric.value === ORDERS) {
+    const series: TrendSeries[] = [{ name: t('payment.admin.orderCount'), color: 'var(--operator-accent)', values: props.data.map((day) => day.count) }]
+    return {
+      type: 'bar' as const,
+      labels,
+      tips,
+      series,
+      summary: t('payment.admin.orderCount'),
+      format: (value: number) => Math.round(value).toLocaleString(),
+    }
+  }
+  const currency = activeMetric.value
+  const series: TrendSeries[] = [{
+    name: `${currency} ${t('payment.admin.revenue')}`,
+    color: 'var(--operator-accent-text)',
+    values: props.data.map((day) => day.amount?.[currency] || 0),
+  }]
   return {
-    labels: props.data.map(d => d.date),
-    datasets: [
-      ...currencies.map((currency, index) => {
-        const [borderColor, backgroundColor] = colors[index % colors.length]
-        return {
-          label: `${currency} ${t('payment.admin.revenue')}`,
-          data: props.data.map(day => day.amount[currency] || 0),
-          borderColor,
-          backgroundColor,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-        }
-      }),
-      {
-        label: t('payment.admin.orderCount'),
-        data: props.data.map(d => d.count),
-        borderColor: 'rgb(16, 185, 129)',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        fill: false,
-        tension: 0.3,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        yAxisID: 'y1',
-      }
-    ]
+    type: 'line' as const,
+    labels,
+    tips,
+    series,
+    summary: `${currency} ${t('payment.admin.revenue')}`,
+    format: (value: number) => formatMoney(currency, value),
   }
 })
 
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  interaction: { mode: 'index' as const, intersect: false },
-  scales: {
-    y: {
-      type: 'linear' as const,
-      display: true,
-      position: 'left' as const,
-      title: { display: true, text: t('payment.admin.revenue') },
-    },
-    y1: {
-      type: 'linear' as const,
-      display: true,
-      position: 'right' as const,
-      title: { display: true, text: t('payment.admin.orderCount') },
-      grid: { drawOnChartArea: false },
-    }
+const totals = computed(() => [
+  ...currencies.value.map((currency) => ({
+    key: currency,
+    label: currency,
+    value: formatMoney(currency, props.data.reduce((sum, day) => sum + (day.amount?.[currency] || 0), 0)),
+  })),
+  {
+    key: ORDERS,
+    label: t('payment.admin.orders'),
+    value: props.data.reduce((sum, day) => sum + day.count, 0).toLocaleString(),
   },
-  plugins: {
-    legend: { position: 'top' as const },
-  }
-}
+])
 </script>

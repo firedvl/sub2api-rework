@@ -10,7 +10,8 @@ for (const width of [390, 1280]) {
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
     await page.goto('/admin/accounts?view=technical')
-    await page.getByRole('button', { name: 'Create Account', exact: true }).first().click()
+    // The accounts toolbar's create button is now labeled "Add".
+    await page.getByRole('main').getByRole('button', { name: 'Add', exact: true }).click()
     const createDialog = page.getByRole('dialog', { name: 'Create Account' })
     await createDialog.getByRole('button', { name: 'TypeSafe / Jev', exact: true }).click()
     await expect(createDialog.getByPlaceholder('https://api.typesafe.ai', { exact: true })).toHaveValue('https://api.typesafe.ai')
@@ -36,7 +37,9 @@ for (const width of [390, 1280]) {
       total: 1, page: 1, page_size: 10, pages: 1
     } } }))
     await page.goto('/keys')
-    await page.getByRole('button', { name: 'Use Key', exact: true }).click()
+    // The full Use Key dialog now opens from the key row's ⋯ menu (the row "Use" button opens a quick drawer).
+    await page.getByTestId('key-more-1').click()
+    await page.getByRole('menuitem', { name: 'Use Key', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Use API Key' })
     await expect(dialog.getByRole('button', { name: 'System One', exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'Codex CLI', exact: true })).toHaveCount(0)
