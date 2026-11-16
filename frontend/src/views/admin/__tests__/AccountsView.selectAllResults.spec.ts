@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { routeLocationKey } from 'vue-router'
 
 import AccountsView from '../AccountsView.vue'
+
+enableAutoUnmount(afterEach)
 
 const {
   listAccounts,
@@ -223,10 +225,13 @@ describe('admin AccountsView select all filtered results', () => {
       include_scheduler_score: '0'
     }))
 
+    const callsBeforeFilter = listAccounts.mock.calls.length
     await wrapper.get('[data-test="change-filter"]').trigger('click')
 
     expect(wrapper.get('[data-test="selected-count"]').text()).toBe('0')
     expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('false')
+    await vi.waitFor(() => expect(listAccounts).toHaveBeenCalledTimes(callsBeforeFilter + 2))
+    await flushPromises()
   })
 
   it('keeps the original page selection when loading all results fails', async () => {
