@@ -325,8 +325,7 @@ func TestHandleUpstreamError_AnthropicAccountWindowStillWinsOver7dOi(t *testing.
 	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
 }
 
-func TestHandleUpstreamError_Anthropic429Without7dOiKeepsLegacyBehavior(t *testing.T) {
-	// 无 7d_oi 头、5h/7d 均未超限的 429：保持旧行为（按较早 reset 标记账号限流）。
+func TestHandleUpstreamError_AnthropicHealthyWindowsUseShortCooldown(t *testing.T) {
 	now := time.Now()
 	reset5h := now.Add(2 * time.Hour).Truncate(time.Second)
 	reset7d := now.Add(80 * time.Hour).Truncate(time.Second)
@@ -347,6 +346,6 @@ func TestHandleUpstreamError_Anthropic429Without7dOiKeepsLegacyBehavior(t *testi
 
 	require.Zero(t, repo.modelRateLimitCalls, "no 7d_oi signal → no model rate limit")
 	require.Equal(t, 1, repo.rateLimitCalls)
-	require.Equal(t, reset5h, repo.lastRateLimitReset, "legacy path picks the sooner reset")
-	require.Equal(t, 1, repo.sessionWindowCalls)
+	require.WithinDuration(t, now.Add(5*time.Second), repo.lastRateLimitReset, time.Second)
+	require.Zero(t, repo.sessionWindowCalls, "healthy windows must not be relabeled rejected")
 }

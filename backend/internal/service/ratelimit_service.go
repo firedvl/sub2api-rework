@@ -1230,6 +1230,27 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		}
 	}
 
+	if account.Platform == PlatformAnthropic {
+		now := time.Now()
+		if selectAnthropicExhaustedWindow(headers, now) == nil {
+			if reset := parseRetryAfterResetTime(headers, now); reset != nil && reset.After(now) && !reset.After(now.Add(8*24*time.Hour)) {
+				s.notifyAccountSchedulingBlocked(account, *reset, "429_retry_after")
+				if err := s.accountRepo.SetRateLimited(ctx, account.ID, *reset); err != nil {
+					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+				}
+				return
+			}
+			allowed := func(window string) bool {
+				status := strings.ToLower(strings.TrimSpace(headers.Get("anthropic-ratelimit-unified-" + window + "-status")))
+				return (status == "allowed" || status == "allowed_warning") && !isAnthropicWindowExceeded(headers, window)
+			}
+			if allowed("5h") && allowed("7d") {
+				s.apply429FallbackRateLimit(ctx, account, "anthropic_shared_windows_allowed")
+				return
+			}
+		}
+	}
+
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
@@ -1671,7 +1692,14 @@ func (s *RateLimitService) persistAnthropicModelWindowLimit(ctx context.Context,
 		}
 	}
 	if limit == nil {
-		return false
+		if !isAnthropicWindowExceeded(headers, window) {
+			return false
+		}
+		cooldown, enabled := s.get429FallbackCooldown(ctx, account)
+		if !enabled {
+			return true
+		}
+		limit = &anthropicWindowLimit{window: window, resetAt: now.Add(cooldown), reason: "anthropic_" + window + "_window_no_reset"}
 	}
 	// Keep the displayed family quota fresh while scheduling avoids this account.
 	s.samplePassiveUsageFromHeaders(ctx, account, headers)

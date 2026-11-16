@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -186,4 +187,81 @@ func TestAnthropicFableCreditsAreSpecificToTheRequestedVersion(t *testing.T) {
 			require.False(t, account.isModelRateLimitedWithContext(context.Background(), other))
 		})
 	}
+}
+
+func TestAnthropicFamilyQuotaWithoutResetDoesNotBecomeShared(t *testing.T) {
+	for _, window := range []string{"7d_oi", "7d_sonnet", "7d_opus"} {
+		t.Run(window, func(t *testing.T) {
+			headers := http.Header{}
+			headers.Set("anthropic-ratelimit-unified-"+window+"-status", "rejected")
+			headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(15*24*time.Hour).Unix(), 10))
+			repo := &anthropicWindowLimitRepo{}
+			account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+			started := time.Now()
+			NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(), account, http.StatusTooManyRequests, headers, nil)
+			require.Zero(t, repo.rateLimitCalls)
+			require.Equal(t, 1, repo.modelRateLimitCalls)
+			require.WithinDuration(t, started.Add(5*time.Second), repo.lastModelRateLimitReset, time.Second)
+		})
+	}
+}
+
+func TestAnthropicThroughputRetryAfterDoesNotUseHealthyQuotaResets(t *testing.T) {
+	for _, weeklyRejected := range []bool{false, true} {
+		t.Run(strconv.FormatBool(weeklyRejected), func(t *testing.T) {
+			now := time.Now()
+			headers := http.Header{}
+			headers.Set("Retry-After", "9")
+			headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+			headers.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(now.Add(2*time.Hour).Unix(), 10))
+			headers.Set("anthropic-ratelimit-unified-7d-status", "allowed")
+			weeklyReset := now.Add(72 * time.Hour).Truncate(time.Second)
+			headers.Set("anthropic-ratelimit-unified-7d-reset", strconv.FormatInt(weeklyReset.Unix(), 10))
+			if weeklyRejected {
+				headers.Set("anthropic-ratelimit-unified-7d-status", "rejected")
+			}
+			repo := &anthropicWindowLimitRepo{}
+			NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(),
+				&Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth}, http.StatusTooManyRequests, headers, nil)
+			require.Equal(t, 1, repo.rateLimitCalls)
+			if weeklyRejected {
+				require.Equal(t, weeklyReset, repo.lastRateLimitReset)
+			} else {
+				require.WithinDuration(t, now.Add(9*time.Second), repo.lastRateLimitReset, time.Second)
+				require.Zero(t, repo.sessionWindowCalls)
+			}
+		})
+	}
+}
+
+func TestAnthropicInvalidRetryAfterUsesShortFallback(t *testing.T) {
+	for _, value := range []string{"-1", "NaN", "Inf", "not-a-date", "999999999999999999999"} {
+		t.Run(value, func(t *testing.T) {
+			now := time.Now()
+			headers := http.Header{}
+			headers.Set("Retry-After", value)
+			for _, window := range []string{"5h", "7d"} {
+				headers.Set("anthropic-ratelimit-unified-"+window+"-status", "allowed")
+				headers.Set("anthropic-ratelimit-unified-"+window+"-reset", strconv.FormatInt(now.Add(time.Hour).Unix(), 10))
+			}
+			repo := &anthropicWindowLimitRepo{}
+			NewRateLimitService(repo, nil, nil, nil, nil).HandleUpstreamError(context.Background(),
+				&Account{ID: 1, Platform: PlatformAnthropic}, http.StatusTooManyRequests, headers, nil)
+			require.WithinDuration(t, now.Add(5*time.Second), repo.lastRateLimitReset, time.Second)
+		})
+	}
+}
+
+func TestAnthropicMissingFamilyResetWithFallbackDisabledKeepsAccountEligible(t *testing.T) {
+	repo := &anthropicWindowLimitRepo{}
+	settings := newMockSettingRepo()
+	settings.data[SettingKeyRateLimit429CooldownSettings] = `{"enabled":false,"cooldown_seconds":5}`
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	svc.settingService = NewSettingService(settings, &config.Config{})
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-7d_sonnet-status", "rejected")
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(15*24*time.Hour).Unix(), 10))
+	svc.HandleUpstreamError(context.Background(), &Account{ID: 1, Platform: PlatformAnthropic}, http.StatusTooManyRequests, headers, nil)
+	require.Zero(t, repo.rateLimitCalls)
+	require.Zero(t, repo.modelRateLimitCalls)
 }
