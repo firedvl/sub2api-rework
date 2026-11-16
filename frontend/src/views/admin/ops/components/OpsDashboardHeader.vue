@@ -856,139 +856,116 @@ function handleToolbarRefresh() {
   loadRealtimeTrafficSummary()
   emit('refresh')
 }
+
+const lastUpdatedLabel = computed(() => props.lastUpdated
+  ? props.lastUpdated.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-')
+  : t('common.unknown'))
+const lastUpdatedShort = computed(() => props.lastUpdated
+  ? props.lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  : t('common.unknown'))
 </script>
 
 <template>
-  <div :class="['flex flex-col gap-4 card', props.fullscreen ? 'p-8' : 'p-6']">
+  <div :class="['ops-header ui-card flex flex-col gap-4', props.fullscreen ? 'p-6 md:p-8' : 'p-4 sm:p-5']">
     <!-- Top Toolbar -->
-    <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 pb-4 dark:border-dark-700">
-      <div>
-        <h1 v-if="props.fullscreen" class="flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-white">
-          <svg class="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
-          {{ t('admin.ops.title') }}
-        </h1>
+    <div class="ui-toolbar ops-header-toolbar">
+      <h1 v-if="props.fullscreen" class="ops-fs-title">
+        <Icon name="chartBar" size="md" class="text-primary-500" />
+        {{ t('admin.ops.title') }}
+      </h1>
 
-        <div v-if="!props.fullscreen" class="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <span class="flex items-center gap-1.5" :title="props.loading ? t('admin.ops.loadingText') : t('admin.ops.ready')">
-            <span class="relative flex h-2 w-2">
-              <span class="relative inline-flex h-2 w-2 rounded-full" :class="props.loading ? 'bg-gray-400' : 'bg-green-500'"></span>
-            </span>
-            {{ props.loading ? t('admin.ops.loadingText') : t('admin.ops.ready') }}
-          </span>
-
-          <span>·</span>
-          <span>{{ t('common.refresh') }}: {{ props.lastUpdated ? props.lastUpdated.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : t('common.unknown') }}</span>
-
-          <template v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined">
-            <span>·</span>
-            <span>{{ t('admin.ops.autoRefreshRemaining', { seconds: props.autoRefreshCountdown }) }}</span>
-          </template>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-3">
-        <template v-if="!props.fullscreen">
-          <Select
-            :model-value="platform"
-            :options="platformOptions"
-            class="w-full sm:w-[140px]"
-            @update:model-value="handlePlatformChange"
-          />
-
-          <Select
-            :model-value="groupId"
-            :options="groupOptions"
-            class="w-full sm:w-[160px]"
-            @update:model-value="handleGroupChange"
-          />
-
-          <div class="mx-1 hidden h-4 w-[1px] bg-gray-200 dark:bg-dark-700 sm:block"></div>
-
-          <Select
-            :model-value="timeRange"
-            :options="timeRangeOptions"
-            class="relative w-full sm:w-[150px]"
-            @update:model-value="handleTimeRangeChange"
-          />
-        </template>
-
+      <template v-if="!props.fullscreen">
         <Select
-          v-if="false"
-          :model-value="queryMode"
-          :options="queryModeOptions"
-          class="relative w-full sm:w-[170px]"
-          @update:model-value="handleQueryModeChange"
+          :model-value="platform"
+          :options="platformOptions"
+          class="ops-header-select"
+          :aria-label="t('admin.activityUi.platform')"
+          @update:model-value="handlePlatformChange"
         />
 
+        <Select
+          :model-value="groupId"
+          :options="groupOptions"
+          class="ops-header-select"
+          :aria-label="t('admin.usage.group')"
+          @update:model-value="handleGroupChange"
+        />
+
+        <Select
+          :model-value="timeRange"
+          :options="timeRangeOptions"
+          class="ops-header-select relative"
+          :aria-label="t('admin.dashboard.timeRange')"
+          @update:model-value="handleTimeRangeChange"
+        />
+      </template>
+
+      <Select
+        v-if="false"
+        :model-value="queryMode"
+        :options="queryModeOptions"
+        class="relative w-full sm:w-[170px]"
+        @update:model-value="handleQueryModeChange"
+      />
+
+      <span class="ui-grow"></span>
+
+      <span
+        v-if="!props.fullscreen"
+        class="ops-status"
+        :title="`${props.loading ? t('admin.ops.loadingText') : t('admin.ops.ready')} · ${t('common.refresh')}: ${lastUpdatedLabel}`"
+      >
+        <span class="viz-pulse" :class="props.loading ? 'is-idle' : ''" aria-hidden="true"></span>
+        <span class="sr-only">{{ props.loading ? t('admin.ops.loadingText') : t('admin.ops.ready') }}</span>
+        <span class="tabular-nums">{{ lastUpdatedShort }}</span>
+        <span
+          v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined"
+          class="ops-countdown tabular-nums"
+          :title="t('admin.ops.autoRefreshRemaining', { seconds: props.autoRefreshCountdown })"
+        >{{ props.autoRefreshCountdown }}s</span>
+      </span>
+
+      <template v-if="!props.fullscreen">
         <button
-          v-if="!props.fullscreen"
           type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          class="app-icon-button"
           :disabled="loading"
+          :aria-label="t('common.refresh')"
           :title="t('common.refresh')"
           @click="handleToolbarRefresh"
         >
-          <svg class="h-4 w-4" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
+          <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />
         </button>
-
-        <div v-if="!props.fullscreen" class="mx-1 hidden h-4 w-[1px] bg-gray-200 dark:bg-dark-700 sm:block"></div>
-
-        <!-- Alert Rules Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
           type="button"
-          class="flex h-8 items-center gap-1.5 rounded-lg bg-blue-100 px-3 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+          class="app-icon-button"
+          :aria-label="t('admin.ops.alertRules.manage')"
           :title="t('admin.ops.alertRules.title')"
           @click="emit('openAlertRules')"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
-          <span class="hidden sm:inline">{{ t('admin.ops.alertRules.manage') }}</span>
+          <Icon name="bell" size="sm" />
         </button>
-
-        <!-- Settings Button (hidden in fullscreen) -->
         <button
-          v-if="!props.fullscreen"
           type="button"
-          class="flex h-8 items-center gap-1.5 rounded-lg bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+          class="app-icon-button"
+          :aria-label="t('admin.ops.settings.title')"
           :title="t('admin.ops.settings.title')"
           @click="emit('openSettings')"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span class="hidden sm:inline">{{ t('common.settings') }}</span>
+          <Icon name="cog" size="sm" />
         </button>
-
-        <!-- Enter Fullscreen Button (hidden in fullscreen mode) -->
         <button
-          v-if="!props.fullscreen"
           type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+          class="app-icon-button"
+          :aria-label="t('admin.ops.fullscreen.enter')"
           :title="t('admin.ops.fullscreen.enter')"
           @click="emit('enterFullscreen')"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
           </svg>
         </button>
-      </div>
+      </template>
     </div>
 
     <div v-if="overview" class="grid grid-cols-1 gap-6 xl:grid-cols-12">
@@ -1628,3 +1605,40 @@ function handleToolbarRefresh() {
     </BaseDialog>
   </div>
 </template>
+
+<style scoped>
+.ops-fs-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--operator-foreground);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.ops-header-select {
+  width: 9.5rem;
+  flex: 0 1 9.5rem;
+}
+.ops-header-select :deep(.select-trigger) {
+  height: 2.25rem;
+}
+.ops-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: 0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+.ops-countdown {
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--operator-muted);
+}
+@media (max-width: 640px) {
+  .ops-header-select {
+    flex: 1 1 calc(50% - 0.5rem);
+    width: auto;
+  }
+}
+</style>

@@ -24,12 +24,14 @@ for (const width of [390, 1280]) {
       })
     }
     await page.goto('/profile')
+    await page.getByTestId('profile-edit-toggle').click()
     await page.locator('#username').fill('Updated username')
     await page.getByRole('button', { name: 'Update Profile', exact: true }).click()
     await expect(page.getByText('Profile update rejected', { exact: true })).toBeVisible()
     await expect(page.locator('#username')).toHaveValue('Updated username')
     await expect(page.getByRole('button', { name: 'Update Profile', exact: true })).toBeEnabled()
 
+    await page.getByTestId('profile-password-toggle').click()
     await page.locator('#old_password').fill('old-password')
     await page.locator('#new_password').fill('new-password')
     await page.locator('#confirm_password').fill('new-password')

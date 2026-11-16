@@ -1,62 +1,69 @@
 <template>
-  <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-    <!-- Left: Search + Filters -->
-    <div class="flex flex-1 flex-wrap items-center gap-3">
-      <div class="relative w-full sm:w-64">
-        <Icon
-          name="search"
-          size="md"
-          class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-        />
-        <input
-          v-model="search"
-          type="text"
-          :placeholder="t('admin.channelMonitor.searchPlaceholder')"
-          class="input pl-10"
-          @input="$emit('search-input')"
-        />
-      </div>
-
-      <Select
-        v-model="provider"
-        :options="providerFilterOptions"
-        :placeholder="t('admin.channelMonitor.allProviders')"
-        class="w-44"
-        @change="$emit('reload')"
+  <div class="ui-toolbar monitor-toolbar" role="toolbar" :aria-label="t('admin.routingUi.filters')">
+    <label class="ui-search">
+      <Icon name="search" size="sm" />
+      <input
+        v-model="search"
+        type="search"
+        :placeholder="t('admin.routingUi.search')"
+        :aria-label="t('admin.channelMonitor.searchPlaceholder')"
+        @input="$emit('search-input')"
       />
+    </label>
 
-      <Select
-        v-model="enabled"
-        :options="enabledFilterOptions"
-        :placeholder="t('admin.channelMonitor.enabledFilter')"
-        class="w-40"
-        @change="$emit('reload')"
-      />
+    <div class="ui-chips monitor-providers" role="group" :aria-label="t('admin.channelMonitor.allProviders')">
+      <button
+        v-for="option in providerChips"
+        :key="option.value"
+        type="button"
+        class="ui-chip is-icon"
+        :aria-pressed="provider === option.value"
+        :aria-label="option.label"
+        :title="option.label"
+        :data-testid="`monitor-filter-${option.value}`"
+        @click="setProvider(option.value)"
+      >
+        <ProviderMark :platform="option.value" :size="20" />
+      </button>
     </div>
 
-    <!-- Right: Actions -->
-    <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
+    <div class="viz-seg" role="group" :aria-label="t('admin.channelMonitor.enabledFilter')">
       <button
-        @click="$emit('reload')"
-        :disabled="loading"
-        class="btn btn-secondary"
-        :title="t('common.refresh')"
+        v-for="option in enabledFilterOptions"
+        :key="option.value"
+        type="button"
+        :aria-pressed="enabled === option.value"
+        @click="setEnabled(option.value)"
       >
-        <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-      </button>
-      <button
-        @click="$emit('manage-templates')"
-        class="btn btn-secondary"
-        :title="t('admin.channelMonitor.template.manageButton')"
-      >
-        <Icon name="cog" size="md" class="mr-2" />
-        {{ t('admin.channelMonitor.template.manageButton') }}
-      </button>
-      <button @click="$emit('create')" class="btn btn-primary">
-        <Icon name="plus" size="md" class="mr-2" />
-        {{ t('admin.channelMonitor.createButton') }}
+        {{ option.label }}
       </button>
     </div>
+
+    <span class="ui-grow"></span>
+
+    <button
+      type="button"
+      class="app-icon-button monitor-tool"
+      :disabled="loading"
+      :aria-label="t('common.refresh')"
+      :title="t('common.refresh')"
+      @click="$emit('reload')"
+    >
+      <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+    </button>
+    <button
+      type="button"
+      class="app-icon-button monitor-tool"
+      :aria-label="t('admin.channelMonitor.template.manageButton')"
+      :title="t('admin.channelMonitor.template.manageButton')"
+      @click="$emit('manage-templates')"
+    >
+      <Icon name="document" size="sm" />
+    </button>
+    <button type="button" class="btn btn-primary" @click="$emit('create')">
+      <Icon name="plus" size="sm" />
+      <span>{{ t('admin.routingUi.newMonitor') }}</span>
+    </button>
   </div>
 </template>
 
@@ -64,7 +71,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Provider } from '@/api/admin/channelMonitor'
-import Select from '@/components/common/Select.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
   PROVIDER_OPENAI,
@@ -83,7 +90,7 @@ defineProps<{
   loading: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'reload'): void
   (e: 'create'): void
   (e: 'manage-templates'): void
@@ -96,8 +103,7 @@ const enabled = defineModel<'' | 'true' | 'false'>('enabled', { required: true }
 
 const { t } = useI18n()
 
-const providerFilterOptions = computed(() => [
-  { value: '', label: t('admin.channelMonitor.allProviders') },
+const providerChips = computed<{ value: Provider; label: string }[]>(() => [
   { value: PROVIDER_OPENAI, label: t('monitorCommon.providers.openai') },
   { value: PROVIDER_ANTHROPIC, label: t('monitorCommon.providers.anthropic') },
   { value: PROVIDER_GEMINI, label: t('monitorCommon.providers.gemini') },
@@ -110,9 +116,61 @@ const providerFilterOptions = computed(() => [
   { value: PROVIDER_OPENCODE_GO, label: t('monitorCommon.providers.opencode_go') },
 ])
 
-const enabledFilterOptions = computed(() => [
-  { value: '', label: t('admin.channelMonitor.allStatus') },
-  { value: 'true', label: t('admin.channelMonitor.onlyEnabled') },
-  { value: 'false', label: t('admin.channelMonitor.onlyDisabled') },
+const enabledFilterOptions = computed<{ value: '' | 'true' | 'false'; label: string }[]>(() => [
+  { value: '', label: t('admin.routingUi.all') },
+  { value: 'true', label: t('admin.routingUi.on') },
+  { value: 'false', label: t('admin.routingUi.off') },
 ])
+
+// Filters apply immediately; a second click on the active provider clears it.
+function setProvider(value: Provider) {
+  provider.value = provider.value === value ? '' : value
+  emit('reload')
+}
+
+function setEnabled(value: '' | 'true' | 'false') {
+  if (enabled.value === value) return
+  enabled.value = value
+  emit('reload')
+}
 </script>
+
+<style scoped>
+.monitor-providers {
+  gap: 0.25rem;
+}
+
+.monitor-providers .ui-chip.is-icon {
+  width: 2.125rem;
+  height: 2.125rem;
+}
+
+.monitor-providers .ui-chip[aria-pressed='true'] :deep(.provider-mark) {
+  animation: ui-pop 320ms var(--operator-spring);
+}
+
+.monitor-tool {
+  border: 1px solid var(--operator-border);
+  background: var(--operator-card);
+}
+
+@media (max-width: 760px) {
+  .monitor-toolbar .ui-search {
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .monitor-providers {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monitor-providers .ui-chip[aria-pressed='true'] :deep(.provider-mark) {
+    animation: none;
+  }
+}
+</style>

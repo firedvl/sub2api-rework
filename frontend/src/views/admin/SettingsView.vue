@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto w-full min-w-0 max-w-none space-y-6">
+    <div class="settings-page">
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -11,19 +11,112 @@
       <!-- Settings Form -->
       <form
         v-else
+        ref="settingsFormRef"
         @submit.prevent="saveSettings"
-        class="operator-settings-form space-y-6"
+        class="operator-settings-form settings-layout"
         :class="{ 'settings-form-dirty': settingsDirty }"
         novalidate
       >
-        <!-- Tab Navigation -->
-        <div class="settings-tabs-shell">
+        <!-- Section navigation -->
+        <aside
+          class="settings-tabs-shell"
+          :class="{ 'settings-search-active': searchOpen }"
+        >
+          <div class="settings-search-wrap">
+            <label class="ui-search settings-search">
+              <Icon name="search" size="sm" />
+              <span class="sr-only">{{ t("admin.settingsUi.search") }}</span>
+              <input
+                ref="searchInputRef"
+                v-model="searchQuery"
+                type="search"
+                role="combobox"
+                autocomplete="off"
+                spellcheck="false"
+                aria-autocomplete="list"
+                :aria-expanded="searchResultsVisible"
+                aria-controls="settings-search-results"
+                :aria-activedescendant="
+                  searchResultsVisible && searchResults[searchActiveIndex]
+                    ? `settings-search-result-${searchActiveIndex}`
+                    : undefined
+                "
+                :placeholder="t('admin.settingsUi.search')"
+                data-testid="settings-search-input"
+                @focus="searchFocused = true"
+                @blur="handleSearchBlur"
+                @keydown="handleSearchKeydown"
+              />
+              <button
+                v-if="searchQuery || searchOpen"
+                type="button"
+                class="settings-search-clear"
+                :aria-label="t('admin.settingsUi.clearSearch')"
+                @click="closeSearch"
+              >
+                <Icon name="x" size="xs" />
+              </button>
+            </label>
+            <Transition name="menu-pop">
+              <div
+                v-if="searchResultsVisible"
+                id="settings-search-results"
+                class="settings-search-results"
+                role="listbox"
+                :aria-label="t('admin.settingsUi.search')"
+                data-testid="settings-search-results"
+              >
+                <button
+                  v-for="(result, index) in searchResults"
+                  :id="`settings-search-result-${index}`"
+                  :key="result.id"
+                  type="button"
+                  role="option"
+                  tabindex="-1"
+                  :aria-selected="index === searchActiveIndex"
+                  class="settings-search-result"
+                  :class="{ 'settings-search-result-active': index === searchActiveIndex }"
+                  @mousedown.prevent
+                  @mouseenter="searchActiveIndex = index"
+                  @click="jumpToSearchResult(result)"
+                >
+                  <Icon :name="tabIcon(result.tab)" size="sm" class="settings-search-result-icon" />
+                  <span class="settings-search-result-text">
+                    <b>{{ result.label }}</b>
+                    <small>{{ t(`admin.settings.tabs.${result.tab}`) }}<template v-if="result.context"> · {{ result.context }}</template></small>
+                  </span>
+                </button>
+                <p v-if="!searchResults.length" class="settings-search-empty" role="status">
+                  {{ t("admin.settingsUi.noMatches") }}
+                </p>
+              </div>
+            </Transition>
+          </div>
+
           <nav
             class="settings-tabs-scroll"
-            role="tablist"
             :aria-label="t('admin.settings.title')"
           >
-            <div class="settings-tabs">
+            <button
+              type="button"
+              class="settings-search-toggle"
+              :aria-label="t('admin.settingsUi.search')"
+              @click="openSearch"
+            >
+              <Icon name="search" size="sm" />
+            </button>
+            <div
+              ref="tabListRef"
+              class="settings-tabs"
+              role="tablist"
+              :aria-orientation="wideLayout ? 'vertical' : 'horizontal'"
+            >
+              <span
+                class="settings-tab-indicator"
+                :class="{ 'settings-tab-indicator-ready': indicatorReady }"
+                :style="indicatorStyle"
+                aria-hidden="true"
+              ></span>
               <button
                 v-for="tab in settingsTabs"
                 :key="tab.key"
@@ -31,11 +124,13 @@
                 type="button"
                 role="tab"
                 :aria-selected="activeTab === tab.key"
+                :aria-current="activeTab === tab.key ? 'true' : undefined"
                 :aria-controls="settingsTabPanelIds[tab.key].join(' ')"
                 :tabindex="activeTab === tab.key ? 0 : -1"
                 :class="[
                   'settings-tab',
                   activeTab === tab.key && 'settings-tab-active',
+                  searchQuery.trim() && !searchTabCounts[tab.key] && 'settings-tab-dim',
                 ]"
                 @click="selectSettingsTab(tab.key)"
                 @keydown="handleSettingsTabKeydown($event, tab.key)"
@@ -46,24 +141,32 @@
                 <span class="settings-tab-label">{{
                   t(`admin.settings.tabs.${tab.key}`)
                 }}</span>
+                <span
+                  v-if="searchQuery.trim() && searchTabCounts[tab.key]"
+                  class="settings-tab-count"
+                  aria-hidden="true"
+                >{{ searchTabCounts[tab.key] }}</span>
+                <span
+                  v-else-if="settingsDirty && dirtyTabs.includes(tab.key)"
+                  class="settings-tab-dirty"
+                  data-testid="settings-tab-dirty"
+                  :title="t('admin.settings.unsavedChanges')"
+                  aria-hidden="true"
+                ></span>
               </button>
             </div>
           </nav>
-        </div>
+        </aside>
+
+        <div class="settings-content">
 
         <!-- Tab: Security — Admin API Key -->
-        <div id="settings-panel-security-key" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="space-y-6">
+        <div id="settings-panel-security-key" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Admin API Key Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.adminApiKey.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.adminApiKey.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.adminApiKey.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.adminApiKey.description") }}</HelpTooltip>
             </div>
             <div class="space-y-4 p-6">
               <!-- Security Warning -->
@@ -209,18 +312,12 @@
         <!-- /Tab: Security — Admin API Key -->
 
         <!-- Tab: Gateway -->
-        <div id="settings-panel-gateway-resilience" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="space-y-6">
+        <div id="settings-panel-gateway-resilience" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.overloadCooldown.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.overloadCooldown.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.overloadCooldown.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.overloadCooldown.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div
@@ -313,15 +410,9 @@
 
           <!-- Rate Limit Cooldown (429) Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.rateLimit429Cooldown.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.rateLimit429Cooldown.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.rateLimit429Cooldown.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.rateLimit429Cooldown.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div
@@ -420,15 +511,9 @@
 
           <!-- Stream Timeout Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.streamTimeout.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.streamTimeout.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.streamTimeout.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.streamTimeout.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Loading State -->
@@ -600,15 +685,9 @@
 
           <!-- Request Rectifier Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.rectifier.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.rectifier.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.rectifier.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.rectifier.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Loading State -->
@@ -799,15 +878,9 @@
           </div>
           <!-- Beta Policy Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.betaPolicy.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.betaPolicy.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.betaPolicy.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.betaPolicy.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Loading State -->
@@ -1078,15 +1151,9 @@
           </div>
           <!-- OpenAI Fast/Flex Policy Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.openaiFastPolicy.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.openaiFastPolicy.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.openaiFastPolicy.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.openaiFastPolicy.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Empty state -->
@@ -1430,18 +1497,12 @@
         <!-- /Tab: Gateway -->
 
         <!-- Tab: Security — Registration, Turnstile, LinuxDo -->
-        <div id="settings-panel-security-controls" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="space-y-6">
+        <div id="settings-panel-security-controls" v-show="activeTab === 'security'" role="tabpanel" aria-labelledby="settings-tab-security" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Registration Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.registration.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.registration.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.registration.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.registration.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Enable Registration -->
@@ -1765,15 +1826,9 @@
 
           <!-- API Key IP ACL Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.apiKeyAcl.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.apiKeyAcl.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.apiKeyAcl.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.apiKeyAcl.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between gap-4">
@@ -1852,22 +1907,9 @@
 
           <!-- Panel API Rate Limit Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <div class="flex items-center gap-2">
-                <Icon
-                  name="shield"
-                  size="md"
-                  class="text-primary-500"
-                />
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ t("admin.settings.panelRateLimit.title") }}
-                </h2>
-              </div>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.panelRateLimit.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.panelRateLimit.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.panelRateLimit.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div
@@ -2043,15 +2085,9 @@
 
           <!-- 人机验证 Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.captcha.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.captcha.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.captcha.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.captcha.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Enable Captcha -->
@@ -2447,15 +2483,9 @@
 
           <!-- LinuxDo Connect OAuth 登录 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.linuxdo.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.linuxdo.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.linuxdo.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.linuxdo.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between">
@@ -2565,20 +2595,9 @@
 
           <!-- GitHub / Google 邮箱快捷登录 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ localText("邮箱快捷登录", "Email OAuth Sign-in") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{
-                  localText(
-                    "开启 GitHub 或 Google 邮箱授权登录后，系统会读取已验证邮箱，存在则直接登录，不存在则自动注册。",
-                    "After GitHub or Google email OAuth is enabled, the system reads a verified email, signs in matching users, and auto-registers missing users.",
-                  )
-                }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ localText("邮箱快捷登录", "Email OAuth Sign-in") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ localText("开启 GitHub 或 Google 邮箱授权登录后，系统会读取已验证邮箱，存在则直接登录，不存在则自动注册。", "After GitHub or Google email OAuth is enabled, the system reads a verified email, signs in matching users, and auto-registers missing users.") }}</HelpTooltip>
             </div>
             <div class="space-y-6 p-6">
               <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -2791,15 +2810,9 @@
 
           <!-- WeChat Connect OAuth 登录 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.wechatConnect.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.wechatConnect.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.wechatConnect.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.wechatConnect.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between">
@@ -3133,15 +3146,9 @@
 
           <!-- DingTalk Connect OAuth 登录 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.dingtalk.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.dingtalk.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.dingtalk.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.dingtalk.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between">
@@ -3421,15 +3428,9 @@
 
           <!-- Generic OIDC OAuth 登录 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.oidc.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.oidc.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.oidc.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.oidc.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between">
@@ -3831,18 +3832,12 @@
         <!-- /Tab: Security — Registration, Turnstile, LinuxDo, OIDC -->
 
         <!-- Tab: Users -->
-        <div id="settings-panel-users" v-show="activeTab === 'users'" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" class="space-y-6">
+        <div id="settings-panel-users" v-show="activeTab === 'users'" role="tabpanel" aria-labelledby="settings-tab-users" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Default Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.defaults.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.defaults.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.defaults.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.defaults.description") }}</HelpTooltip>
             </div>
             <div class="space-y-6 p-6">
               <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -4107,15 +4102,9 @@
           </div>
 
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.authSourceDefaults.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.authSourceDefaults.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.authSourceDefaults.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.authSourceDefaults.description") }}</HelpTooltip>
             </div>
             <div class="space-y-6 p-6">
               <div
@@ -4447,18 +4436,12 @@
         <!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
-        <div id="settings-panel-gateway-policy" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="space-y-6">
+        <div id="settings-panel-gateway-policy" v-show="activeTab === 'gateway'" role="tabpanel" aria-labelledby="settings-tab-gateway" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Claude Code Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.claudeCode.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.claudeCode.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.claudeCode.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.claudeCode.description") }}</HelpTooltip>
             </div>
             <div class="p-6">
               <div>
@@ -4502,12 +4485,8 @@
 
           <!-- Codex Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.gatewayForwarding.codexHardeningTitle") }}
-              </h2>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.gatewayForwarding.codexHardeningTitle") }}</h2>
             </div>
             <div class="p-6 space-y-4">
                 <div>
@@ -4750,15 +4729,9 @@
 
           <!-- Upstream Billing Probe Settings -->
           <div class="card" data-testid="upstream-billing-probe-settings">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.upstreamBillingProbe.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.upstreamBillingProbe.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.upstreamBillingProbe.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.upstreamBillingProbe.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div
@@ -4836,13 +4809,9 @@
 
           <!-- Ollama Cloud Usage Settings -->
           <div class="card" data-testid="ollama-cloud-usage-global-settings">
-            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.ollamaCloudUsage.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.ollamaCloudUsage.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.ollamaCloudUsage.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.ollamaCloudUsage.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div v-if="ollamaCloudUsageLoading" class="flex items-center gap-2 text-gray-500">
@@ -4920,13 +4889,9 @@
 
           <!-- OpenCode Go Usage Settings -->
           <div class="card" data-testid="opencode-go-usage-global-settings">
-            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.opencodeGoUsage.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.opencodeGoUsage.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.opencodeGoUsage.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.opencodeGoUsage.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div v-if="opencodeGoUsageLoading" class="flex items-center gap-2 text-gray-500">
@@ -5004,15 +4969,9 @@
 
           <!-- Gateway Scheduling Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.scheduling.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.scheduling.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.scheduling.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.scheduling.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between">
@@ -5313,15 +5272,9 @@
 
           <!-- Gateway Forwarding Behavior -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.gatewayForwarding.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.gatewayForwarding.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.gatewayForwarding.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.gatewayForwarding.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <div class="grid gap-5 border-b border-gray-100 pb-5 dark:border-dark-700 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
@@ -5962,15 +5915,9 @@
 
           <!-- Web Search Emulation -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.webSearchEmulation.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.webSearchEmulation.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.webSearchEmulation.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.webSearchEmulation.description") }}</HelpTooltip>
             </div>
             <div class="space-y-5 p-6">
               <!-- Global Toggle -->
@@ -6400,13 +6347,9 @@
 
         <!-- Usage Records Settings -->
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.usageRecords.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.usageRecords.description') }}
-            </p>
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.usageRecords.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.usageRecords.description') }}</HelpTooltip>
           </div>
           <div class="space-y-4 p-6">
             <!-- User error requests visibility -->
@@ -6430,19 +6373,13 @@
         <!-- /Tab: Gateway — Claude Code, Scheduling -->
 
         <!-- Tab: General -->
-        <div id="settings-panel-general" v-show="activeTab === 'general'" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" class="space-y-6">
+        <div id="settings-panel-general" v-show="activeTab === 'general'" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <UpdateSettingsCard />
           <!-- Site Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.site.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.site.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.site.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.site.description") }}</HelpTooltip>
             </div>
             <div class="space-y-6 p-6">
               <!-- Backend Mode -->
@@ -6802,15 +6739,9 @@
 
           <!-- Custom Menu Items -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.customMenu.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.customMenu.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.customMenu.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.customMenu.description") }}</HelpTooltip>
             </div>
             <div class="space-y-4 p-6">
               <!-- Existing menu items -->
@@ -7005,30 +6936,17 @@
 	        <!-- /Tab: General -->
 
 	        <!-- Tab: Login Agreement -->
-	        <div id="settings-panel-agreement" v-show="activeTab === 'agreement'" role="tabpanel" aria-labelledby="settings-tab-agreement" tabindex="0" class="space-y-6">
+	        <div id="settings-panel-agreement" v-show="activeTab === 'agreement'" role="tabpanel" aria-labelledby="settings-tab-agreement" tabindex="0" class="settings-panel ui-stagger space-y-6">
 	          <div class="card">
-	            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-	              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-	                <div>
-	                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-	                    {{ localText("登录条款确认", "Login agreement") }}
-	                  </h2>
-	                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-	                    {{
-	                      localText(
-	                        "控制登录页是否要求用户先阅读并同意服务条款、隐私政策或其他 Markdown 文档。",
-	                        "Control whether the login page requires users to accept Markdown policy documents first.",
-	                      )
-	                    }}
-	                  </p>
-	                </div>
-	                <div class="flex items-center gap-3">
+	            <div class="settings-card-head">
+	                  <h2 class="settings-card-title">{{ localText("登录条款确认", "Login agreement") }}</h2>
+	                  <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ localText("控制登录页是否要求用户先阅读并同意服务条款、隐私政策或其他 Markdown 文档。", "Control whether the login page requires users to accept Markdown policy documents first.") }}</HelpTooltip>
+	                <div class="settings-card-tools">
 	                  <span class="text-sm text-gray-600 dark:text-gray-300">
 	                    {{ form.login_agreement_enabled ? localText("已启用", "Enabled") : localText("未启用", "Disabled") }}
 	                  </span>
 	                  <Toggle v-model="form.login_agreement_enabled" />
 	                </div>
-	              </div>
 	            </div>
 
 	            <div class="space-y-6 p-6">
@@ -7207,8 +7125,8 @@
         <!-- /Tab: Login Agreement -->
 
 	        <!-- Tab: Features (功能开关) -->
-        <div id="settings-panel-features" v-show="activeTab === 'features'" role="tabpanel" aria-labelledby="settings-tab-features" tabindex="0" class="space-y-6">
-        <div class="flex flex-col gap-3 border-b border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-dark-700">
+        <div id="settings-panel-features" v-show="activeTab === 'features'" role="tabpanel" aria-labelledby="settings-tab-features" tabindex="0" class="settings-panel ui-stagger space-y-6">
+        <div class="settings-row-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <label id="site-billing-mode-label" class="text-sm font-medium">{{ t('admin.settings.features.siteBillingMode.title') }}</label>
           <Select
             v-model="siteBillingMode"
@@ -7220,22 +7138,18 @@
         </div>
 
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.channelMonitor.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.channelMonitor.description') }}
-            </p>
-            <p class="mt-1.5 text-xs">
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.channelMonitor.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.channelMonitor.description') }}</HelpTooltip>
+            <div class="settings-card-tools">
               <router-link
                 to="/admin/channels/monitor"
-                class="inline-flex items-center gap-1 text-primary-600 hover:underline dark:text-primary-400"
+                class="settings-card-link"
               >
                 {{ t('admin.settings.features.channelMonitor.configureLink') }}
                 <span aria-hidden="true">→</span>
               </router-link>
-            </p>
+            </div>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between">
@@ -7351,22 +7265,18 @@
         </div>
 
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.availableChannels.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.availableChannels.description') }}
-            </p>
-            <p class="mt-1.5 text-xs">
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.availableChannels.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.availableChannels.description') }}</HelpTooltip>
+            <div class="settings-card-tools">
               <router-link
                 to="/admin/channels/pricing"
-                class="inline-flex items-center gap-1 text-primary-600 hover:underline dark:text-primary-400"
+                class="settings-card-link"
               >
                 {{ t('admin.settings.features.availableChannels.configureLink') }}
                 <span aria-hidden="true">→</span>
               </router-link>
-            </p>
+            </div>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between">
@@ -7384,13 +7294,9 @@
         </div>
 
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.modelPlaza.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.modelPlaza.description') }}
-            </p>
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.modelPlaza.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.modelPlaza.description') }}</HelpTooltip>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between">
@@ -7434,13 +7340,9 @@
         </div>
 
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.pluginManagement.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.pluginManagement.description') }}
-            </p>
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.pluginManagement.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.pluginManagement.description') }}</HelpTooltip>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between gap-4">
@@ -7458,22 +7360,18 @@
         </div>
 
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.riskControl.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.riskControl.description') }}
-            </p>
-            <p class="mt-1.5 text-xs">
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.riskControl.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.riskControl.description') }}</HelpTooltip>
+            <div class="settings-card-tools">
               <router-link
                 to="/admin/risk-control"
-                class="inline-flex items-center gap-1 text-primary-600 hover:underline dark:text-primary-400"
+                class="settings-card-link"
               >
                 {{ t('admin.settings.features.riskControl.configureLink') }}
                 <span aria-hidden="true">→</span>
               </router-link>
-            </p>
+            </div>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between">
@@ -7529,13 +7427,9 @@
 
         <!-- Affiliate (邀请返利) feature card -->
         <div class="card">
-          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.settings.features.affiliate.title') }}
-            </h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {{ t('admin.settings.features.affiliate.description') }}
-            </p>
+          <div class="settings-card-head">
+            <h2 class="settings-card-title">{{ t('admin.settings.features.affiliate.title') }}</h2>
+            <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t('admin.settings.features.affiliate.description') }}</HelpTooltip>
           </div>
           <div class="space-y-5 p-6">
             <div class="flex items-center justify-between">
@@ -7943,22 +7837,18 @@
 
         <!-- Tab: Email -->
         <!-- Tab: Payment -->
-        <div id="settings-panel-payment" v-show="activeTab === 'payment'" role="tabpanel" aria-labelledby="settings-tab-payment" tabindex="0" class="space-y-6">
+        <div id="settings-panel-payment" v-show="activeTab === 'payment'" role="tabpanel" aria-labelledby="settings-tab-payment" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Payment System Settings -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.payment.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.payment.description") }}
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.payment.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.payment.description") }}</HelpTooltip>
+              <div class="settings-card-tools">
                 <a
                   :href="paymentGuideHref"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="ml-2 inline-flex items-center text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                  class="settings-card-link"
                 >
                   <svg
                     class="mr-0.5 h-3.5 w-3.5"
@@ -7975,7 +7865,7 @@
                   </svg>
                   {{ t("admin.settings.payment.configGuide") }}
                 </a>
-              </p>
+              </div>
             </div>
             <div class="space-y-4 p-6">
               <!-- Enable toggle -->
@@ -8502,7 +8392,7 @@
           />
         </div>
 
-        <div id="settings-panel-email" v-show="activeTab === 'email'" role="tabpanel" aria-labelledby="settings-tab-email" tabindex="0" class="space-y-6">
+        <div id="settings-panel-email" v-show="activeTab === 'email'" role="tabpanel" aria-labelledby="settings-tab-email" tabindex="0" class="settings-panel ui-stagger space-y-6">
           <!-- Email disabled hint - show when email_verify_enabled is off -->
           <div v-if="!form.email_verify_enabled" class="card">
             <div class="p-6">
@@ -8526,17 +8416,9 @@
 
           <!-- SMTP Settings - Only show when email verification is enabled -->
           <div v-if="form.email_verify_enabled" class="card">
-            <div
-              class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <div>
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ t("admin.settings.smtp.title") }}
-                </h2>
-                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  {{ t("admin.settings.smtp.description") }}
-                </p>
-              </div>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.smtp.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.smtp.description") }}</HelpTooltip>
               <button
                 type="button"
                 @click="testSmtpConnection"
@@ -8690,15 +8572,9 @@
 
           <!-- Send Test Email - Only show when email verification is enabled -->
           <div v-if="form.email_verify_enabled" class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.testEmail.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.testEmail.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h2 class="settings-card-title">{{ t("admin.settings.testEmail.title") }}</h2>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.testEmail.description") }}</HelpTooltip>
             </div>
             <div class="p-6">
               <div class="flex items-end gap-4">
@@ -8757,15 +8633,9 @@
 
           <!-- 订阅到期提醒 -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h3 class="text-base font-medium text-gray-900 dark:text-white">
-                {{ t("admin.settings.subscriptionExpiryNotify.title") }}
-              </h3>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.subscriptionExpiryNotify.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h3 class="settings-card-title">{{ t("admin.settings.subscriptionExpiryNotify.title") }}</h3>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.subscriptionExpiryNotify.description") }}</HelpTooltip>
             </div>
             <div class="px-6 py-6">
               <div class="flex items-center justify-between gap-4">
@@ -8788,15 +8658,9 @@
 
           <!-- Balance Low Notification -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h3 class="text-base font-medium text-gray-900 dark:text-white">
-                {{ t("admin.settings.balanceNotify.title") }}
-              </h3>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.balanceNotify.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h3 class="settings-card-title">{{ t("admin.settings.balanceNotify.title") }}</h3>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.balanceNotify.description") }}</HelpTooltip>
             </div>
             <div class="px-6 py-6 space-y-4">
               <div class="flex items-center justify-between">
@@ -8848,15 +8712,9 @@
 
           <!-- Account Quota Notification -->
           <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h3 class="text-base font-medium text-gray-900 dark:text-white">
-                {{ t("admin.settings.quotaNotify.title") }}
-              </h3>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.quotaNotify.description") }}
-              </p>
+            <div class="settings-card-head">
+              <h3 class="settings-card-title">{{ t("admin.settings.quotaNotify.title") }}</h3>
+              <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.quotaNotify.description") }}</HelpTooltip>
             </div>
             <div class="px-6 py-6 space-y-4">
               <div class="flex items-center justify-between">
@@ -8925,9 +8783,28 @@
         <!-- /Tab: Email -->
 
         <!-- Tab: Backup -->
-        <div id="settings-panel-backup" v-show="activeTab === 'backup'" role="tabpanel" aria-labelledby="settings-tab-backup" tabindex="0">
+        <div id="settings-panel-backup" v-show="activeTab === 'backup'" role="tabpanel" aria-labelledby="settings-tab-backup" tabindex="0" class="settings-panel ui-stagger">
           <BackupSettings />
         </div>
+
+        <!-- Secondary save fallback at the natural end of the form. -->
+        <div v-show="activeTab !== 'backup'" class="settings-bottom-actions">
+          <button
+            type="submit"
+            :disabled="saving || loadFailed"
+            class="btn btn-secondary btn-sm"
+            :aria-busy="saving"
+          >
+            <span v-if="saving" class="settings-spinner" aria-hidden="true"></span>
+            {{
+              saving
+                ? t("admin.settings.saving")
+                : t("admin.settings.saveSettings")
+            }}
+          </button>
+        </div>
+        </div>
+        <!-- /settings-content -->
 
         <Transition name="settings-dirty-bar">
           <div
@@ -8936,12 +8813,13 @@
             data-testid="settings-dirty-bar"
           >
             <p role="status" aria-live="polite">
+              <span class="settings-dirty-pulse" aria-hidden="true"></span>
               {{ t("admin.settings.unsavedChanges") }}
             </p>
             <div class="settings-dirty-actions">
               <button
                 type="button"
-                class="btn btn-secondary"
+                class="btn btn-ghost btn-sm"
                 data-testid="settings-discard-button"
                 :disabled="saving"
                 @click="discardSettingsChanges"
@@ -8950,52 +8828,31 @@
               </button>
               <button
                 type="submit"
-                class="btn btn-primary"
+                class="btn btn-primary btn-sm"
                 data-testid="settings-floating-save-button"
                 :disabled="saving || loadFailed"
                 :aria-busy="saving"
               >
+                <span v-if="saving" class="settings-spinner" aria-hidden="true"></span>
                 {{ saving ? t("admin.settings.saving") : t("admin.settings.saveSettings") }}
+                <kbd v-if="!saving" class="settings-save-kbd" aria-hidden="true">{{ saveShortcutLabel }}</kbd>
               </button>
             </div>
           </div>
-        </Transition>
-
-        <!-- Secondary save fallback at the natural end of the form. -->
-        <div v-show="activeTab !== 'backup'" class="settings-bottom-actions flex justify-end">
-          <button
-            type="submit"
-            :disabled="saving || loadFailed"
-            class="btn btn-secondary"
-            :aria-busy="saving"
+          <div
+            v-else-if="saveSucceeded"
+            class="settings-dirty-bar settings-saved-bar"
+            data-testid="settings-saved-bar"
           >
-            <svg
-              v-if="saving"
-              class="h-4 w-4 animate-spin"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            {{
-              saving
-                ? t("admin.settings.saving")
-                : t("admin.settings.saveSettings")
-            }}
-          </button>
-        </div>
+            <p role="status" aria-live="polite">
+              <svg class="settings-saved-check" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M7.5 12.5l3 3 6-6.5" />
+              </svg>
+              {{ t("admin.settingsUi.saved") }}
+            </p>
+          </div>
+        </Transition>
       </form>
 
       <!-- Provider dialogs placed outside the settings form to prevent form submission bubbling -->
@@ -9036,7 +8893,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {
@@ -9076,6 +8933,7 @@ import { PLATFORM_QUOTA_PLATFORMS } from "@/api/admin/users";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
+import HelpTooltip from "@/components/common/HelpTooltip.vue";
 import { SITE_BILLING_MODES, SITE_BILLING_MODE_I18N_KEYS, billingModeToSettings, resolveSiteBillingMode, type SiteBillingMode } from "@/utils/siteBillingMode";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
@@ -9196,8 +9054,290 @@ const settingsTabKeyboardActions = {
 } as const;
 
 function selectSettingsTab(tab: SettingsTab): void {
+  if (activeTab.value === tab) return;
   activeTab.value = tab;
+  revealSettingsTop();
 }
+
+const settingsFormRef = ref<HTMLFormElement | null>(null);
+const tabListRef = ref<HTMLElement | null>(null);
+const searchInputRef = ref<HTMLInputElement | null>(null);
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+// After a section switch, bring the top of the form back into view when the
+// operator had scrolled past it, so the new section starts at its first card.
+function revealSettingsTop(): void {
+  const form = settingsFormRef.value;
+  const main = form?.closest("main");
+  if (!form || !main) return;
+  if (form.getBoundingClientRect().top >= main.getBoundingClientRect().top) {
+    return;
+  }
+  form.scrollIntoView?.({
+    block: "start",
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+  });
+}
+
+function tabIcon(tab: SettingsTab) {
+  return settingsTabs.find((item) => item.key === tab)?.icon ?? "cog";
+}
+
+// ---- Sliding active-section indicator ----
+const wideLayout = ref(false);
+const indicatorReady = ref(false);
+const indicatorStyle = ref<Record<string, string>>({});
+let wideLayoutQuery: MediaQueryList | null = null;
+let tabListObserver: ResizeObserver | null = null;
+
+function updateWideLayout(): void {
+  wideLayout.value = wideLayoutQuery?.matches ?? false;
+  void nextTick(updateTabIndicator);
+}
+
+function updateTabIndicator(): void {
+  const list = tabListRef.value;
+  const active = list?.querySelector<HTMLElement>(".settings-tab-active");
+  if (!list || !active) return;
+  indicatorStyle.value = {
+    width: `${active.offsetWidth}px`,
+    height: `${active.offsetHeight}px`,
+    transform: `translate(${active.offsetLeft}px, ${active.offsetTop}px)`,
+  };
+  if (!wideLayout.value && list.scrollWidth > list.clientWidth) {
+    // Keep the active pill centered in the horizontal row without moving the page.
+    list.scrollTo?.({
+      left: active.offsetLeft - (list.clientWidth - active.offsetWidth) / 2,
+      behavior: indicatorReady.value && !prefersReducedMotion() ? "smooth" : "auto",
+    });
+  }
+  // Skip the slide on the first placement so the pill does not fly in.
+  window.requestAnimationFrame(() => {
+    indicatorReady.value = true;
+  });
+}
+
+watch(activeTab, () => void nextTick(updateTabIndicator));
+watch(tabListRef, (list) => {
+  tabListObserver?.disconnect();
+  if (!list) return;
+  if (typeof ResizeObserver !== "undefined") {
+    // Watch the tabs too: label widths change when fonts or locale load.
+    tabListObserver = new ResizeObserver(() => updateTabIndicator());
+    tabListObserver.observe(list);
+    list.querySelectorAll(".settings-tab").forEach((tab) => tabListObserver?.observe(tab));
+  }
+  void nextTick(updateTabIndicator);
+});
+
+// ---- Settings search: jump to a card or field by its visible label ----
+interface SettingsSearchEntry {
+  id: string;
+  tab: SettingsTab;
+  label: string;
+  context: string;
+  haystack: string;
+  card: HTMLElement;
+  target: HTMLElement;
+}
+
+const searchQuery = ref("");
+const searchFocused = ref(false);
+const searchOpen = ref(false);
+const searchActiveIndex = ref(0);
+const searchIndex = ref<SettingsSearchEntry[]>([]);
+let searchFlashTimer: number | undefined;
+
+function settingsTabForPanel(panelId: string): SettingsTab | null {
+  const entry = (Object.entries(settingsTabPanelIds) as [SettingsTab, string[]][])
+    .find(([, ids]) => ids.includes(panelId));
+  return entry ? entry[0] : null;
+}
+
+function cleanLabel(element: Element | null): string {
+  return (element?.textContent ?? "").replace(/\s+/g, " ").replace(/\*$/, "").trim();
+}
+
+function buildSearchIndex(): SettingsSearchEntry[] {
+  const form = settingsFormRef.value;
+  if (!form) return [];
+  const entries: SettingsSearchEntry[] = [];
+  form.querySelectorAll<HTMLElement>('[role="tabpanel"]').forEach((panel) => {
+    const tab = settingsTabForPanel(panel.id);
+    if (!tab) return;
+    const cards = Array.from(panel.querySelectorAll<HTMLElement>(".card")).filter(
+      (card) => !card.parentElement?.closest(".card"),
+    );
+    cards.forEach((card, cardIndex) => {
+      const heading = card.querySelector("h2, h3");
+      const title = cleanLabel(heading);
+      if (!title) return;
+      const cardId = `${panel.id}-${cardIndex}`;
+      entries.push({
+        id: cardId,
+        tab,
+        label: title,
+        context: "",
+        haystack: title.toLowerCase(),
+        card,
+        target: card,
+      });
+      const seen = new Set([title.toLowerCase()]);
+      card.querySelectorAll<HTMLElement>("label, legend, h3, h4").forEach((field, fieldIndex) => {
+        const label = cleanLabel(field);
+        const key = label.toLowerCase();
+        if (!label || label.length > 64 || seen.has(key)) return;
+        seen.add(key);
+        entries.push({
+          id: `${cardId}-${fieldIndex}`,
+          tab,
+          label,
+          context: title,
+          haystack: key,
+          card,
+          target: field,
+        });
+      });
+    });
+  });
+  return entries;
+}
+
+const searchMatches = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) return [];
+  const terms = query.split(/\s+/);
+  return searchIndex.value
+    .filter((entry) => terms.every((term) => entry.haystack.includes(term)))
+    .sort((a, b) => {
+      const aStarts = a.haystack.startsWith(query) ? 0 : 1;
+      const bStarts = b.haystack.startsWith(query) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      // Card titles before the fields inside them.
+      return (a.context ? 1 : 0) - (b.context ? 1 : 0);
+    });
+});
+
+const searchResults = computed(() => searchMatches.value.slice(0, 8));
+
+const searchTabCounts = computed(() => {
+  const counts: Partial<Record<SettingsTab, number>> = {};
+  for (const entry of searchMatches.value) {
+    counts[entry.tab] = (counts[entry.tab] ?? 0) + 1;
+  }
+  return counts;
+});
+
+const searchResultsVisible = computed(
+  () => searchFocused.value && searchQuery.value.trim().length > 0,
+);
+
+watch(searchQuery, (query, previous) => {
+  searchActiveIndex.value = 0;
+  if (query.trim() && !previous?.trim()) {
+    searchIndex.value = buildSearchIndex();
+  }
+});
+
+function openSearch(): void {
+  searchOpen.value = true;
+  void nextTick(() => searchInputRef.value?.focus());
+}
+
+function closeSearch(): void {
+  searchQuery.value = "";
+  searchOpen.value = false;
+}
+
+function handleSearchBlur(): void {
+  searchFocused.value = false;
+  if (!searchQuery.value.trim()) searchOpen.value = false;
+}
+
+function handleSearchKeydown(event: KeyboardEvent): void {
+  const count = searchResults.value.length;
+  if (event.key === "ArrowDown" && count) {
+    event.preventDefault();
+    searchActiveIndex.value = (searchActiveIndex.value + 1) % count;
+  } else if (event.key === "ArrowUp" && count) {
+    event.preventDefault();
+    searchActiveIndex.value = (searchActiveIndex.value - 1 + count) % count;
+  } else if (event.key === "Enter") {
+    // Never let Enter in the search box submit the settings form.
+    event.preventDefault();
+    const result = searchResults.value[searchActiveIndex.value];
+    if (result) jumpToSearchResult(result);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeSearch();
+    searchInputRef.value?.blur();
+  }
+}
+
+async function jumpToSearchResult(result: SettingsSearchEntry): Promise<void> {
+  activeTab.value = result.tab;
+  closeSearch();
+  searchInputRef.value?.blur();
+  await nextTick();
+  result.target.scrollIntoView?.({
+    block: result.target === result.card ? "start" : "center",
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+  });
+  const card = result.card;
+  card.classList.remove("settings-search-flash");
+  void card.offsetWidth;
+  card.classList.add("settings-search-flash");
+  window.clearTimeout(searchFlashTimer);
+  searchFlashTimer = window.setTimeout(() => {
+    card.classList.remove("settings-search-flash");
+  }, 1800);
+  if (result.target === card) return;
+  const control =
+    result.target instanceof HTMLLabelElement ? result.target.control : null;
+  const focusable =
+    control ??
+    result.target.parentElement?.querySelector<HTMLElement>(
+      "input:not([type=hidden]), textarea, select",
+    );
+  focusable?.focus({ preventScroll: true });
+}
+
+// ---- Keyboard save (Cmd/Ctrl+S) ----
+const saveShortcutLabel =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+    ? "⌘S"
+    : "Ctrl S";
+
+function handleSaveShortcut(event: KeyboardEvent): void {
+  if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
+  if (!settingsFormRef.value) return;
+  event.preventDefault();
+  if (!settingsDirty.value || saving.value || loadFailed.value) return;
+  settingsFormRef.value.requestSubmit();
+}
+
+onMounted(() => {
+  if (typeof window.matchMedia === "function") {
+    wideLayoutQuery = window.matchMedia("(min-width: 1100px)");
+    wideLayoutQuery.addEventListener?.("change", updateWideLayout);
+  }
+  updateWideLayout();
+  window.addEventListener("keydown", handleSaveShortcut);
+});
+
+onBeforeUnmount(() => {
+  wideLayoutQuery?.removeEventListener?.("change", updateWideLayout);
+  tabListObserver?.disconnect();
+  window.removeEventListener("keydown", handleSaveShortcut);
+  window.clearTimeout(searchFlashTimer);
+  window.clearTimeout(saveSucceededTimer);
+});
 
 function focusSettingsTab(tab: SettingsTab): void {
   window.requestAnimationFrame(() => {
@@ -11197,11 +11337,40 @@ function canonicalSettingsJSON(): string {
 }
 
 const settingsBaseline = ref<SettingsBaseline | null>(null);
+const settingsCanonical = computed(() => canonicalSettingsJSON());
 const settingsDirty = computed(
   () =>
     settingsBaseline.value !== null &&
-    canonicalSettingsJSON() !== settingsBaseline.value.canonical,
+    settingsCanonical.value !== settingsBaseline.value.canonical,
 );
+
+const saveSucceeded = ref(false);
+let saveSucceededTimer: number | undefined;
+
+// Sections edited since the last baseline. Edits always happen in the visible
+// section, so the active tab at change time is the one that owns the edit.
+const dirtyTabs = ref<SettingsTab[]>([]);
+watch(settingsCanonical, () => {
+  if (!settingsDirty.value) return;
+  if (!dirtyTabs.value.includes(activeTab.value)) {
+    dirtyTabs.value = [...dirtyTabs.value, activeTab.value];
+  }
+});
+watch(settingsDirty, (dirty) => {
+  if (dirty) {
+    saveSucceeded.value = false;
+  } else {
+    dirtyTabs.value = [];
+  }
+});
+
+function flashSaveSucceeded(): void {
+  saveSucceeded.value = true;
+  window.clearTimeout(saveSucceededTimer);
+  saveSucceededTimer = window.setTimeout(() => {
+    saveSucceeded.value = false;
+  }, 1600);
+}
 
 function captureSettingsBaseline(): void {
   settingsBaseline.value = {
@@ -12155,6 +12324,7 @@ async function saveSettings() {
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
     if (wsOk) {
+      flashSaveSucceeded();
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {
@@ -13544,81 +13714,465 @@ watch(
   @apply h-[42px];
 }
 
-/* ============ 系统设置 Tab 导航 ============ */
+/* ============ Settings frame: section nav + content ============ */
+.settings-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  scroll-margin-top: 1rem;
+}
+
+.settings-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  /* Gaps also separate a section's panels, which are not DOM neighbors. */
+  gap: 1rem;
+}
+
+/* Overrides the legacy horizontal tab strip styling in style.css. */
 .settings-tabs-shell {
-  @apply sticky z-20 -mx-1 px-1;
+  position: sticky;
   top: 0;
-  border: 1px solid var(--operator-border);
-  border-radius: 0.5rem;
-  background: var(--operator-muted);
+  z-index: 20;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.settings-tabs-scroll {
-  @apply overflow-x-auto;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.settings-search-wrap {
+  position: relative;
 }
 
-.settings-tabs-scroll::-webkit-scrollbar {
+.settings-search {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+
+.settings-search input::-webkit-search-cancel-button {
   display: none;
 }
 
+.settings-search-clear {
+  display: grid;
+  width: 1.375rem;
+  height: 1.375rem;
+  flex: none;
+  place-items: center;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-subtle-foreground);
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.settings-search-clear:hover {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+.settings-search-clear:focus-visible,
+.settings-search-toggle:focus-visible,
+.settings-tab:focus-visible,
+.settings-search-result:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+
+.settings-search-results {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  width: min(24rem, calc(100vw - 1.5rem));
+  max-height: min(24rem, 60vh);
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.25rem;
+  overflow-y: auto;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-popup-surface);
+  box-shadow: var(--operator-shadow-md);
+}
+
+.settings-search-result {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.4375rem 0.625rem;
+  border-radius: var(--operator-radius);
+  color: var(--operator-muted-foreground);
+  text-align: left;
+}
+
+.settings-search-result-active {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+}
+
+.settings-search-result-icon {
+  flex: none;
+  color: var(--operator-subtle-foreground);
+}
+
+.settings-search-result-active .settings-search-result-icon {
+  color: var(--operator-accent-text);
+}
+
+.settings-search-result-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.settings-search-result-text b,
+.settings-search-result-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-search-result-text b {
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.settings-search-result-text small {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.settings-search-empty {
+  margin: 0;
+  padding: 0.75rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.settings-search-toggle {
+  display: none;
+}
+
+.settings-tabs-scroll {
+  min-width: 0;
+}
+
 .settings-tabs {
-  @apply flex min-w-max items-center gap-1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-tab-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs), 0 0 0 1px var(--operator-border);
+  pointer-events: none;
+}
+
+.settings-tab-indicator::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 1rem;
+  border-radius: 0 3px 3px 0;
+  background: var(--operator-accent);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.settings-tab-indicator-ready {
+  transition:
+    transform 340ms var(--operator-spring),
+    width 240ms var(--operator-ease-out),
+    height 240ms var(--operator-ease-out);
 }
 
 .settings-tab {
-  @apply relative flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-150 ease-out hover:text-gray-900 dark:text-gray-300 dark:hover:text-white;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 2.25rem;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.625rem;
+  padding: 0 0.625rem;
+  border: 0;
+  border-radius: var(--operator-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out),
+    opacity var(--operator-duration) var(--operator-ease-out);
 }
 
-.settings-tab:focus-visible {
-  outline: 2px solid var(--operator-focus);
-  outline-offset: -2px;
+.settings-tab:hover:not(.settings-tab-active) {
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
 }
 
 .settings-tab-active {
+  background: transparent;
+  box-shadow: none;
   color: var(--operator-foreground);
 }
 
-.dark .settings-tab-active {
-  color: var(--operator-foreground);
-}
-
-.settings-tab-active::after {
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0.25rem;
-  left: 0.75rem;
-  height: 2px;
-  content: "";
-  background: var(--operator-foreground);
-}
-
-.dark .settings-tab-active::after {
-  background: var(--operator-foreground);
+.settings-tab-dim {
+  opacity: 0.45;
 }
 
 .settings-tab-icon {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center text-gray-500 transition-colors duration-150 dark:text-gray-400;
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  place-items: center;
+  color: var(--operator-subtle-foreground);
+  transition: color var(--operator-duration-fast) var(--operator-ease-out),
+    transform 260ms var(--operator-spring);
 }
 
-.settings-tab:hover .settings-tab-icon,
-.settings-tab:focus-visible .settings-tab-icon {
-  @apply text-gray-700 dark:text-gray-200;
+.settings-tab:hover .settings-tab-icon {
+  color: var(--operator-foreground);
 }
 
 .settings-tab-active .settings-tab-icon {
-  color: var(--operator-foreground);
-}
-
-.dark .settings-tab-active .settings-tab-icon {
-  color: var(--operator-foreground);
+  color: var(--operator-accent-text);
+  transform: scale(1.08);
 }
 
 .settings-tab-label {
-  @apply whitespace-nowrap leading-none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1;
 }
 
+.settings-tab-count {
+  min-width: 1.25rem;
+  margin-left: auto;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 999px;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.settings-tab-dirty {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: none;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--operator-warning-fill, #d97706);
+  box-shadow: 0 0 0 3px var(--operator-warning-soft, rgb(217 119 6 / 0.18));
+  animation: settings-pop 320ms var(--operator-spring);
+}
+
+@media (min-width: 1100px) {
+  .settings-layout {
+    grid-template-columns: 12.5rem minmax(0, 1fr);
+    gap: 1.75rem;
+  }
+
+  .settings-tabs-shell {
+    padding-bottom: 1rem;
+  }
+}
+
+/* Narrow layouts: one sticky row of section pills above the content. */
+@media (max-width: 1099px) {
+  .settings-tabs-shell {
+    margin: 0 -0.25rem;
+    padding: 0.375rem 0.25rem;
+    border-bottom: 1px solid var(--operator-border);
+    background: color-mix(in srgb, var(--operator-background) 88%, transparent);
+    backdrop-filter: saturate(160%) blur(14px);
+  }
+
+  .settings-search-wrap {
+    display: none;
+  }
+
+  .settings-search-active .settings-search-wrap {
+    display: block;
+  }
+
+  .settings-search-active .settings-tabs-scroll {
+    display: none;
+  }
+
+  .settings-tabs-scroll {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .settings-search-toggle {
+    display: grid;
+    width: 2.125rem;
+    height: 2.125rem;
+    flex: none;
+    place-items: center;
+    border: 1px solid var(--operator-border);
+    border-radius: 999px;
+    background: var(--operator-card);
+    color: var(--operator-muted-foreground);
+  }
+
+  .settings-tabs {
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: row;
+    gap: 0.25rem;
+    overflow-x: auto;
+    -ms-overflow-style: none;
+    scroll-padding-inline: 0.5rem;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, transparent, #000 0.75rem, #000 calc(100% - 0.75rem), transparent);
+  }
+
+  .settings-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-tab {
+    height: 2.125rem;
+    flex: none;
+    gap: 0.4375rem;
+    padding: 0 0.75rem;
+    border-radius: 999px;
+    font-size: 0.8125rem;
+  }
+
+  .settings-tab-indicator {
+    border-radius: 999px;
+  }
+
+  .settings-tab-indicator::before {
+    display: none;
+  }
+
+  .settings-tab-count,
+  .settings-tab-dirty {
+    margin-left: 0;
+  }
+}
+
+/* ============ Cards ============ */
+.settings-content .card {
+  transition: border-color var(--operator-duration) var(--operator-ease-out);
+}
+
+.settings-content .card:hover {
+  border-color: var(--operator-border-strong);
+}
+
+.operator-settings-form [role="tabpanel"] .card > .settings-card-head {
+  display: flex;
+  min-height: 3rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.5rem;
+  padding: 0.875rem 1.25rem 0;
+  border: 0;
+}
+
+.operator-settings-form [role="tabpanel"] .card > .settings-card-head + * {
+  padding-top: 0.875rem;
+}
+
+.settings-card-title {
+  margin: 0;
+  color: var(--operator-foreground);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.settings-card-head :deep(svg.cursor-help) {
+  color: var(--operator-subtle-foreground);
+}
+
+.settings-card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.settings-card-head > .btn {
+  margin-left: auto;
+}
+
+.settings-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--operator-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.settings-card-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.settings-row-card {
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-card);
+  box-shadow: var(--operator-shadow-xs);
+}
+
+/* One label size for every field and toggle row. */
+.settings-content .card label.font-medium {
+  font-size: 0.875rem;
+}
+
+/* Keep help text readable without moving controls when focus changes. */
+.settings-content .card label ~ p.text-gray-500,
+.settings-content .card label ~ p.text-gray-400 {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.78rem;
+}
+
+/* ============ Floating save bar ============ */
 .operator-settings-form.settings-form-dirty {
   padding-bottom: 6rem;
 }
@@ -13626,78 +14180,248 @@ watch(
 .settings-dirty-bar {
   position: fixed;
   z-index: 40;
-  right: 1rem;
-  bottom: calc(3.25rem + env(safe-area-inset-bottom));
-  left: 1rem;
+  right: 0.75rem;
+  bottom: calc(var(--operator-tabbar-height, 3.75rem) + 0.75rem + env(safe-area-inset-bottom));
+  left: 0.75rem;
   display: flex;
-  width: min(44rem, calc(100vw - 2rem));
-  min-height: 3.5rem;
+  width: min(30rem, calc(100vw - 1.5rem));
+  min-height: 3.25rem;
   margin: 0 auto;
-  padding: 0.625rem 0.75rem 0.625rem 1rem;
+  padding: 0.4375rem 0.4375rem 0.4375rem 1.125rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid var(--operator-border);
-  border-radius: 0.5rem;
-  background: var(--operator-card);
-  box-shadow: 0 12px 32px oklch(0 0 0 / 0.28);
+  border: 1px solid var(--operator-border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--operator-popup-surface) 92%, transparent);
+  backdrop-filter: saturate(160%) blur(16px);
+  box-shadow: var(--operator-shadow-lg);
   color: var(--operator-foreground);
 }
 
 .settings-dirty-bar p {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.settings-dirty-pulse {
+  position: relative;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--operator-warning-fill, #d97706);
+}
+
+.settings-dirty-pulse::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  content: "";
+  animation: settings-pulse 1.8s var(--operator-ease-out) infinite;
 }
 
 .settings-dirty-actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 0.5rem;
+  gap: 0.375rem;
+}
+
+.settings-dirty-actions .btn {
+  border-radius: 999px;
+  padding: 0 0.875rem;
+}
+
+.settings-save-kbd {
+  margin-left: 0.125rem;
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 0.25rem;
+  background: rgb(255 255 255 / 0.2);
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.settings-saved-bar {
+  width: max-content;
+  justify-content: center;
+  padding: 0.4375rem 1.25rem;
+}
+
+.settings-saved-check {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  fill: none;
+  stroke: var(--operator-success-fill, #16a34a);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.settings-saved-check circle {
+  stroke-dasharray: 63;
+  stroke-dashoffset: 63;
+  animation: settings-draw 420ms var(--operator-ease-out) forwards;
+}
+
+.settings-saved-check path {
+  stroke-dasharray: 16;
+  stroke-dashoffset: 16;
+  animation: settings-draw 260ms 300ms var(--operator-ease-out) forwards;
+}
+
+.settings-spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: settings-spin 700ms linear infinite;
 }
 
 .settings-bottom-actions {
+  display: flex;
+  justify-content: flex-end;
   margin-top: 2rem !important;
   padding: 1rem 0 2rem;
 }
 
-.settings-dirty-bar-enter-active,
+.settings-dirty-bar-enter-active {
+  transition:
+    opacity 200ms var(--operator-ease-out),
+    transform 380ms var(--operator-spring);
+}
+
 .settings-dirty-bar-leave-active {
-  transition: opacity 150ms ease-out, transform 150ms ease-out;
+  transition:
+    opacity 160ms var(--operator-ease-out),
+    transform 160ms var(--operator-ease-out);
 }
 
 .settings-dirty-bar-enter-from,
 .settings-dirty-bar-leave-to {
   opacity: 0;
-  transform: translateY(0.5rem);
+  transform: translateY(1.25rem) scale(0.96);
+}
+
+@media (min-width: 1024px) {
+  .settings-dirty-bar {
+    right: 1rem;
+    bottom: calc(1.25rem + env(safe-area-inset-bottom));
+    left: calc(var(--operator-sidebar-width, 15rem) + 1rem);
+    width: min(30rem, calc(100vw - var(--operator-sidebar-width, 15rem) - 2rem));
+  }
+
+  .settings-saved-bar {
+    width: max-content;
+  }
+}
+
+@media (max-width: 1023px) {
+  .settings-save-kbd {
+    display: none;
+  }
 }
 
 @media (max-width: 479px) {
   .operator-settings-form.settings-form-dirty {
-    padding-bottom: 8rem;
+    padding-bottom: 7rem;
   }
 
   .settings-dirty-bar {
-    flex-wrap: wrap;
-    gap: 0.625rem;
-    padding: 0.75rem;
-  }
-
-  .settings-dirty-actions {
-    width: 100%;
+    gap: 0.5rem;
+    padding-left: 0.875rem;
   }
 
   .settings-dirty-actions .btn {
     min-width: 0;
-    flex: 1 1 0;
+    padding: 0 0.75rem;
   }
+}
+
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes settings-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes settings-pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+@keyframes settings-pulse {
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.6); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .settings-dirty-bar-enter-active,
   .settings-dirty-bar-leave-active {
     transition: none;
+  }
+
+  .settings-tab-indicator-ready,
+  .settings-tab,
+  .settings-tab-icon {
+    transition: none;
+  }
+
+  .settings-tab-dirty,
+  .settings-dirty-pulse::after,
+  .settings-saved-check circle,
+  .settings-saved-check path {
+    animation: none;
+  }
+
+  .settings-saved-check circle,
+  .settings-saved-check path {
+    stroke-dashoffset: 0;
+  }
+
+  .settings-spinner {
+    animation-duration: 1.6s;
+  }
+}
+</style>
+
+<style>
+/* Search jump highlight. Added from script, so it lives outside the scoped
+   block; it also reaches cards rendered by child components (Backup). */
+.operator-settings-form .settings-search-flash {
+  animation: settings-search-flash 1.6s var(--operator-ease-out);
+}
+
+@keyframes settings-search-flash {
+  0%,
+  35% {
+    box-shadow:
+      0 0 0 2px rgb(var(--operator-accent-rgb) / 0.6),
+      0 0 0 7px rgb(var(--operator-accent-rgb) / 0.14);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--operator-accent-rgb) / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .operator-settings-form .settings-search-flash {
+    outline: 2px solid rgb(var(--operator-accent-rgb) / 0.6);
+    outline-offset: 2px;
   }
 }
 </style>

@@ -186,7 +186,7 @@ describe('ProfileInfoCard', () => {
     expect(wrapper.text()).not.toContain('legacy-user@wechat-connect.invalid')
   })
 
-  it('renders the approved overview hero and two-column content shell', () => {
+  it('renders the identity hero with inline metrics and a separate connections card', () => {
     const wrapper = mount(ProfileInfoCard, {
       props: {
         user: createUser()
@@ -203,9 +203,34 @@ describe('ProfileInfoCard', () => {
     expect(wrapper.get('[data-testid="profile-overview-metric-concurrency"]').text()).toContain('Concurrency Limit')
     expect(wrapper.get('[data-testid="profile-overview-metric-member-since"]').text()).toContain('Member Since')
     expect(wrapper.find('[data-testid="profile-info-summary-grid"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="profile-main-column"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="profile-side-column"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-basics-panel"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-auth-bindings-panel"]').exists()).toBe(true)
+  })
+
+  it('keeps profile editing behind the Edit toggle', async () => {
+    const wrapper = mount(ProfileInfoCard, {
+      props: { user: createUser() },
+      global: { stubs: { Icon: true } }
+    })
+
+    const toggle = wrapper.get('[data-testid="profile-edit-toggle"]')
+    const panel = wrapper.get('[data-testid="profile-basics-panel"]')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect((panel.element as HTMLElement).style.display).toBe('none')
+
+    await toggle.trigger('click')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect((panel.element as HTMLElement).style.display).toBe('')
+    expect(panel.find('#username').exists()).toBe(true)
+  })
+
+  it('shows each synchronized profile source once', () => {
+    const wrapper = mount(ProfileInfoCard, {
+      props: { user: createUser({ avatar_source: 'dingtalk' }), dingtalkEnabled: true },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.text().split('Avatar synced from DingTalk')).toHaveLength(2)
   })
 })

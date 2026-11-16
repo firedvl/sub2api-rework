@@ -90,8 +90,8 @@ describe('PromptAuditView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('[data-test="tab-events"]').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-selected')).toBe('false')
+    expect(wrapper.get('[data-test="tab-events"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-pressed')).toBe('false')
     expect(wrapper.get('[data-test="tab-panel-events"]').attributes('style') || '').not.toContain('display: none')
     expect(wrapper.get('[data-test="tab-panel-config"]').attributes('style') || '').toContain('display: none')
     expect(wrapper.find('[data-test="save-config"]').exists()).toBe(false)
@@ -102,18 +102,18 @@ describe('PromptAuditView', () => {
 
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-test="tab-panel-config"]').attributes('style') || '').not.toContain('display: none')
     expect(wrapper.get('[data-test="tab-panel-events"]').attributes('style') || '').toContain('display: none')
     expect(wrapper.find('[data-test="save-config"]').exists()).toBe(true)
 
     await wrapper.get('[data-test="tab-events"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-test="tab-events"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-events"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.find('[data-test="save-config"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="pass-events-disabled-notice"] button').trigger('click')
-    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="tab-config"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.find('[data-test="save-config"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="tab-panel-config"]').attributes('style') || '').not.toContain('display: none')
   })
@@ -173,15 +173,15 @@ describe('PromptAuditView', () => {
     expect(wrapper.get('[data-test="dialog-preview-state"]').text()).toBe('none')
   })
 
-  it('uses native labeled switches and a responsive fixed save surface', async () => {
+  it('uses native labeled switches and a responsive sticky save surface', async () => {
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     const switches = wrapper.findAll('[role="switch"]')
     expect(switches).toHaveLength(4)
     expect(switches.every((item) => Boolean(item.attributes('aria-label')))).toBe(true)
-    expect(wrapper.html()).toContain('fixed inset-x-0 bottom-0')
-    expect(wrapper.html()).toContain('flex-wrap')
+    expect(wrapper.get('[data-test="save-bar"]').classes()).toContain('pa-savebar')
+    expect(wrapper.get('[data-test="save-bar"]').html()).toContain('flex-wrap')
   })
 
   it('executes single, selected-batch, and preview-confirmed filter deletion flows', async () => {
@@ -237,5 +237,17 @@ describe('PromptAuditView', () => {
       confirmation_token: 'opaque-confirmation',
     }))
     expect(wrapper.find('[data-test="filter-delete-dialog"]').exists()).toBe(false)
+  })
+
+  it('splits configuration into runtime, nodes, and policy sections', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-config"]').trigger('click')
+    expect(wrapper.get('[data-test="section-runtime"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-test="endpoint"]').element.parentElement?.getAttribute('style') || '').toContain('display: none')
+    await wrapper.get('[data-test="section-nodes"]').trigger('click')
+    expect(wrapper.get('[data-test="endpoint"]').element.parentElement?.getAttribute('style') || '').not.toContain('display: none')
+    expect(wrapper.get('[data-test="runtime"]').element.parentElement?.getAttribute('style') || '').toContain('display: none')
+    expect(wrapper.find('[data-test="save-config"]').exists()).toBe(true)
   })
 })

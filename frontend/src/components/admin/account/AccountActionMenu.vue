@@ -121,7 +121,8 @@ const updatePosition = () => {
   const viewportBottom = window.innerHeight
   const maxHeight = Math.max(0, viewportBottom - padding * 2)
   const menuHeight = Math.min(menuContent.value.scrollHeight + menuContent.value.offsetHeight - menuContent.value.clientHeight, maxHeight)
-  const menuWidth = menuContent.value.getBoundingClientRect().width
+  // Layout width: the bounding rect is still scaled down while the menu-in animation runs.
+  const menuWidth = menuContent.value.offsetWidth
 
   menuStyle.value = {
     top: `${Math.max(padding, Math.min(props.position.top, viewportBottom - menuHeight - padding))}px`,

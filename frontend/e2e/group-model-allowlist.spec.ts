@@ -30,7 +30,8 @@ test('edits the enforced allowlist without changing the display-only model list'
   })
 
   await page.goto('/admin/groups')
-  const row = page.getByText('OpenAI Production', { exact: true }).locator('..').locator('..')
+  const row = page.getByTestId('group-row-11')
+  await expect(row).toContainText('OpenAI Production')
   await row.getByRole('button', { name: 'Edit' }).click()
 
   const dialog = page.getByRole('dialog', { name: 'Edit Group' })
@@ -77,7 +78,8 @@ test('persists ordered pinned manifest accounts and scheduler fallback through g
   await page.route('**/api/v1/admin/accounts/101', route => fulfill(route, operatorFixtureAccounts.find(account => account.id === 101)))
 
   await page.goto('/admin/groups')
-  const row = page.getByText('OpenAI Production', { exact: true }).locator('..').locator('..')
+  const row = page.getByTestId('group-row-11')
+  await expect(row).toContainText('OpenAI Production')
   await row.getByRole('button', { name: 'Edit' }).click()
   const dialog = page.getByRole('dialog', { name: 'Edit Group' })
   const manifestToggle = dialog.getByTestId('codex-manifest-toggle')

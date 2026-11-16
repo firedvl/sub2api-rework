@@ -10,11 +10,6 @@
     </div>
     <div :class="props.embedded ? '' : 'px-6 py-6'">
       <form @submit.prevent="handleChangePassword" class="space-y-4">
-        <div v-if="props.embedded">
-          <p class="text-sm font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.changePassword') }}
-          </p>
-        </div>
         <div>
           <label for="old_password" class="input-label">
             {{ t('profile.currentPassword') }}
@@ -60,7 +55,7 @@
           />
         </div>
 
-        <div class="flex justify-end pt-4">
+        <div :class="props.embedded ? 'flex justify-end' : 'flex justify-end pt-4'">
           <button type="submit" :disabled="loading" class="btn btn-primary">
             {{ loading ? t('profile.changingPassword') : t('profile.changePasswordButton') }}
           </button>

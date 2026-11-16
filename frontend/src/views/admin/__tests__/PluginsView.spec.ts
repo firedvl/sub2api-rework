@@ -117,6 +117,13 @@ function mountView() {
         BaseDialog: { template: '<div><slot /></div>' },
         Icon: true,
         TotpStepUpDialog: true,
+        HelpTooltip: true,
+        TransitionGroup: { template: '<div><slot /></div>' },
+        ProviderMark: true,
+        SideDrawer: {
+          props: ['open', 'title'],
+          template: '<div v-if="open" data-test="drawer"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>',
+        },
       },
     },
   })
@@ -142,9 +149,9 @@ describe('管理员插件页二次验证', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const button = wrapper.findAll('button').find((item) => item.text().includes('admin.plugins.enable'))
-    expect(button).toBeDefined()
-    await button!.trigger('click')
+    const button = wrapper.get('[data-test="plugin-7"] .btn-primary')
+    expect(button.text()).toContain('admin.plugins.enable')
+    await button.trigger('click')
     await flushPromises()
 
     expect(stepUpRun).toHaveBeenCalledTimes(1)
@@ -165,5 +172,20 @@ describe('管理员插件页二次验证', () => {
 
     expect(stepUpRun).toHaveBeenCalledTimes(1)
     expect(uploadPlugin).toHaveBeenCalledTimes(1)
+  })
+
+  it('按状态分段筛选并在卡片点击后打开详情抽屉', async () => {
+    listPlugins.mockResolvedValue([plugin, { ...plugin, id: 8, name: 'Broken', state: 'error', last_error: 'boom' }])
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="plugin-state-issues"]').text()).toContain('1')
+    await wrapper.get('[data-test="plugin-state-issues"]').trigger('click')
+    expect(wrapper.find('[data-test="plugin-7"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="plugin-8"]').text()).toContain('boom')
+
+    await wrapper.get('[data-test="plugin-8"]').trigger('click')
+    expect(wrapper.get('[data-test="drawer"]').text()).toContain('Broken')
+    expect(wrapper.get('[data-test="drawer"]').text()).toContain('a'.repeat(64))
   })
 })

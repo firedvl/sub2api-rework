@@ -1,476 +1,296 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
+    <div class="ui-page groups-page">
+      <div class="ui-toolbar groups-toolbar" role="toolbar" :aria-label="t('admin.routingUi.filters')">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="t('admin.routingUi.search')"
+            :aria-label="t('admin.groups.searchGroups')"
+            @input="handleSearch"
+          />
+        </label>
         <div
-          class="flex flex-col justify-between gap-4 xl:flex-row xl:items-start"
+          v-if="platformChips.length > 1"
+          class="ui-chips groups-platforms"
+          role="group"
+          :aria-label="t('admin.groups.columns.platform')"
         >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
-            <Select
-              v-model="filters.platform"
-              :options="platformFilterOptions"
-              :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
-              @change="loadGroups"
-            />
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
-              @change="loadGroups"
-            />
-            <Select
-              v-model="filters.is_exclusive"
-              :options="exclusiveOptions"
-              :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
-              @change="loadGroups"
-            />
-          </div>
-
-          <!-- Right: actions -->
-          <div
-            class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 xl:w-auto"
+          <button
+            v-for="chip in platformChips"
+            :key="chip.value"
+            type="button"
+            class="ui-chip is-icon"
+            :aria-pressed="filters.platform === chip.value"
+            :aria-label="chip.label"
+            :title="chip.label"
+            :data-testid="`group-platform-${chip.value}`"
+            @click="setPlatformFilter(chip.value)"
           >
-            <button
-              @click="loadGroups"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon
-                name="refresh"
-                size="md"
-                :class="loading ? 'animate-spin' : ''"
-              />
-            </button>
-            <div class="relative" ref="columnDropdownRef">
-              <button
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary"
-                :title="t('admin.groups.columnSettings')"
-              >
-                <Icon name="grid" size="md" class="mr-2" />
-                <span class="hidden md:inline">{{
-                  t("admin.groups.columnSettings")
-                }}</span>
-              </button>
-              <div
-                v-if="showColumnDropdown"
-                class="operator-menu menu-enter absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto py-1"
-              >
-                <button
-                  v-for="col in toggleableColumns"
-                  :key="col.key"
-                  @click="toggleColumn(col.key)"
-                  class="operator-menu-item flex w-full items-center justify-between px-4 py-2 text-left text-sm"
-                  :aria-pressed="isColumnVisible(col.key)"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="operator-menu-check"
-                    :stroke-width="2"
-                  />
-                </button>
-              </div>
-            </div>
-            <button
-              @click="openSortModal"
-              class="btn btn-secondary"
-              :title="t('admin.groups.sortOrder')"
-            >
-              <Icon name="arrowsUpDown" size="md" class="mr-2" />
-              {{ t("admin.groups.sortOrder") }}
-            </button>
-            <button
-              @click="openCreateModal"
-              class="btn btn-primary"
-            >
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t("admin.groups.createGroup") }}
-            </button>
-          </div>
+            <ProviderMark :platform="chip.value" :size="20" />
+          </button>
         </div>
-      </template>
-
-      <template #table>
-        <DataTable
-          :columns="columns"
-          :data="groups"
-          :loading="loading"
-          :server-side-sort="true"
-          default-sort-key="sort_order"
-          default-sort-order="asc"
-          @sort="handleSort"
+        <div class="viz-seg" role="group" :aria-label="t('admin.groups.columns.status')">
+          <button
+            v-for="option in statusSegments"
+            :key="option.value"
+            type="button"
+            :aria-pressed="filters.status === option.value"
+            @click="setStatusFilter(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <button
+          v-if="filters.is_exclusive"
+          type="button"
+          class="ui-chip is-active"
+          :aria-label="`${t('admin.routingUi.clearFilter')}: ${exclusiveFilterLabel}`"
+          @click="setExclusiveFilter('')"
         >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              value
-            }}</span>
-          </template>
-
-          <template #cell-id="{ value }">
-            <span class="font-mono text-xs text-gray-500 dark:text-gray-400"
-              >#{{ value }}</span
-            >
-          </template>
-
-          <template #cell-platform="{ value }">
-            <span
-              :class="[
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                value === 'anthropic'
-                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                  : value === 'openai'
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : value === 'antigravity'
-                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                      : value === 'grok'
-                        ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                        : value === 'kimi'
-                          ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
-                          : value === 'zhipu'
-                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-                            : value === 'deepseek'
-                              ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-                              : value === 'minimax'
-                                ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                              : value === 'opencode_go'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-              ]"
-            >
-              <PlatformIcon :platform="value" size="xs" />
-              {{ t("admin.groups.platforms." + value) }}
-            </span>
-          </template>
-
-          <template #cell-billing_type="{ row }">
-            <div class="space-y-1">
-              <!-- Type Badge -->
-              <span
-                :class="[
-                  'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                  row.subscription_type === 'subscription'
-                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-                ]"
-              >
-                {{
-                  row.subscription_type === "subscription"
-                    ? t("admin.groups.subscription.subscription")
-                    : t("admin.groups.subscription.standard")
-                }}
-              </span>
-              <!-- Subscription Limits - compact single line -->
-              <div
-                v-if="row.subscription_type === 'subscription'"
-                class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400"
-              >
-                <div
-                  v-if="
-                    row.daily_limit_usd ||
-                    row.weekly_limit_usd ||
-                    row.monthly_limit_usd
-                  "
-                  class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
-                >
-                  <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
-                    <span
-                      v-if="usageLoading"
-                      class="font-medium text-gray-400 dark:text-gray-500"
-                      >—</span
-                    >
-                    <span
-                      v-else
-                      :class="
-                        getQuotaUsageClass(
-                          usageMap.get(row.id)?.today_cost ?? 0,
-                          row.daily_limit_usd
-                        )
-                      "
-                      >{{
-                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
-                      }}</span
-                    >
-                    <span class="text-gray-400 dark:text-gray-500">
-                      / {{ formatUsd(row.daily_limit_usd) }}/{{
-                        t("admin.groups.limitDay")
-                      }}</span
-                    >
-                  </span>
-                  <span
-                    v-if="
-                      row.daily_limit_usd &&
-                      (row.weekly_limit_usd || row.monthly_limit_usd)
-                    "
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.weekly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.weekly_limit_usd) }}/{{
-                      t("admin.groups.limitWeek")
-                    }}</span
-                  >
-                  <span
-                    v-if="row.weekly_limit_usd && row.monthly_limit_usd"
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.monthly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.monthly_limit_usd) }}/{{
-                      t("admin.groups.limitMonth")
-                    }}</span
-                  >
-                </div>
-                <span v-else class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.subscription.noLimit")
-                }}</span>
-                <div class="text-gray-400 dark:text-gray-500">
-                  {{ t("admin.groups.usageTotal") }}
-                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    >{{
-                      usageLoading
-                        ? "—"
-                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
-                    }}</span
-                  >
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <template #cell-rate_multiplier="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300"
-              >{{ value }}x</span
-            >
-          </template>
-
-          <template #cell-is_exclusive="{ value }">
-            <span :class="['badge', value ? 'badge-primary' : 'badge-gray']">
-              {{
-                value ? t("admin.groups.exclusive") : t("admin.groups.public")
-              }}
-            </span>
-          </template>
-
-          <template #cell-account_count="{ row }">
-            <div class="space-y-0.5 text-xs">
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsAvailable")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-emerald-600 dark:text-emerald-400"
-                  >{{ row.active_account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div v-if="row.rate_limited_account_count">
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsRateLimited")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-amber-600 dark:text-amber-400"
-                  >{{ row.rate_limited_account_count }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsTotal")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >{{ row.account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-            </div>
-          </template>
-
-          <template #cell-capacity="{ row }">
-            <GroupCapacityBadge
-              v-if="capacityMap.get(row.id)"
-              :concurrency-used="capacityMap.get(row.id)!.concurrencyUsed"
-              :concurrency-max="capacityMap.get(row.id)!.concurrencyMax"
-              :sessions-used="capacityMap.get(row.id)!.sessionsUsed"
-              :sessions-max="capacityMap.get(row.id)!.sessionsMax"
-              :rpm-used="capacityMap.get(row.id)!.rpmUsed"
-              :rpm-max="capacityMap.get(row.id)!.rpmMax"
-            />
-            <span v-else class="text-xs text-gray-400">—</span>
-          </template>
-
-          <template #cell-usage="{ row }">
-            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
-            <div v-else class="space-y-0.5 text-xs">
-              <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.usageToday")
-                }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.today_cost ?? 0)
-                  }}</span
-                >
-              </div>
-              <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.usageYesterday")
-                }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.yesterday_cost ?? 0)
-                  }}</span
-                >
-              </div>
-              <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.usageTotal")
-                }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.total_cost ?? 0)
-                  }}</span
-                >
-              </div>
-            </div>
-          </template>
-
-          <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active' ? 'badge-success' : 'badge-danger',
-              ]"
-            >
-              {{ t("admin.accounts.status." + value) }}
-            </span>
-          </template>
-
-          <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button
-                @click="handleEdit(row)"
-                class="row-action"
-                :title="t('common.edit')"
-              >
-                <Icon name="edit" size="sm" />
-                <span class="row-action-label">{{ t("common.edit") }}</span>
-              </button>
-              <button
-                data-testid="group-duplicate"
-                :title="
-                  duplicatingGroupIds.has(row.id)
-                    ? t('admin.groups.duplicating')
-                    : t('admin.groups.duplicate')
-                "
-                :disabled="duplicatingGroupIds.has(row.id)"
-                @click="handleDuplicate(row)"
-                class="row-action disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Icon name="copy" size="sm" />
-                <span class="row-action-label">
-                  {{
-                    duplicatingGroupIds.has(row.id)
-                      ? t("admin.groups.duplicating")
-                      : t("admin.groups.duplicate")
-                  }}
-                </span>
-              </button>
-              <button
-                v-if="row.platform === 'composite'"
-                @click="handleCompositeRoutes(row)"
-                class="row-action"
-                :title="t('admin.groups.compositeRoutes.action')"
-              >
-                <Icon name="swap" size="sm" />
-                <span class="row-action-label">{{
-                  t("admin.groups.compositeRoutes.action")
-                }}</span>
-              </button>
-              <button
-                @click="handleRateMultipliers(row)"
-                class="row-action"
-                :title="t('admin.groups.rateMultipliers')"
-              >
-                <Icon name="dollar" size="sm" />
-                <span class="row-action-label">{{
-                  t("admin.groups.rateMultipliers")
-                }}</span>
-              </button>
-              <button
-                @click="handleRPMOverrides(row)"
-                class="row-action"
-                :title="t('admin.groups.rpmOverrides')"
-              >
-                <Icon name="bolt" size="sm" />
-                <span class="row-action-label">{{
-                  t("admin.groups.rpmOverrides")
-                }}</span>
-              </button>
-              <button
-                @click="handleDelete(row)"
-                class="row-action row-action-danger"
-                :title="t('common.delete')"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="row-action-label">{{ t("common.delete") }}</span>
-              </button>
-            </div>
-          </template>
-
-          <template #empty>
-            <EmptyState
-              :title="t('admin.groups.noGroupsYet')"
-              :description="t('admin.groups.createFirstGroup')"
-              :action-text="t('admin.groups.createGroup')"
-              @action="openCreateModal"
-            />
-          </template>
-        </DataTable>
-      </template>
-
-      <template #pagination>
-        <Pagination
-          v-if="pagination.total > 0"
-          :page="pagination.page"
-          :total="pagination.total"
-          :page-size="pagination.page_size"
-          @update:page="handlePageChange"
-          @update:pageSize="handlePageSizeChange"
+          {{ exclusiveFilterLabel }}
+          <Icon name="x" size="xs" />
+        </button>
+        <span class="ui-grow"></span>
+        <button
+          type="button"
+          class="app-icon-button groups-tool"
+          :disabled="loading"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          @click="loadGroups"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <ActionMenu
+          :label="t('admin.routingUi.viewOptions')"
+          icon="cog"
+          trigger-class="app-icon-button groups-tool"
+          test-id="group-view-menu"
+          :items="viewMenuItems"
         />
-      </template>
-    </TablePageLayout>
+        <button type="button" class="btn btn-primary" @click="openCreateModal">
+          <Icon name="plus" size="sm" />
+          <span>{{ t('admin.routingUi.newGroup') }}</span>
+        </button>
+      </div>
+
+      <section class="ui-card groups-card" :class="{ 'is-refreshing': loading && groups.length > 0 }" :aria-busy="loading">
+        <div class="ui-table-wrap">
+          <table class="ui-table groups-table">
+            <thead>
+              <tr>
+                <th
+                  v-for="col in columns"
+                  :key="col.key"
+                  :class="columnClass[col.key]"
+                  :data-col="col.key"
+                  :aria-sort="col.sortable && sortState.sort_by === col.key ? (sortState.sort_order === 'asc' ? 'ascending' : 'descending') : undefined"
+                >
+                  <span v-if="col.key === 'actions'" class="sr-only">{{ col.label }}</span>
+                  <button
+                    v-else-if="col.sortable"
+                    type="button"
+                    class="ui-sort"
+                    :aria-pressed="sortState.sort_by === col.key"
+                    @click="toggleHeaderSort(col.key)"
+                  >
+                    {{ headerLabel(col) }}
+                    <Icon
+                      :name="sortState.sort_by === col.key ? (sortState.sort_order === 'asc' ? 'arrowUp' : 'arrowDown') : 'arrowsUpDown'"
+                      size="xs"
+                      :class="sortState.sort_by === col.key ? '' : 'opacity-40'"
+                    />
+                  </button>
+                  <template v-else>{{ headerLabel(col) }}</template>
+                </th>
+              </tr>
+            </thead>
+            <tbody v-if="loading && groups.length === 0">
+              <tr v-for="n in 5" :key="`s${n}`" aria-hidden="true">
+                <td v-for="col in columns" :key="col.key" :class="columnClass[col.key]">
+                  <span class="skeleton groups-skel" :class="col.key === 'name' ? 'is-wide' : ''"></span>
+                </td>
+              </tr>
+            </tbody>
+            <tbody v-else class="ui-rows-enter">
+              <tr
+                v-for="row in groups"
+                :key="row.id"
+                class="is-clickable"
+                :class="{ 'is-selected': drawerGroup?.id === row.id && drawerOpen, 'is-inactive': row.status !== 'active' }"
+                tabindex="0"
+                :aria-label="t('admin.routingUi.openGroup', { name: row.name })"
+                :data-testid="`group-row-${row.id}`"
+                @click="openGroupDrawer(row)"
+                @keydown.enter.self.prevent="openGroupDrawer(row)"
+                @keydown.space.self.prevent="openGroupDrawer(row)"
+              >
+                <td v-for="col in columns" :key="col.key" :class="columnClass[col.key]" :data-col="col.key">
+                  <!-- Route: provider + name -->
+                  <div v-if="col.key === 'name'" class="groups-route">
+                    <span class="groups-mark">
+                      <ProviderMark :platform="row.platform" :size="30" :label="platformLabel(row.platform)" />
+                      <i class="ui-dot groups-mark-dot" :class="toneDot[poolTone(poolSplit(row))]"></i>
+                    </span>
+                    <span class="min-w-0">
+                      <span class="ui-cell-main groups-name">
+                        <span class="truncate">{{ row.name }}</span>
+                        <span v-if="row.is_exclusive" class="badge badge-primary groups-tag">{{ t('admin.groups.exclusive') }}</span>
+                        <span v-if="row.status !== 'active'" class="badge badge-gray groups-tag">{{ t('admin.accounts.status.' + row.status) }}</span>
+                      </span>
+                      <span class="ui-cell-sub">{{ platformLabel(row.platform) }}</span>
+                    </span>
+                  </div>
+
+                  <span v-else-if="col.key === 'id'" class="font-mono text-xs text-gray-500">#{{ row.id }}</span>
+
+                  <span v-else-if="col.key === 'platform'" class="groups-inline">
+                    <PlatformIcon :platform="row.platform" size="xs" />
+                    {{ t('admin.groups.platforms.' + row.platform) }}
+                  </span>
+
+                  <PoolBar v-else-if="col.key === 'account_count'" :split="poolSplit(row)" />
+
+                  <template v-else-if="col.key === 'capacity'">
+                    <span
+                      v-if="capacityMap.get(row.id)"
+                      class="groups-load"
+                      :title="capacityTitle(row.id)"
+                    >
+                      <span class="groups-load-track">
+                        <i :style="{ width: `${loadPercent(row.id)}%` }" :class="loadTone(row.id)"></i>
+                      </span>
+                      <b>{{ capacityMap.get(row.id)!.concurrencyUsed }}<small>/{{ capacityMap.get(row.id)!.concurrencyMax }}</small></b>
+                    </span>
+                    <span v-else class="text-xs text-gray-400">—</span>
+                  </template>
+
+                  <div v-else-if="col.key === 'billing_type'" class="groups-billing">
+                    <template v-if="row.subscription_type === 'subscription'">
+                      <span class="ui-cell-main" :title="billingTitle(row)">
+                        <template v-if="row.daily_limit_usd">
+                          <span v-if="usageLoading" class="text-gray-400">—</span>
+                          <span v-else :class="getQuotaUsageClass(usageMap.get(row.id)?.today_cost ?? 0, row.daily_limit_usd)">{{ formatUsd(usageMap.get(row.id)?.today_cost ?? 0) }}</span>
+                          <span class="groups-billing-limit"> / {{ formatUsd(row.daily_limit_usd) }} {{ t('admin.routingUi.billing.dayShort') }}</span>
+                        </template>
+                        <template v-else-if="row.weekly_limit_usd">{{ formatUsd(row.weekly_limit_usd) }} <span class="groups-billing-limit">{{ t('admin.routingUi.billing.weekShort') }}</span></template>
+                        <template v-else-if="row.monthly_limit_usd">{{ formatUsd(row.monthly_limit_usd) }} <span class="groups-billing-limit">{{ t('admin.routingUi.billing.monthShort') }}</span></template>
+                        <template v-else>{{ t('admin.groups.subscription.noLimit') }}</template>
+                      </span>
+                      <span class="ui-cell-sub">
+                        {{ t('admin.routingUi.billing.subscription') }} · {{ t('admin.groups.usageTotal') }}
+                        {{ usageLoading ? '—' : formatUsd(usageMap.get(row.id)?.total_cost ?? 0) }}
+                      </span>
+                    </template>
+                    <span v-else class="groups-balance">{{ t('admin.routingUi.billing.balance') }}</span>
+                  </div>
+
+                  <span
+                    v-else-if="col.key === 'rate_multiplier'"
+                    class="groups-mult"
+                    :class="{ 'is-up': row.rate_multiplier > 1, 'is-down': row.rate_multiplier < 1 }"
+                  >{{ row.rate_multiplier }}×</span>
+
+                  <span v-else-if="col.key === 'is_exclusive'" :class="['badge', row.is_exclusive ? 'badge-primary' : 'badge-gray']">
+                    {{ row.is_exclusive ? t('admin.groups.exclusive') : t('admin.groups.public') }}
+                  </span>
+
+                  <template v-else-if="col.key === 'usage'">
+                    <span v-if="usageLoading" class="text-xs text-gray-400">—</span>
+                    <span v-else class="groups-usage">
+                      <span>{{ t('admin.groups.usageToday') }}<b>${{ formatCost(usageMap.get(row.id)?.today_cost ?? 0) }}</b></span>
+                      <span>{{ t('admin.groups.usageYesterday') }}<b>${{ formatCost(usageMap.get(row.id)?.yesterday_cost ?? 0) }}</b></span>
+                      <span>{{ t('admin.groups.usageTotal') }}<b>${{ formatCost(usageMap.get(row.id)?.total_cost ?? 0) }}</b></span>
+                    </span>
+                  </template>
+
+                  <span v-else-if="col.key === 'status'" class="groups-inline">
+                    <i class="ui-dot" :class="row.status === 'active' ? 'is-ok' : ''"></i>
+                    {{ t('admin.accounts.status.' + row.status) }}
+                  </span>
+
+                  <div v-else-if="col.key === 'actions'" class="groups-actions" @click.stop @keydown.stop>
+                    <button
+                      type="button"
+                      class="app-icon-button"
+                      :aria-label="t('common.edit')"
+                      :title="t('common.edit')"
+                      @click="handleEdit(row)"
+                    >
+                      <Icon name="edit" size="sm" />
+                      <span class="sr-only">{{ t('common.edit') }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="app-icon-button"
+                      data-testid="group-duplicate"
+                      :title="duplicatingGroupIds.has(row.id) ? t('admin.groups.duplicating') : t('admin.groups.duplicate')"
+                      :aria-label="duplicatingGroupIds.has(row.id) ? t('admin.groups.duplicating') : t('admin.groups.duplicate')"
+                      :disabled="duplicatingGroupIds.has(row.id)"
+                      @click="handleDuplicate(row)"
+                    >
+                      <Icon name="copy" size="sm" />
+                    </button>
+                    <button
+                      v-if="row.platform === 'composite'"
+                      type="button"
+                      class="app-icon-button"
+                      :aria-label="t('admin.groups.compositeRoutes.action')"
+                      :title="t('admin.groups.compositeRoutes.action')"
+                      @click="handleCompositeRoutes(row)"
+                    >
+                      <Icon name="swap" size="sm" />
+                    </button>
+                    <ActionMenu :label="t('admin.routingUi.more')" :items="rowMenuItems(row)" :test-id="`group-more-${row.id}`" />
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="!loading && groups.length === 0" class="ui-empty">
+          <span class="ui-empty-icon"><Icon name="layers" size="md" /></span>
+          <template v-if="hasActiveFilters">
+            <b>{{ t('admin.routingUi.noMatches') }}</b>
+            <button type="button" class="btn btn-secondary btn-sm" @click="resetFilters">{{ t('admin.routingUi.reset') }}</button>
+          </template>
+          <template v-else>
+            <b>{{ t('admin.groups.noGroupsYet') }}</b>
+            <button type="button" class="btn btn-primary btn-sm" @click="openCreateModal">
+              <Icon name="plus" size="sm" />{{ t('admin.routingUi.newGroup') }}
+            </button>
+          </template>
+        </div>
+      </section>
+
+      <Pagination
+        v-if="pagination.total > 0"
+        :page="pagination.page"
+        :total="pagination.total"
+        :page-size="pagination.page_size"
+        @update:page="handlePageChange"
+        @update:pageSize="handlePageSizeChange"
+      />
+    </div>
+
+    <GroupRouteDrawer
+      :open="drawerOpen"
+      :group="drawerGroup"
+      :usage="drawerGroup ? usageMap.get(drawerGroup.id) ?? null : null"
+      :capacity="drawerGroup ? capacityMap.get(drawerGroup.id) ?? null : null"
+      :duplicating="drawerGroup ? duplicatingGroupIds.has(drawerGroup.id) : false"
+      @close="drawerOpen = false"
+      @edit="fromDrawer(handleEdit, $event)"
+      @duplicate="handleDuplicate"
+      @composite="fromDrawer(handleCompositeRoutes, $event)"
+      @rate-multipliers="fromDrawer(handleRateMultipliers, $event)"
+      @rpm-overrides="fromDrawer(handleRPMOverrides, $event)"
+      @delete="fromDrawer(handleDelete, $event)"
+    />
 
     <!-- Create Group Modal -->
     <BaseDialog
@@ -4666,19 +4486,20 @@ import {
 } from "@/constants/platforms";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
-import TablePageLayout from "@/components/layout/TablePageLayout.vue";
-import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
-import EmptyState from "@/components/common/EmptyState.vue";
 import Select from "@/components/common/Select.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
-import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
+import ProviderMark from "@/components/viz/ProviderMark.vue";
+import ActionMenu, { type ActionMenuItem } from "./routing/ActionMenu.vue";
+import PoolBar from "./routing/PoolBar.vue";
+import GroupRouteDrawer from "./routing/GroupRouteDrawer.vue";
+import { poolSplit, poolTone, type Tone } from "./routing/routeSummary";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
@@ -4840,14 +4661,16 @@ const appStore = useAppStore();
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
 // Default hidden columns (hidden on first load / after schema bumps).
-const DEFAULT_HIDDEN_COLUMNS = ["id", "usage"];
+const DEFAULT_HIDDEN_COLUMNS = ["id", "platform", "is_exclusive", "usage", "status"];
 const HIDDEN_COLUMNS_KEY = "group-hidden-columns";
 // Bump when adding new default-hidden columns so existing admins pick them up once.
 const COLUMN_SETTINGS_VERSION_KEY = "group-column-settings-version";
-const COLUMN_SETTINGS_VERSION = 3;
+const COLUMN_SETTINGS_VERSION = 4;
 const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
   2: ["id"],
   3: ["usage"],
+  // v4: the route cell shows the provider logo, exclusive badge, and status.
+  4: ["platform", "is_exclusive", "status"],
 };
 
 const allColumns = computed<Column[]>(() => [
@@ -4857,6 +4680,16 @@ const allColumns = computed<Column[]>(() => [
     key: "platform",
     label: t("admin.groups.columns.platform"),
     sortable: true,
+  },
+  {
+    key: "account_count",
+    label: t("admin.groups.columns.accounts"),
+    sortable: true,
+  },
+  {
+    key: "capacity",
+    label: t("admin.groups.columns.capacity"),
+    sortable: false,
   },
   {
     key: "billing_type",
@@ -4873,16 +4706,6 @@ const allColumns = computed<Column[]>(() => [
     label: t("admin.groups.columns.type"),
     sortable: true,
   },
-  {
-    key: "account_count",
-    label: t("admin.groups.columns.accounts"),
-    sortable: true,
-  },
-  {
-    key: "capacity",
-    label: t("admin.groups.columns.capacity"),
-    sortable: false,
-  },
   { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
   { key: "status", label: t("admin.groups.columns.status"), sortable: true },
   { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
@@ -4892,8 +4715,6 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.has(col.key)),
 );
 const hiddenColumns = reactive<Set<string>>(new Set());
-const showColumnDropdown = ref(false);
-const columnDropdownRef = ref<HTMLElement | null>(null);
 
 const getValidHiddenColumnKeys = () =>
   new Set(toggleableColumns.value.map((col) => col.key));
@@ -5001,8 +4822,8 @@ if (typeof window !== "undefined") {
 }
 
 // Filter options
-const statusOptions = computed(() => [
-  { value: "", label: t("admin.groups.allStatus") },
+const statusSegments = computed(() => [
+  { value: "", label: t("admin.routingUi.all") },
   { value: "active", label: t("admin.accounts.status.active") },
   { value: "inactive", label: t("admin.accounts.status.inactive") },
 ]);
@@ -5015,10 +4836,16 @@ const exclusiveOptions = computed(() => [
 
 const platformOptions = computed(() => [...GROUP_PLATFORM_OPTIONS]);
 
-const platformFilterOptions = computed(() => [
-  { value: "", label: t("admin.groups.allPlatforms") },
-  ...GROUP_PLATFORM_OPTIONS,
-]);
+// Platforms that own at least one group (all platforms until that is known).
+const presentPlatforms = ref<Set<string> | null>(null);
+const platformChips = computed(() =>
+  GROUP_PLATFORM_OPTIONS.filter(
+    (option) =>
+      !presentPlatforms.value ||
+      presentPlatforms.value.has(option.value) ||
+      filters.platform === option.value,
+  ).map((option) => ({ value: option.value, label: platformLabel(option.value) })),
+);
 
 const compositeRoutePlatformOptions = computed(() => [
   ...CONCRETE_PLATFORM_OPTIONS,
@@ -6060,6 +5887,9 @@ const loadGroups = async () => {
     );
     if (signal.aborted) return;
     groups.value = response.items;
+    if (presentPlatforms.value) {
+      for (const group of response.items) presentPlatforms.value.add(group.platform);
+    }
     pagination.total = response.total;
     pagination.pages = response.pages;
     if (hasVisibleUsageSummaryConsumer.value) {
@@ -6195,6 +6025,229 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   sortState.sort_order = order;
   pagination.page = 1;
   loadGroups();
+};
+
+// ── Route table presentation ──
+const platformLabel = (platform: string) => t(`admin.groups.platforms.${platform}`);
+
+const toneDot: Record<Tone, string> = { ok: "is-ok", warn: "is-warn", bad: "is-bad", idle: "" };
+
+const columnClass: Record<string, string> = {
+  name: "groups-col-name",
+  account_count: "groups-col-pool",
+  capacity: "groups-col-load is-optional",
+  billing_type: "groups-col-billing is-optional",
+  rate_multiplier: "groups-col-mult is-optional",
+  usage: "is-optional",
+  id: "is-optional",
+  platform: "is-optional",
+  is_exclusive: "is-optional",
+  status: "is-optional",
+  actions: "groups-col-actions",
+};
+
+const headerLabel = (col: Column) => {
+  const short: Record<string, string> = {
+    account_count: t("admin.routingUi.columns.pool"),
+    capacity: t("admin.routingUi.columns.load"),
+    billing_type: t("admin.routingUi.columns.billing"),
+    rate_multiplier: t("admin.routingUi.columns.rate"),
+  };
+  return short[col.key] ?? col.label;
+};
+
+const toggleHeaderSort = (key: string) => {
+  const order =
+    sortState.sort_by === key && sortState.sort_order === "asc" ? "desc" : "asc";
+  handleSort(key, order);
+};
+
+const setPlatformFilter = (platform: string) => {
+  filters.platform = filters.platform === platform ? "" : platform;
+  pagination.page = 1;
+  loadGroups();
+};
+
+const setStatusFilter = (status: string) => {
+  if (filters.status === status) return;
+  filters.status = status;
+  pagination.page = 1;
+  loadGroups();
+};
+
+const setExclusiveFilter = (value: string) => {
+  filters.is_exclusive = value;
+  pagination.page = 1;
+  loadGroups();
+};
+
+const exclusiveFilterLabel = computed(
+  () => exclusiveOptions.value.find((o) => o.value === filters.is_exclusive)?.label ?? "",
+);
+
+const hasActiveFilters = computed(
+  () =>
+    Boolean(searchQuery.value.trim()) ||
+    Boolean(filters.platform || filters.status || filters.is_exclusive),
+);
+
+const resetFilters = () => {
+  searchQuery.value = "";
+  filters.platform = "";
+  filters.status = "";
+  filters.is_exclusive = "";
+  pagination.page = 1;
+  loadGroups();
+};
+
+const sortMenuKeys = computed(() => [
+  { key: "sort_order", label: t("admin.routingUi.manualOrder") },
+  ...allColumns.value
+    .filter((col) => col.sortable)
+    .map((col) => ({ key: col.key, label: col.label })),
+]);
+
+const viewMenuItems = computed<ActionMenuItem[]>(() => [
+  ...exclusiveOptions.value.map((option) => ({
+    key: `type-${option.value || "all"}`,
+    section: t("admin.groups.columns.type"),
+    label: option.label,
+    pressed: filters.is_exclusive === option.value,
+    action: () => setExclusiveFilter(option.value),
+  })),
+  ...sortMenuKeys.value.map((item) => ({
+    key: `sort-${item.key}`,
+    section: t("admin.groups.sortOrder"),
+    label: item.label,
+    hint:
+      sortState.sort_by === item.key && item.key !== "sort_order"
+        ? sortState.sort_order === "asc" ? "↑" : "↓"
+        : undefined,
+    pressed: sortState.sort_by === item.key,
+    action: () =>
+      item.key === "sort_order"
+        ? handleSort("sort_order", "asc")
+        : toggleHeaderSort(item.key),
+  })),
+  {
+    key: "reorder",
+    section: t("admin.groups.sortOrder"),
+    label: t("admin.routingUi.reorder"),
+    icon: "arrowsUpDown",
+    testId: "group-reorder",
+    action: openSortModal,
+  },
+  ...toggleableColumns.value.map((col) => ({
+    key: `col-${col.key}`,
+    section: t("admin.groups.columnSettings"),
+    label: col.label,
+    pressed: isColumnVisible(col.key),
+    testId: `group-column-${col.key}`,
+    action: () => toggleColumn(col.key),
+  })),
+]);
+
+const rowMenuItems = (row: AdminGroup): ActionMenuItem[] => [
+  { key: "rates", label: t("admin.groups.rateMultipliers"), icon: "dollar", action: () => handleRateMultipliers(row) },
+  { key: "rpm", label: t("admin.groups.rpmOverrides"), icon: "bolt", action: () => handleRPMOverrides(row) },
+  { key: "delete", label: t("common.delete"), icon: "trash", danger: true, action: () => handleDelete(row) },
+];
+
+const loadPercent = (groupId: number) => {
+  const capacity = capacityMap.value.get(groupId);
+  if (!capacity || capacity.concurrencyMax <= 0) return 0;
+  return Math.min(100, Math.round((capacity.concurrencyUsed / capacity.concurrencyMax) * 100));
+};
+
+const loadTone = (groupId: number) => {
+  const percent = loadPercent(groupId);
+  return percent >= 90 ? "is-bad" : percent >= 70 ? "is-warn" : "is-ok";
+};
+
+const capacityTitle = (groupId: number) => {
+  const c = capacityMap.value.get(groupId);
+  if (!c) return "";
+  const parts = [`${t("admin.routingUi.load.concurrency")} ${c.concurrencyUsed}/${c.concurrencyMax}`];
+  if (c.sessionsMax > 0) parts.push(`${t("admin.routingUi.load.sessions")} ${c.sessionsUsed}/${c.sessionsMax}`);
+  if (c.rpmMax > 0) parts.push(`RPM ${c.rpmUsed}/${c.rpmMax}`);
+  return parts.join(" · ");
+};
+
+const billingTitle = (row: AdminGroup) => {
+  const parts: string[] = [];
+  if (row.daily_limit_usd) parts.push(`${formatUsd(row.daily_limit_usd)}/${t("admin.groups.limitDay")}`);
+  if (row.weekly_limit_usd) parts.push(`${formatUsd(row.weekly_limit_usd)}/${t("admin.groups.limitWeek")}`);
+  if (row.monthly_limit_usd) parts.push(`${formatUsd(row.monthly_limit_usd)}/${t("admin.groups.limitMonth")}`);
+  return parts.join(" · ");
+};
+
+// ── Route drawer ──
+const drawerOpen = ref(false);
+const drawerGroupId = ref<number | null>(null);
+const drawerGroup = computed(
+  () => groups.value.find((group) => group.id === drawerGroupId.value) ?? null,
+);
+
+const openGroupDrawer = (group: AdminGroup) => {
+  drawerGroupId.value = group.id;
+  drawerOpen.value = true;
+  if (usageMap.value.size === 0 && !usageLoading.value) void loadDrawerUsage();
+  if (capacityMap.value.size === 0) void loadDrawerCapacity();
+};
+
+// The drawer shows usage and load even when their columns are hidden.
+const loadDrawerUsage = async () => {
+  try {
+    const data = await adminAPI.groups.getUsageSummary();
+    const map = new Map(usageMap.value);
+    for (const item of data) {
+      map.set(item.group_id, {
+        today_cost: item.today_cost,
+        yesterday_cost: item.yesterday_cost,
+        total_cost: item.total_cost,
+      });
+    }
+    usageMap.value = map;
+  } catch (error) {
+    console.error("Error loading group usage summary:", error);
+  }
+};
+
+const loadDrawerCapacity = async () => {
+  try {
+    const data = await adminAPI.groups.getCapacitySummary();
+    const map = new Map(capacityMap.value);
+    for (const item of data) {
+      map.set(item.group_id, {
+        concurrencyUsed: item.concurrency_used,
+        concurrencyMax: item.concurrency_max,
+        sessionsUsed: item.sessions_used,
+        sessionsMax: item.sessions_max,
+        rpmUsed: item.rpm_used,
+        rpmMax: item.rpm_max,
+      });
+    }
+    capacityMap.value = map;
+  } catch (error) {
+    console.error("Error loading group capacity summary:", error);
+  }
+};
+
+// Dialogs open over the page, so the drawer steps aside first.
+const fromDrawer = (handler: (group: AdminGroup) => unknown, group: AdminGroup) => {
+  drawerOpen.value = false;
+  void handler(group);
+};
+
+const loadPresentPlatforms = async () => {
+  try {
+    const all = await adminAPI.groups.getAllIncludingInactive();
+    if (Array.isArray(all) && all.length) {
+      presentPlatforms.value = new Set(all.map((group) => group.platform));
+    }
+  } catch {
+    presentPlatforms.value = null;
+  }
 };
 
 const openCreateModal = () => {
@@ -7228,9 +7281,6 @@ const handleClickOutside = (event: MouseEvent) => {
       showAccountDropdown.value[key] = false;
     });
   }
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
-    showColumnDropdown.value = false;
-  }
 };
 
 // 打开排序弹窗
@@ -7279,6 +7329,7 @@ const saveSortOrder = async () => {
 
 onMounted(() => {
   loadGroups();
+  void loadPresentPlatforms();
   void loadLiveCapability();
   loadModelsListCandidates("create", 0, createForm.platform);
   loadModelAllowlistCandidates("create", 0, createForm.platform);
@@ -7291,3 +7342,282 @@ onUnmounted(() => {
   clearAllAccountSearchState();
 });
 </script>
+
+<style scoped>
+.groups-platforms {
+  gap: 0.25rem;
+}
+
+.groups-platforms .ui-chip.is-icon {
+  width: 2.125rem;
+  height: 2.125rem;
+}
+
+.groups-platforms .ui-chip[aria-pressed='true'] :deep(.provider-mark) {
+  animation: ui-pop 320ms var(--operator-spring);
+}
+
+.groups-tool {
+  border: 1px solid var(--operator-border);
+  background: var(--operator-card);
+}
+
+.groups-card {
+  overflow: hidden;
+  transition: opacity var(--operator-duration) var(--operator-ease-out);
+}
+
+.groups-card.is-refreshing {
+  opacity: 0.7;
+}
+
+.groups-table td {
+  height: 3.75rem;
+}
+
+.groups-table tr.is-inactive .groups-route {
+  opacity: 0.6;
+}
+
+.groups-table tr.is-clickable:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+
+.groups-col-name {
+  min-width: 15rem;
+}
+
+.groups-col-pool {
+  width: 11rem;
+  min-width: 9rem;
+}
+
+.groups-col-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.groups-skel {
+  display: block;
+  width: 4.5rem;
+  height: 0.75rem;
+  border-radius: 999px;
+}
+
+.groups-skel.is-wide {
+  width: 11rem;
+}
+
+.groups-route {
+  display: flex;
+  min-width: 0;
+  max-width: 26rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.groups-mark {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.groups-mark-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 0.5625rem;
+  height: 0.5625rem;
+  box-shadow: 0 0 0 2px var(--operator-card) !important;
+}
+
+.groups-name {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.groups-tag {
+  flex: none;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 0.6875rem;
+}
+
+.groups-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.groups-load {
+  display: flex;
+  min-width: 6rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.groups-load-track {
+  position: relative;
+  height: 0.375rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--operator-track);
+}
+
+.groups-load-track > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--operator-success-fill);
+  transform-origin: left center;
+  animation: viz-grow-x 700ms var(--operator-ease-out) both;
+}
+
+.groups-load-track > i.is-warn { background: var(--operator-warning-fill); }
+.groups-load-track > i.is-bad { background: var(--operator-destructive-fill); }
+
+.groups-load b {
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.groups-load b small,
+.groups-billing-limit {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.groups-billing {
+  min-width: 0;
+  max-width: 14rem;
+}
+
+.groups-balance {
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.groups-mult {
+  display: inline-flex;
+  height: 1.375rem;
+  align-items: center;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--operator-muted);
+  color: var(--operator-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.groups-mult.is-up {
+  background: var(--operator-warning-soft);
+  color: var(--operator-warning);
+}
+
+.groups-mult.is-down {
+  background: var(--operator-success-soft);
+  color: var(--operator-success);
+}
+
+.groups-usage {
+  display: inline-flex;
+  gap: 0.75rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.groups-usage b {
+  margin-left: 0.25rem;
+  color: var(--operator-foreground);
+  font-weight: 500;
+}
+
+/* Row actions surface on hover or keyboard focus; always shown on touch. */
+.groups-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.125rem;
+  opacity: 0;
+  transform: translateX(4px);
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-out),
+    transform var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.groups-table tr:hover .groups-actions,
+.groups-table tr:focus-within .groups-actions,
+.groups-table tr.is-selected .groups-actions,
+.groups-actions:has([aria-expanded='true']) {
+  opacity: 1;
+  transform: none;
+}
+
+@media (hover: none) {
+  .groups-actions {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .groups-table .is-optional {
+    display: none;
+  }
+
+  .groups-table {
+    table-layout: fixed;
+  }
+
+  .groups-table .groups-col-actions {
+    display: none;
+  }
+
+  .groups-col-name {
+    min-width: 0;
+  }
+
+  .groups-col-pool {
+    width: 7.5rem;
+    min-width: 6rem;
+  }
+
+  .groups-table th,
+  .groups-table td {
+    padding: 0 0.625rem;
+  }
+
+  .groups-platforms {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .groups-toolbar .ui-search {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .groups-load-track > i,
+  .groups-platforms .ui-chip[aria-pressed='true'] :deep(.provider-mark) {
+    animation: none;
+  }
+
+  .groups-actions {
+    transform: none;
+  }
+}
+</style>

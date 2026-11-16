@@ -1,245 +1,183 @@
 <template>
-  <div class="space-y-4">
-    <div class="card p-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <div class="flex-1 sm:max-w-64">
-          <input
-            v-model="searchQuery"
-            type="text"
-            :placeholder="t('payment.admin.searchOrders')"
-            class="input"
-            @input="handleSearch"
-          />
-        </div>
-        <Select
-          v-model="filters.status"
-          :options="statusFilterOptions"
-          class="w-36"
-          @change="emitFiltersChanged"
-        />
-        <Select
-          v-model="filters.payment_type"
-          :options="paymentTypeFilterOptions"
-          class="w-40"
-          @change="emitFiltersChanged"
-        />
-        <Select
-          v-model="filters.order_type"
-          :options="orderTypeFilterOptions"
-          class="w-36"
-          @change="emitFiltersChanged"
-        />
-        <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-          <button
-            @click="emit('refresh')"
-            :disabled="loading"
-            class="btn btn-secondary"
-            :title="t('common.refresh')"
-          >
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <DataTable :columns="columns" :data="orders" :loading="loading">
-      <template #cell-id="{ value }">
-        <span class="font-mono text-sm">#{{ value }}</span>
-      </template>
-
-      <template #cell-user_id="{ value }">
-        <span class="text-sm text-gray-600 dark:text-gray-400">#{{ value }}</span>
-      </template>
-
-      <template #cell-pay_amount="{ value, row }">
-        <div class="text-sm">
-          <span class="font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol(row) }}{{ value.toFixed(2) }}</span>
-          <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
-            ({{ row.fee_rate }}%)
-          </span>
-          <div v-if="row.amount !== row.pay_amount || (row.bonus_amount ?? 0) > 0" class="text-xs text-gray-500">
-            {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
-            <span v-if="(row.bonus_amount ?? 0) > 0" class="ml-1 text-amber-600 dark:text-amber-400">
-              ({{ t('payment.orders.bonusIncluded', { amount: creditedAmountSymbol + (row.bonus_amount ?? 0).toFixed(2) }) }})
-            </span>
-          </div>
-        </div>
-      </template>
-
-      <template #cell-payment_type="{ value }">
-        <span class="text-sm text-gray-700 dark:text-gray-300">
-          {{ t('payment.methods.' + value, value) }}
-        </span>
-      </template>
-
-      <template #cell-status="{ value }">
-        <span :class="['badge', statusBadgeClass(value)]">
-          {{ t('payment.status.' + value.toLowerCase(), value) }}
-        </span>
-      </template>
-
-      <template #cell-order_type="{ value }">
-        <span class="text-sm text-gray-700 dark:text-gray-300">
-          {{ t('payment.admin.' + value + 'Order', value) }}
-        </span>
-      </template>
-
-      <template #cell-created_at="{ value }">
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDateTime(value) }}</span>
-      </template>
-
-      <template #cell-actions="{ row }">
-        <div class="flex items-center gap-2">
-          <button
+  <section class="ui-card admin-order-card">
+    <div class="ui-table-wrap">
+      <table class="ui-table" data-testid="admin-orders-table">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('payment.orders.orderId') }}</th>
+            <th scope="col" class="hidden sm:table-cell">{{ t('payment.admin.colUser') }}</th>
+            <th scope="col" class="hidden md:table-cell">{{ t('payment.orders.paymentMethod') }}</th>
+            <th scope="col">{{ t('payment.orders.status') }}</th>
+            <th scope="col" class="hidden lg:table-cell">{{ t('payment.orders.createdAt') }}</th>
+            <th scope="col" class="is-num">{{ t('payment.orders.payAmount') }}</th>
+            <th scope="col" class="w-12"><span class="sr-only">{{ t('common.actions') }}</span></th>
+          </tr>
+        </thead>
+        <tbody v-if="loading && !orders.length">
+          <tr v-for="i in 6" :key="i" aria-hidden="true">
+            <td><div class="skeleton h-4 w-28 rounded"></div></td>
+            <td class="hidden sm:table-cell"><div class="skeleton h-4 w-36 rounded"></div></td>
+            <td class="hidden md:table-cell"><div class="skeleton h-4 w-20 rounded"></div></td>
+            <td><div class="skeleton h-5 w-16 rounded-full"></div></td>
+            <td class="hidden lg:table-cell"><div class="skeleton h-4 w-28 rounded"></div></td>
+            <td><div class="skeleton ml-auto h-4 w-16 rounded"></div></td>
+            <td></td>
+          </tr>
+        </tbody>
+        <tbody v-else-if="orders.length" :key="page" class="ui-rows-enter" :class="loading ? 'opacity-60' : ''">
+          <tr
+            v-for="row in orders"
+            :key="row.id"
+            class="is-clickable"
+            :class="row.id === selectedId ? 'is-selected' : ''"
+            tabindex="0"
+            :aria-label="`#${row.id} ${row.out_trade_no}`"
             @click="emit('detail', row)"
-            class="row-action"
-                :title="t('common.view')"
+            @keydown.enter.self="emit('detail', row)"
+          >
+            <td class="max-w-[14rem]">
+              <span class="ui-cell-main font-mono">#{{ row.id }}</span>
+              <span class="ui-cell-sub" :title="row.out_trade_no">{{ row.out_trade_no }}</span>
+            </td>
+            <td class="hidden max-w-[16rem] sm:table-cell">
+              <span class="ui-cell-main">{{ userLabel(row) }}</span>
+              <span class="ui-cell-sub">
+                #{{ row.user_id }}<template v-if="row.user_notes"> · {{ row.user_notes }}</template>
+              </span>
+            </td>
+            <td class="hidden md:table-cell">
+              <PaymentMethodMark :type="row.payment_type" class="text-sm" />
+              <span class="ui-cell-sub">{{ t('payment.admin.' + row.order_type + 'Order', row.order_type) }}</span>
+            </td>
+            <td>
+              <span :class="orderStatusBadgeClass(row.status)" class="whitespace-nowrap">
+                {{ t('payment.status.' + row.status.toLowerCase(), row.status) }}
+              </span>
+            </td>
+            <td class="hidden whitespace-nowrap text-xs text-gray-500 dark:text-gray-400 lg:table-cell">
+              {{ formatOrderDateTime(row.created_at) }}
+            </td>
+            <td class="is-num">
+              <span class="ui-cell-main">{{ paymentAmountSymbol(row) }}{{ row.pay_amount.toFixed(2) }}</span>
+              <span
+                v-if="row.amount !== row.pay_amount || (row.bonus_amount ?? 0) > 0"
+                class="ui-cell-sub"
+                :title="t('payment.orders.creditedAmount')"
               >
-            <Icon name="eye" size="sm" />
-            <span class="row-action-label">{{ t('common.view') }}</span>
-          </button>
-          <button
-            v-if="row.status === 'PENDING'"
-            @click="emit('cancel', row)"
-            class="row-action"
-                :title="t('payment.orders.cancel')"
+                {{ t('admin.adminUi.orders.credited') }} {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
+              </span>
+              <span v-if="row.refund_amount" class="ui-cell-sub text-red-600 dark:text-red-400" :title="t('payment.admin.refundAmount')">
+                −{{ creditedAmountSymbol }}{{ row.refund_amount.toFixed(2) }}
+              </span>
+            </td>
+            <td class="text-right">
+              <button
+                v-if="orderAction(row.status)"
+                type="button"
+                class="app-icon-button"
+                :class="orderAction(row.status)!.tone === 'danger' ? 'text-red-600 dark:text-red-400' : ''"
+                :disabled="orderAction(row.status)!.kind === 'queryRefund' && busyIds?.has(row.id)"
+                :aria-label="t(orderAction(row.status)!.labelKey)"
+                :title="t(orderAction(row.status)!.labelKey)"
+                :data-testid="`order-action-${row.id}`"
+                @click.stop="emitAction(row)"
               >
-            <Icon name="x" size="sm" />
-            <span class="row-action-label">{{ t('payment.orders.cancel') }}</span>
-          </button>
-          <button
-            v-if="row.status === 'FAILED'"
-            @click="emit('retry', row)"
-            class="row-action"
-                :title="t('payment.admin.retry')"
-              >
-            <Icon name="refresh" size="sm" />
-            <span class="row-action-label">{{ t('payment.admin.retry') }}</span>
-          </button>
-          <button
-            v-if="canRefundRow(row)"
-            @click="emit('refund', row)"
-            class="row-action row-action-danger"
-                :title="t('payment.admin.refund')"
-              >
-            <Icon name="dollar" size="sm" />
-            <span class="row-action-label">{{ t('payment.admin.refund') }}</span>
-          </button>
-        </div>
-      </template>
-    </DataTable>
+                <Icon
+                  :name="orderAction(row.status)!.icon"
+                  size="sm"
+                  :class="orderAction(row.status)!.kind === 'queryRefund' && busyIds?.has(row.id) ? 'animate-spin' : ''"
+                />
+              </button>
+            </td>
+          </tr>
+        </tbody>
+        <tbody v-else>
+          <tr>
+            <td colspan="7">
+              <div class="ui-empty">
+                <span class="ui-empty-icon"><Icon name="receipt" size="md" /></span>
+                <b>{{ filtered ? t('admin.adminUi.noMatches') : t('payment.admin.noData') }}</b>
+                <button v-if="filtered" type="button" class="btn btn-secondary btn-sm" @click="emit('clearFilters')">
+                  {{ t('admin.adminUi.clearFilters') }}
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-    <Pagination
-      v-if="total > 0"
-      :page="page"
-      :total="total"
-      :page-size="pageSize"
-      @update:page="emit('update:page', $event)"
-      @update:pageSize="emit('update:pageSize', $event)"
-    />
-  </div>
+  <Pagination
+    v-if="total > 0"
+    :page="page"
+    :total="total"
+    :page-size="pageSize"
+    @update:page="emit('update:page', $event)"
+    @update:pageSize="emit('update:pageSize', $event)"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PaymentOrder } from '@/types/payment'
-import type { Column } from '@/components/common/types'
-import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
-import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { statusBadgeClass, canRefund, formatOrderDateTime } from '@/components/payment/orderUtils'
+import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
+import PaymentMethodMark from './PaymentMethodMark.vue'
+import { orderAction, orderStatusBadgeClass } from './orderDisplay'
+
+/** Admin list rows also carry the buyer's identity. */
+export type AdminOrderRow = PaymentOrder & { user_email?: string; user_name?: string; user_notes?: string }
 
 const { t } = useI18n()
 
 defineProps<{
-  orders: PaymentOrder[]
+  orders: AdminOrderRow[]
   loading: boolean
   page: number
   pageSize: number
   total: number
+  selectedId?: number | null
+  busyIds?: Set<number>
+  filtered?: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: 'detail', order: PaymentOrder): void
-  (e: 'cancel', order: PaymentOrder): void
-  (e: 'retry', order: PaymentOrder): void
-  (e: 'refund', order: PaymentOrder): void
-  (e: 'refresh'): void
+  (e: 'detail', order: AdminOrderRow): void
+  (e: 'cancel', order: AdminOrderRow): void
+  (e: 'retry', order: AdminOrderRow): void
+  (e: 'refund', order: AdminOrderRow): void
+  (e: 'queryRefund', order: AdminOrderRow): void
+  (e: 'clearFilters'): void
   (e: 'update:page', page: number): void
   (e: 'update:pageSize', size: number): void
-  (e: 'filter', filters: { keyword?: string; status?: string; payment_type?: string; order_type?: string }): void
 }>()
 
-const searchQuery = ref('')
-const filters = reactive({ status: '', payment_type: '', order_type: '' })
 const creditedAmountSymbol = currencySymbol('USD')
 
 function paymentAmountSymbol(order: PaymentOrder): string {
   return currencySymbol(order.currency)
 }
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
-function handleSearch() {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => emitFiltersChanged(), 300)
+function userLabel(order: AdminOrderRow): string {
+  return order.user_email || order.user_name || `#${order.user_id}`
 }
 
-function emitFiltersChanged() {
-  emit('filter', {
-    keyword: searchQuery.value || undefined,
-    status: filters.status || undefined,
-    payment_type: filters.payment_type || undefined,
-    order_type: filters.order_type || undefined,
-  })
-}
-
-const columns = computed<Column[]>(() => [
-  { key: 'id', label: t('payment.orders.orderId') },
-  { key: 'user_id', label: t('payment.orders.userId') },
-  { key: 'pay_amount', label: t('payment.orders.payAmount') },
-  { key: 'payment_type', label: t('payment.orders.paymentMethod') },
-  { key: 'status', label: t('payment.orders.status') },
-  { key: 'order_type', label: t('payment.orders.orderType') },
-  { key: 'created_at', label: t('payment.orders.createdAt') },
-  { key: 'actions', label: t('payment.orders.actions') },
-])
-
-const statusFilterOptions = computed(() => [
-  { value: '', label: t('payment.admin.allStatuses') },
-  { value: 'PENDING', label: t('payment.status.pending') },
-  { value: 'PAID', label: t('payment.status.paid') },
-  { value: 'COMPLETED', label: t('payment.status.completed') },
-  { value: 'EXPIRED', label: t('payment.status.expired') },
-  { value: 'CANCELLED', label: t('payment.status.cancelled') },
-  { value: 'FAILED', label: t('payment.status.failed') },
-  { value: 'REFUNDED', label: t('payment.status.refunded') },
-  { value: 'REFUND_REQUESTED', label: t('payment.status.refund_requested') },
-  { value: 'REFUND_PENDING', label: t('payment.status.refund_pending') },
-  { value: 'REFUND_FAILED', label: t('payment.status.refund_failed') },
-])
-
-const paymentTypeFilterOptions = computed(() => [
-  { value: '', label: t('payment.admin.allPaymentTypes') },
-  { value: 'alipay', label: t('payment.methods.alipay') },
-  { value: 'wxpay', label: t('payment.methods.wxpay') },
-  { value: 'stripe', label: t('payment.methods.stripe') },
-  { value: 'airwallex', label: t('payment.methods.airwallex') },
-])
-
-const orderTypeFilterOptions = computed(() => [
-  { value: '', label: t('payment.admin.allOrderTypes') },
-  { value: 'balance', label: t('payment.admin.balanceOrder') },
-  { value: 'subscription', label: t('payment.admin.subscriptionOrder') },
-])
-
-function canRefundRow(order: PaymentOrder): boolean {
-  return canRefund(order.status)
-}
-
-function formatDateTime(dateStr: string): string {
-  return formatOrderDateTime(dateStr)
+function emitAction(order: AdminOrderRow) {
+  const action = orderAction(order.status)
+  if (!action) return
+  if (action.kind === 'cancel') emit('cancel', order)
+  else if (action.kind === 'retry') emit('retry', order)
+  else if (action.kind === 'refund') emit('refund', order)
+  else emit('queryRefund', order)
 }
 </script>
+
+<style scoped>
+.admin-order-card {
+  overflow: hidden;
+  padding: 0;
+}
+</style>

@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import UserDashboardPlatforms from '../UserDashboardPlatforms.vue'
 import UserDashboardStats from '../UserDashboardStats.vue'
 import type { UserDashboardStats as Stats } from '@/api/usage'
 import type { PlatformQuotaItem } from '@/types'
@@ -9,7 +10,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 const stats: Stats = {
-  total_api_keys: 0, active_api_keys: 0, total_requests: 0, total_input_tokens: 0,
+  total_api_keys: 3, active_api_keys: 2, total_requests: 0, total_input_tokens: 0,
   total_output_tokens: 0, total_cache_creation_tokens: 0, total_cache_read_tokens: 0,
   total_tokens: 0, total_cost: 0, total_actual_cost: 5, today_requests: 0,
   today_input_tokens: 0, today_output_tokens: 0, today_cache_creation_tokens: 0,
@@ -25,13 +26,30 @@ describe('platform quota dashboard cards', () => {
       platform, daily_limit_usd, weekly_limit_usd: null, monthly_limit_usd: null,
       daily_usage_usd: 0, weekly_usage_usd: 0, monthly_usage_usd: 0,
     })
-    const wrapper = mount(UserDashboardStats, { props: {
-      stats, balance: 0, isSimple: false,
+    const wrapper = mount(UserDashboardPlatforms, { props: {
+      stats,
       platformQuotas: [quota('anthropic', 0), quota('gemini', null), quota('openai', null)],
     } })
     expect(wrapper.findAll('[data-testid="platform-card"]').map(card => card.attributes('data-platform')))
       .toEqual(['anthropic', 'openai', '__other__'])
     expect(wrapper.text()).toContain('dashboard.platformCount:2')
+    expect(wrapper.text()).toContain('dashboard.platformQuota.disabled')
+    wrapper.unmount()
+  })
+})
+
+describe('dashboard hero', () => {
+  it('leads with balance and shows key counts in the footer', () => {
+    const wrapper = mount(UserDashboardStats, { props: { stats, balance: 12.5, isSimple: false } })
+    expect(wrapper.text()).toContain('dashboard.balance')
+    expect(wrapper.text()).toContain('2/3')
+    wrapper.unmount()
+  })
+
+  it('leads with the key count in simple mode', () => {
+    const wrapper = mount(UserDashboardStats, { props: { stats, balance: 12.5, isSimple: true } })
+    expect(wrapper.text()).not.toContain('dashboard.balance')
+    expect(wrapper.get('#pd-hero-label').text()).toBe('dashboard.apiKeys')
     wrapper.unmount()
   })
 })

@@ -51,6 +51,7 @@ vi.mock('@/api/admin', () => ({
     groups: {
       list: listGroups,
       getAll: getAllGroups,
+      getAllIncludingInactive: getAllGroups,
       getModelsListCandidates,
       getModelAllowlistCandidates,
       getUsageSummary,
@@ -129,30 +130,6 @@ const AppLayoutStub = {
   template: '<div><slot /></div>',
 }
 
-const TablePageLayoutStub = {
-  template: `
-    <div>
-      <slot name="filters" />
-      <slot name="table" />
-      <slot name="pagination" />
-    </div>
-  `,
-}
-
-const DataTableStub = {
-  props: ['columns', 'data'],
-  emits: ['sort'],
-  template: `
-    <div>
-      <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
-      <div data-test="rows">{{ data.map((row) => row.name).join(',') }}</div>
-      <div v-if="data.length" data-test="usage-cell">
-        <slot name="cell-usage" :row="data[0]" />
-      </div>
-    </div>
-  `,
-}
-
 const SelectStub = {
   props: ['modelValue', 'options', 'placeholder'],
   emits: ['update:modelValue', 'change'],
@@ -183,8 +160,6 @@ const mountView = async () => {
     global: {
       stubs: {
         AppLayout: AppLayoutStub,
-        TablePageLayout: TablePageLayoutStub,
-        DataTable: DataTableStub,
         Pagination: true,
         BaseDialog: BaseDialogStub,
         ConfirmDialog: true,
@@ -204,18 +179,17 @@ const mountView = async () => {
 }
 
 const columnKeys = (wrapper: ReturnType<typeof mount>) =>
-  wrapper.get('[data-test="columns"]').text().split(',').filter(Boolean)
+  wrapper.findAll('thead th').map((th) => th.attributes('data-col'))
 
 const openColumnSettings = async (wrapper: ReturnType<typeof mount>) => {
-  await wrapper.get('button[title="Column Settings"]').trigger('click')
+  await wrapper.get('[data-testid="group-view-menu"]').trigger('click')
+  await flushPromises()
 }
 
-const clickColumnToggle = async (wrapper: ReturnType<typeof mount>, label: string) => {
-  const button = wrapper
-    .findAll('button')
-    .find((item) => item.text().includes(label))
-  expect(button, `column toggle ${label}`).toBeTruthy()
-  await button!.trigger('click')
+const clickColumnToggle = async (_wrapper: ReturnType<typeof mount>, key: string) => {
+  const button = document.body.querySelector<HTMLButtonElement>(`[data-testid="group-column-${key}"]`)
+  expect(button, `column toggle ${key}`).toBeTruthy()
+  button!.click()
   await flushPromises()
 }
 
@@ -251,24 +225,24 @@ describe('admin GroupsView column settings', () => {
 
   afterEach(() => {
     localStorage.clear()
+    document.body.innerHTML = ''
   })
 
-  it('hides id and historical usage by default while keeping routing health visible', async () => {
+  it('shows the route view by default and hides detail columns', async () => {
     const wrapper = await mountView()
 
     expect(columnKeys(wrapper)).toEqual([
       'name',
-      'platform',
-      'billing_type',
-      'rate_multiplier',
-      'is_exclusive',
       'account_count',
       'capacity',
-      'status',
+      'billing_type',
+      'rate_multiplier',
       'actions',
     ])
-    expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['id', 'usage']))
-    expect(localStorage.getItem('group-column-settings-version')).toBe('3')
+    expect(localStorage.getItem('group-hidden-columns')).toBe(
+      JSON.stringify(['id', 'platform', 'is_exclusive', 'usage', 'status']),
+    )
+    expect(localStorage.getItem('group-column-settings-version')).toBe('4')
   })
 
   it('applies saved hidden columns on mount and ignores unknown keys', async () => {
@@ -276,7 +250,7 @@ describe('admin GroupsView column settings', () => {
       'group-hidden-columns',
       JSON.stringify(['usage', 'capacity', 'removed_column', 'name', 'actions']),
     )
-    localStorage.setItem('group-column-settings-version', '3')
+    localStorage.setItem('group-column-settings-version', '4')
 
     const wrapper = await mountView()
 
@@ -284,78 +258,73 @@ describe('admin GroupsView column settings', () => {
       'name',
       'id',
       'platform',
+      'account_count',
       'billing_type',
       'rate_multiplier',
       'is_exclusive',
-      'account_count',
       'status',
       'actions',
     ])
   })
 
-  it('auto-hides id and usage for existing saved column prefs after version bumps', async () => {
+  it('auto-hides newly default-hidden columns for existing saved prefs after version bumps', async () => {
     localStorage.setItem('group-hidden-columns', JSON.stringify([]))
-    // No version key means version 1, so migrations 2 and 3 both apply.
+    // No version key means version 1, so migrations 2 through 4 all apply.
 
     const wrapper = await mountView()
 
     expect(columnKeys(wrapper)).toEqual([
       'name',
-      'platform',
-      'billing_type',
-      'rate_multiplier',
-      'is_exclusive',
       'account_count',
       'capacity',
-      'status',
+      'billing_type',
+      'rate_multiplier',
       'actions',
     ])
     expect(JSON.parse(localStorage.getItem('group-hidden-columns')!)).toEqual(
-      expect.arrayContaining(['id', 'usage']),
+      expect.arrayContaining(['id', 'usage', 'platform', 'is_exclusive', 'status']),
     )
-    expect(localStorage.getItem('group-column-settings-version')).toBe('3')
+    expect(localStorage.getItem('group-column-settings-version')).toBe('4')
   })
 
-  it('toggles a column and persists hidden column keys', async () => {
+  it('toggles a column from the view menu and persists hidden column keys', async () => {
     const wrapper = await mountView()
 
     await openColumnSettings(wrapper)
-    await clickColumnToggle(wrapper, 'Usage')
+    await clickColumnToggle(wrapper, 'usage')
 
     expect(columnKeys(wrapper)).toEqual([
       'name',
-      'platform',
-      'billing_type',
-      'rate_multiplier',
-      'is_exclusive',
       'account_count',
       'capacity',
+      'billing_type',
+      'rate_multiplier',
       'usage',
-      'status',
       'actions',
     ])
-    expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['id']))
+    expect(localStorage.getItem('group-hidden-columns')).toBe(
+      JSON.stringify(['id', 'platform', 'is_exclusive', 'status']),
+    )
   })
 
-  it('can show the id column from column settings', async () => {
+  it('can show the id column from the view menu', async () => {
     const wrapper = await mountView()
 
     await openColumnSettings(wrapper)
-    await clickColumnToggle(wrapper, 'ID')
+    await clickColumnToggle(wrapper, 'id')
 
     expect(columnKeys(wrapper)).toEqual([
       'name',
       'id',
-      'platform',
-      'billing_type',
-      'rate_multiplier',
-      'is_exclusive',
       'account_count',
       'capacity',
-      'status',
+      'billing_type',
+      'rate_multiplier',
       'actions',
     ])
-    expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['usage']))
+    expect(localStorage.getItem('group-hidden-columns')).toBe(
+      JSON.stringify(['platform', 'is_exclusive', 'usage', 'status']),
+    )
   })
 
   it('skips usage and capacity fetches until consuming columns are shown', async () => {
@@ -363,6 +332,7 @@ describe('admin GroupsView column settings', () => {
       'group-hidden-columns',
       JSON.stringify(['billing_type', 'usage', 'capacity']),
     )
+    localStorage.setItem('group-column-settings-version', '4')
 
     const wrapper = await mountView()
 
@@ -370,12 +340,12 @@ describe('admin GroupsView column settings', () => {
     expect(getCapacitySummary).not.toHaveBeenCalled()
 
     await openColumnSettings(wrapper)
-    await clickColumnToggle(wrapper, 'Usage')
+    await clickColumnToggle(wrapper, 'usage')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getUsageSummary).toHaveBeenCalledWith()
     expect(getCapacitySummary).not.toHaveBeenCalled()
 
-    await clickColumnToggle(wrapper, 'Capacity')
+    await clickColumnToggle(wrapper, 'capacity')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
   })
@@ -385,13 +355,58 @@ describe('admin GroupsView column settings', () => {
       { group_id: 1, today_cost: 1.25, yesterday_cost: 2.5, total_cost: 9.75 },
     ])
 
+    localStorage.setItem('group-hidden-columns', JSON.stringify([]))
+    localStorage.setItem('group-column-settings-version', '4')
     const wrapper = await mountView()
-    const text = wrapper.get('[data-test="usage-cell"]').text()
+    const text = wrapper.get('td[data-col="usage"]').text()
 
     expect(text).toContain('Today$1.25')
     expect(text).toContain('Yesterday$2.50')
     expect(text).toContain('Total$9.75')
     expect(text.indexOf('Today')).toBeLessThan(text.indexOf('Yesterday'))
     expect(text.indexOf('Yesterday')).toBeLessThan(text.indexOf('Total'))
+  })
+
+  it('filters by provider chip and opens the route drawer with member accounts', async () => {
+    getAllGroups.mockResolvedValue([
+      createGroup(),
+      createGroup({ id: 2, name: 'Codex', platform: 'openai' }),
+    ])
+    listAccounts.mockResolvedValue({
+      items: [
+        { id: 7, name: 'Claude Primary', platform: 'anthropic', status: 'active', schedulable: true, group_ids: [1], rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null },
+        { id: 8, name: 'Other Group', platform: 'anthropic', status: 'active', schedulable: true, group_ids: [9], rate_limit_reset_at: null, overload_until: null, temp_unschedulable_until: null },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 100,
+      pages: 1,
+    })
+
+    const wrapper = await mountView()
+
+    const chips = wrapper.findAll('[data-testid^="group-platform-"]')
+    expect(chips.map((chip) => chip.attributes('data-testid'))).toEqual([
+      'group-platform-anthropic',
+      'group-platform-openai',
+    ])
+    await chips[1].trigger('click')
+    await flushPromises()
+    expect(listGroups).toHaveBeenLastCalledWith(
+      1,
+      expect.any(Number),
+      expect.objectContaining({ platform: 'openai' }),
+      expect.anything(),
+    )
+    expect(chips[1].attributes('aria-pressed')).toBe('true')
+
+    await wrapper.get('[data-testid="group-row-1"]').trigger('click')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(1, 100, { group: '1', lite: '1' })
+    const map = document.body.querySelector('[data-testid="group-route-map"]')
+    expect(map?.textContent).toContain('Claude Primary')
+    expect(map?.textContent).not.toContain('Other Group')
+    expect(getUsageSummary).toHaveBeenCalled()
   })
 })

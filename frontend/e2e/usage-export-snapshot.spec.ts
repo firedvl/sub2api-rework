@@ -30,7 +30,9 @@ for (const width of [390, 1280]) {
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Export CSV', exact: true }).click()
     await expect.poll(() => exportQueries.length).toBe(1)
-    await page.locator('label').filter({ hasText: /^Type$/ }).locator('..').getByRole('button').click()
+    // Type now lives in the toolbar's Filters popover.
+    await page.getByTestId('usage-more-filters').click()
+    await page.locator('#usage-more-filters label').filter({ has: page.getByText('Type', { exact: true }) }).getByRole('button').first().click()
     await page.getByRole('option', { name: 'Sync', exact: true }).click()
     release()
     const download = await downloadPromise

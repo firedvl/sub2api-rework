@@ -29,14 +29,17 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Expired', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Next', exact: true }).click()
     await expect.poll(() => requests.at(-1)?.get('page')).toBe('2')
-    await page.getByRole('button').filter({ hasText: /^All Protocols$/ }).click()
+    // Protocol moved into the toolbar's Filters popover.
+    await page.locator('[data-test="proxy-filters"]').click()
+    await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button').filter({ hasText: /^All Protocols$/ }).click()
     await page.getByRole('option', { name: 'SOCKS5', exact: true }).click()
     await expect.poll(() => requests.at(-1)?.get('page')).toBe('1')
     expect(requests.at(-1)?.get('protocol')).toBe('socks5')
     await page.getByRole('button', { name: 'Next', exact: true }).click()
     await expect.poll(() => requests.at(-1)?.get('page')).toBe('2')
-    await page.getByRole('button').filter({ hasText: /^All Status$/ }).click()
-    await page.getByRole('option', { name: 'Expired', exact: true }).click()
+    // Status is now a segmented button switch in the toolbar.
+    await page.locator('[data-test="proxy-status-expired"]').click()
+    await expect(page.locator('[data-test="proxy-status-expired"]')).toHaveAttribute('aria-pressed', 'true')
     await expect.poll(() => requests.at(-1)?.get('page')).toBe('1')
     expect(requests.at(-1)?.get('status')).toBe('expired')
     malformed = true
@@ -45,7 +48,9 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Recovery Proxy', { exact: true })).toBeVisible()
     malformed = false
     await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-    await page.getByRole('button', { name: 'Import', exact: true }).click()
+    // Import moved into the toolbar's ⋯ menu.
+    await page.locator('[data-test="proxy-more"]').click()
+    await page.getByRole('menuitem', { name: 'Import', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Import Proxies', exact: true })
     await dialog.locator('input[type="file"]').setInputFiles({ name: 'fixture.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
       exported_at: '2026-09-30T00:00:00Z', proxies: [], accounts: []

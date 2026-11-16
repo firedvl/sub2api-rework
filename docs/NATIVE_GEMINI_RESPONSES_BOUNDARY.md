@@ -2,8 +2,8 @@
 
 Native Gemini API-key accounts now have a direct Responses adapter in
 `GeminiMessagesCompatService.ForwardAsResponses`. The Gateway Responses handler
-and Operator Assistant relay dispatch those accounts to native `generateContent`
-or `streamGenerateContent`. Neither path translates through Anthropic or
+dispatches those accounts to native `generateContent` or
+`streamGenerateContent`. It does not translate through Anthropic or
 Antigravity. See [the supported subset and verification limits](native-gemini-responses.md).
 
 `GatewayService.ForwardAsResponses` remains the Anthropic converter and rejects

@@ -1,105 +1,129 @@
 <template>
   <AppLayout>
-    <div class="operator-accounts-layout">
-      <div class="operator-account-view-bar">
-        <div
-          class="operator-account-view-tabs"
-          role="tablist"
-          :aria-label="t('admin.accounts.viewSwitcher')"
+    <div class="ui-page operator-accounts-layout">
+      <div class="ui-toolbar acct-toolbar" role="toolbar" :aria-label="t('admin.accountsUi.toolbar')">
+        <AccountTableFilters
+          v-model:searchQuery="params.search"
+          :filters="params"
+          :groups="groups"
+          :show-status="accountView === 'technical'"
+          :platforms="providerChips"
+          :sort-value="accountView === 'capacity' ? fleetSortPreset : undefined"
+          :sort-options="accountView === 'capacity' ? fleetSortOptions : undefined"
+          @update:filters="(newFilters) => Object.assign(params, newFilters)"
+          @update:sort="setCapacitySort"
+          @change="debouncedReload"
+          @update:searchQuery="debouncedReload"
         >
-        <button
-          id="account-capacity-tab"
-          ref="capacityViewTabRef"
-          type="button"
-          role="tab"
-          class="operator-account-view-tab"
-          :class="{ 'is-active': accountView === 'capacity' }"
-          :aria-selected="accountView === 'capacity'"
-          aria-controls="account-capacity-panel"
-          :tabindex="accountView === 'capacity' ? 0 : -1"
-          @click="setAccountView('capacity')"
-          @keydown.right.prevent="setAccountView('technical', true)"
-          @keydown.end.prevent="setAccountView('technical', true)"
-        >
-          {{ t('admin.accounts.capacityView') }}
-        </button>
-        <button
-          id="account-technical-tab"
-          ref="technicalViewTabRef"
-          type="button"
-          role="tab"
-          class="operator-account-view-tab"
-          :class="{ 'is-active': accountView === 'technical' }"
-          :aria-selected="accountView === 'technical'"
-          aria-controls="account-technical-panel"
-          :tabindex="accountView === 'technical' ? 0 : -1"
-          @click="setAccountView('technical')"
-          @keydown.left.prevent="setAccountView('capacity', true)"
-          @keydown.home.prevent="setAccountView('capacity', true)"
-        >
-          {{ t('admin.accounts.technicalView') }}
-        </button>
-        </div>
-        <div v-if="accountView === 'capacity'" class="operator-capacity-controls">
-          <Select
-            :model-value="operatorStatus"
-            :options="operatorStatusOptions"
-            aria-label="Filter accounts by operator status"
-            @update:model-value="setOperatorStatus"
-          />
-          <Select
-            :model-value="capacitySort"
-            :options="capacitySortOptions"
-            aria-label="Sort account capacity rows"
-            @update:model-value="setCapacitySort"
-          />
-        </div>
-      </div>
-
-      <div class="operator-accounts-toolbar">
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
-          <AccountTableFilters
-            v-model:searchQuery="params.search"
-            :filters="params"
-            :groups="groups"
-            :show-status="accountView === 'technical'"
-            @update:filters="(newFilters) => Object.assign(params, newFilters)"
-            @change="debouncedReload"
-            @update:searchQuery="debouncedReload"
-          />
-          <AccountTableActions
-            :loading="loading || refreshing || autoRefreshFetching"
-            @refresh="handleManualRefresh"
-            @create="showCreate = true"
+          <div
+            v-if="accountView === 'capacity'"
+            class="viz-seg acct-status-seg"
+            role="group"
+            :aria-label="t('admin.accountsUi.statusFilter')"
           >
-            <template #after>
-              <!-- Auto Refresh Dropdown -->
-              <div class="relative" ref="autoRefreshDropdownRef">
-                <button
-                  ref="autoRefreshTriggerRef"
-                  @click="
-                    showAutoRefreshDropdown = !showAutoRefreshDropdown;
-                    showAccountToolsDropdown = false
-                  "
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.accounts.autoRefresh')"
-                  :aria-expanded="showAutoRefreshDropdown"
-                >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '']" />
-                  <span class="hidden md:inline">
-                    {{
-                      autoRefreshEnabled
-                        ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
-                        : t('admin.accounts.autoRefresh')
-                    }}
-                  </span>
-                </button>
+            <button
+              v-for="segment in statusSegments"
+              :key="segment.value"
+              type="button"
+              :aria-pressed="operatorStatus === segment.value"
+              :data-testid="`account-status-${segment.value}`"
+              @click="setOperatorStatus(segment.value)"
+            >
+              <span v-if="segment.dot" class="ui-dot" :class="segment.dot"></span>
+              {{ segment.label }}
+              <span class="acct-seg-count">{{ segment.count }}</span>
+            </button>
+          </div>
+        </AccountTableFilters>
+        <span class="ui-grow"></span>
+        <AccountTableActions
+          :loading="loading || refreshing || autoRefreshFetching"
+          @refresh="handleManualRefresh"
+          @create="showCreate = true"
+        >
+          <template #before>
+            <button
+              v-if="accountView === 'capacity'"
+              type="button"
+              class="app-icon-button acct-icon-toggle"
+              :aria-pressed="groupByProvider"
+              :aria-label="t('admin.accountsUi.groupByProvider')"
+              :title="t('admin.accountsUi.groupByProvider')"
+              @click="toggleGroupByProvider"
+            >
+              <Icon name="layers" size="sm" />
+            </button>
+            <div
+              class="viz-seg acct-view-tabs"
+              role="tablist"
+              :aria-label="t('admin.accounts.viewSwitcher')"
+            >
+              <button
+                id="account-capacity-tab"
+                ref="capacityViewTabRef"
+                type="button"
+                role="tab"
+                :aria-selected="accountView === 'capacity'"
+                aria-controls="account-capacity-panel"
+                :aria-label="t('admin.accounts.capacityView')"
+                :title="t('admin.accounts.capacityView')"
+                :tabindex="accountView === 'capacity' ? 0 : -1"
+                @click="setAccountView('capacity')"
+                @keydown.right.prevent="setAccountView('technical', true)"
+                @keydown.end.prevent="setAccountView('technical', true)"
+              >
+                <Icon name="chartBar" size="sm" />
+              </button>
+              <button
+                id="account-technical-tab"
+                ref="technicalViewTabRef"
+                type="button"
+                role="tab"
+                :aria-selected="accountView === 'technical'"
+                aria-controls="account-technical-panel"
+                :aria-label="t('admin.accounts.technicalView')"
+                :title="t('admin.accounts.technicalView')"
+                :tabindex="accountView === 'technical' ? 0 : -1"
+                @click="setAccountView('technical')"
+                @keydown.left.prevent="setAccountView('capacity', true)"
+                @keydown.home.prevent="setAccountView('capacity', true)"
+              >
+                <Icon name="grid" size="sm" />
+              </button>
+            </div>
+          </template>
+          <template #after>
+            <!-- Auto refresh: countdown and interval menu, joined to the refresh button. -->
+            <div class="relative" ref="autoRefreshDropdownRef">
+              <button
+                ref="autoRefreshTriggerRef"
+                type="button"
+                class="app-icon-button acct-auto-refresh"
+                :class="{ 'is-on': autoRefreshEnabled }"
+                :title="t('admin.accounts.autoRefresh')"
+                :aria-label="autoRefreshEnabled
+                  ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
+                  : t('admin.accounts.autoRefresh')"
+                :aria-expanded="showAutoRefreshDropdown"
+                @click="
+                  showAutoRefreshDropdown = !showAutoRefreshDropdown;
+                  showAccountToolsDropdown = false
+                "
+              >
+                <template v-if="autoRefreshEnabled">
+                  <span class="acct-live-dot" aria-hidden="true"></span>
+                  <span class="acct-countdown" data-test="auto-refresh-countdown">{{ autoRefreshCountdown }}s</span>
+                </template>
+                <Icon v-else name="chevronDown" size="xs" />
+              </button>
+              <Transition name="menu-pop">
                 <div
                   v-if="showAutoRefreshDropdown"
-                  class="operator-menu menu-enter absolute right-0 z-50 mt-2 w-56 origin-top-right"
+                  class="operator-menu absolute right-0 z-50 mt-2 w-52 origin-top-right"
                 >
-                  <div class="p-2">
+                  <div class="p-1.5">
                     <button
+                      type="button"
                       @click="setAutoRefreshEnabled(!autoRefreshEnabled)"
                       class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm"
                       :aria-pressed="autoRefreshEnabled"
@@ -111,6 +135,7 @@
                     <button
                       v-for="sec in autoRefreshIntervals"
                       :key="sec"
+                      type="button"
                       @click="setAutoRefreshInterval(sec)"
                       class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm"
                       :aria-pressed="autoRefreshIntervalSeconds === sec"
@@ -120,162 +145,145 @@
                     </button>
                   </div>
                 </div>
-              </div>
-
-              <!-- More Tools Dropdown -->
-              <div class="relative" ref="accountToolsDropdownRef">
-                <button
-                  ref="accountToolsTriggerRef"
-                  @click="toggleAccountToolsDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.accounts.moreActions')"
-                  :aria-expanded="showAccountToolsDropdown"
+              </Transition>
+            </div>
+          </template>
+          <template #beforeCreate>
+            <!-- More: data, bulk, tools, and (technical view) columns -->
+            <div class="relative" ref="accountToolsDropdownRef">
+              <button
+                ref="accountToolsTriggerRef"
+                type="button"
+                class="btn btn-secondary acct-more-trigger"
+                :title="t('admin.accounts.moreActions')"
+                :aria-label="t('admin.accounts.moreActions')"
+                :aria-expanded="showAccountToolsDropdown"
+                @click="toggleAccountToolsDropdown"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+              <Teleport to="body">
+                <div
+                  v-if="showAccountToolsDropdown"
+                  class="account-tools-menu operator-menu menu-enter fixed z-[9999] origin-top-right overflow-hidden"
+                  :style="accountToolsDropdownStyle"
+                  @click.stop
                 >
-                  <Icon name="more" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1 hidden md:inline" />
-                </button>
-                <Teleport to="body">
-                  <div
-                    v-if="showAccountToolsDropdown"
-                    class="account-tools-menu operator-menu menu-enter fixed z-[9999] origin-top-right overflow-hidden"
-                    :style="accountToolsDropdownStyle"
-                    @click.stop
-                  >
-                    <div class="overflow-y-auto p-2" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.dataActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item operator-menu-item" @click="openSyncFromCrs">
-                        <span class="account-tools-menu-icon">
-                          <Icon name="sync" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item operator-menu-item" @click="openImportData">
-                        <span class="account-tools-menu-icon">
-                          <Icon name="upload" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item operator-menu-item" @click="openExportDataDialogFromMenu">
-                        <span class="account-tools-menu-icon">
-                          <Icon name="download" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">
-                          {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
-                        </span>
-                        <span
-                          v-if="selIds.length"
-                          class="operator-menu-count rounded-full px-2 py-0.5 text-xs font-medium"
-                        >
-                          {{ t('admin.accounts.selectedCount', { count: selIds.length }) }}
-                        </span>
-                      </button>
+                  <div class="overflow-y-auto p-1.5" :style="{ maxHeight: `${accountToolsDropdownPosition.maxHeight}px` }">
+                    <div class="account-tools-menu-label">{{ t('admin.accounts.dataActions') }}</div>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" @click="openSyncFromCrs">
+                      <Icon name="sync" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.accounts.syncFromCrs') }}</span>
+                    </button>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" @click="openImportData">
+                      <Icon name="upload" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.accounts.dataImport') }}</span>
+                    </button>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" @click="openExportDataDialogFromMenu">
+                      <Icon name="download" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">
+                        {{ selIds.length ? t('admin.accounts.dataExportSelected') : t('admin.accounts.dataExport') }}
+                      </span>
+                      <span v-if="selIds.length" class="operator-menu-count rounded-full px-2 py-0.5 text-xs font-medium">
+                        {{ selIds.length }}
+                      </span>
+                    </button>
 
-                      <div class="operator-menu-divider my-2 border-t"></div>
-                      <div class="px-2 py-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.toolActions') }}
-                        </div>
-                      </div>
-                      <button class="account-tools-menu-item operator-menu-item" @click="openErrorPassthrough">
-                        <span class="account-tools-menu-icon">
-                          <Icon name="shield" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
-                      </button>
-                      <button class="account-tools-menu-item operator-menu-item" @click="openTLSFingerprintProfiles">
-                        <span class="account-tools-menu-icon">
-                          <Icon name="lock" size="sm" />
-                        </span>
-                        <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
-                      </button>
+                    <div class="operator-menu-divider my-1.5 border-t"></div>
+                    <div class="account-tools-menu-label">{{ t('admin.accountsUi.bulk') }}</div>
+                    <button
+                      type="button"
+                      class="account-tools-menu-item operator-menu-item"
+                      :disabled="selectingAllResults || selectAllTargetCount === 0"
+                      @click="selectAllFromMenu"
+                    >
+                      <Icon name="checkCircle" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.accountsUi.selectAll') }}</span>
+                      <span class="operator-menu-count rounded-full px-2 py-0.5 text-xs font-medium">{{ selectAllTargetCount }}</span>
+                    </button>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" data-test="edit-filtered" @click="editFilteredFromMenu">
+                      <Icon name="filter" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.accountsUi.editFiltered') }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="account-tools-menu-item operator-menu-item"
+                      data-testid="edit-auto-warmup-eligible"
+                      @click="editAutoWarmupFromMenu"
+                    >
+                      <Icon name="fire" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.accounts.bulkEdit.editAllAutoWarmupEligible') }}</span>
+                    </button>
 
-                      <div class="operator-menu-divider my-2 border-t"></div>
-                      <div class="px-2 py-2">
-                        <div class="flex items-center justify-between gap-3">
-                          <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                            {{ t('admin.accounts.viewColumns') }}
-                          </span>
-                          <Icon name="grid" size="sm" class="text-gray-400" />
-                        </div>
-                      </div>
-                      <div class="grid grid-cols-1 gap-1">
-                        <button
-                          v-for="col in toggleableColumns"
-                          :key="col.key"
-                          @click="toggleColumn(col.key)"
-                          class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors"
-                          :aria-pressed="isColumnVisible(col.key)"
-                        >
-                          <span class="truncate">{{ col.label }}</span>
-                          <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="operator-menu-check" />
-                        </button>
-                      </div>
-                    </div>
+                    <div class="operator-menu-divider my-1.5 border-t"></div>
+                    <div class="account-tools-menu-label">{{ t('admin.accounts.toolActions') }}</div>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" @click="openErrorPassthrough">
+                      <Icon name="shield" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.errorPassthrough.title') }}</span>
+                    </button>
+                    <button type="button" class="account-tools-menu-item operator-menu-item" @click="openTLSFingerprintProfiles">
+                      <Icon name="lock" size="sm" class="account-tools-menu-icon" />
+                      <span class="flex-1 text-left">{{ t('admin.tlsFingerprintProfiles.title') }}</span>
+                    </button>
+
+                    <template v-if="accountView === 'technical'">
+                      <div class="operator-menu-divider my-1.5 border-t"></div>
+                      <div class="account-tools-menu-label">{{ t('admin.accounts.viewColumns') }}</div>
+                      <button
+                        v-for="col in toggleableColumns"
+                        :key="col.key"
+                        type="button"
+                        @click="toggleColumn(col.key)"
+                        class="operator-menu-item flex w-full items-center justify-between rounded-md px-3 py-1.5 text-sm transition-colors"
+                        :aria-pressed="isColumnVisible(col.key)"
+                      >
+                        <span class="truncate">{{ col.label }}</span>
+                        <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="operator-menu-check" />
+                      </button>
+                    </template>
                   </div>
-                </Teleport>
-              </div>
-            </template>
-          </AccountTableActions>
-        </div>
-        <div
-          v-if="hasPendingListSync"
-          class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
-        >
-          <span>{{ t('admin.accounts.listPendingSyncHint') }}</span>
-          <button
-            class="btn btn-secondary px-2 py-1 text-xs"
-            @click="syncPendingListChanges"
-          >
+                </div>
+              </Teleport>
+            </div>
+          </template>
+        </AccountTableActions>
+      </div>
+
+      <Transition name="fade">
+        <div v-if="hasPendingListSync" class="acct-pending" role="status">
+          <Icon name="sync" size="sm" />
+          <span class="flex-1">{{ t('admin.accounts.listPendingSyncHint') }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" @click="syncPendingListChanges">
             {{ t('admin.accounts.listPendingSyncAction') }}
           </button>
         </div>
-      </div>
+      </Transition>
 
       <section
         v-show="accountView === 'capacity'"
         id="account-capacity-panel"
+        class="ui-card acct-card"
         role="tabpanel"
         aria-labelledby="account-capacity-tab"
       >
-        <OperatorCapacityOverview
-          :accounts="fleetAccounts"
-          :usage-by-account-id="fleetUsageByAccountId"
-          :errors-by-account-id="{ ...fleetUsageErrorByAccountId, ...capacityUsageQueryErrors }"
+        <AccountFleetTable
+          :rows="visibleFleetRows"
+          :sort="fleetSort"
+          :selected="selectedSet"
+          :group-by-provider="groupByProvider"
           :loading="fleetLoading"
           :error="fleetError"
-          :status="operatorStatus"
-          :sort="capacitySort"
-          @retry="loadFleetCapacity"
-        >
-          <template #account-maintenance="{ account }">
-            <AutoWarmupStatus :account="account" :global-enabled="globalAutoWarmupEnabled" details />
-          </template>
-          <template #account-actions="{ account }">
-            <button
-              type="button"
-              class="operator-account-row-action"
-              :title="t('common.edit')"
-              :aria-label="`${t('common.edit')} ${account.name}`"
-              @click="handleEdit(account)"
-            >
-              <Icon name="edit" size="sm" />
-            </button>
-            <button
-              type="button"
-              class="operator-account-row-action"
-              :title="t('common.more')"
-              :aria-label="`${t('common.more')} ${account.name}`"
-              @click="openMenu(account, $event)"
-            >
-              <Icon name="more" size="sm" />
-            </button>
-          </template>
-        </OperatorCapacityOverview>
+          :filtered="hasActiveFleetFilters"
+          :today-loading="fleetTodayLoading"
+          @open="openDrawer"
+          @more="openMenu"
+          @toggle="toggleSel"
+          @toggle-visible="toggleVisibleFleet"
+          @sort="handleFleetSort"
+          @retry="loadFleetCapacity()"
+          @reset-filters="resetFleetFilters"
+          @create="showCreate = true"
+        />
       </section>
 
       <section
@@ -285,24 +293,6 @@
         role="tabpanel"
         aria-labelledby="account-technical-tab"
       >
-        <AccountBulkActionsBar
-          :selected-ids="selIds"
-          :total-results="pagination.total"
-          :selecting-all="selectingAllResults"
-          :all-results-selected="allResultsSelected"
-          @delete="handleBulkDelete"
-          @reset-status="handleBulkResetStatus"
-          @refresh-token="handleBulkRefreshToken"
-          @probe-upstream-billing="handleBulkProbeUpstreamBilling"
-          @edit-selected="openBulkEditSelected"
-          @edit-filtered="openBulkEditFiltered"
-          @edit-auto-warmup-eligible="openBulkEditAutoWarmupEligible"
-          @clear="clearSelection"
-          @select-page="selectPage"
-          @select-all-results="handleSelectAllResults"
-          @toggle-schedulable="handleBulkToggleSchedulable"
-        />
-
         <div class="operator-account-technical-shell">
         <div ref="accountTableRef" class="operator-account-table flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
@@ -574,18 +564,18 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="operator-table-row-action">
+            <div class="flex items-center gap-0.5">
+              <button type="button" @click="handleEdit(row)" class="operator-table-row-action" :title="t('common.edit')">
                 <Icon name="edit" size="sm" />
-                <span>{{ t('common.edit') }}</span>
+                <span class="sr-only">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="operator-table-row-action is-danger">
+              <button type="button" @click="handleDelete(row)" class="operator-table-row-action is-danger" :title="t('common.delete')">
                 <Icon name="trash" size="sm" />
-                <span>{{ t('common.delete') }}</span>
+                <span class="sr-only">{{ t('common.delete') }}</span>
               </button>
-              <button @click="openMenu(row, $event)" class="operator-table-row-action">
+              <button type="button" @click="openMenu(row, $event)" class="operator-table-row-action" :title="t('common.more')">
                 <Icon name="more" size="sm" />
-                <span>{{ t('common.more') }}</span>
+                <span class="sr-only">{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
@@ -603,13 +593,47 @@
         </div>
       </section>
     </div>
+    <AccountBulkActionsBar
+      :selected-ids="selIds"
+      :total-results="accountView === 'capacity' ? visibleFleetRows.length : pagination.total"
+      :selecting-all="selectingAllResults"
+      :all-results-selected="allResultsSelected"
+      :page-selectable="accountView === 'technical'"
+      @delete="handleBulkDelete"
+      @reset-status="handleBulkResetStatus"
+      @refresh-token="handleBulkRefreshToken"
+      @probe-upstream-billing="handleBulkProbeUpstreamBilling"
+      @edit-selected="openBulkEditSelected"
+      @clear="clearSelection"
+      @select-page="selectPage"
+      @select-all-results="selectAllFromBar"
+      @toggle-schedulable="handleBulkToggleSchedulable"
+    />
+    <AccountDetailDrawer
+      :open="drawerAccountId !== null"
+      :row="drawerRow"
+      :groups="groups"
+      :global-auto-warmup-enabled="globalAutoWarmupEnabled"
+      :toggling-schedulable="drawerRow !== null && togglingSchedulable === drawerRow.account.id"
+      :usage-loading="drawerRow !== null && usageBatchLoadingByAccountId[String(drawerRow.account.id)] === true"
+      @close="closeDrawer"
+      @test="drawerActions.test"
+      @reauth="drawerActions.reauth"
+      @edit="drawerActions.edit"
+      @stats="drawerActions.stats"
+      @temp-unsched="drawerActions.tempUnsched"
+      @more="drawerActions.more"
+      @refresh-usage="drawerActions.refreshUsage"
+      @toggle-schedulable="drawerActions.toggleSchedulable"
+      @revert-fallback="drawerActions.revertFallback"
+    />
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" :global-auto-warmup-enabled="globalAutoWarmupEnabled" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @delete="handleDelete" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="menuActions.test" @stats="menuActions.stats" @schedule="menuActions.schedule" @duplicate="handleDuplicateAccount" @reauth="menuActions.reauth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="menuActions.createSparkShadow" @delete="menuActions.delete" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal
       :show="showImportData"
@@ -649,7 +673,7 @@
 import { ref, reactive, computed, inject, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { routeLocationKey } from 'vue-router'
+import { routeLocationKey, routerKey } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
@@ -674,13 +698,15 @@ import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vu
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
-import Select, { type SelectOption } from '@/components/common/Select.vue'
+import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-import OperatorCapacityOverview from '@/components/admin/OperatorCapacityOverview.vue'
+import AccountFleetTable from '@/components/admin/account/AccountFleetTable.vue'
+import AccountDetailDrawer from '@/components/admin/account/AccountDetailDrawer.vue'
+import { OPERATOR_STATUSES, PLATFORM_ORDER, STATUS_DOT, buildFleetRow, providerLabel, sortFleetRows, type FleetSort, type FleetSortKey } from '@/components/admin/account/accountFleet'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -704,40 +730,57 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const route = inject(routeLocationKey, null)
+const router = inject(routerKey, null)
+const firstQueryValue = (value: unknown) => (Array.isArray(value) ? value[0] : value)
 
 type AccountView = 'capacity' | 'technical'
-const routeAccountView = Array.isArray(route?.query.view) ? route.query.view[0] : route?.query.view
+const routeAccountView = firstQueryValue(route?.query.view)
 const accountView = ref<AccountView>(routeAccountView === 'technical' ? 'technical' : 'capacity')
-const routeAutoWarmup = Array.isArray(route?.query.auto_warmup)
-  ? route.query.auto_warmup[0]
-  : route?.query.auto_warmup
+const routeAutoWarmup = firstQueryValue(route?.query.auto_warmup)
 type CapacitySort = 'capacity' | 'name' | 'status'
-const routeOperatorStatus = Array.isArray(route?.query.operator_status)
-  ? route.query.operator_status[0]
-  : route?.query.operator_status
+const routeOperatorStatus = firstQueryValue(route?.query.operator_status)
 const operatorStatus = ref<OperatorAccountStatus | 'all'>(
   ['active', 'limited', 'error', 'disabled'].includes(String(routeOperatorStatus))
     ? routeOperatorStatus as OperatorAccountStatus
     : 'all'
 )
-const capacitySort = ref<CapacitySort>('capacity')
-const operatorStatusOptions: SelectOption[] = [
-  { value: 'all', label: 'All operator states' },
-  { value: 'active', label: 'Active' },
-  { value: 'limited', label: 'Limited' },
-  { value: 'error', label: 'Error' },
-  { value: 'disabled', label: 'Disabled' },
-]
-const capacitySortOptions: SelectOption[] = [
-  { value: 'capacity', label: 'Lowest capacity first' },
-  { value: 'status', label: 'Status priority' },
-  { value: 'name', label: 'Account name' },
-]
+const routeSearch = firstQueryValue(route?.query.search)
+const fleetSort = reactive<FleetSort>({ key: 'capacity', dir: 1 })
+const CAPACITY_SORTS: CapacitySort[] = ['capacity', 'status', 'name']
+const fleetSortPreset = computed(() => (
+  (CAPACITY_SORTS as string[]).includes(fleetSort.key) ? fleetSort.key : undefined
+))
+const fleetSortOptions = computed<SelectOption[]>(() => [
+  { value: 'capacity', label: t('admin.accountsUi.sortCapacity') },
+  { value: 'status', label: t('admin.accountsUi.sortStatus') },
+  { value: 'name', label: t('admin.accountsUi.sortName') },
+])
 const setOperatorStatus = (value: string | number | boolean | null) => {
   operatorStatus.value = String(value) as OperatorAccountStatus | 'all'
 }
 const setCapacitySort = (value: string | number | boolean | null) => {
-  capacitySort.value = String(value) as CapacitySort
+  if (!(CAPACITY_SORTS as unknown[]).includes(value)) return
+  fleetSort.key = value as CapacitySort
+  fleetSort.dir = 1
+}
+// Header sorts toggle direction; counts and recency start with the largest first.
+const handleFleetSort = (key: FleetSortKey) => {
+  if (fleetSort.key === key) {
+    fleetSort.dir = fleetSort.dir === 1 ? -1 : 1
+    return
+  }
+  fleetSort.key = key
+  fleetSort.dir = key === 'today' || key === 'last_used' ? -1 : 1
+}
+const GROUP_BY_PROVIDER_KEY = 'account-fleet-group-by-provider'
+const groupByProvider = ref(typeof window !== 'undefined' && localStorage.getItem(GROUP_BY_PROVIDER_KEY) === '1')
+const toggleGroupByProvider = () => {
+  groupByProvider.value = !groupByProvider.value
+  try {
+    localStorage.setItem(GROUP_BY_PROVIDER_KEY, groupByProvider.value ? '1' : '0')
+  } catch {
+    // Preference only; the toggle still works without storage.
+  }
 }
 const capacityViewTabRef = ref<HTMLButtonElement | null>(null)
 const technicalViewTabRef = ref<HTMLButtonElement | null>(null)
@@ -786,22 +829,16 @@ type AccountBulkEditTarget =
       selectedPlatforms: AccountPlatform[]
       selectedTypes: AccountType[]
     }
-const selPlatforms = computed<AccountPlatform[]>(() => {
-  const platforms = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
-      .map(a => a.platform)
-  )
-  return [...platforms]
+// Selection can come from the paginated table or the full fleet table.
+const selectedAccounts = computed(() => {
+  const byId = new Map<number, AccountListItem>()
+  for (const account of [...fleetAccounts.value, ...accounts.value]) {
+    if (isSelected(account.id)) byId.set(account.id, account)
+  }
+  return [...byId.values()]
 })
-const selTypes = computed<AccountType[]>(() => {
-  const types = new Set(
-    accounts.value
-      .filter(a => isSelected(a.id))
-      .map(a => a.type)
-  )
-  return [...types]
-})
+const selPlatforms = computed<AccountPlatform[]>(() => [...new Set(selectedAccounts.value.map(a => a.platform))])
+const selTypes = computed<AccountType[]>(() => [...new Set(selectedAccounts.value.map(a => a.type))])
 const showCreate = ref(false)
 const showEdit = ref(false)
 const showSync = ref(false)
@@ -939,10 +976,9 @@ let usageBatchFlushTimer: ReturnType<typeof setTimeout> | null = null
 let queuedUsageBatchForce = false
 let usageBatchRequestToken = 0
 const fleetAccounts = ref<Account[]>([])
-const fleetUsageByAccountId = usageBatchByAccountId
-const fleetUsageErrorByAccountId = usageBatchErrorByAccountId
 const fleetLoading = ref(false)
 const fleetError = ref(false)
+const fleetLoadedOnce = ref(false)
 let fleetLoadSeq = 0
 
 const buildDefaultTodayStats = (): WindowStats => ({
@@ -1037,6 +1073,97 @@ const handleUsageQueryError = (accountID: number, error: string | null) => {
   else delete capacityUsageQueryErrors.value[key]
   usageBatchErrorByAccountId.value[key] = error
 }
+// Fleet table: every filtered account with its capacity, today's traffic, and status.
+const fleetTodayStats = ref<Record<string, WindowStats>>({})
+const fleetTodayLoading = ref(false)
+let fleetTodaySeq = 0
+const refreshFleetTodayStats = async (accountIDs: number[]) => {
+  const seq = ++fleetTodaySeq
+  if (!accountIDs.length) {
+    fleetTodayStats.value = {}
+    fleetTodayLoading.value = false
+    return
+  }
+  fleetTodayLoading.value = true
+  try {
+    const result = await adminAPI.accounts.getBatchTodayStats(accountIDs)
+    if (seq !== fleetTodaySeq) return
+    const stats = result?.stats ?? {}
+    fleetTodayStats.value = Object.fromEntries(
+      accountIDs.map((id) => [String(id), stats[String(id)] ?? buildDefaultTodayStats()])
+    )
+  } catch (error) {
+    if (seq !== fleetTodaySeq) return
+    console.error('Failed to load fleet today stats:', error)
+  } finally {
+    if (seq === fleetTodaySeq) fleetTodayLoading.value = false
+  }
+}
+
+const fleetNow = ref(new Date())
+useIntervalFn(() => { fleetNow.value = new Date() }, 60_000)
+watch(
+  () => [fleetAccounts.value, usageBatchByAccountId.value],
+  () => { fleetNow.value = new Date() },
+  { flush: 'sync' }
+)
+const fleetErrorsByAccountId = computed<Record<string, string | null | undefined>>(() => ({
+  ...usageBatchErrorByAccountId.value,
+  ...capacityUsageQueryErrors.value,
+}))
+const todayFor = (id: number) => fleetTodayStats.value[String(id)] ?? todayStatsByAccountId.value[String(id)] ?? null
+const allFleetRows = computed(() => fleetAccounts.value.map((account) => {
+  const key = String(account.id)
+  return buildFleetRow(account, usageBatchByAccountId.value[key], fleetErrorsByAccountId.value[key], todayFor(account.id), fleetNow.value)
+}))
+const fleetStatusCounts = computed(() => allFleetRows.value.reduce<Record<OperatorAccountStatus, number>>((counts, row) => {
+  counts[row.status] += 1
+  return counts
+}, { active: 0, limited: 0, error: 0, disabled: 0 }))
+const visibleFleetRows = computed(() => sortFleetRows(
+  operatorStatus.value === 'all'
+    ? allFleetRows.value
+    : allFleetRows.value.filter((row) => row.status === operatorStatus.value),
+  fleetSort
+))
+const statusSegments = computed(() => [
+  { value: 'all', label: t('common.all'), count: allFleetRows.value.length, dot: '' },
+  ...OPERATOR_STATUSES.map((status) => ({
+    value: status,
+    label: t(`admin.viz.states.${status}`),
+    count: fleetStatusCounts.value[status],
+    dot: STATUS_DOT[status],
+  })),
+])
+
+// Provider chips stay stable while one provider is filtered: remember what the unfiltered fleet holds.
+const knownPlatformCounts = ref<Record<string, number>>({})
+const providerChips = computed(() => {
+  const counts = { ...knownPlatformCounts.value }
+  if (params.platform && counts[params.platform] === undefined) counts[params.platform] = fleetAccounts.value.length
+  return Object.keys(counts)
+    .sort((left, right) => PLATFORM_ORDER.indexOf(left) - PLATFORM_ORDER.indexOf(right))
+    .map((value) => ({ value, label: providerLabel(value), count: counts[value] }))
+})
+const hasActiveFleetFilters = computed(() => Boolean(
+  operatorStatus.value !== 'all' ||
+  params.search || params.platform || params.type || params.status ||
+  params.group || params.privacy_mode || params.auto_warmup
+))
+const resetFleetFilters = () => {
+  operatorStatus.value = 'all'
+  Object.assign(params, { search: '', platform: '', type: '', status: '', group: '', privacy_mode: '', auto_warmup: '' })
+  debouncedReload()
+}
+const toggleVisibleFleet = (checked: boolean) => {
+  batchUpdate((draft) => {
+    for (const row of visibleFleetRows.value) {
+      if (checked) draft.add(row.account.id)
+      else draft.delete(row.account.id)
+    }
+  })
+}
+
 const flushQueuedUsageBatch = async () => {
   usageBatchFlushTimer = null
   const accountIDs = Array.from(pendingUsageBatchIds)
@@ -1326,7 +1453,7 @@ const {
     privacy_mode: '',
     auto_warmup: ['enabled', 'disabled'].includes(String(routeAutoWarmup)) ? String(routeAutoWarmup) : '',
     group: '',
-    search: '',
+    search: typeof routeSearch === 'string' ? routeSearch : '',
     lite: '1',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
     sort_by: sortState.sort_by,
@@ -1450,6 +1577,13 @@ const loadFleetCapacity = async (forceUsage = false) => {
     if (currentSeq !== fleetLoadSeq) return
 
     fleetAccounts.value = rows
+    if (!filters.platform) {
+      knownPlatformCounts.value = rows.reduce<Record<string, number>>((counts, account) => {
+        counts[account.platform] = (counts[account.platform] ?? 0) + 1
+        return counts
+      }, {})
+    }
+    void refreshFleetTodayStats(rows.map((account) => account.id))
     applyUsageBatchState(usageAccountIDs, usage, errors, usageRequestTokens)
     usageLoaded = usageLoaded && usageAccountIDs.every(id => !usageBatchErrorByAccountId.value[String(id)])
     return usageLoaded
@@ -1467,7 +1601,10 @@ const loadFleetCapacity = async (forceUsage = false) => {
     console.error('Failed to load filtered account fleet:', error)
     return false
   } finally {
-    if (currentSeq === fleetLoadSeq) fleetLoading.value = false
+    if (currentSeq === fleetLoadSeq) {
+      fleetLoading.value = false
+      fleetLoadedOnce.value = true
+    }
   }
 }
 
@@ -2368,6 +2505,9 @@ const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => 
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
   accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  if (fleetAccounts.value.some((account) => idSet.has(account.id))) {
+    fleetAccounts.value = fleetAccounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  }
 }
 const normalizeBulkSchedulableResult = (
   result: {
@@ -2549,6 +2689,33 @@ const openBulkEditAutoWarmupEligible = async () => {
     selectedTypes: ['oauth']
   }
   showBulkEdit.value = true
+}
+
+// The fleet table shows every filtered row at once, so "all results" there means the visible rows.
+const selectVisibleFleetRows = () => {
+  selectionRequestVersion.value++
+  const ids = visibleFleetRows.value.map((row) => row.account.id)
+  setSelectedIds(ids)
+  selectedAllResultIDs.value = new Set(ids)
+}
+const selectAllTargetCount = computed(() => (
+  accountView.value === 'capacity' ? visibleFleetRows.value.length : pagination.total
+))
+const selectAllFromBar = () => {
+  if (accountView.value === 'capacity') selectVisibleFleetRows()
+  else void handleSelectAllResults()
+}
+const selectAllFromMenu = () => {
+  closeAccountToolsDropdown()
+  selectAllFromBar()
+}
+const editFilteredFromMenu = () => {
+  closeAccountToolsDropdown()
+  void openBulkEditFiltered()
+}
+const editAutoWarmupFromMenu = () => {
+  closeAccountToolsDropdown()
+  void openBulkEditAutoWarmupEligible()
 }
 
 const handleBulkUpdated = () => {
@@ -2940,6 +3107,109 @@ const handleTempUnschedReset = async (updated: Account) => {
   patchAccountInList(updated)
   enterAutoRefreshSilentWindow()
 }
+// Account drawer: opened from a fleet row or a `?account=<id>` deep link.
+const drawerAccountId = ref<number | null>(null)
+const drawerFallbackAccount = ref<Account | null>(null)
+const drawerRow = computed(() => {
+  const id = drawerAccountId.value
+  if (id === null) return null
+  const fleetRow = allFleetRows.value.find((row) => row.account.id === id)
+  if (fleetRow) return fleetRow
+  const account = accounts.value.find((row) => row.id === id)
+    ?? (drawerFallbackAccount.value?.id === id ? drawerFallbackAccount.value : null)
+  if (!account) return null
+  const key = String(id)
+  return buildFleetRow(account, usageBatchByAccountId.value[key], fleetErrorsByAccountId.value[key], todayFor(id), fleetNow.value)
+})
+const openDrawer = (account: Account) => {
+  menu.show = false
+  drawerAccountId.value = account.id
+}
+const closeDrawer = () => {
+  drawerAccountId.value = null
+  if (route && firstQueryValue(route.query.account) !== undefined && router) {
+    void router.replace({ query: { ...route.query, account: undefined } })
+  }
+}
+
+// Modals sit below the drawer, so actions that open one close the drawer first.
+const DRAWER_EXIT_MS = 340
+const afterDrawer = (run: () => unknown) => {
+  if (drawerAccountId.value === null) {
+    run()
+    return
+  }
+  closeDrawer()
+  setTimeout(run, DRAWER_EXIT_MS)
+}
+const viaDrawer = (handler: (account: Account) => unknown) => (account: Account) => afterDrawer(() => handler(account))
+const menuActions = {
+  test: viaDrawer(handleTest),
+  stats: viaDrawer(handleViewStats),
+  schedule: viaDrawer(handleSchedule),
+  reauth: viaDrawer(handleReAuth),
+  createSparkShadow: viaDrawer(handleCreateSparkShadow),
+  delete: viaDrawer(handleDelete),
+}
+const withDrawerAccount = (handler: (account: Account) => unknown) => () => {
+  const account = drawerRow.value?.account
+  if (account) handler(account)
+}
+const drawerActions = {
+  test: withDrawerAccount(menuActions.test),
+  reauth: withDrawerAccount(menuActions.reauth),
+  edit: withDrawerAccount(viaDrawer(handleEdit)),
+  stats: withDrawerAccount(menuActions.stats),
+  tempUnsched: withDrawerAccount(viaDrawer(handleShowTempUnsched)),
+  refreshUsage: withDrawerAccount((account) => queueBatchedUsage(account, { force: true })),
+  toggleSchedulable: withDrawerAccount(handleToggleSchedulable),
+  revertFallback: withDrawerAccount(onRevertFallback),
+  more: (event: MouseEvent) => {
+    const account = drawerRow.value?.account
+    if (account) openMenu(account, event)
+  },
+}
+
+const routeAccountId = () => {
+  const id = Number(firstQueryValue(route?.query.account))
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+const pendingDeepLinkAccountId = ref<number | null>(routeAccountId())
+const openDeepLinkedAccount = async () => {
+  const id = pendingDeepLinkAccountId.value
+  if (id === null) return
+  if (drawerAccountId.value === id) {
+    pendingDeepLinkAccountId.value = null
+    return
+  }
+  const known = fleetAccounts.value.find((account) => account.id === id) ?? accounts.value.find((account) => account.id === id)
+  if (known) {
+    pendingDeepLinkAccountId.value = null
+    openDrawer(known)
+    return
+  }
+  // Wait for the first loads; then fall back to the account itself (it may be filtered out).
+  if (loading.value || fleetLoading.value || !fleetLoadedOnce.value) return
+  pendingDeepLinkAccountId.value = null
+  const account = await loadAccountDetails({ id })
+  if (!account) return
+  drawerFallbackAccount.value = account
+  openDrawer(account)
+}
+watch(() => firstQueryValue(route?.query.account), () => {
+  pendingDeepLinkAccountId.value = routeAccountId()
+  void openDeepLinkedAccount()
+})
+watch(() => [loading.value, fleetLoading.value, fleetLoadedOnce.value] as const, () => {
+  void openDeepLinkedAccount()
+})
+watch(() => firstQueryValue(route?.query.search), (value) => {
+  const search = typeof value === 'string' ? value : ''
+  if (search === (params.search ?? '')) return
+  params.search = search
+  debouncedReload()
+})
+
 const formatExpiresAt = (value: number | null) => {
   if (!value) return '-'
   return formatDateTime(
@@ -3066,93 +3336,136 @@ onUnmounted(() => {
 
 <style scoped>
 .operator-accounts-layout {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.operator-accounts-toolbar {
   min-width: 0;
 }
 
-.operator-account-view-tabs {
+.acct-toolbar {
+  position: relative;
+  z-index: 5;
+}
+
+.acct-status-seg {
+  flex: 0 0 auto;
+}
+
+.acct-status-seg button,
+.acct-view-tabs button {
   display: inline-flex;
-  width: fit-content;
-  padding: 0.1875rem;
-  border: 1px solid var(--operator-border);
-  border-radius: 0.5rem;
-  background: var(--operator-muted);
-}
-
-.operator-account-view-bar {
-  display: flex;
-  min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.375rem;
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out),
+    transform 120ms var(--operator-ease-out);
 }
 
-.operator-capacity-controls {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
+.acct-status-seg button {
+  height: 1.875rem;
 }
 
-.operator-capacity-controls > * {
-  width: 12rem;
+.acct-status-seg button:active,
+.acct-view-tabs button:active,
+.acct-icon-toggle:active {
+  transform: scale(0.95);
 }
 
-.operator-account-view-tab {
-  min-width: 6.25rem;
-  min-height: 2.25rem;
-  padding: 0.4375rem 0.75rem;
-  border-radius: var(--operator-radius);
+.acct-status-seg .ui-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  box-shadow: none;
+}
+
+.acct-seg-count {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.acct-status-seg button[aria-pressed='true'] .acct-seg-count {
   color: var(--operator-muted-foreground);
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition: background-color 150ms ease, color 150ms ease;
 }
 
-.operator-account-view-tab:hover {
-  color: var(--operator-foreground);
+.acct-view-tabs button {
+  width: 2.125rem;
+  height: 1.875rem;
+  justify-content: center;
+  padding: 0;
 }
 
-.operator-account-view-tab.is-active {
+.acct-view-tabs button[aria-selected='true'] {
   background: var(--operator-card);
-  box-shadow: 0 0 0 1px var(--operator-border-subtle), var(--operator-shadow-xs);
+  box-shadow: var(--operator-shadow-xs), 0 0 0 1px var(--operator-border-strong);
   color: var(--operator-foreground);
 }
 
-.operator-account-view-tab:focus-visible {
+.acct-view-tabs button:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--operator-focus);
   outline-offset: 2px;
 }
 
-.operator-account-row-action {
-  display: inline-flex;
-  min-height: 2.25rem;
-  align-items: center;
-  justify-content: center;
+.acct-icon-toggle[aria-pressed='true'] {
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.acct-auto-refresh {
+  min-width: 1.75rem;
+  gap: 0.3125rem;
+  padding: 0 0.4375rem;
+  border-left: 1px solid var(--operator-border);
+}
+
+.acct-auto-refresh.is-on {
+  color: var(--operator-accent-text);
+}
+
+.acct-live-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--operator-accent);
+  animation: acct-live 1.6s ease-in-out infinite;
+}
+
+.acct-countdown {
+  min-width: 1.5rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+@keyframes acct-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.acct-more-trigger {
   width: 2.25rem;
+  height: 2.25rem;
   padding: 0;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius);
-  background: var(--operator-card);
-  color: var(--operator-foreground);
+}
+
+.acct-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-warning-soft);
+  color: var(--operator-warning);
   font-size: 0.8125rem;
-  font-weight: 600;
-  transition: background-color 150ms ease, border-color 150ms ease;
 }
 
-.operator-account-row-action:hover {
-  background: var(--operator-muted);
+.acct-pending > span {
+  color: var(--operator-foreground);
 }
 
-.operator-account-row-action:focus-visible,
+.acct-card {
+  overflow: hidden;
+}
+
 .operator-table-row-action:focus-visible,
 .operator-scheduling-switch:focus-visible {
   outline: 2px solid var(--operator-focus);
@@ -3169,7 +3482,7 @@ onUnmounted(() => {
 .operator-account-technical-shell {
   overflow: hidden;
   border: 1px solid var(--operator-border);
-  border-radius: 0.5rem;
+  border-radius: var(--operator-radius-lg);
   background: var(--operator-card);
   box-shadow: var(--operator-shadow-xs);
 }
@@ -3182,7 +3495,7 @@ onUnmounted(() => {
 
 .operator-account-technical-shell :deep(.table-header),
 .operator-account-technical-shell :deep(.sticky-header-cell) {
-  background: var(--operator-raised);
+  background: var(--operator-card);
 }
 
 .operator-account-technical-shell :deep(.table-wrapper > table > :not([hidden]) ~ :not([hidden])),
@@ -3203,7 +3516,7 @@ onUnmounted(() => {
 
 .operator-account-table {
   min-height: 28rem;
-  max-height: 60vh;
+  max-height: calc(100vh - 15rem);
 }
 
 .operator-account-pagination {
@@ -3240,16 +3553,12 @@ onUnmounted(() => {
 
 .operator-table-row-action {
   display: inline-flex;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  width: 2rem;
+  height: 2rem;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  gap: 0.125rem;
-  padding: 0.25rem;
   border-radius: var(--operator-radius);
   color: var(--operator-muted-foreground);
-  font-size: 0.8125rem;
   transition: background-color 150ms ease, color 150ms ease;
 }
 
@@ -3263,33 +3572,51 @@ onUnmounted(() => {
   color: var(--operator-destructive);
 }
 
+.account-tools-menu-label {
+  padding: 0.375rem 0.625rem 0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors;
-  min-height: 2.5rem;
+  @apply flex w-full items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors;
+  min-height: 2.25rem;
+}
+
+.account-tools-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .account-tools-menu-icon {
-  @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
-  background: var(--operator-muted);
+  flex: 0 0 auto;
   color: var(--operator-muted-foreground);
 }
 
 .operator-menu-count {
   background: var(--operator-muted);
   color: var(--operator-foreground);
+  font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 639px) {
-  .operator-account-view-bar,
-  .operator-capacity-controls {
-    align-items: stretch;
-    flex-direction: column;
+@media (max-width: 640px) {
+  .acct-toolbar > .ui-grow {
+    display: none;
   }
-  .operator-capacity-controls,
-  .operator-capacity-controls > * { width: 100%; }
-  .operator-account-view-tabs,
-  .operator-account-view-tab {
+
+  .acct-status-seg {
     width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .acct-status-seg button {
+    flex: 1 0 auto;
+    justify-content: center;
+    padding: 0 0.5rem;
   }
 }
 </style>

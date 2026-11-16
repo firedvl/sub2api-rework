@@ -48,20 +48,6 @@ const AppLayoutStub = defineComponent({
   template: '<main><slot /></main>',
 })
 
-const TablePageLayoutStub = defineComponent({
-  template: '<section><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>',
-})
-
-// 渲染 cell-provider slot，徽章断言基于它。
-const DataTableStub = defineComponent({
-  props: {
-    data: { type: Array, default: () => [] },
-    columns: { type: Array, default: () => [] },
-    loading: { type: Boolean, default: false },
-  },
-  template: '<div><div v-for="row in data" :key="row.id" class="provider-cell"><slot name="cell-provider" :row="row" /></div></div>',
-})
-
 function makeMonitor(overrides: Partial<ChannelMonitor> = {}): ChannelMonitor {
   return {
     id: 42,
@@ -99,12 +85,9 @@ function mountView() {
     global: {
       stubs: {
         AppLayout: AppLayoutStub,
-        TablePageLayout: TablePageLayoutStub,
-        DataTable: DataTableStub,
         MonitorFiltersBar: true,
         Pagination: true,
         ConfirmDialog: true,
-        EmptyState: true,
         HelpTooltip: true,
         Toggle: true,
         MonitorFormDialog: true,
@@ -126,7 +109,7 @@ describe('ChannelMonitorView check-mode badge', () => {
     ['quota', 'monitorCommon.checkMode.quota'],
     ['quota_probe', 'monitorCommon.checkMode.quota_probe'],
     ['probe', 'monitorCommon.checkMode.probe'],
-  ] as const)('renders the %s badge next to the provider badge', async (mode, label) => {
+  ] as const)('renders the %s badge under the monitor name', async (mode, label) => {
     listMonitors.mockResolvedValue({
       items: [makeMonitor({ check_mode: mode })],
       total: 1,
@@ -137,7 +120,7 @@ describe('ChannelMonitorView check-mode badge', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const cell = wrapper.get('.provider-cell')
+    const cell = wrapper.get('td[data-col="name"]')
     expect(cell.text()).toContain(label)
     // provider 徽章仍在（不因并列展示被顶掉）。
     expect(cell.text()).toContain('monitorCommon.providers.openai')

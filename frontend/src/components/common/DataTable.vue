@@ -1,87 +1,91 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
-    <template v-if="loading">
-      <div v-for="i in 5" :key="i" class="data-card">
-        <div class="space-y-3">
-          <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
-            <div class="skeleton h-4 w-20"></div>
-            <div class="skeleton h-4 w-32"></div>
-          </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
-            <div class="skeleton h-8 w-full"></div>
+  <div v-if="!isDesktopViewport" class="data-list-shell">
+    <div v-if="selectable && !loading && data && data.length" class="data-list-bar">
+      <label class="data-list-select-all">
+        <input
+          type="checkbox"
+          class="data-check"
+          :checked="allVisibleSelected"
+          :indeterminate="someVisibleSelected"
+          data-test="select-all-mobile"
+          @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t('common.selectAll') }}</span>
+      </label>
+      <span v-if="selectedKeys.length" class="data-list-count">{{ selectedKeys.length }}</span>
+    </div>
+
+    <div class="data-list" :class="{ 'ui-rows-enter': animateRows }">
+      <template v-if="loading">
+        <div v-for="i in 4" :key="`skeleton-${i}`" class="data-card" aria-hidden="true">
+          <div class="skeleton h-4" :style="{ width: skeletonWidth(i, 0) }"></div>
+          <div v-for="(column, colIndex) in bodyColumns.slice(0, 3)" :key="column.key" class="data-card-field">
+            <div class="skeleton h-3 w-16"></div>
+            <div class="skeleton h-3" :style="{ width: skeletonWidth(i, colIndex + 1, 40) }"></div>
           </div>
         </div>
-      </div>
-    </template>
+      </template>
 
-    <template v-else-if="!data || data.length === 0">
-      <div class="data-card px-6 py-10 text-center">
+      <div v-else-if="!data || data.length === 0" class="data-card data-card-empty">
         <slot name="empty">
-          <div class="data-empty">
-            <span class="data-empty-icon"><Icon name="inbox" size="md" /></span>
-            <p class="data-empty-title">{{ t('empty.noData') }}</p>
+          <div class="ui-empty">
+            <span class="ui-empty-icon"><Icon name="inbox" size="md" /></span>
+            <b>{{ t('empty.noData') }}</b>
           </div>
         </slot>
       </div>
-    </template>
 
-    <template v-else>
-      <div v-if="selectable" class="flex items-center justify-end gap-2 px-1">
-        <label class="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
-          <input
-            type="checkbox"
-            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
-            :checked="allVisibleSelected"
-            :indeterminate="someVisibleSelected"
-            data-test="select-all-mobile"
-            @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
-          />
-          <span>{{ t('common.selectAll') }}</span>
-        </label>
-      </div>
-      <div
-        v-for="(row, index) in sortedData"
-        :key="resolveRowKey(row, index)"
-        class="data-card"
-        :class="{
-          'cursor-pointer': clickableRows,
-          'data-card-selected': selectable && isRowSelected(row, index)
-        }"
-        @click="clickableRows && emit('rowClick', row)"
-      >
-        <div class="space-y-3">
-          <div v-if="selectable" class="flex justify-end">
+      <template v-else>
+        <div
+          v-for="(row, index) in sortedData"
+          :key="resolveRowKey(row, index)"
+          class="data-card"
+          :class="{
+            'is-clickable cursor-pointer': clickableRows,
+            'data-card-selected': selectable && isRowSelected(row, index)
+          }"
+          :tabindex="clickableRows ? 0 : undefined"
+          @click="onRowClick($event, row)"
+          @keydown="onRowKeydown($event, row)"
+        >
+          <div v-if="headColumn || selectable" class="data-card-top">
             <input
+              v-if="selectable"
               type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+              class="data-check"
               :checked="isRowSelected(row, index)"
               :aria-label="getRowSelectionLabel(row, index)"
               data-test="select-row"
               @click.stop
               @change="toggleRowSelection(row, index, ($event.target as HTMLInputElement).checked)"
             />
+            <div v-if="headColumn" :data-field="headColumn.key" class="data-card-head min-w-0 flex-1">
+              <div class="min-w-0 max-w-full">
+                <slot :name="`cell-${headColumn.key}`" :row="row" :value="row[headColumn.key]" :expanded="actionsExpanded">
+                  {{ headColumn.formatter ? headColumn.formatter(row[headColumn.key], row) : row[headColumn.key] }}
+                </slot>
+              </div>
+            </div>
           </div>
           <div
-            v-for="column in dataColumns"
+            v-for="column in bodyColumns"
             :key="column.key"
             :data-field="column.key"
-            class="flex min-w-0 items-start justify-between gap-4"
+            class="data-card-field min-w-0"
           >
-            <span class="flex-shrink-0 text-xs font-medium text-gray-500 dark:text-dark-400">
-              {{ column.label }}
-            </span>
-            <div class="min-w-0 max-w-full text-right text-sm text-gray-900 dark:text-gray-100">
+            <span class="data-card-label">{{ column.label }}</span>
+            <div class="data-card-value min-w-0 max-w-full">
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
             </div>
           </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
+          <div v-if="hasActionsColumn" class="data-card-actions">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
         </div>
-      </div>
-    </template>
+      </template>
+    </div>
   </div>
 
   <div
@@ -108,7 +112,7 @@
           >
             <input
               type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+              class="data-check"
               :checked="allVisibleSelected"
               :indeterminate="someVisibleSelected"
               :aria-label="t('common.selectAll')"
@@ -121,16 +125,19 @@
             :key="column.key"
             scope="col"
             :aria-sort="column.sortable ? getColumnAriaSort(column.key) : undefined"
+            :tabindex="column.sortable ? 0 : undefined"
             :class="[
               'sticky-header-cell py-2.5 text-left text-xs font-medium text-gray-500 dark:text-dark-400',
               getAdaptivePaddingClass(),
               { 'sortable-header cursor-pointer select-none': column.sortable },
+              { 'is-sorted': column.sortable && sortKey === column.key },
               getStickyColumnClass(column, index),
               column.class
             ]"
             @click="column.sortable && handleSort(column.key)"
+            @keydown="column.sortable && onHeaderKeydown($event, column.key)"
           >
-            <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
+            <div :class="['flex items-center gap-1', getHeaderContentAlignmentClass(column)]">
               <slot
                 :name="`header-${column.key}`"
                 :column="column"
@@ -141,33 +148,26 @@
               </slot>
               <span
                 v-if="column.sortable"
-                class="inline-flex h-5 w-4 flex-col items-center justify-center"
+                class="sort-indicator"
+                :class="getSortIndicatorClass(column.key)"
+                :data-sort-state="getSortState(column.key)"
                 aria-hidden="true"
               >
-                <svg
-                  class="h-2.5 w-2.5"
-                  :class="getSortIndicatorClass(column.key, 'asc')"
-                  fill="currentColor"
-                  viewBox="0 0 10 10"
-                >
-                  <path d="M5 2L1.5 6.5h7L5 2z" />
+                <!-- Idle columns show a faint up/down glyph; the sorted column shows one chevron that flips. -->
+                <svg v-if="sortKey !== column.key" class="sort-idle" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3.75 4.75 6 2.5l2.25 2.25M3.75 7.25 6 9.5l2.25-2.25" />
                 </svg>
-                <svg
-                  class="-mt-0.5 h-2.5 w-2.5"
-                  :class="getSortIndicatorClass(column.key, 'desc')"
-                  fill="currentColor"
-                  viewBox="0 0 10 10"
-                >
-                  <path d="M5 8L1.5 3.5h7L5 8z" />
+                <svg v-else class="sort-active" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3.25 7.25 6 4.5l2.75 2.75" />
                 </svg>
               </span>
             </div>
           </th>
         </tr>
       </thead>
-      <tbody class="table-body">
+      <tbody class="table-body" :class="{ 'ui-rows-enter': animateRows }">
         <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i">
+        <tr v-if="loading" v-for="i in 6" :key="i" class="skeleton-row" aria-hidden="true">
           <td
             v-if="selectable"
             :class="[
@@ -177,8 +177,8 @@
           >
             <div class="skeleton mx-auto h-4 w-4"></div>
           </td>
-          <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-3.5', getAdaptivePaddingClass()]">
-            <div class="skeleton h-4 w-3/4"></div>
+          <td v-for="(column, colIndex) in columns" :key="column.key" :class="['whitespace-nowrap py-3.5', getAdaptivePaddingClass()]">
+            <div class="skeleton h-3.5" :style="{ width: skeletonWidth(i, colIndex) }"></div>
           </td>
         </tr>
 
@@ -190,13 +190,13 @@
           >
             <div
               data-test="desktop-empty-state"
-              class="sticky left-0 py-12"
+              class="sticky left-0 py-4"
               :style="{ width: tableViewportWidth ? `${tableViewportWidth}px` : '100%' }"
             >
               <slot name="empty">
-                <div class="data-empty">
-                  <span class="data-empty-icon"><Icon name="inbox" size="md" /></span>
-                  <p class="data-empty-title">{{ t('empty.noData') }}</p>
+                <div class="ui-empty">
+                  <span class="ui-empty-icon"><Icon name="inbox" size="md" /></span>
+                  <b>{{ t('empty.noData') }}</b>
                 </div>
               </slot>
             </div>
@@ -218,10 +218,12 @@
             :ref="item.measure ? measureElement : undefined"
             class="data-row"
             :class="{
-              'cursor-pointer': clickableRows,
+              'is-clickable cursor-pointer': clickableRows,
               'data-row-selected': selectable && isRowSelected(item.row, item.index)
             }"
-            @click="clickableRows && emit('rowClick', item.row)"
+            :tabindex="clickableRows ? 0 : undefined"
+            @click="onRowClick($event, item.row)"
+            @keydown="onRowKeydown($event, item.row)"
           >
             <td
               v-if="selectable"
@@ -232,7 +234,7 @@
             >
               <input
                 type="checkbox"
-                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
+                class="data-check"
                 :checked="isRowSelected(item.row, item.index)"
                 :aria-label="getRowSelectionLabel(item.row, item.index)"
                 data-test="select-row"
@@ -435,6 +437,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearTimeout(animateRowsTimer)
   detachDesktopTableTracking()
   if (desktopViewportMediaQuery && desktopViewportListener) {
     if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
@@ -573,11 +576,63 @@ const applySortState = (state: PersistedSortState | null) => {
   sortOrder.value = state.order
 }
 
-const getSortIndicatorClass = (key: string, order: 'asc' | 'desc') => {
-  return sortKey.value === key && sortOrder.value === order
-    ? 'text-primary-600 dark:text-primary-400'
-    : 'text-gray-300 transition-colors dark:text-dark-500'
+const getSortState = (key: string): 'none' | 'asc' | 'desc' =>
+  sortKey.value === key ? sortOrder.value : 'none'
+
+const getSortIndicatorClass = (key: string) => {
+  const state = getSortState(key)
+  if (state === 'asc') return 'is-active'
+  if (state === 'desc') return 'is-active is-desc'
+  return ''
 }
+
+const onHeaderKeydown = (event: KeyboardEvent, key: string) => {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  handleSort(key)
+}
+
+// Rows and cards ignore clicks that come from their own controls or the
+// mobile actions footer, so a button in a cell never also opens the row.
+const interactiveSelector = 'button, a, input, select, textarea, label, [role="button"], [role="menuitem"], .data-card-actions'
+
+const onRowClick = (event: MouseEvent, row: any) => {
+  if (!props.clickableRows) return
+  const target = event.target as Element | null
+  const control = target?.closest(interactiveSelector)
+  if (control && control !== event.currentTarget && (event.currentTarget as Element).contains(control)) return
+  emit('rowClick', row)
+}
+
+const onRowKeydown = (event: KeyboardEvent, row: any) => {
+  if (!props.clickableRows || event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  emit('rowClick', row)
+}
+
+// Skeleton bars vary in width so the loading state reads as rows, not a grid.
+const skeletonWidths = [72, 48, 60, 84, 40, 66]
+const skeletonWidth = (row: number, column: number, scale = 100) =>
+  `${Math.round((skeletonWidths[(row + column * 2) % skeletonWidths.length] * scale) / 100)}%`
+
+// Rows rise in on the first data paint only; later pages and refreshes stay still.
+const animateRows = ref(false)
+let rowsAnimated = false
+let animateRowsTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => !props.loading && (props.data?.length ?? 0) > 0,
+  (ready) => {
+    if (!ready || rowsAnimated) return
+    rowsAnimated = true
+    animateRows.value = true
+    animateRowsTimer = setTimeout(() => {
+      animateRows.value = false
+    }, 700)
+  },
+  { immediate: true }
+)
 
 const getColumnAriaSort = (key: string) => {
   if (sortKey.value !== key) return 'none'
@@ -653,6 +708,9 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
 const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+// Mobile cards lead with the first real column as a title; the rest become label/value rows.
+const headColumn = computed(() => dataColumns.value.find((column) => column.key !== 'select') ?? null)
+const bodyColumns = computed(() => dataColumns.value.filter((column) => column !== headColumn.value))
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
@@ -1125,41 +1183,214 @@ tbody tr.data-row-selected .sticky-col {
   background: linear-gradient(to left, rgb(0 0 0 / 0.35), transparent);
 }
 
-/* Narrow layouts render each row as a labelled card. */
-.data-card {
-  padding: 0.875rem 1rem;
+/* Sort indicator: faint glyph on idle columns, one accent chevron that flips. */
+.sort-indicator {
+  display: inline-grid;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: none;
+  place-items: center;
+  color: var(--operator-subtle-foreground);
+  opacity: 0.45;
+  transition:
+    opacity var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.sort-indicator svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sortable-header:hover .sort-indicator,
+.sortable-header:focus-visible .sort-indicator {
+  opacity: 0.9;
+}
+
+.sort-indicator.is-active {
+  color: var(--operator-accent-text);
+  opacity: 1;
+}
+
+.sort-indicator .sort-active {
+  transition: transform 220ms var(--operator-spring);
+}
+
+.sort-indicator.is-desc .sort-active {
+  transform: rotate(180deg);
+}
+
+.sortable-header.is-sorted {
+  color: var(--operator-foreground);
+}
+
+.sortable-header:focus-visible,
+.data-row.is-clickable:focus-visible,
+.data-card.is-clickable:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: -2px;
+}
+
+/* Selection checkboxes: native, accent-tinted, with a soft focus ring and press. */
+.data-check {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  flex: none;
+  margin: 0;
+  accent-color: var(--operator-accent);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: transform 120ms var(--operator-ease-out);
+}
+
+.data-check:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+
+.data-check:active {
+  transform: scale(0.88);
+}
+
+.skeleton-row td {
+  border-top-color: transparent !important;
+}
+
+/* Narrow layouts: rows stack into one surface, each a titled block of label/value pairs. */
+.data-list-shell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.data-list-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.25rem;
+}
+
+.data-list-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.data-list-count {
+  min-width: 1.375rem;
+  padding: 0 0.4375rem;
+  border-radius: 999px;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.375rem;
+  text-align: center;
+}
+
+.data-list {
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--operator-border);
   border-radius: var(--operator-radius-lg);
   background: var(--operator-card);
   box-shadow: var(--operator-shadow-xs);
 }
 
+/* Inside a redesigned card the card is already the surface. */
+/* Written fully inside :global(); Vue drops anything that follows :global(). */
+:global(.ui-card .data-list),
+:global(.viz-card .data-list) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.data-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.75rem 0.875rem;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.data-card + .data-card {
+  border-top: 1px solid var(--operator-border-subtle);
+}
+
+.data-card.is-clickable:active {
+  background: var(--table-row-hover-background);
+}
+
 .data-card-selected {
-  border-color: color-mix(in srgb, var(--operator-accent) 45%, var(--operator-border));
   background: var(--table-row-selected-background);
 }
 
-.data-empty {
+.data-card-empty {
+  padding: 0;
+}
+
+.data-card-top {
   display: flex;
-  flex-direction: column;
+  min-width: 0;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
+  padding-bottom: 0.125rem;
 }
 
-.data-empty-icon {
-  display: grid;
-  width: 2.5rem;
-  height: 2.5rem;
-  place-items: center;
-  border: 1px solid var(--operator-border);
-  border-radius: var(--operator-radius-lg);
-  background: var(--operator-muted);
-  color: var(--operator-subtle-foreground);
-}
-
-.data-empty-title {
-  color: var(--operator-muted-foreground);
+.data-card-head {
+  color: var(--operator-foreground);
   font-size: 0.875rem;
   font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.data-card-field {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 1.5rem;
+}
+
+.data-card-label {
+  flex: none;
+  padding-top: 0.125rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.data-card-value {
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.data-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--operator-border-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-indicator .sort-active,
+  .data-check {
+    transition: none;
+  }
 }
 </style>

@@ -29,7 +29,8 @@ for (const width of [390, 1280]) {
     await expect.poll(() => attempts).toBe(2)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('ops_monitoring_enabled_cached'))).toBe('true')
     if (width < 768) await page.getByRole('button', { name: 'Toggle menu', exact: true }).click()
-    await page.getByRole('link', { name: 'Accounts', exact: true }).first().click()
+    // The sidebar link's name now carries its attention badge ("Accounts 2 need attention").
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: /^Accounts\b/ }).click()
     await expect(page.getByRole('heading', { name: 'Accounts', exact: true })).toBeVisible()
     expect(attempts).toBe(2)
   })

@@ -305,3 +305,91 @@ describe('UsageFilters — native compaction filter', () => {
     expect(wrapper.emitted('change')).toBeTruthy()
   })
 })
+
+describe('UsageFilters — toolbar layout', () => {
+  const mountToolbar = (filters: Record<string, any> = defaultFilters(), mode: 'usage' | 'errors' = 'usage') => mount(UsageFilters, {
+    props: {
+      modelValue: filters,
+      exporting: false,
+      startDate: '2026-05-01',
+      endDate: '2026-05-28',
+      modelOptions: ['claude-sonnet-4'],
+      layout: 'toolbar',
+      mode,
+    },
+    slots: { leading: '<span data-test="leading">dates</span>', actions: '<button data-test="action">act</button>' },
+    global: { stubs: { Select: true, Teleport: true, Icon: true } },
+  })
+
+  it('renders slots and keeps the extra filters in a collapsed panel', async () => {
+    const wrapper = mountToolbar()
+    expect(wrapper.find('[data-test="leading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="action"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="usage-filter-panel"]').exists()).toBe(false)
+
+    const toggle = wrapper.get('[data-testid="usage-filters-toggle"]')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    const labels = wrapper.get('[data-testid="usage-filter-panel"]').findAll('label').map((label) => label.text())
+    expect(labels).toEqual(expect.arrayContaining(['API Key', 'Type', 'Request Kind', 'Billing Type', 'Billing Mode', 'Upstream model audit', 'Group']))
+  })
+
+  it('shows a chip per active filter and clears one or all', async () => {
+    const filters = { ...defaultFilters(), model: 'claude-sonnet-4', request_type: 'sync', billing_type: 1 }
+    const wrapper = mountToolbar(filters)
+    await flushPromises()
+
+    const chips = () => wrapper.findAll('.ui-chip')
+    expect(chips().map((chip) => chip.text())).toEqual(['Modelclaude-sonnet-4', 'TypeSync', 'Billing TypeSubscription'])
+    expect(wrapper.get('[data-testid="usage-filters-toggle"]').text()).toContain('2')
+
+    await chips()[1].trigger('click')
+    expect(filters.request_type).toBeNull()
+    expect(wrapper.emitted('change')).toHaveLength(1)
+
+    await wrapper.get('[data-testid="usage-filters-clear-all"]').trigger('click')
+    expect(filters.model).toBeUndefined()
+    expect(filters.billing_type).toBeNull()
+    expect(wrapper.emitted('change')).toHaveLength(2)
+  })
+
+  it('shows All Models for an unset model and keeps clearing it unset', async () => {
+    const SelectStub = {
+      name: 'Select',
+      props: ['modelValue', 'options', 'ariaLabel'],
+      emits: ['update:modelValue', 'change'],
+      template: '<div />',
+    }
+    // UsageView starts, resets, and clears the model filter as undefined.
+    const filters: Record<string, any> = { ...defaultFilters(), model: undefined }
+    const wrapper = mount(UsageFilters, {
+      props: {
+        modelValue: filters,
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        modelOptions: ['claude-sonnet-4'],
+        layout: 'toolbar',
+      },
+      global: { stubs: { Select: SelectStub, Teleport: true, Icon: true } },
+    })
+    const modelSelect = wrapper.findAllComponents(SelectStub).find((select: any) => select.props('ariaLabel') === 'Model')!
+    expect(filters.model).toBeUndefined()
+    // The "All Models" option (value null) is the selected one while no model is set.
+    expect(modelSelect.props('modelValue')).toBeNull()
+    expect(modelSelect.props('options')[0]).toEqual({ value: null, label: 'All Models' })
+
+    modelSelect.vm.$emit('update:modelValue', 'claude-sonnet-4')
+    await wrapper.vm.$nextTick()
+    expect(filters.model).toBe('claude-sonnet-4')
+    modelSelect.vm.$emit('update:modelValue', null)
+    await wrapper.vm.$nextTick()
+    expect(filters.model).toBeUndefined()
+  })
+
+  it('hides usage-only chips on the errors tab', async () => {
+    const wrapper = mountToolbar({ ...defaultFilters(), billing_mode: 'token', status_code: 429 }, 'errors')
+    await flushPromises()
+    expect(wrapper.findAll('.ui-chip').map((chip) => chip.text())).toEqual(['admin.ops.errorLog.status429'])
+  })
+})

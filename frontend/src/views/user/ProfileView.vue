@@ -2,7 +2,7 @@
   <AppLayout>
     <div
       data-testid="profile-shell"
-      class="max-w-[950px] space-y-6"
+      class="ui-page ui-stagger pv-shell"
     >
       <ProfileInfoCard
         :user="user"
@@ -15,24 +15,41 @@
         :wechat-mp-enabled="wechatOAuthMPEnabled"
       />
 
-      <div
-        v-if="contactInfo"
-        class="card border-primary-200 bg-primary-50 p-6 dark:bg-primary-900/20"
-      >
-        <div class="flex items-center gap-4">
-          <div class="rounded-xl bg-primary-100 p-3 text-primary-600 dark:bg-primary-500/15">
-            <Icon name="chat" size="lg" />
-          </div>
-          <div>
-            <h3 class="font-semibold text-primary-800 dark:text-primary-200">
-              {{ t('common.contactSupport') }}
-            </h3>
-            <p class="text-sm font-medium">{{ contactInfo }}</p>
-          </div>
-        </div>
-      </div>
-
-      <ProfilePasswordForm />
+      <section class="viz-card" aria-labelledby="profile-security-title" data-testid="profile-security">
+        <header class="viz-card-head">
+          <h2 id="profile-security-title" class="viz-card-title inline-flex items-center gap-2">
+            <Icon name="shield" size="sm" class="text-gray-400" />
+            {{ t('personalUi.profile.security') }}
+          </h2>
+        </header>
+        <ProfileSettingRow icon="lock" :title="t('common.password')" title-id="profile-password-title">
+          {{ t('profile.passwordHint') }}
+          <template #actions>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              data-testid="profile-password-toggle"
+              :aria-expanded="passwordOpen"
+              aria-controls="profile-password-panel"
+              aria-describedby="profile-password-title"
+              @click="passwordOpen = !passwordOpen"
+            >
+              {{ passwordOpen ? t('common.cancel') : t('personalUi.profile.change') }}
+            </button>
+          </template>
+          <template #panel>
+            <div
+              v-show="passwordOpen"
+              id="profile-password-panel"
+              class="pv-panel"
+            >
+              <ProfilePasswordForm embedded />
+            </div>
+          </template>
+        </ProfileSettingRow>
+        <ProfileTotpCard />
+        <ProfilePasskeyCard :enabled="passkeyEnabled" />
+      </section>
 
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"
@@ -43,8 +60,17 @@
         :user-email="user.email"
       />
 
-      <ProfileTotpCard />
-      <ProfilePasskeyCard :enabled="passkeyEnabled" />
+      <section
+        v-if="contactInfo"
+        class="viz-card pv-support"
+        :aria-label="t('common.contactSupport')"
+      >
+        <span class="pv-support-icon" aria-hidden="true"><Icon name="chat" size="sm" /></span>
+        <span class="min-w-0">
+          <span class="ui-cell-sub">{{ t('common.contactSupport') }}</span>
+          <span class="ui-cell-main whitespace-normal break-words">{{ contactInfo }}</span>
+        </span>
+      </section>
     </div>
   </AppLayout>
 </template>
@@ -57,6 +83,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNotifyCard.vue'
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
+import ProfileSettingRow from '@/components/user/profile/ProfileSettingRow.vue'
 import ProfileTotpCard from '@/components/user/profile/ProfileTotpCard.vue'
 import ProfilePasskeyCard from '@/components/user/profile/ProfilePasskeyCard.vue'
 import { isWeChatWebOAuthEnabled } from '@/api/auth'
@@ -68,6 +95,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const user = computed(() => authStore.user)
 
+const passwordOpen = ref(false)
 const contactInfo = ref('')
 const balanceLowNotifyEnabled = ref(false)
 const systemDefaultThreshold = ref(0)
@@ -113,3 +141,52 @@ onMounted(async () => {
   await Promise.all([profileRefresh, settingsLoad])
 })
 </script>
+
+<style scoped>
+.pv-shell {
+  max-width: 56rem;
+}
+
+.pv-panel {
+  max-width: 28rem;
+  margin: 0.875rem 0 0.25rem 2.875rem;
+  animation: pv-reveal var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+@keyframes pv-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.pv-support {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1.125rem;
+}
+
+.pv-support-icon {
+  display: inline-grid;
+  width: 2.125rem;
+  height: 2.125rem;
+  flex: none;
+  place-items: center;
+  border-radius: var(--operator-radius-sm);
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-panel {
+    animation: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .pv-panel {
+    margin-left: 0;
+  }
+}
+</style>

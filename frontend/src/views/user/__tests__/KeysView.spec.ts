@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
+
+enableAutoUnmount(afterEach)
 
 const {
   listKeys,
@@ -163,6 +165,7 @@ const DataTableStub = {
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
         <slot name="cell-actions" :row="row" />
+        <slot name="cell-status" :value="row.status" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
         </div>
@@ -183,13 +186,6 @@ const SelectStub = {
   props: ['modelValue', 'options'],
   emits: ['update:modelValue'],
   template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"></select>',
-}
-
-const SearchInputStub = {
-  name: 'SearchInput',
-  props: ['modelValue'],
-  emits: ['update:modelValue', 'search'],
-  template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
 }
 
 const PaginationStub = {
@@ -225,7 +221,6 @@ const mountView = async () => {
         ConfirmDialog: true,
         EmptyState: true,
         Select: SelectStub,
-        SearchInput: SearchInputStub,
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
@@ -233,6 +228,7 @@ const mountView = async () => {
         GroupBadge: true,
         GroupOptionItem: true,
         Teleport: true,
+        Transition: true,
       },
     },
   })
@@ -246,6 +242,11 @@ const visibleColumnKeys = (wrapper: VueWrapper) =>
 
 const visibleColumnMeta = (wrapper: VueWrapper): Array<{ key: string; sortable: boolean }> =>
   JSON.parse(wrapper.get('[data-test="columns-meta"]').text())
+
+const openRowMenu = async (wrapper: VueWrapper, id = 1) => {
+  await wrapper.get(`[data-testid="key-more-${id}"]`).trigger('click')
+  await nextTick()
+}
 
 const getButtonByText = (wrapper: VueWrapper, text: string) => {
   const button = wrapper.findAll('button').find((item) => item.text().includes(text))
@@ -292,6 +293,7 @@ describe('user KeysView column settings', () => {
     listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
     updateKey.mockResolvedValue({ ...key, status, quota_used: 0 })
     const wrapper = await mountView()
+    await openRowMenu(wrapper)
     await getButtonByText(wrapper, 'common.edit').trigger('click')
     await wrapper.get('#key-form input[type="text"]').setValue('Unsaved name')
     const statusSelect = wrapper.findAllComponents({ name: 'Select' })
@@ -320,14 +322,15 @@ describe('user KeysView column settings', () => {
     let resolveReset!: (key: ApiKey) => void
     updateKey.mockImplementationOnce(() => new Promise<ApiKey>(resolve => { resolveReset = resolve }))
     const wrapper = await mountView()
-    const editButtons = wrapper.findAll('button').filter(button => button.text().includes('common.edit'))
-    await editButtons[0].trigger('click')
+    await openRowMenu(wrapper, 1)
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
     await wrapper.get('button[title="keys.resetQuotaUsed"]').trigger('click')
     const confirmation = wrapper.findAllComponents({ name: 'ConfirmDialog' })
       .find(dialog => dialog.props('title') === 'keys.resetQuotaTitle')!
     confirmation.vm.$emit('confirm')
     await flushPromises()
-    await editButtons[1].trigger('click')
+    await openRowMenu(wrapper, 2)
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
     await wrapper.get('#key-form input[type="text"]').setValue('Second draft')
     resolveReset({ ...first, status: 'active', quota_used: 2 })
     await flushPromises()
@@ -380,7 +383,7 @@ describe('user KeysView column settings', () => {
     table.vm.$emit('update:selectedKeys', [1])
     await nextTick()
     if (change === 'filter') {
-      wrapper.findComponent({ name: 'SearchInput' }).vm.$emit('search')
+      await wrapper.get('[data-testid="keys-search"]').trigger('keydown', { key: 'Enter' })
     } else if (change === 'page size') {
       await wrapper.get('[data-test="page-size-50"]').trigger('click')
     } else {
@@ -530,14 +533,19 @@ describe('user KeysView column settings', () => {
     await wrapper.get('[data-test="page-size-50"]').trigger('click')
     await flushPromises()
 
-    await wrapper.findComponent({ name: 'SearchInput' }).vm.$emit('update:modelValue', 'target')
-    await wrapper.findComponent({ name: 'SearchInput' }).vm.$emit('search')
+    const search = wrapper.get('[data-testid="keys-search"]')
+    const callsBeforeSearch = listKeys.mock.calls.length
+    ;(search.element as HTMLInputElement).value = 'target'
+    await search.trigger('input')
+    await search.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    await vi.waitFor(() => expect(listKeys).toHaveBeenCalledTimes(callsBeforeSearch + 2))
     await flushPromises()
 
     const selects = wrapper.findAllComponents({ name: 'Select' })
     await selects[0].vm.$emit('update:modelValue', 42)
     await flushPromises()
-    await selects[1].vm.$emit('update:modelValue', 'active')
+    await wrapper.get('[data-testid="keys-status-active"]').trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-test="page-2"]').trigger('click')
@@ -656,9 +664,60 @@ describe('user KeysView column settings', () => {
       expect(optionIds(wrapper)).toEqual([1])
       expect(groupSelect(wrapper).props('modelValue')).toBeNull()
       await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      await openRowMenu(wrapper)
       await getButtonByText(wrapper, 'common.edit').trigger('click')
       expect(wrapper.find('[data-testid="key-form-provider"]').exists()).toBe(false)
       expect(optionIds(wrapper)).toHaveLength(11)
+    })
+  })
+
+  describe('redesigned list', () => {
+    it('opens the key drawer with ready-to-copy snippets from the site base URL', async () => {
+      getPublicSettings.mockResolvedValue({ api_base_url: 'https://gw.example.test/v1/' })
+      const wrapper = await mountView()
+      await wrapper.get('[data-testid="key-use-1"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-testid="key-drawer-base-url"]').text()).toBe('https://gw.example.test/v1')
+      const code = wrapper.get('pre code').text()
+      expect(code).toContain('https://gw.example.test/v1/models')
+      expect(code).not.toContain('sk-test-key')
+      await wrapper.get('[aria-label="personalUi.keys.showKey"]').trigger('click')
+      expect(wrapper.get('pre code').text()).toContain('sk-test-key')
+      wrapper.unmount()
+    })
+
+    it('toggles key status from the row switch', async () => {
+      vi.mocked(keysAPI.toggleStatus).mockResolvedValue({ ...createApiKey(), status: 'inactive' })
+      const wrapper = await mountView()
+      const toggle = wrapper.get('[data-testid="key-status-toggle-1"]')
+      expect(toggle.attributes('aria-checked')).toBe('true')
+      await toggle.trigger('click')
+      await flushPromises()
+      expect(keysAPI.toggleStatus).toHaveBeenCalledWith(1, 'inactive')
+      wrapper.unmount()
+    })
+
+    it('filters by status from the segmented control', async () => {
+      const wrapper = await mountView()
+      listKeys.mockClear()
+      await wrapper.get('[data-testid="keys-status-expired"]').trigger('click')
+      await flushPromises()
+      expect(listKeys.mock.calls[0][2]).toMatchObject({ status: 'expired' })
+      expect(wrapper.get('[data-testid="keys-status-expired"]').attributes('aria-pressed')).toBe('true')
+      wrapper.unmount()
+    })
+
+    it('offers a create button in the empty state and clears filters when filtered', async () => {
+      listKeys.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+      const wrapper = await mountView()
+      expect(wrapper.text()).toContain('personalUi.keys.emptyTitle')
+      await wrapper.get('[data-testid="keys-status-active"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('personalUi.keys.noMatches')
+      await getButtonByText(wrapper, 'personalUi.keys.clearFilters').trigger('click')
+      await flushPromises()
+      expect(listKeys.mock.calls.at(-1)?.[2]).not.toHaveProperty('status')
+      wrapper.unmount()
     })
   })
 })

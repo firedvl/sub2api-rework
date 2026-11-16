@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="space-y-6 pb-12">
+    <div class="ui-page pb-12">
       <!-- Ops-style elevated shell: title toolbar + filters (mirrors OpsDashboardHeader) -->
       <section
         class="card sticky top-0 z-20 p-0"
@@ -11,7 +11,7 @@
               <span class="relative flex h-2 w-2 shrink-0">
                 <span
                   class="relative inline-flex h-2 w-2 rounded-full"
-                  :class="loading || refreshing ? 'bg-gray-400' : 'bg-green-500'"
+                  :class="loading || refreshing ? 'bg-gray-400' : 'bg-emerald-500'"
                 ></span>
               </span>
               <span v-if="refreshing" class="inline-flex items-center gap-1 text-primary-600 dark:text-primary-300">
@@ -52,25 +52,25 @@
         <!-- First-upgrade silent backfill: show until 30d product window is covered -->
         <div
           v-if="bootstrapActive"
-          class="border-b border-blue-100 bg-blue-50/90 px-5 py-3 dark:border-blue-900/40 dark:bg-blue-950/40 sm:px-6"
+          class="border-b border-gray-100 bg-primary-50/70 px-5 py-3 dark:border-dark-700 dark:bg-primary-900/20 sm:px-6"
           role="status"
           aria-live="polite"
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <p class="text-sm font-semibold text-blue-900 dark:text-blue-100">
+              <p class="text-sm font-semibold text-gray-900 dark:text-white">
                 {{ t('channelMonitorV2.bootstrap.title') }}
               </p>
-              <p class="mt-0.5 text-xs text-blue-800/80 dark:text-blue-200/80">
+              <p class="mt-0.5 text-xs text-gray-500">
                 {{ t('channelMonitorV2.bootstrap.description') }}
               </p>
             </div>
-            <span class="shrink-0 text-xs font-medium tabular-nums text-blue-700 dark:text-blue-300">
+            <span class="shrink-0 text-xs font-medium tabular-nums text-primary-600 dark:text-primary-300">
               {{ t('channelMonitorV2.bootstrap.progress', { percent: bootstrapPercent }) }}
             </span>
           </div>
           <div
-            class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-blue-200/80 dark:bg-blue-900/60"
+            class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-700"
             role="progressbar"
             :aria-valuenow="bootstrapPercent"
             aria-valuemin="0"
@@ -78,7 +78,7 @@
             :aria-label="t('channelMonitorV2.bootstrap.working')"
           >
             <div
-              class="h-full rounded-full bg-blue-500 transition-[width] duration-500 ease-out dark:bg-blue-400"
+              class="h-full rounded-full bg-primary-500 transition-[width] duration-500 ease-out"
               :style="{ width: `${bootstrapPercent}%` }"
             />
           </div>
@@ -238,7 +238,7 @@
         <div
           v-for="i in (showThroughput ? 5 : 4)"
           :key="i"
-          class="h-24 animate-pulse rounded-2xl bg-gray-50 dark:bg-dark-900/30"
+          class="skeleton h-24 rounded-xl"
         />
       </section>
 
@@ -332,7 +332,7 @@
             <div
               v-for="row in errorRows"
               :key="row.category"
-              class="rounded-2xl bg-gray-50 p-4 text-sm dark:bg-dark-900/30"
+              class="rounded-lg border border-gray-100 p-3 text-sm dark:border-dark-700"
               :class="row.ignored ? 'opacity-60' : ''"
             >
               <button
@@ -938,21 +938,21 @@ onBeforeUnmount(() => {
   border-radius: 9999px;
 }
 /* Multi-stop green → yellow → red score bands */
-.health-score10 { background: #16a34a; }
-.health-score9  { background: #22c55e; }
-.health-score8  { background: #4ade80; }
-.health-score7  { background: #a3e635; }
-.health-score6  { background: #facc15; }
-.health-score5  { background: #fbbf24; }
-.health-score4  { background: #f59e0b; }
-.health-score3  { background: #f97316; }
-.health-score2  { background: #fb7185; }
-.health-score1  { background: #f87171; }
-.health-score0  { background: rgb(239, 67, 67); }
-.health-healthy  { background: #22c55e; }
-.health-warning  { background: #f59e0b; }
-.health-critical { background: #ef4444; }
-.health-unknown  { background: #9ca3af; }
+.health-score10 { background: var(--operator-success-fill); }
+.health-score9  { background: color-mix(in srgb, var(--operator-success-fill) 85%, var(--operator-warning-fill)); }
+.health-score8  { background: color-mix(in srgb, var(--operator-success-fill) 70%, var(--operator-warning-fill)); }
+.health-score7  { background: color-mix(in srgb, var(--operator-success-fill) 50%, var(--operator-warning-fill)); }
+.health-score6  { background: color-mix(in srgb, var(--operator-success-fill) 25%, var(--operator-warning-fill)); }
+.health-score5  { background: var(--operator-warning-fill); }
+.health-score4  { background: color-mix(in srgb, var(--operator-warning-fill) 75%, var(--operator-destructive-fill)); }
+.health-score3  { background: color-mix(in srgb, var(--operator-warning-fill) 50%, var(--operator-destructive-fill)); }
+.health-score2  { background: color-mix(in srgb, var(--operator-warning-fill) 25%, var(--operator-destructive-fill)); }
+.health-score1  { background: color-mix(in srgb, var(--operator-warning-fill) 10%, var(--operator-destructive-fill)); }
+.health-score0  { background: var(--operator-destructive-fill); }
+.health-healthy  { background: var(--operator-success-fill); }
+.health-warning  { background: var(--operator-warning-fill); }
+.health-critical { background: var(--operator-destructive-fill); }
+.health-unknown  { background: var(--operator-subtle-foreground); }
 .matrix-select {
   min-width: 10rem;
 }

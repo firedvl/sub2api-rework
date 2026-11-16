@@ -49,9 +49,13 @@ provider, and account behavior unless a separately tested change replaces it.
   motion, with light values on `:root` and dark values on `.dark`.
   `tailwind.config.js` maps the `gray`, `dark`, and `primary` ramps to the same
   palette, so inherited utility classes render in the current system.
-- **Color roles.** Neutral zinc surfaces carry structure. Ink (near-black, or
-  near-white in dark mode) marks the primary action. One blue accent marks
-  selection, focus, links, and information. Green, amber, and red are reserved
+- **Color roles.** Graphite surfaces carry structure. Ink (near-black, or
+  near-white in dark mode) marks the primary action. One accent marks
+  selection, focus, links, and information. Iris is the default; the user menu
+  and command palette switch it to azure, cyan, or magenta. The `--accent-50…950`
+  ramp holds RGB channels, `html[data-accent]` swaps it, and Tailwind's
+  `primary` ramp reads it, so every accent utility follows the choice. An inline
+  script in `index.html` applies the saved theme and accent before first paint. Green, amber, and red are reserved
   for status and always appear with text or an icon.
 - **Contrast.** Muted and status text utilities resolve to theme-aware tokens
   that meet WCAG AA on both themes, so `text-gray-400` or `text-green-600` stay
@@ -70,12 +74,26 @@ provider, and account behavior unless a separately tested change replaces it.
   Switching the theme cross-fades the window. Browsers without view transitions
   fade the page in instead. Menus and dialogs rise a few pixels from their
   trigger, tab panels fade in, toasts slide in from the top right and slide out
-  to the right, and the sidebar group expands in place. Under reduced motion
-  every transition becomes immediate, while loading spinners keep turning.
+  to the right, and the sidebar group expands in place. The active sidebar link
+  and the area tabs have a sliding highlight. Page sections enter with a short
+  staggered rise (`.ui-stagger`), metrics count up to their value
+  (`components/ui/CountUp.vue`), new table rows flash once (`.ui-flash`), and
+  cards show a soft spotlight under a fine pointer (`utils/spotlight.ts`). Under
+  reduced motion every transition becomes immediate, while loading spinners
+  keep turning.
+- **Shared parts.** `components/ui/` holds `CountUp`, `QuotaMeter` (remaining
+  capacity with ok/warn/bad tones), and `SideDrawer` (right-side detail panel
+  with focus trap and Escape). The `.ui-*` classes in `style.css` cover toolbars,
+  search, filter chips, tables, empty states, skeletons, and drawers.
 
 ## Information Architecture
 
 ### Overview
+
+Overview counts today's figures up from zero and compares them with the same
+hours yesterday. A Live toggle refreshes every 15 seconds instead of every
+minute. New recent requests flash once, and each attention item opens that
+account's drawer.
 
 Answer four questions in order:
 
@@ -128,6 +146,14 @@ the first operator map.
 
 ## Navigation
 
+- The command palette (`components/layout/CommandPalette.vue`) opens with
+  Cmd/Ctrl+K, `/`, or the header search field. It searches pages, accounts by
+  name (opening the account drawer), and actions such as theme, accent, sidebar,
+  and sign-out.
+- Below the `lg` breakpoint a bottom tab bar (`MobileTabBar.vue`) gives
+  thumb-reach access to the three busiest pages, search, and the full menu.
+- The sidebar footer shows gateway status from `useGatewayPulse`, and the
+  Accounts link carries a count of accounts that need attention.
 - Use Overview, Stats, Accounts, Models & Routing, Activity, and Settings as the
   stable top level. `src/router/operatorNavigation.ts` is the single definition;
   the sidebar, area tabs, and header breadcrumb all read from it.

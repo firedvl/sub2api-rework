@@ -14,7 +14,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -508,62 +507,4 @@ func TestNativeGeminiResponsesNonstreamFailureOpsAndAccounting(t *testing.T) {
 	require.Equal(t, "Gemini generation failed", message)
 	require.Contains(t, w.Body.String(), `"status":"failed"`)
 	require.NotContains(t, w.Body.String(), `"status":"completed"`)
-}
-
-type nativeGeminiOperatorCache struct {
-	gatewayCapabilitySchedulerCacheStub
-	account *Account
-}
-
-func (c *nativeGeminiOperatorCache) GetAccount(context.Context, int64) (*Account, error) {
-	return c.account, nil
-}
-func TestNativeGeminiResponsesOperatorAssistantRelay(t *testing.T) {
-	group := Group{ID: 42, Platform: PlatformGemini, Status: StatusActive, Hydrated: true}
-	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "test"}, AccountGroups: []AccountGroup{{GroupID: 42, AccountID: 1}}}
-	snapshot := gatewayCapabilitySchedulerSnapshot(42, PlatformGemini, account)
-	cache, ok := snapshot.cache.(*gatewayCapabilitySchedulerCacheStub)
-	require.True(t, ok)
-	snapshot.cache = &nativeGeminiOperatorCache{gatewayCapabilitySchedulerCacheStub: *cache, account: account}
-	gateway := &GatewayService{schedulerSnapshot: snapshot}
-	upstream := &nativeGeminiResponsesUpstream{status: 200, response: "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"operator OK\"}]},\"finishReason\":\"STOP\"}]}\n\n"}
-	gemini := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
-	assistant := NewOperatorAssistantService(nil, nil, nil, gateway, nil, nil, gemini, BuildInfo{}, nil)
-	c, w := nativeGeminiTestContext()
-	ctx := context.WithValue(context.Background(), ctxkey.Group, &group)
-	err := assistant.relayExistingGateway(ctx, c, operatorAssistantCandidate{Option: OperatorAssistantModelOption{GroupID: 42, Model: "gemini", Platform: PlatformGemini}, Group: group}, []byte(`{"model":"gemini","input":"hi","stream":true,"store":false}`), 9)
-	require.NoError(t, err)
-	require.NotNil(t, upstream.req)
-	require.Equal(t, "/v1beta/models/gemini:streamGenerateContent", upstream.req.URL.Path)
-	require.Contains(t, w.Body.String(), "operator OK")
-	require.Contains(t, w.Body.String(), "response.completed")
-
-	upstream.response = "data: {\"candidates\":[{\"finishReason\":\"MALFORMED_FUNCTION_CALL\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":2}}\n\n"
-	c, w = nativeGeminiTestContext()
-	err = assistant.relayExistingGateway(ctx, c, operatorAssistantCandidate{Option: OperatorAssistantModelOption{GroupID: 42, Model: "gemini", Platform: PlatformGemini}, Group: group}, []byte(`{"model":"gemini","input":"hi","stream":true,"store":false}`), 9)
-	require.ErrorContains(t, err, "native Gemini generation failed")
-	require.Contains(t, w.Body.String(), "response.failed")
-	require.NotContains(t, w.Body.String(), "response.completed")
-
-	account.AccountGroups = append(account.AccountGroups, AccountGroup{GroupID: 43, AccountID: 1})
-	reader := &operatorAssistantReaderStub{
-		groups:   []Group{group, {ID: 43, Platform: PlatformGemini, Status: StatusActive}},
-		models:   map[int64][]string{42: {"gemini"}, 43: {"gemini"}},
-		accounts: []Account{*account},
-	}
-	orchestrator := operatorAssistantTestService(reader)
-	relay := assistant.relay
-	attempts := 0
-	orchestrator.relay = func(ctx context.Context, c *gin.Context, candidate operatorAssistantCandidate, body []byte, adminID int64) error {
-		attempts++
-		return relay(ctx, c, candidate, body, adminID)
-	}
-	c, w = nativeGeminiTestContext()
-	c.Request = c.Request.WithContext(ctx)
-	run, err := orchestrator.Stream(c, 9, OperatorAssistantRequest{Model: "auto", Messages: []OperatorAssistantMessage{{Role: "user", Content: "status"}}})
-	require.Error(t, err)
-	require.True(t, run.Started)
-	require.Equal(t, 1, attempts)
-	require.Contains(t, w.Body.String(), "response.failed")
-	require.NotContains(t, w.Body.String(), "response.completed")
 }

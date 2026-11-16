@@ -1,44 +1,48 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="flex-1 sm:max-w-64">
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.promo.searchCodes')"
-              class="input"
-              @input="handleSearch"
-            />
-          </div>
-          <Select
-            v-model="filters.status"
-            :options="filterStatusOptions"
-            class="w-36"
-            @change="loadCodes"
+    <div class="ui-page ui-stagger">
+      <div class="ui-toolbar">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="t('admin.promo.searchCodes')"
+            :aria-label="t('common.search')"
+            @input="handleSearch"
           />
-
-          <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
-            <button
-              @click="loadCodes"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <button @click="showCreateDialog = true" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-1" />
-              {{ t('admin.promo.createCode') }}
-            </button>
-          </div>
+        </label>
+        <div class="viz-seg" role="group" :aria-label="t('admin.promo.status')">
+          <button
+            v-for="option in filterStatusOptions"
+            :key="option.value"
+            type="button"
+            :data-test="`promo-status-${option.value || 'all'}`"
+            :aria-pressed="filters.status === option.value"
+            @click="setStatusFilter(option.value)"
+          >
+            {{ option.value === '' ? t('common.all') : option.label }}
+            <span v-if="filters.status === option.value && !loading" class="ui-chip-count">{{ pagination.total }}</span>
+          </button>
         </div>
-      </template>
+        <span class="ui-grow" />
+        <button
+          type="button"
+          class="app-icon-button"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          :disabled="loading"
+          @click="loadCodes"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button type="button" class="btn btn-primary" @click="showCreateDialog = true">
+          <Icon name="plus" size="sm" />
+          {{ t('admin.promo.createCode') }}
+        </button>
+      </div>
 
-      <template #table>
+      <section class="viz-card promo-card">
         <DataTable
           :columns="columns"
           :data="codes"
@@ -46,55 +50,44 @@
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
+          clickable-rows
+          row-key="id"
           @sort="handleSort"
+          @row-click="openDetail"
         >
-          <template #cell-code="{ value }">
-            <div class="flex items-center space-x-2">
-              <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
+          <template #cell-code="{ value, row }">
+            <div class="flex items-center gap-1">
+              <button type="button" class="promo-code" :title="t('admin.adminUi.details')" @click.stop="openDetail(row)">
+                {{ value }}
+              </button>
               <button
-                @click="copyToClipboard(value)"
-                :class="[
-                  'flex items-center transition-colors',
-                  copiedCode === value
-                    ? 'text-green-500'
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                ]"
+                type="button"
+                class="row-action promo-copy"
+                :class="copiedCode === value ? 'is-copied' : ''"
+                :aria-label="copiedCode === value ? t('admin.promo.copied') : t('keys.copyToClipboard')"
                 :title="copiedCode === value ? t('admin.promo.copied') : t('keys.copyToClipboard')"
+                @click.stop="copyToClipboard(value)"
               >
-                <Icon v-if="copiedCode !== value" name="copy" size="sm" :stroke-width="2" />
-                <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
+                <Icon :name="copiedCode === value ? 'check' : 'copy'" size="sm" />
               </button>
             </div>
           </template>
 
           <template #cell-bonus_amount="{ value }">
-            <span class="text-sm font-medium text-gray-900 dark:text-white">
-              ${{ value.toFixed(2) }}
-            </span>
+            <span class="font-medium tabular-nums text-gray-900 dark:text-white">${{ value.toFixed(2) }}</span>
           </template>
 
           <template #cell-usage="{ row }">
-            <span class="text-sm text-gray-600 dark:text-gray-300">
-              {{ row.used_count }} / {{ row.max_uses === 0 ? '∞' : row.max_uses }}
-            </span>
+            <div class="promo-usage">
+              <span class="tabular-nums">{{ row.used_count }} / {{ row.max_uses === 0 ? '∞' : row.max_uses }}</span>
+              <div v-if="row.max_uses > 0" :class="usageMeterClass(row)" role="img" :aria-label="`${usagePercent(row)}%`">
+                <div class="ui-meter-track"><i :style="{ width: `${Math.max(usagePercent(row), 2)}%` }"></i></div>
+              </div>
+            </div>
           </template>
 
           <template #cell-status="{ value, row }">
-            <span
-              :class="[
-                'badge',
-                getStatusClass(value, row)
-              ]"
-            >
-              {{ getStatusLabel(value, row) }}
-            </span>
+            <span :class="['badge', getStatusClass(value, row)]">{{ getStatusLabel(value, row) }}</span>
           </template>
 
           <template #cell-expires_at="{ value }">
@@ -104,47 +97,39 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ formatDateTime(value) }}
-            </span>
+            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center space-x-1">
-              <button
-                @click="copyRegisterLink(row)"
-                class="row-action"
-                :title="t('admin.promo.copyRegisterLink')"
-              >
+            <div class="flex items-center gap-0.5" @click.stop>
+              <button type="button" class="row-action" :aria-label="t('admin.promo.copyRegisterLink')" :title="t('admin.promo.copyRegisterLink')" @click="copyRegisterLink(row)">
                 <Icon name="link" size="sm" />
               </button>
-              <button
-                @click="handleViewUsages(row)"
-                class="row-action"
-                :title="t('admin.promo.viewUsages')"
-              >
-                <Icon name="eye" size="sm" />
-              </button>
-              <button
-                @click="handleEdit(row)"
-                class="row-action"
-                :title="t('common.edit')"
-              >
+              <button type="button" class="row-action" :aria-label="t('common.edit')" :title="t('common.edit')" @click="handleEdit(row)">
                 <Icon name="edit" size="sm" />
               </button>
-              <button
-                @click="handleDelete(row)"
-                class="row-action row-action-danger"
-                :title="t('common.delete')"
-              >
-                <Icon name="trash" size="sm" />
+              <ToolbarPopover :label="t('admin.adminUi.moreActions')" icon="more" icon-only menu>
+                <button type="button" role="menuitem" class="dropdown-item" @click="handleViewUsages(row)">
+                  <Icon name="eye" size="sm" />{{ t('admin.promo.viewUsages') }}
+                </button>
+                <button type="button" role="menuitem" class="dropdown-item promo-danger" @click="handleDelete(row)">
+                  <Icon name="trash" size="sm" />{{ t('common.delete') }}
+                </button>
+              </ToolbarPopover>
+            </div>
+          </template>
+
+          <template #empty>
+            <div class="ui-empty">
+              <span class="ui-empty-icon"><Icon name="ticket" size="md" /></span>
+              <b>{{ searchQuery || filters.status ? t('admin.adminUi.noMatches') : t('admin.promo.noCodesYet') }}</b>
+              <button v-if="!searchQuery && !filters.status" type="button" class="btn btn-primary btn-sm" @click="showCreateDialog = true">
+                <Icon name="plus" size="sm" />{{ t('admin.promo.createCode') }}
               </button>
             </div>
           </template>
         </DataTable>
-      </template>
 
-      <template #pagination>
         <Pagination
           v-if="pagination.total > 0"
           :page="pagination.page"
@@ -153,8 +138,102 @@
           @update:page="handlePageChange"
           @update:pageSize="handlePageSizeChange"
         />
+      </section>
+    </div>
+
+    <SideDrawer
+      :open="currentViewingCode !== null"
+      :title="currentViewingCode?.code ?? ''"
+      :subtitle="currentViewingCode ? `$${currentViewingCode.bonus_amount.toFixed(2)}` : ''"
+      width="30rem"
+      @close="closeDetail"
+    >
+      <template #leading>
+        <span class="promo-drawer-icon"><Icon name="ticket" size="md" /></span>
       </template>
-    </TablePageLayout>
+      <template v-if="currentViewingCode" #badge>
+        <span :class="['badge', getStatusClass(currentViewingCode.status, currentViewingCode)]">
+          {{ getStatusLabel(currentViewingCode.status, currentViewingCode) }}
+        </span>
+      </template>
+
+      <div v-if="currentViewingCode" class="promo-drawer">
+        <section>
+          <div class="ui-section-label">{{ t('admin.promo.columns.usage') }}</div>
+          <div class="promo-usage is-large">
+            <span class="tabular-nums">
+              <b>{{ currentViewingCode.used_count }}</b> / {{ currentViewingCode.max_uses === 0 ? '∞' : currentViewingCode.max_uses }}
+            </span>
+            <div v-if="currentViewingCode.max_uses > 0" :class="usageMeterClass(currentViewingCode)">
+              <div class="ui-meter-track"><i :style="{ width: `${Math.max(usagePercent(currentViewingCode), 2)}%` }"></i></div>
+              <b>{{ usagePercent(currentViewingCode) }}%</b>
+            </div>
+          </div>
+        </section>
+
+        <dl class="ui-dl">
+          <dt>{{ t('admin.promo.columns.bonusAmount') }}</dt>
+          <dd class="tabular-nums">${{ currentViewingCode.bonus_amount.toFixed(2) }}</dd>
+          <dt>{{ t('admin.promo.columns.expiresAt') }}</dt>
+          <dd>{{ currentViewingCode.expires_at ? formatDateTime(currentViewingCode.expires_at) : t('admin.promo.neverExpires') }}</dd>
+          <dt>{{ t('admin.promo.columns.createdAt') }}</dt>
+          <dd>{{ formatDateTime(currentViewingCode.created_at) }}</dd>
+          <dt>{{ t('admin.adminUi.promoCodes.updatedAt') }}</dt>
+          <dd>{{ formatDateTime(currentViewingCode.updated_at) }}</dd>
+          <template v-if="currentViewingCode.notes">
+            <dt>{{ t('admin.promo.notes') }}</dt>
+            <dd class="whitespace-pre-wrap">{{ currentViewingCode.notes }}</dd>
+          </template>
+        </dl>
+
+        <section data-test="promo-usage-records">
+          <div class="ui-section-label">
+            {{ t('admin.promo.usageRecords') }}
+            <span v-if="usagesTotal > 0" class="ml-1 tabular-nums">{{ usagesTotal }}</span>
+          </div>
+          <div v-if="usagesLoading" class="space-y-2">
+            <div v-for="n in 3" :key="n" class="skeleton h-12 rounded-lg"></div>
+          </div>
+          <div v-else-if="usages.length === 0" class="ui-empty promo-empty">
+            <span class="ui-empty-icon"><Icon name="users" size="md" /></span>
+            <b>{{ t('admin.promo.noUsages') }}</b>
+          </div>
+          <template v-else>
+            <ul class="promo-usages">
+              <li v-for="usage in usages" :key="usage.id">
+                <span class="promo-usage-avatar"><Icon name="user" size="sm" /></span>
+                <div class="min-w-0 flex-1">
+                  <div class="ui-cell-main truncate">{{ usage.user?.email || t('admin.promo.userPrefix', { id: usage.user_id }) }}</div>
+                  <div class="ui-cell-sub">{{ formatDateTime(usage.used_at) }}</div>
+                </div>
+                <span class="promo-usage-bonus">+${{ usage.bonus_amount.toFixed(2) }}</span>
+              </li>
+            </ul>
+            <Pagination
+              v-if="usagesTotal > usagesPageSize"
+              :page="usagesPage"
+              :total="usagesTotal"
+              :page-size="usagesPageSize"
+              @update:page="handleUsagesPageChange"
+              @update:page-size="(size: number) => { usagesPageSize = size; usagesPage = 1; loadUsages() }"
+            />
+          </template>
+        </section>
+      </div>
+
+      <template v-if="currentViewingCode" #footer>
+        <button type="button" class="btn btn-primary" @click="editFromDetail">
+          <Icon name="edit" size="sm" />{{ t('common.edit') }}
+        </button>
+        <button type="button" class="btn btn-secondary" @click="copyRegisterLink(currentViewingCode)">
+          <Icon name="link" size="sm" />{{ t('admin.promo.copyRegisterLink') }}
+        </button>
+        <span class="flex-1"></span>
+        <button type="button" class="btn btn-ghost promo-danger" @click="deleteFromDetail">
+          <Icon name="trash" size="sm" />{{ t('common.delete') }}
+        </button>
+      </template>
+    </SideDrawer>
 
     <!-- Create Dialog -->
     <BaseDialog
@@ -313,63 +392,6 @@
       </template>
     </BaseDialog>
 
-    <!-- Usages Dialog -->
-    <BaseDialog
-      :show="showUsagesDialog"
-      :title="t('admin.promo.usageRecords')"
-      width="wide"
-      @close="showUsagesDialog = false"
-    >
-      <div v-if="usagesLoading" class="flex items-center justify-center py-8">
-        <Icon name="refresh" size="lg" class="animate-spin text-gray-400" />
-      </div>
-      <div v-else-if="usages.length === 0" class="py-8 text-center text-gray-500 dark:text-gray-400">
-        {{ t('admin.promo.noUsages') }}
-      </div>
-      <div v-else class="space-y-3">
-        <div
-          v-for="usage in usages"
-          :key="usage.id"
-          class="flex items-center justify-between rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-        >
-          <div class="flex items-center gap-3">
-            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-              <Icon name="user" size="sm" class="text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <p class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ usage.user?.email || t('admin.promo.userPrefix', { id: usage.user_id }) }}
-              </p>
-              <p class="text-xs text-gray-500 dark:text-gray-400">
-                {{ formatDateTime(usage.used_at) }}
-              </p>
-            </div>
-          </div>
-          <div class="text-right">
-            <span class="text-sm font-medium text-green-600 dark:text-green-400">
-              +${{ usage.bonus_amount.toFixed(2) }}
-            </span>
-          </div>
-        </div>
-        <!-- Usages Pagination -->
-        <div v-if="usagesTotal > usagesPageSize" class="mt-4">
-          <Pagination
-            :page="usagesPage"
-            :total="usagesTotal"
-            :page-size="usagesPageSize"
-            @update:page="handleUsagesPageChange"
-            @update:page-size="(size: number) => { usagesPageSize = size; usagesPage = 1; loadUsages() }"
-          />
-        </div>
-      </div>
-      <template #footer>
-        <div class="flex justify-end">
-          <button type="button" @click="showUsagesDialog = false" class="btn btn-secondary">
-            {{ t('common.close') }}
-          </button>
-        </div>
-      </template>
-    </BaseDialog>
 
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
@@ -396,13 +418,14 @@ import { formatDateTime, formatDateTimeLocalInput } from '@/utils/format'
 import type { PromoCode, PromoCodeUsage } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -434,7 +457,6 @@ const sortState = reactive({
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const showDeleteDialog = ref(false)
-const showUsagesDialog = ref(false)
 
 const editingCode = ref<PromoCode | null>(null)
 const deletingCode = ref<PromoCode | null>(null)
@@ -496,6 +518,16 @@ const getStatusClass = (status: string, row: PromoCode) => {
     return 'badge-gray'
   }
   return status === 'active' ? 'badge-success' : 'badge-gray'
+}
+
+const usagePercent = (row: PromoCode) => (row.max_uses > 0 ? Math.min(100, Math.round((row.used_count / row.max_uses) * 100)) : 0)
+
+// Literal meter classes so Tailwind keeps them: amber near the limit, red when used up.
+const usageMeterClass = (row: PromoCode) => {
+  const value = usagePercent(row)
+  if (value >= 100) return 'ui-meter promo-meter is-bad'
+  if (value >= 80) return 'ui-meter promo-meter is-warn'
+  return 'ui-meter promo-meter'
 }
 
 const getStatusLabel = (status: string, row: PromoCode) => {
@@ -561,6 +593,13 @@ const handleSearch = () => {
     pagination.page = 1
     loadCodes()
   }, 300)
+}
+
+const setStatusFilter = (status: string) => {
+  if (filters.status === status) return
+  filters.status = status
+  pagination.page = 1
+  loadCodes()
 }
 
 const handlePageChange = (page: number) => {
@@ -703,12 +742,35 @@ const confirmDelete = async () => {
   }
 }
 
-// View Usages
+// Detail drawer (shows the code's usage records)
 const handleViewUsages = async (code: PromoCode) => {
   currentViewingCode.value = code
-  showUsagesDialog.value = true
   usagesPage.value = 1
+  usagesTotal.value = 0
   await loadUsages()
+}
+
+const openDetail = (code: PromoCode) => {
+  void handleViewUsages(code)
+}
+
+const closeDetail = () => {
+  currentViewingCode.value = null
+  usages.value = []
+}
+
+const editFromDetail = () => {
+  const code = currentViewingCode.value
+  if (!code) return
+  closeDetail()
+  handleEdit(code)
+}
+
+const deleteFromDetail = () => {
+  const code = currentViewingCode.value
+  if (!code) return
+  closeDetail()
+  handleDelete(code)
 }
 
 const loadUsages = async () => {
@@ -745,3 +807,119 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.promo-card {
+  overflow: hidden;
+}
+
+.promo-code {
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.promo-code:hover {
+  color: var(--operator-accent-text);
+}
+
+.promo-code:focus-visible {
+  outline: 2px solid var(--operator-focus);
+  outline-offset: 2px;
+}
+
+.promo-copy {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.promo-copy.is-copied {
+  color: var(--operator-success);
+}
+
+.promo-usage {
+  display: flex;
+  min-width: 7rem;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.promo-meter {
+  min-width: 3.5rem;
+  flex: 1 1 auto;
+}
+
+.promo-usage.is-large {
+  font-size: 0.9375rem;
+}
+
+.promo-usage.is-large b {
+  color: var(--operator-foreground);
+  font-size: 1.375rem;
+  font-weight: 600;
+}
+
+.promo-danger {
+  color: var(--operator-destructive);
+}
+
+.promo-drawer {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.promo-drawer-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: var(--operator-radius);
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.promo-empty {
+  padding-block: 1.5rem;
+}
+
+.promo-usages {
+  display: grid;
+  margin-bottom: 0.5rem;
+}
+
+.promo-usages li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--operator-border);
+}
+
+.promo-usages li:last-child {
+  border-bottom: 0;
+}
+
+.promo-usage-avatar {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--operator-raised);
+  color: var(--operator-muted-foreground);
+}
+
+.promo-usage-bonus {
+  color: var(--operator-success);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+</style>

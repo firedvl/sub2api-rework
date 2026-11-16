@@ -1,57 +1,133 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="ui-page ui-stagger">
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="flex-1 sm:max-w-64">
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.redeem.searchCodes')"
-              class="input"
-              @input="handleSearch"
-            />
-          </div>
-          <Select
-            v-model="filters.type"
-            :options="filterTypeOptions"
-            class="w-36"
-            @change="loadCodes"
-          />
-          <Select
-            v-model="filters.status"
-            :options="filterStatusOptions"
-            class="w-36"
-            @change="loadCodes"
-          />
+        <div class="redeem-top">
+          <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.adminUi.filters')">
+            <label class="ui-search">
+              <Icon name="search" size="sm" />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.redeem.searchCodes')"
+                :aria-label="t('admin.redeem.searchCodes')"
+                @input="handleSearch"
+              />
+            </label>
 
-          <!-- Right: Action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <div class="viz-seg" role="group" :aria-label="t('admin.redeem.columns.status')">
+              <button
+                v-for="option in filterStatusOptions"
+                :key="option.value"
+                type="button"
+                :aria-pressed="filters.status === option.value"
+                @click="setStatusFilter(option.value)"
+              >
+                {{ option.label }}
+                <span
+                  v-if="filters.status === option.value && !loading && pagination.total > 0"
+                  class="ui-chip-count"
+                >{{ pagination.total }}</span>
+              </button>
+            </div>
+
+            <ToolbarPopover
+              :label="t('admin.adminUi.filters')"
+              icon="filter"
+              :count="filters.type ? 1 : 0"
+              align="left"
+            >
+              <div>
+                <div class="ui-section-label">{{ t('admin.redeem.columns.type') }}</div>
+                <div class="ui-chips" role="group" :aria-label="t('admin.redeem.columns.type')">
+                  <button
+                    v-for="option in filterTypeOptions"
+                    :key="option.value"
+                    type="button"
+                    class="ui-chip"
+                    :aria-pressed="filters.type === option.value"
+                    @click="setTypeFilter(option.value)"
+                  >
+                    <Icon v-if="option.value" :name="typeIcon(option.value)" size="sm" />
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+            </ToolbarPopover>
+
+            <span class="ui-grow" />
+
             <button
-              @click="loadCodes"
+              type="button"
+              class="app-icon-button"
               :disabled="loading"
-              class="btn btn-secondary"
               :title="t('common.refresh')"
+              :aria-label="t('common.refresh')"
+              @click="loadCodes"
             >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="handleExportCodes" class="btn btn-secondary">
-              {{ t('admin.redeem.exportCsv') }}
-            </button>
-            <button
-              data-test="batch-update-open"
-              @click="openBatchUpdateDialog"
-              :disabled="selectedCount === 0 || batchUpdating"
-              class="btn btn-secondary"
+
+            <ToolbarPopover
+              :label="t('admin.adminUi.moreActions')"
+              icon="more"
+              icon-only
+              menu
+              width="15rem"
             >
-              <Icon name="edit" size="md" class="mr-2" />
-              {{ t('admin.redeem.batchUpdate') }}
-            </button>
-            <button @click="showGenerateDialog = true" class="btn btn-primary">
+              <button type="button" role="menuitem" class="dropdown-item" @click="handleExportCodes">
+                <Icon name="download" size="sm" />
+                {{ t('admin.redeem.exportCsv') }}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="dropdown-item"
+                :disabled="selectedCount === 0 || batchUpdating"
+                @click="openBatchUpdateDialog"
+              >
+                <Icon name="edit" size="sm" />
+                {{ t('admin.redeem.batchUpdate') }}
+              </button>
+              <div class="redeem-menu-divider" role="separator"></div>
+              <button
+                type="button"
+                role="menuitem"
+                class="dropdown-item is-danger"
+                @click="showDeleteUnusedDialog = true"
+              >
+                <Icon name="trash" size="sm" />
+                {{ t('admin.redeem.deleteAllUnused') }}
+              </button>
+            </ToolbarPopover>
+
+            <button type="button" class="btn btn-primary" @click="showGenerateDialog = true">
+              <Icon name="plus" size="sm" />
               {{ t('admin.redeem.generateCodes') }}
             </button>
           </div>
+
+          <Transition name="fade">
+            <div v-if="selectedCount > 0" class="redeem-bulkbar">
+              <span class="redeem-bulkbar-count">
+                {{ t('admin.redeem.selectedCount', { count: selectedCount }) }}
+              </span>
+              <span class="ui-grow" />
+              <button
+                type="button"
+                data-test="batch-update-open"
+                class="btn btn-secondary btn-sm"
+                :disabled="batchUpdating"
+                @click="openBatchUpdateDialog"
+              >
+                <Icon name="edit" size="sm" />
+                {{ t('admin.redeem.batchUpdate') }}
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" @click="clearSelectedCodes">
+                {{ t('admin.redeem.clearSelection') }}
+              </button>
+            </div>
+          </Transition>
         </div>
       </template>
 
@@ -60,10 +136,12 @@
           :columns="columns"
           :data="codes"
           :loading="loading"
+          clickable-rows
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
           @sort="handleSort"
+          @row-click="openDetail"
         >
           <template #header-select>
             <input
@@ -71,6 +149,7 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="allVisibleSelected"
+              :aria-label="t('common.selectAll')"
               @click.stop
               @change="toggleSelectAllVisible($event)"
             />
@@ -82,155 +161,97 @@
               type="checkbox"
               class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
               :checked="selectedCodeIds.has(row.id)"
+              :aria-label="row.code"
               @click.stop
               @change="toggleSelectRow(row.id, $event)"
             />
           </template>
 
           <template #cell-code="{ value }">
-            <div class="flex items-center space-x-2">
-              <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
+            <span class="redeem-code">
+              <code>{{ value }}</code>
               <button
-                @click="copyToClipboard(value)"
-                :class="[
-                  'flex items-center transition-colors',
-                  copiedCode === value
-                    ? 'text-green-500'
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                ]"
+                type="button"
+                class="redeem-copy"
+                :class="copiedCode === value ? 'is-copied' : ''"
                 :title="copiedCode === value ? t('admin.redeem.copied') : t('keys.copyToClipboard')"
+                :aria-label="copiedCode === value ? t('admin.redeem.copied') : t('keys.copyToClipboard')"
+                @click.stop="copyToClipboard(value)"
               >
-                <Icon v-if="copiedCode !== value" name="copy" size="sm" :stroke-width="2" />
-                <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
+                <Icon :name="copiedCode === value ? 'check' : 'copy'" size="sm" :stroke-width="2" />
               </button>
-            </div>
+            </span>
           </template>
 
           <template #cell-type="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'balance'
-                  ? 'badge-success'
-                  : value === 'subscription'
-                    ? 'badge-warning'
-                    : 'badge-primary'
-              ]"
-            >
+            <span :class="typeBadgeClass(value)">
               {{ t('admin.redeem.types.' + value) }}
             </span>
           </template>
 
           <template #cell-value="{ value, row }">
-            <span class="text-sm font-medium text-gray-900 dark:text-white">
+            <span class="redeem-value">
               <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
               <template v-else-if="row.type === 'subscription'">
-                {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
-                <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
-                  >({{ row.group.name }})</span
-                >
+                {{ row.validity_days || 30 }}{{ t('admin.redeem.days') }}
+                <span v-if="row.group" class="redeem-value-group">
+                  <ProviderMark :platform="row.group.platform" :size="16" />
+                  {{ row.group.name }}
+                </span>
               </template>
               <template v-else>{{ value }}</template>
             </span>
           </template>
 
           <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'unused'
-                  ? 'badge-success'
-                  : value === 'used'
-                    ? 'badge-gray'
-                    : 'badge-danger'
-              ]"
-            >
+            <span :class="statusBadgeClass(value)">
               {{ t('admin.redeem.status.' + value) }}
             </span>
           </template>
 
           <template #cell-used_by="{ value, row }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
+            <span class="redeem-muted">
               {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
             </span>
           </template>
 
           <template #cell-used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{
-              value ? formatDateTime(value) : '-'
-            }}</span>
+            <span class="redeem-muted">{{ value ? formatDateTime(value) : '-' }}</span>
           </template>
 
           <template #cell-expires_at="{ value, row }">
-            <span
-              :class="[
-                'text-sm',
-                row.status === 'expired'
-                  ? 'text-red-600 dark:text-red-400'
-                  : 'text-gray-500 dark:text-dark-400'
-              ]"
-            >
+            <span :class="row.status === 'expired' ? 'redeem-muted is-expired' : 'redeem-muted'">
               {{ value ? formatDateTime(value) : t('admin.redeem.neverExpires') }}
             </span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center space-x-2">
+            <div class="redeem-row-actions" @click.stop @keydown.enter.stop>
+              <button
+                type="button"
+                class="app-icon-button"
+                :title="t('admin.adminUi.details')"
+                :aria-label="t('admin.adminUi.details')"
+                @click="openDetail(row)"
+              >
+                <Icon name="eye" size="sm" />
+              </button>
               <button
                 v-if="row.status === 'unused'"
-                @click="handleDelete(row)"
-                class="row-action row-action-danger"
+                type="button"
+                class="app-icon-button redeem-danger"
                 :title="t('common.delete')"
+                :aria-label="t('common.delete')"
+                @click="handleDelete(row)"
               >
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                <span class="row-action-label">{{ t('common.delete') }}</span>
+                <Icon name="trash" size="sm" />
               </button>
-              <span v-else class="text-gray-400 dark:text-dark-500">-</span>
             </div>
           </template>
         </DataTable>
       </template>
 
       <template #pagination>
-        <div
-          v-if="selectedCount > 0"
-          class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20"
-        >
-          <span class="text-sm font-medium text-primary-900 dark:text-primary-100">
-            {{ t('admin.redeem.selectedCount', { count: selectedCount }) }}
-          </span>
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              class="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
-              @click="clearSelectedCodes"
-            >
-              {{ t('admin.redeem.clearSelection') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary btn-sm"
-              @click="openBatchUpdateDialog"
-            >
-              {{ t('admin.redeem.batchUpdate') }}
-            </button>
-          </div>
-        </div>
-
         <Pagination
           v-if="pagination.total > 0"
           :page="pagination.page"
@@ -239,15 +260,86 @@
           @update:page="handlePageChange"
           @update:pageSize="handlePageSizeChange"
         />
-
-        <!-- Batch Actions -->
-        <div v-if="filters.status === 'unused'" class="flex justify-end">
-          <button @click="showDeleteUnusedDialog = true" class="btn btn-danger">
-            {{ t('admin.redeem.deleteAllUnused') }}
-          </button>
-        </div>
       </template>
     </TablePageLayout>
+
+    <!-- Redeem code detail -->
+    <SideDrawer
+      :open="detailCode !== null"
+      :title="detailCode?.code ?? ''"
+      :subtitle="detailCode ? t('admin.redeem.types.' + detailCode.type) : undefined"
+      width="28rem"
+      @close="closeDetail"
+    >
+      <template #leading>
+        <span v-if="detailCode" class="redeem-drawer-icon" aria-hidden="true">
+          <Icon :name="typeIcon(detailCode.type)" size="md" />
+        </span>
+      </template>
+      <template #badge>
+        <span v-if="detailCode" :class="statusBadgeClass(detailCode.status)">
+          {{ t('admin.redeem.status.' + detailCode.status) }}
+        </span>
+      </template>
+
+      <template v-if="detailCode">
+        <div class="redeem-hero">
+          <span class="ui-section-label">{{ t('admin.redeem.columns.value') }}</span>
+          <b v-if="detailCode.type === 'balance'">${{ detailCode.value.toFixed(2) }}</b>
+          <b v-else-if="detailCode.type === 'subscription'">
+            {{ detailCode.validity_days || 30 }}{{ t('admin.redeem.days') }}
+          </b>
+          <b v-else>{{ detailCode.value }}</b>
+        </div>
+
+        <dl class="ui-dl">
+          <template v-if="detailCode.group">
+            <dt>{{ t('admin.redeem.batchFields.group') }}</dt>
+            <dd>
+              <GroupBadge
+                :name="detailCode.group.name"
+                :platform="detailCode.group.platform"
+                :subscription-type="detailCode.group.subscription_type"
+                :rate-multiplier="detailCode.group.rate_multiplier"
+              />
+            </dd>
+          </template>
+          <dt>{{ t('admin.redeem.columns.usedBy') }}</dt>
+          <dd>
+            {{ detailCode.user?.email || (detailCode.used_by ? t('admin.redeem.userPrefix', { id: detailCode.used_by }) : '-') }}
+          </dd>
+          <dt>{{ t('admin.redeem.columns.usedAt') }}</dt>
+          <dd>{{ detailCode.used_at ? formatDateTime(detailCode.used_at) : '-' }}</dd>
+          <dt>{{ t('admin.redeem.columns.createdAt') }}</dt>
+          <dd>{{ formatDateTime(detailCode.created_at) }}</dd>
+          <dt>{{ t('admin.redeem.columns.expiresAt') }}</dt>
+          <dd :class="detailCode.status === 'expired' ? 'redeem-expired' : ''">
+            {{ detailCode.expires_at ? formatDateTime(detailCode.expires_at) : t('admin.redeem.neverExpires') }}
+          </dd>
+          <dt>{{ t('admin.redeem.batchFields.notes') }}</dt>
+          <dd class="whitespace-pre-wrap">{{ detailCode.notes || '-' }}</dd>
+        </dl>
+      </template>
+
+      <template #footer>
+        <template v-if="detailCode">
+          <button type="button" class="btn btn-secondary btn-sm" @click="copyToClipboard(detailCode.code)">
+            <Icon :name="copiedCode === detailCode.code ? 'check' : 'copy'" size="sm" />
+            {{ copiedCode === detailCode.code ? t('admin.redeem.copied') : t('keys.copyToClipboard') }}
+          </button>
+          <span class="flex-1" />
+          <button
+            v-if="detailCode.status === 'unused'"
+            type="button"
+            class="btn btn-ghost btn-sm redeem-danger"
+            @click="deleteFromDrawer(detailCode)"
+          >
+            <Icon name="trash" size="sm" />
+            {{ t('common.delete') }}
+          </button>
+        </template>
+      </template>
+    </SideDrawer>
 
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
@@ -641,6 +733,9 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -748,7 +843,7 @@ const typeOptions = computed(() => [
 ])
 
 const filterTypeOptions = computed(() => [
-  { value: '', label: t('admin.redeem.allTypes') },
+  { value: '', label: t('common.all') },
   { value: 'balance', label: t('admin.redeem.balance') },
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
@@ -756,7 +851,7 @@ const filterTypeOptions = computed(() => [
 ])
 
 const filterStatusOptions = computed(() => [
-  { value: '', label: t('admin.redeem.allStatus') },
+  { value: '', label: t('common.all') },
   { value: 'unused', label: t('admin.redeem.unused') },
   { value: 'used', label: t('admin.redeem.used') },
   { value: 'expired', label: t('admin.redeem.status.expired') },
@@ -904,6 +999,52 @@ const loadCodes = async () => {
       abortController = null
     }
   }
+}
+
+const setStatusFilter = (status: string) => {
+  if (filters.status === status) return
+  filters.status = status
+  pagination.page = 1
+  loadCodes()
+}
+
+const setTypeFilter = (type: string) => {
+  if (filters.type === type) return
+  filters.type = type
+  pagination.page = 1
+  loadCodes()
+}
+
+const typeIcon = (type: string) => {
+  if (type === 'balance' || type === 'admin_balance') return 'wallet'
+  if (type === 'concurrency' || type === 'admin_concurrency') return 'bolt'
+  if (type === 'subscription') return 'calendar'
+  if (type === 'invitation') return 'userPlus'
+  return 'ticket'
+}
+
+const typeBadgeClass = (type: string) =>
+  type === 'balance' ? 'badge badge-success' : type === 'subscription' ? 'badge badge-warning' : 'badge badge-primary'
+
+const statusBadgeClass = (status: string) =>
+  status === 'unused'
+    ? 'badge badge-success'
+    : status === 'used'
+      ? 'badge badge-gray'
+      : status === 'expired'
+        ? 'badge badge-warning'
+        : 'badge badge-danger'
+
+// Detail drawer: follows the row by ID so it reflects reloaded data.
+const detailId = ref<number | null>(null)
+const detailCode = computed(() =>
+  detailId.value === null ? null : (codes.value.find((code) => code.id === detailId.value) ?? null)
+)
+const openDetail = (code: RedeemCode) => {
+  detailId.value = code.id
+}
+const closeDetail = () => {
+  detailId.value = null
 }
 
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -1102,6 +1243,12 @@ const handleDelete = (code: RedeemCode) => {
   showDeleteDialog.value = true
 }
 
+// Dialogs sit below the drawer layer, so close the drawer before confirming.
+const deleteFromDrawer = (code: RedeemCode) => {
+  closeDetail()
+  handleDelete(code)
+}
+
 const confirmDelete = async () => {
   if (!deletingCode.value) return
 
@@ -1196,3 +1343,167 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.redeem-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Keep the segmented status control inside narrow viewports. */
+.ui-toolbar > .viz-seg {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.redeem-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--operator-border);
+}
+
+.dropdown-item.is-danger,
+.redeem-danger {
+  color: var(--operator-destructive);
+}
+
+.dropdown-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.redeem-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem 0.5rem 0.875rem;
+  border: 1px solid rgb(var(--operator-accent-rgb) / 0.35);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-accent-soft);
+}
+
+.redeem-bulkbar > .ui-grow {
+  flex: 1 1 auto;
+}
+
+.redeem-bulkbar-count {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.redeem-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.redeem-code code {
+  color: var(--operator-foreground);
+  font-family: var(--operator-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+}
+
+.redeem-copy {
+  display: inline-grid;
+  width: 1.625rem;
+  height: 1.625rem;
+  place-items: center;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-subtle-foreground);
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out),
+    transform 120ms var(--operator-ease-out);
+}
+
+.redeem-copy:hover {
+  background: var(--operator-raised);
+  color: var(--operator-foreground);
+}
+
+.redeem-copy:active {
+  transform: scale(0.92);
+}
+
+.redeem-copy:focus-visible {
+  outline: 2px solid rgb(var(--operator-accent-rgb) / 0.6);
+  outline-offset: 1px;
+}
+
+.redeem-copy.is-copied {
+  color: var(--operator-success);
+}
+
+.redeem-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.redeem-value-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.redeem-muted {
+  color: var(--operator-muted-foreground);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.redeem-muted.is-expired,
+.redeem-expired {
+  color: var(--operator-destructive);
+}
+
+.redeem-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.125rem;
+}
+
+.redeem-drawer-icon {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  place-items: center;
+  border-radius: 0.625rem;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.redeem-hero {
+  display: flex;
+  flex-direction: column;
+}
+
+.redeem-hero .ui-section-label {
+  margin-bottom: 0.25rem;
+}
+
+.redeem-hero b {
+  color: var(--operator-foreground);
+  font-size: 1.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+</style>

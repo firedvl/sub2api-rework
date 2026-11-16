@@ -1,140 +1,180 @@
 <template>
-  <BaseDialog
-    :show="show"
-    :title="t('payment.admin.orderDetail')"
-    width="wide"
+  <SideDrawer
+    :open="show && !!order"
+    :title="order ? `#${order.id}` : t('payment.admin.orderDetail')"
+    :subtitle="order?.out_trade_no"
+    width="32rem"
     @close="emit('close')"
   >
-    <div v-if="order" class="space-y-4">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p>
-          <p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ order.id }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.status') }}</p>
-          <span :class="['badge', statusBadgeClass(order.status)]">
-            {{ t('payment.status.' + order.status.toLowerCase(), order.status) }}
-          </span>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.baseAmount') }}</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ baseAmount.toFixed(2) }}</p>
-        </div>
-        <div v-if="order.fee_rate > 0">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.fee') }} ({{ order.fee_rate }}%)</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ feeAmount.toFixed(2) }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol }}{{ order.pay_amount.toFixed(2) }}</p>
-        </div>
-        <div v-if="(order.bonus_amount ?? 0) > 0">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.bonusAmount') }}</p>
-          <p class="text-sm font-medium text-amber-600 dark:text-amber-400">+{{ creditedAmountSymbol }}{{ (order.bonus_amount ?? 0).toFixed(2) }}</p>
-        </div>
-        <div v-if="order.amount !== order.pay_amount || (order.bonus_amount ?? 0) > 0">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</p>
-          <p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order.amount.toFixed(2) }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.paymentMethod') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">
-            {{ t('payment.methods.' + order.payment_type, order.payment_type) }}
-          </p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderType') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">
-            {{ t('payment.admin.' + order.order_type + 'Order', order.order_type) }}
-          </p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.userId') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">#{{ order.user_id }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.createdAt') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(order.created_at) }}</p>
-        </div>
-        <div>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.expiresAt') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(order.expires_at) }}</p>
-        </div>
-        <div v-if="order.paid_at">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.paidAt') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(order.paid_at) }}</p>
-        </div>
-        <div v-if="order.completed_at">
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.completedAt') }}</p>
-          <p class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(order.completed_at) }}</p>
-        </div>
+    <template v-if="order" #leading>
+      <PaymentMethodMark :type="order.payment_type" :size="32" icon-only />
+    </template>
+    <template v-if="order" #badge>
+      <span :class="orderStatusBadgeClass(order.status)" class="whitespace-nowrap">
+        {{ t('payment.status.' + order.status.toLowerCase(), order.status) }}
+      </span>
+    </template>
+
+    <template v-if="order">
+      <div class="order-hero">
+        <span class="order-hero-value">{{ paymentAmountSymbol }}{{ order.pay_amount.toFixed(2) }}</span>
+        <span v-if="order.amount !== order.pay_amount || (order.bonus_amount ?? 0) > 0" class="order-hero-sub">
+          {{ t('admin.adminUi.orders.credited') }} {{ creditedAmountSymbol }}{{ order.amount.toFixed(2) }}
+        </span>
       </div>
 
-      <div
-        v-if="order.refund_amount"
-        class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20"
+      <section>
+        <h3 class="ui-section-label">{{ t('payment.orders.amount') }}</h3>
+        <dl class="ui-dl">
+          <dt>{{ t('payment.orders.baseAmount') }}</dt>
+          <dd class="tabular-nums">{{ paymentAmountSymbol }}{{ baseAmount.toFixed(2) }}</dd>
+          <template v-if="order.fee_rate > 0">
+            <dt>{{ t('payment.orders.fee') }} ({{ order.fee_rate }}%)</dt>
+            <dd class="tabular-nums">{{ paymentAmountSymbol }}{{ feeAmount.toFixed(2) }}</dd>
+          </template>
+          <dt>{{ t('payment.orders.payAmount') }}</dt>
+          <dd class="tabular-nums">{{ paymentAmountSymbol }}{{ order.pay_amount.toFixed(2) }}</dd>
+          <template v-if="(order.bonus_amount ?? 0) > 0">
+            <dt>{{ t('payment.orders.bonusAmount') }}</dt>
+            <dd class="tabular-nums text-amber-600 dark:text-amber-400">+{{ creditedAmountSymbol }}{{ (order.bonus_amount ?? 0).toFixed(2) }}</dd>
+          </template>
+          <template v-if="order.amount !== order.pay_amount || (order.bonus_amount ?? 0) > 0">
+            <dt>{{ t('payment.orders.creditedAmount') }}</dt>
+            <dd class="tabular-nums">{{ creditedAmountSymbol }}{{ order.amount.toFixed(2) }}</dd>
+          </template>
+        </dl>
+      </section>
+
+      <section>
+        <h3 class="ui-section-label">{{ t('admin.adminUi.details') }}</h3>
+        <dl class="ui-dl">
+          <dt>{{ t('payment.orders.orderNo') }}</dt>
+          <dd class="font-mono text-xs">{{ order.out_trade_no }}</dd>
+          <dt>{{ t('payment.admin.colUser') }}</dt>
+          <dd>
+            <span v-if="order.user_email || order.user_name">{{ order.user_email || order.user_name }} </span>
+            <span class="text-gray-500 dark:text-gray-400">#{{ order.user_id }}</span>
+            <span v-if="order.user_notes" class="block text-xs text-gray-500 dark:text-gray-400">{{ order.user_notes }}</span>
+          </dd>
+          <dt>{{ t('payment.orders.paymentMethod') }}</dt>
+          <dd><PaymentMethodMark :type="order.payment_type" /></dd>
+          <dt>{{ t('payment.admin.orderType') }}</dt>
+          <dd>{{ t('payment.admin.' + order.order_type + 'Order', order.order_type) }}</dd>
+          <dt>{{ t('payment.orders.createdAt') }}</dt>
+          <dd>{{ formatDateTime(order.created_at) }}</dd>
+          <dt>{{ t('payment.admin.expiresAt') }}</dt>
+          <dd>{{ formatDateTime(order.expires_at) }}</dd>
+          <template v-if="order.paid_at">
+            <dt>{{ t('payment.admin.paidAt') }}</dt>
+            <dd>{{ formatDateTime(order.paid_at) }}</dd>
+          </template>
+          <template v-if="order.completed_at">
+            <dt>{{ t('payment.admin.completedAt') }}</dt>
+            <dd>{{ formatDateTime(order.completed_at) }}</dd>
+          </template>
+        </dl>
+      </section>
+
+      <section v-if="order.refund_amount || order.refund_reason">
+        <h3 class="ui-section-label">{{ t('payment.admin.refundInfo') }}</h3>
+        <dl class="ui-dl">
+          <template v-if="order.refund_amount">
+            <dt>{{ t('payment.admin.refundAmount') }}</dt>
+            <dd class="tabular-nums font-medium text-red-600 dark:text-red-400">{{ creditedAmountSymbol }}{{ order.refund_amount.toFixed(2) }}</dd>
+          </template>
+          <template v-if="order.refund_reason">
+            <dt>{{ t('payment.admin.refundReason') }}</dt>
+            <dd>{{ order.refund_reason }}</dd>
+          </template>
+        </dl>
+      </section>
+
+      <section v-if="order.refund_requested_at">
+        <h3 class="ui-section-label">{{ t('payment.admin.refundRequestInfo') }}</h3>
+        <dl class="ui-dl">
+          <dt>{{ t('payment.admin.refundRequestedAt') }}</dt>
+          <dd>{{ formatDateTime(order.refund_requested_at) }}</dd>
+          <dt>{{ t('payment.admin.refundRequestedBy') }}</dt>
+          <dd>#{{ order.refund_requested_by }}</dd>
+          <dt>{{ t('payment.admin.refundRequestReason') }}</dt>
+          <dd>{{ order.refund_request_reason || '-' }}</dd>
+        </dl>
+      </section>
+
+      <section v-if="auditLogs?.length">
+        <h3 class="ui-section-label">{{ t('payment.admin.auditLogs') }}</h3>
+        <ol class="order-log">
+          <li v-for="log in auditLogs" :key="log.id">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-gray-900 dark:text-white">{{ log.action }}</span>
+              <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">{{ formatDateTime(log.created_at) }}</span>
+            </div>
+            <div v-if="log.detail" class="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">{{ log.detail }}</div>
+            <div v-if="log.operator" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.operator') }}: {{ log.operator }}</div>
+          </li>
+        </ol>
+      </section>
+    </template>
+
+    <template v-if="order && action" #footer>
+      <button
+        type="button"
+        :class="action.tone === 'danger' ? 'btn btn-danger' : 'btn btn-primary'"
+        :disabled="action.kind === 'queryRefund' && querying"
+        data-testid="order-drawer-action"
+        @click="runAction"
       >
-        <h4 class="mb-2 text-sm font-semibold text-red-700 dark:text-red-400">
-          {{ t('payment.admin.refundInfo') }}
-        </h4>
-        <div class="grid grid-cols-2 gap-2 text-sm">
-          <div>
-            <span class="text-red-600 dark:text-red-400">{{ t('payment.admin.refundAmount') }}:</span>
-            <span class="ml-1 font-medium text-red-700 dark:text-red-300">{{ creditedAmountSymbol }}{{ order.refund_amount.toFixed(2) }}</span>
-          </div>
-          <div v-if="order.refund_reason" class="col-span-2">
-            <span class="text-red-600 dark:text-red-400">{{ t('payment.admin.refundReason') }}:</span>
-            <span class="ml-1 text-red-700 dark:text-red-300">{{ order.refund_reason }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-end gap-2 border-t border-gray-200 pt-4 dark:border-dark-700">
-        <button
-          v-if="order.status === 'PENDING'"
-          @click="emit('cancel', order)"
-          class="btn btn-sm rounded-md bg-yellow-50 px-3 py-1.5 text-sm text-yellow-600 hover:bg-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400 dark:hover:bg-yellow-900/30"
-        >
-          {{ t('payment.orders.cancel') }}
-        </button>
-        <button
-          v-if="order.status === 'FAILED'"
-          @click="emit('retry', order)"
-          class="btn btn-sm btn-secondary"
-        >
-          {{ t('payment.admin.retry') }}
-        </button>
-        <button
-          v-if="canRefund(order)"
-          @click="emit('refund', order)"
-          class="btn btn-sm rounded-md bg-red-50 px-3 py-1.5 text-sm text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30"
-        >
-          {{ t('payment.admin.refund') }}
-        </button>
-      </div>
-    </div>
-  </BaseDialog>
+        <Icon :name="action.icon" size="sm" :class="action.kind === 'queryRefund' && querying ? 'animate-spin' : ''" />
+        {{ t(action.labelKey) }}
+      </button>
+    </template>
+  </SideDrawer>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import BaseDialog from '@/components/common/BaseDialog.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { PaymentOrder } from '@/types/payment'
-import { statusBadgeClass, canRefund as canRefundStatus, formatOrderDateTime } from '@/components/payment/orderUtils'
+import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
+import PaymentMethodMark from './PaymentMethodMark.vue'
+import { orderAction, orderStatusBadgeClass } from './orderDisplay'
+
+export interface OrderAuditLog {
+  id: number
+  action: string
+  detail: string | null
+  operator: string | null
+  created_at: string
+}
+
+type DetailOrder = PaymentOrder & { user_email?: string; user_name?: string; user_notes?: string }
 
 const { t } = useI18n()
 
 const props = defineProps<{
   show: boolean
-  order: PaymentOrder | null
+  order: DetailOrder | null
+  auditLogs?: OrderAuditLog[]
+  /** A refund-status query for this order is in flight. */
+  querying?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'cancel', order: PaymentOrder): void
+  (e: 'retry', order: PaymentOrder): void
+  (e: 'refund', order: PaymentOrder): void
+  (e: 'queryRefund', order: PaymentOrder): void
 }>()
 
 const creditedAmountSymbol = currencySymbol('USD')
 
 const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
+
+const action = computed(() => (props.order ? orderAction(props.order.status) : null))
 
 /** 充值金额 (base amount before fee) = pay_amount - fee = pay_amount / (1 + fee_rate/100) */
 const baseAmount = computed(() => {
@@ -152,18 +192,53 @@ const feeAmount = computed(() => {
   return props.order.pay_amount - baseAmount.value
 })
 
-const emit = defineEmits<{
-  (e: 'close'): void
-  (e: 'cancel', order: PaymentOrder): void
-  (e: 'retry', order: PaymentOrder): void
-  (e: 'refund', order: PaymentOrder): void
-}>()
-
-function canRefund(order: PaymentOrder): boolean {
-  return canRefundStatus(order.status)
+function runAction() {
+  const order = props.order
+  if (!order || !action.value) return
+  if (action.value.kind === 'cancel') emit('cancel', order)
+  else if (action.value.kind === 'retry') emit('retry', order)
+  else if (action.value.kind === 'refund') emit('refund', order)
+  else emit('queryRefund', order)
 }
 
 function formatDateTime(dateStr: string): string {
   return formatOrderDateTime(dateStr)
 }
 </script>
+
+<style scoped>
+.order-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.order-hero-value {
+  color: var(--operator-foreground);
+  font-size: 1.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+.order-hero-sub {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-log {
+  display: grid;
+  max-height: 16rem;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+.order-log > li {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+}
+</style>

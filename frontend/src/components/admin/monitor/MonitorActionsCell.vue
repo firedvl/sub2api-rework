@@ -1,41 +1,45 @@
 <template>
-  <div class="flex items-center gap-1">
+  <div class="monitor-actions">
     <button
-      @click="$emit('run', row)"
+      type="button"
+      class="app-icon-button"
       :disabled="running"
-      class="row-action"
-                :title="t('admin.channelMonitor.runNow')"
-              >
-      <Icon name="refresh" size="sm" :class="running ? 'animate-spin' : ''" />
-      <span class="row-action-label">{{ t('admin.channelMonitor.runNow') }}</span>
+      :title="t('admin.channelMonitor.runNow')"
+      @click="$emit('run', row)"
+    >
+      <Icon name="play" size="sm" :class="running ? 'animate-pulse' : ''" />
+      <span class="sr-only">{{ t('admin.channelMonitor.runNow') }}</span>
     </button>
     <button
+      type="button"
+      class="app-icon-button"
       data-testid="monitor-duplicate"
       :title="duplicateTitle"
       :disabled="duplicating || Boolean(row.api_key_decrypt_failed)"
       @click="$emit('duplicate', row)"
-      class="row-action disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Icon name="copy" size="sm" />
-      <span class="row-action-label">
+      <span class="sr-only">
         {{ duplicating ? t('admin.channelMonitor.duplicating') : t('admin.channelMonitor.duplicate') }}
       </span>
     </button>
     <button
+      type="button"
+      class="app-icon-button"
+      :title="t('common.edit')"
       @click="$emit('edit', row)"
-      class="row-action"
-                :title="t('common.edit')"
-              >
+    >
       <Icon name="edit" size="sm" />
-      <span class="row-action-label">{{ t('common.edit') }}</span>
+      <span class="sr-only">{{ t('common.edit') }}</span>
     </button>
     <button
+      type="button"
+      class="app-icon-button monitor-actions-danger"
+      :title="t('common.delete')"
       @click="$emit('delete', row)"
-      class="row-action row-action-danger"
-                :title="t('common.delete')"
-              >
+    >
       <Icon name="trash" size="sm" />
-      <span class="row-action-label">{{ t('common.delete') }}</span>
+      <span class="sr-only">{{ t('common.delete') }}</span>
     </button>
   </div>
 </template>
@@ -66,3 +70,21 @@ const duplicateTitle = computed(() => {
   return t('admin.channelMonitor.duplicate')
 })
 </script>
+
+<style scoped>
+.monitor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.125rem;
+}
+
+.monitor-actions .app-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.monitor-actions-danger:hover {
+  color: var(--operator-destructive);
+}
+</style>

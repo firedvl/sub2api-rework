@@ -1,32 +1,42 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <div v-if="loading" class="flex items-center justify-center py-12"><LoadingSpinner /></div>
-      <template v-else-if="stats">
-        <UserDashboardStats :stats="stats" :balance="user?.balance || 0" :is-simple="authStore.isSimpleMode" :platform-quotas="platformQuotas" />
-        <UserDashboardCharts v-model:startDate="startDate" v-model:endDate="endDate" v-model:granularity="granularity" :loading="loadingCharts" :trend="trendData" :models="modelStats" @dateRangeChange="loadCharts" @granularityChange="loadCharts" @refresh="refreshAll" />
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div class="lg:col-span-2"><UserDashboardRecentUsage :data="recentUsage" :loading="loadingUsage" /></div>
-          <div class="lg:col-span-1"><UserDashboardQuickActions /></div>
-        </div>
-      </template>
+    <div v-if="loading && !stats" class="viz-grid" role="status" :aria-label="t('common.loading')">
+      <div class="skeleton viz-span-12 h-48 rounded-xl"></div>
+      <div class="skeleton viz-span-8 h-72 rounded-xl"></div>
+      <div class="skeleton viz-span-4 h-72 rounded-xl"></div>
+    </div>
+    <div v-else-if="stats" class="viz-grid ui-stagger">
+      <UserDashboardStats class="viz-span-12" :stats="stats" :balance="user?.balance || 0" :is-simple="authStore.isSimpleMode">
+        <template #actions><UserDashboardQuickActions /></template>
+      </UserDashboardStats>
+      <UserDashboardCharts v-model:startDate="startDate" v-model:endDate="endDate" v-model:granularity="granularity" :loading="loadingCharts" :trend="trendData" :models="modelStats" @dateRangeChange="loadCharts" @granularityChange="loadCharts" @refresh="refreshAll" />
+      <UserDashboardRecentUsage :class="showPlatforms ? 'viz-span-8' : 'viz-span-12'" :data="recentUsage" :loading="loadingUsage" />
+      <UserDashboardPlatforms v-if="showPlatforms" class="viz-span-4" :stats="stats" :platform-quotas="platformQuotas" />
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'; import { useAuthStore } from '@/stores/auth'; import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
-import AppLayout from '@/components/layout/AppLayout.vue'; import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import UserDashboardStats from '@/components/user/dashboard/UserDashboardStats.vue'; import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts.vue'
 import UserDashboardRecentUsage from '@/components/user/dashboard/UserDashboardRecentUsage.vue'; import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
+import UserDashboardPlatforms from '@/components/user/dashboard/UserDashboardPlatforms.vue'
+import { useI18n } from 'vue-i18n'
 import type { UsageLog, TrendDataPoint, ModelStat, PlatformQuotaItem } from '@/types'
 import { getMyPlatformQuotas } from '@/api/user'
 import { formatDateLocalInput } from '@/utils/format'
 
+const { t } = useI18n()
 const authStore = useAuthStore(); const user = computed(() => authStore.user)
 const stats = ref<UserStatsType | null>(null); const loading = ref(false); const loadingUsage = ref(false); const loadingCharts = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const modelStats = ref<ModelStat[]>([]); const recentUsage = ref<UsageLog[]>([])
 const platformQuotas = ref<PlatformQuotaItem[] | null>(null)
+// Platform rows need usage or a configured quota; simple mode hides spend entirely.
+const showPlatforms = computed(() => !authStore.isSimpleMode && (
+  (stats.value?.by_platform?.length ?? 0) > 0 ||
+  (platformQuotas.value ?? []).some((q) => q.daily_limit_usd != null || q.weekly_limit_usd != null || q.monthly_limit_usd != null)
+))
 
 const startDate = ref(formatDateLocalInput(new Date(Date.now() - 6 * 86400000))); const endDate = ref(formatDateLocalInput(new Date())); const granularity = ref('day')
 

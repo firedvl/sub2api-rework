@@ -1,36 +1,39 @@
 <template>
-  <div class="card">
-    <div class="flex items-start justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-      <div>
-        <h2 class="text-lg font-medium text-gray-900 dark:text-white">
-          {{ t('profile.passkey.title') }}
-        </h2>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {{ t('profile.passkey.description') }}
-        </p>
-      </div>
+  <ProfileSettingRow
+    icon="key"
+    :title="t('profile.passkey.title')"
+    title-id="profile-passkey-title"
+    :tone="credentials.length ? 'ok' : 'neutral'"
+    data-testid="profile-passkey-row"
+  >
+    <template #badge>
+      <span v-if="credentials.length" class="badge badge-success tabular-nums">{{ credentials.length }}</span>
+    </template>
+
+    <span v-if="!enabled">{{ t('profile.passkey.featureDisabled') }}</span>
+    <span v-else-if="!supported" class="text-amber-600 dark:text-amber-400">{{ t('profile.passkey.unsupported') }}</span>
+    <span v-else-if="!loading && credentials.length === 0">{{ t('profile.passkey.empty') }}</span>
+    <span v-else>{{ t('profile.passkey.description') }}</span>
+
+    <template #actions>
       <button
         v-if="enabled && supported && !showAddForm"
         type="button"
-        class="btn btn-primary"
+        class="btn btn-secondary btn-sm"
+        aria-describedby="profile-passkey-title"
         :disabled="busy"
         @click="showAddForm = true"
       >
+        <Icon name="plus" size="xs" />
         {{ t('profile.passkey.add') }}
       </button>
-    </div>
+    </template>
 
-    <div class="px-6 py-6">
-      <div v-if="!enabled" class="mb-5 text-sm text-gray-500 dark:text-gray-400">
-        {{ t('profile.passkey.featureDisabled') }}
-      </div>
-      <div v-if="enabled && !supported" class="mb-5 text-sm text-amber-600 dark:text-amber-400">
-        {{ t('profile.passkey.unsupported') }}
-      </div>
-      <div>
+    <template #panel>
+      <Transition name="fade">
         <form
           v-if="enabled && supported && showAddForm"
-          class="mb-5 flex flex-col gap-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700"
+          class="pk-panel"
           @submit.prevent="addPasskey"
         >
           <div class="grid gap-3 sm:grid-cols-2">
@@ -60,74 +63,61 @@
             </div>
           </div>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn btn-secondary" :disabled="busy" @click="cancelAdd">
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="cancelAdd">
               {{ t('common.cancel') }}
             </button>
-            <button type="submit" class="btn btn-primary" :disabled="busy || newPassword.length === 0">
+            <button type="submit" class="btn btn-primary btn-sm" :disabled="busy || newPassword.length === 0">
               {{ busy ? t('common.processing') : t('profile.passkey.continue') }}
             </button>
           </div>
         </form>
+      </Transition>
 
-        <div v-if="loading" class="flex justify-center py-6">
-          <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-500"></div>
-        </div>
-
-        <div
-          v-else-if="credentials.length === 0"
-          class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400"
-        >
-          {{ t('profile.passkey.empty') }}
-        </div>
-
-        <div v-else class="divide-y divide-gray-100 dark:divide-dark-700">
-          <div
-            v-for="credential in credentials"
-            :key="credential.id"
-            class="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
-          >
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <Icon name="key" size="md" class="shrink-0 text-primary-500" />
-                <p class="truncate font-medium text-gray-900 dark:text-white">
-                  {{ credential.name }}
-                </p>
-                <span
-                  v-if="credential.backup"
-                  class="rounded-full bg-green-50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                >
-                  {{ t('profile.passkey.synced') }}
-                </span>
-              </div>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('profile.passkey.createdAt', { date: formatDate(credential.created_at) }) }}
-                <template v-if="credential.last_used_at">
-                  · {{ t('profile.passkey.lastUsed', { date: formatDate(credential.last_used_at) }) }}
-                </template>
-              </p>
-            </div>
-            <div class="flex shrink-0 gap-2">
-              <button
-                type="button"
-                class="btn btn-secondary btn-sm"
-                :disabled="busy"
-                @click="renamePasskey(credential)"
-              >
-                {{ t('common.edit') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
-                :disabled="busy"
-                @click="deletePasskey(credential)"
-              >
-                {{ t('common.delete') }}
-              </button>
-            </div>
-          </div>
-        </div>
+      <div v-if="loading" class="pk-list">
+        <div class="skeleton h-10 rounded-lg"></div>
       </div>
-    </div>
+      <ul v-else-if="credentials.length" class="pk-list ui-rows-enter">
+        <li
+          v-for="credential in credentials"
+          :key="credential.id"
+          class="pk-item"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ credential.name }}</span>
+              <span v-if="credential.backup" class="badge badge-success">{{ t('profile.passkey.synced') }}</span>
+            </div>
+            <p class="ui-cell-sub">
+              {{ t('profile.passkey.createdAt', { date: formatDate(credential.created_at) }) }}
+              <template v-if="credential.last_used_at">
+                · {{ t('profile.passkey.lastUsed', { date: formatDate(credential.last_used_at) }) }}
+              </template>
+            </p>
+          </div>
+          <div class="flex shrink-0 gap-1">
+            <button
+              type="button"
+              class="app-icon-button"
+              :disabled="busy"
+              :aria-label="`${t('common.edit')}: ${credential.name}`"
+              :title="t('common.edit')"
+              @click="renamePasskey(credential)"
+            >
+              <Icon name="edit" size="sm" />
+            </button>
+            <button
+              type="button"
+              class="app-icon-button pk-danger"
+              :disabled="busy"
+              :aria-label="`${t('common.delete')}: ${credential.name}`"
+              :title="t('common.delete')"
+              @click="deletePasskey(credential)"
+            >
+              <Icon name="trash" size="sm" />
+            </button>
+          </div>
+        </li>
+      </ul>
 
     <!-- 删除确认：吊销凭据需验证当前密码，防止被窃会话静默移除 Passkey -->
     <div v-if="deleteTarget" class="fixed inset-0 z-50 overflow-y-auto">
@@ -173,7 +163,8 @@
         </div>
       </div>
     </div>
-  </div>
+    </template>
+  </ProfileSettingRow>
 </template>
 
 <script setup lang="ts">
@@ -182,6 +173,7 @@ import { useI18n } from 'vue-i18n'
 import { passkeyAPI, type PasskeyCredentialSummary } from '@/api'
 import { Icon } from '@/components/icons'
 import { useAppStore } from '@/stores/app'
+import ProfileSettingRow from './ProfileSettingRow.vue'
 
 const props = defineProps<{ enabled: boolean }>()
 
@@ -305,3 +297,43 @@ watch(
   { immediate: true }
 )
 </script>
+
+<style scoped>
+.pk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.875rem 0 0 2.875rem;
+  padding: 0.875rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-muted);
+}
+
+.pk-list {
+  margin: 0.75rem 0 0 2.875rem;
+}
+
+.pk-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.pk-item + .pk-item {
+  border-top: 1px solid var(--operator-border-subtle);
+}
+
+.pk-danger:hover:not(:disabled) {
+  color: var(--operator-destructive-fill);
+}
+
+@media (max-width: 480px) {
+  .pk-panel,
+  .pk-list {
+    margin-left: 0;
+  }
+}
+</style>

@@ -12,7 +12,9 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  getUserApiKeys,
+  getPlatformQuotas
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   deleteUser: vi.fn(),
@@ -21,7 +23,9 @@ const {
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  getUserApiKeys: vi.fn(),
+  getPlatformQuotas: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -29,7 +33,9 @@ vi.mock('@/api/admin', () => ({
     users: {
       list: listUsers,
       toggleStatus: vi.fn(),
-      delete: deleteUser
+      delete: deleteUser,
+      getUserApiKeys,
+      getPlatformQuotas
     },
     groups: {
       getAll: getAllGroups
@@ -189,6 +195,10 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockResolvedValue({ stats: {} })
     listEnabledDefinitions.mockResolvedValue([])
     getBatchUserAttributes.mockResolvedValue({ values: {} })
+    getUserApiKeys.mockReset()
+    getPlatformQuotas.mockReset()
+    getUserApiKeys.mockResolvedValue({ items: [], total: 3, page: 1, page_size: 20, pages: 1 })
+    getPlatformQuotas.mockResolvedValue({ platform_quotas: [] })
   })
 
   afterEach(() => {
@@ -493,5 +503,77 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
+  })
+
+  it('filters by status from the segmented control and resets to page one', async () => {
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+
+    await wrapper.get('[data-test="users-status-disabled"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="users-status-disabled"]').attributes('aria-pressed')).toBe('true')
+    expect(listUsers).toHaveBeenLastCalledWith(
+      1,
+      20,
+      expect.objectContaining({ status: 'disabled' }),
+      expect.any(Object)
+    )
+    expect(JSON.parse(localStorage.getItem('user-filter-values') || '{}').status).toBe('disabled')
+    wrapper.unmount()
+  })
+
+  it('opens the user drawer from the identity cell and hands footer actions to the existing modals', async () => {
+    const IdentityTableStub = {
+      props: ['columns', 'data'],
+      template: `<div><div v-for="row in data" :key="row.id"><slot name="cell-email" :row="row" :value="row.email" /></div></div>`
+    }
+    const UserEditModalStub = {
+      props: ['show', 'user'],
+      template: '<div v-if="show" data-test="edit-modal">{{ user?.email }}</div>'
+    }
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: IdentityTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserCreateModal: true,
+          UserEditModal: UserEditModalStub,
+          BulkEditUserModal: true,
+          UserPlatformQuotaModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          PlatformUsageBreakdown: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="user-drawer"]').exists()).toBe(false)
+
+    await wrapper.get('button[aria-label^="admin.adminUi.details"]').trigger('click')
+    await flushPromises()
+
+    expect(getUserApiKeys).toHaveBeenCalledWith(42)
+    expect(getPlatformQuotas).toHaveBeenCalledWith(42)
+    expect(wrapper.get('[data-test="user-drawer"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="user-drawer-api-keys"]').text()).toContain('admin.users.apiKeys')
+
+    await wrapper.get('[data-test="user-drawer-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="user-drawer"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="edit-modal"]').text()).toBe('scoped@example.com')
+    wrapper.unmount()
   })
 })

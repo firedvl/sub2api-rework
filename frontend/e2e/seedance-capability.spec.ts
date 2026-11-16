@@ -21,7 +21,9 @@ for (const width of [390, 1280]) {
       return route.fulfill({ json: { code: 0, data: account } })
     })
     await page.goto('/admin/accounts')
-    await page.getByRole('button', { name: 'Edit Ark Fixture', exact: true }).click()
+    // Row click opens the account drawer; its footer Edit opens the editor.
+    await page.getByTestId('account-capacity-row').filter({ hasText: 'Ark Fixture' }).click()
+    await page.getByRole('dialog', { name: 'Ark Fixture', exact: true }).getByRole('button', { name: 'Edit', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Edit Account', exact: true })
     const capability = dialog.getByTestId('openai-endpoint-capability-seedance')
     await expect(capability).not.toBeChecked()

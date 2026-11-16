@@ -1,5 +1,5 @@
 <template>
-  <div :class="props.embedded ? 'space-y-4' : 'card overflow-hidden'">
+  <div :class="props.embedded ? (compact ? '' : 'space-y-4') : 'card overflow-hidden'">
     <div
       v-if="!props.embedded"
       class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
@@ -12,8 +12,8 @@
       </p>
     </div>
 
-    <div :class="props.embedded ? 'space-y-4' : 'divide-y divide-gray-100 dark:divide-dark-700'">
-      <div v-if="props.embedded">
+    <div :class="props.embedded && !compact ? 'space-y-4' : 'divide-y divide-gray-100 dark:divide-dark-700'">
+      <div v-if="props.embedded && !compact">
         <p class="text-sm font-semibold text-gray-900 dark:text-white">
           {{ t('profile.authBindings.title') }}
         </p>
@@ -30,8 +30,8 @@
         <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div class="flex min-w-0 flex-1 items-start gap-4">
             <div
-              :class="providerIconClass(item.provider)"
-              class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold"
+              :class="[providerIconClass(item.provider), compact ? 'h-9 w-9 rounded-xl' : 'h-11 w-11 rounded-2xl']"
+              class="flex shrink-0 items-center justify-center text-sm font-semibold"
             >
               <Icon
                 v-if="item.provider === 'email'"
@@ -284,7 +284,7 @@ const compact = computed(() => props.compact)
 const rowClass = computed(() =>
   props.embedded
     ? compact.value
-      ? 'rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-900/40'
+      ? 'px-[1.125rem] py-3.5'
       : 'rounded-2xl border border-gray-100 bg-gray-50/70 p-4 dark:border-dark-700 dark:bg-dark-900/30'
     : 'px-6 py-5'
 )

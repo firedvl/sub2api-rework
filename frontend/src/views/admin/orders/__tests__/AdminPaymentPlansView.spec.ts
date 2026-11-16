@@ -35,17 +35,6 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-const DataTableStub = {
-  props: ['data'],
-  template: `
-    <div>
-      <div v-for="row in data" :key="row.id">
-        <slot name="cell-price" :value="row.price" :row="row" />
-      </div>
-    </div>
-  `,
-}
-
 describe('AdminPaymentPlansView', () => {
   beforeEach(() => {
     getGroups.mockResolvedValue([])
@@ -88,7 +77,6 @@ describe('AdminPaymentPlansView', () => {
         plugins: [createPinia()],
         stubs: {
           AppLayout: { template: '<div><slot /></div>' },
-          DataTable: DataTableStub,
           ConfirmDialog: true,
           GroupBadge: true,
           Icon: true,
@@ -99,8 +87,38 @@ describe('AdminPaymentPlansView', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('¥499.00CNY')
-    expect(wrapper.text()).toContain('¥599.00')
-    expect(wrapper.text()).toContain('$10.00')
+    const cny = wrapper.get('[data-testid="plan-card-1"]').text()
+    expect(cny).toContain('¥499.00')
+    expect(cny).toContain('CNY')
+    expect(cny).toContain('¥599.00')
+    expect(wrapper.get('[data-testid="plan-card-2"]').text()).toContain('$10.00')
+  })
+
+  it('filters plans by sale state with counts', async () => {
+    getPlans.mockResolvedValueOnce({
+      data: [
+        { id: 1, name: 'On', group_id: 1, price: 1, currency: 'USD', validity_days: 30, validity_unit: 'day', sort_order: 0, for_sale: true, features: [] },
+        { id: 2, name: 'Off', group_id: 1, price: 1, currency: 'USD', validity_days: 30, validity_unit: 'day', sort_order: 0, for_sale: false, features: [] },
+      ],
+    })
+    const wrapper = mount(AdminPaymentPlansView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ConfirmDialog: true,
+          GroupBadge: true,
+          Icon: true,
+          PlanEditDialog: true,
+          TransitionGroup: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="plans-sale-off"]').text()).toContain('1')
+    await wrapper.get('[data-testid="plans-sale-off"]').trigger('click')
+    expect(wrapper.find('[data-testid="plan-card-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="plan-card-2"]').exists()).toBe(true)
   })
 })

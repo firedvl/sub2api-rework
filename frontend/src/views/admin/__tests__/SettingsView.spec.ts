@@ -810,6 +810,97 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.get("form").classes()).not.toContain("settings-form-dirty");
   });
 
+  it("marks the active section and the section that holds unsaved edits", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const general = wrapper.get("#settings-tab-general");
+    expect(general.attributes("aria-current")).toBe("true");
+    expect(wrapper.get("#settings-tab-security").attributes("aria-current")).toBeUndefined();
+    expect(general.find('[data-testid="settings-tab-dirty"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="settings-site-name"]').setValue("Gateway Operator");
+    expect(general.find('[data-testid="settings-tab-dirty"]').exists()).toBe(true);
+    expect(wrapper.get("#settings-tab-security").find('[data-testid="settings-tab-dirty"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="settings-discard-button"]').trigger("click");
+    await flushPromises();
+    expect(general.find('[data-testid="settings-tab-dirty"]').exists()).toBe(false);
+  });
+
+  it("finds a card by title and jumps to its section", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const search = wrapper.get('[data-testid="settings-search-input"]');
+    await search.trigger("focus");
+    await search.setValue("captcha.title");
+    const results = wrapper.get('[data-testid="settings-search-results"]');
+    const match = results
+      .findAll('[role="option"]')
+      .find((option) => option.text().includes("admin.settings.captcha.title"));
+    expect(match).toBeDefined();
+    expect(wrapper.get("#settings-tab-security").text()).toMatch(/\d/);
+
+    await match!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("#settings-tab-security").attributes("aria-selected")).toBe("true");
+    expect((search.element as HTMLInputElement).value).toBe("");
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.captcha.title"));
+    expect(card!.classes()).toContain("settings-search-flash");
+  });
+
+  it("keeps Enter in the search box from submitting settings", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const search = wrapper.get('[data-testid="settings-search-input"]');
+    await search.trigger("focus");
+    await search.setValue("no-such-setting-anywhere");
+    expect(wrapper.get('[data-testid="settings-search-results"]').text()).toContain(
+      "admin.settingsUi.noMatches",
+    );
+    await search.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("confirms a successful save before the bar leaves", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="settings-site-name"]').setValue("Gateway Operator");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    // Let the bar's leave transition finish.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(wrapper.find('[data-testid="settings-dirty-bar"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="settings-saved-bar"]').text()).toContain(
+      "admin.settingsUi.saved",
+    );
+  });
+
+  it("saves with the keyboard shortcut only when there are changes", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true }));
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    await wrapper.get('[data-testid="settings-site-name"]').setValue("Gateway Operator");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true }));
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ site_name: "Gateway Operator" }),
+    );
+    wrapper.unmount();
+  });
+
   it.each([
     ["recharge_and_subscription", true, false],
     ["recharge_only", false, false],
@@ -898,7 +989,11 @@ describe("admin SettingsView payment visible method controls", () => {
   it("keeps the floating actions clear of the footer and disables their motion on request", () => {
     expect(enSettings.settings.unsavedChanges).toBe("Unsaved changes");
     expect(zhSettings.settings.discardChanges).toBe("放弃更改");
-    expect(settingsViewSource).toContain("bottom: calc(3.25rem + env(safe-area-inset-bottom))");
+    // Mobile: above the shell tab bar. Desktop: floats over the content column.
+    expect(settingsViewSource).toContain(
+      "bottom: calc(var(--operator-tabbar-height, 3.75rem) + 0.75rem + env(safe-area-inset-bottom))",
+    );
+    expect(settingsViewSource).toContain("bottom: calc(1.25rem + env(safe-area-inset-bottom))");
     expect(settingsViewSource).toContain(".settings-bottom-actions");
     expect(settingsViewSource).toContain("@media (max-width: 479px)");
     expect(settingsViewSource).toContain("@media (prefers-reduced-motion: reduce)");

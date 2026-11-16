@@ -132,7 +132,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="actions" /></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -203,8 +203,8 @@ let usageRefreshRevision = 1
 
 const mountRouteFilteredUsageView = () => mount(UsageView, {
   global: { stubs: {
-    AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-    UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+    AppLayout: AppLayoutStub, UsageKpiStrip: true, UsageFilters: UsageFiltersStub,
+    UsageRecordsTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
     UserBalanceHistoryModal: true, Pagination: true, Select: true,
     DateRangePicker: true, Icon: true, TokenUsageTrend: true,
     ModelDistributionChart: true, GroupDistributionChart: true,
@@ -416,8 +416,8 @@ describe('admin UsageView distribution metric toggles', () => {
 
     const wrapper = mount(UsageView, {
       global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        AppLayout: AppLayoutStub, UsageKpiStrip: true, UsageFilters: UsageFiltersStub,
+        UsageRecordsTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
@@ -446,9 +446,9 @@ describe('admin UsageView distribution metric toggles', () => {
       global: {
         stubs: {
           AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
+          UsageKpiStrip: true,
           UsageFilters: UsageFiltersStub,
-          UsageTable: true,
+          UsageRecordsTable: true,
           UsageExportProgress: true,
           UsageCleanupDialog: true,
           UserBalanceHistoryModal: true,
@@ -542,9 +542,9 @@ describe('admin UsageView refresh integration', () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub,
-        UsageStatsCards: RefreshUsageStatsStub,
+        UsageKpiStrip: RefreshUsageStatsStub,
         UsageFilters: RefreshUsageFiltersStub,
-        UsageTable: RefreshUsageTableStub,
+        UsageRecordsTable: RefreshUsageTableStub,
         UsageExportProgress: true,
         UsageCleanupDialog: true,
         UserBalanceHistoryModal: true,
@@ -618,9 +618,9 @@ describe('admin UsageView request ID column visibility', () => {
       global: {
         stubs: {
           AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
+          UsageKpiStrip: true,
           UsageFilters: UsageFiltersStub,
-          UsageTable: UsageTableStub,
+          UsageRecordsTable: UsageTableStub,
           UsageExportProgress: true,
           UsageCleanupDialog: true,
           UserBalanceHistoryModal: true,
@@ -644,6 +644,7 @@ describe('admin UsageView request ID column visibility', () => {
       expect.arrayContaining([expect.objectContaining({ key: 'request_id' })]),
     )
 
+    await wrapper.get('[data-testid="usage-more-actions"]').trigger('click')
     await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
     const requestIdToggle = wrapper.findAll('button').find((button) => button.text() === 'Request ID')
     expect(requestIdToggle).toBeDefined()
@@ -663,9 +664,9 @@ describe('admin UsageView request ID column visibility', () => {
       global: {
         stubs: {
           AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
+          UsageKpiStrip: true,
           UsageFilters: UsageFiltersStub,
-          UsageTable: UsageTableStub,
+          UsageRecordsTable: UsageTableStub,
           UsageExportProgress: true,
           UsageCleanupDialog: true,
           UserBalanceHistoryModal: true,
@@ -689,6 +690,7 @@ describe('admin UsageView request ID column visibility', () => {
       expect.arrayContaining([expect.objectContaining({ key: 'upstream_request_id' })]),
     )
 
+    await wrapper.get('[data-testid="usage-more-actions"]').trigger('click')
     await wrapper.get('button[title="admin.users.columnSettings"]').trigger('click')
     const upstreamToggle = wrapper.findAll('button').find((button) => button.text() === 'Upstream ID')
     expect(upstreamToggle).toBeDefined()
@@ -727,9 +729,9 @@ describe('admin UsageView handleUserClick', () => {
       global: {
         stubs: {
           AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
+          UsageKpiStrip: true,
           UsageFilters: UsageFiltersStub,
-          UsageTable: UsageTableStub,
+          UsageRecordsTable: UsageTableStub,
           UsageExportProgress: true,
           UsageCleanupDialog: true,
           UserBalanceHistoryModal: true,
@@ -783,8 +785,8 @@ describe('admin UsageView errors tab filter forwarding', () => {
   it('forwards model/account_id/group_id to listErrorLogs on the errors tab', async () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        AppLayout: AppLayoutStub, UsageKpiStrip: true, UsageFilters: UsageFiltersStub,
+        UsageRecordsTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
         UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
@@ -839,8 +841,8 @@ describe('admin UsageView ranking tab', () => {
   it('mounts ranking lazily and drill-down sets user filter then jumps back to usage tab', async () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        AppLayout: AppLayoutStub, UsageKpiStrip: true, UsageFilters: UsageFiltersStub,
+        UsageRecordsTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
         UserBalanceHistoryModal: true, Pagination: true, Select: true,
         DateRangePicker: true, Icon: true, TokenUsageTrend: true,
         ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,

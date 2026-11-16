@@ -1,17 +1,11 @@
 <template>
   <div class="card">
-    <div
-      class="flex flex-col gap-3 border-b border-gray-100 px-6 py-4 dark:border-dark-700 lg:flex-row lg:items-start lg:justify-between"
-    >
-      <div>
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-          {{ t("admin.settings.emailTemplates.title") }}
-        </h2>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {{ t("admin.settings.emailTemplates.description") }}
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-center gap-2 px-5 py-3.5">
+      <h2 class="text-[0.9375rem] font-semibold text-gray-900 dark:text-white">
+        {{ t("admin.settings.emailTemplates.title") }}
+      </h2>
+      <HelpTooltip interactive width-class="w-72" :aria-label="t('admin.settingsUi.about')">{{ t("admin.settings.emailTemplates.description") }}</HelpTooltip>
+      <div class="ml-auto flex flex-wrap gap-2">
         <button
           type="button"
           class="btn btn-secondary btn-sm"
@@ -232,6 +226,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import HelpTooltip from "@/components/common/HelpTooltip.vue";
 import { adminAPI } from "@/api";
 import type {
   EmailTemplateEventOption,

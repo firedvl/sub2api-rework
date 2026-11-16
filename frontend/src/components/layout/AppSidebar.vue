@@ -37,7 +37,17 @@
       </button>
     </div>
 
-    <nav ref="sidebarNavRef" class="sidebar-nav" :aria-label="t('nav.mainNavigation')">
+    <nav
+      ref="sidebarNavRef"
+      class="sidebar-nav"
+      :class="{ 'has-indicator': indicator.visible }"
+      :aria-label="t('nav.mainNavigation')"
+    >
+      <span
+        class="sidebar-indicator"
+        aria-hidden="true"
+        :style="{ transform: `translateY(${indicator.top}px)`, height: `${indicator.height}px`, opacity: indicator.visible ? 1 : 0 }"
+      ></span>
       <div v-for="section in sections" :key="section.key" class="sidebar-section">
         <div v-if="section.title" class="sidebar-section-title">
           <span>{{ section.title }}</span>
@@ -68,6 +78,7 @@
               class="sidebar-children"
               :class="{ 'sidebar-children-open': isGroupOpen(item) }"
               :inert="isGroupOpen(item) ? undefined : true"
+              @transitionend="measureIndicator"
             >
               <div>
                 <div class="sidebar-children-inner">
@@ -105,10 +116,28 @@
             <span v-if="item.iconSvg" class="sidebar-link-icon sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <Icon v-else-if="item.icon" :name="item.icon" class="sidebar-link-icon" />
             <span class="sidebar-link-label">{{ item.label }}</span>
+            <span
+              v-if="item.areaId === 'accounts' && pulse.attention.value > 0"
+              class="sidebar-count"
+              :class="{ 'is-bad': pulse.errorAccounts.value > 0 }"
+              :aria-label="t('nav.needAttention', { count: pulse.attention.value })"
+            >{{ pulse.attention.value }}</span>
           </router-link>
         </template>
       </div>
     </nav>
+
+    <div v-if="isAdmin" class="sidebar-foot">
+      <router-link
+        to="/admin/accounts"
+        class="sidebar-status"
+        :title="sidebarCollapsed ? statusLabel : undefined"
+        @click="handleMenuItemClick"
+      >
+        <span class="viz-pulse" :class="pulseToneClass" aria-hidden="true"></span>
+        <b>{{ statusLabel }}</b>
+      </router-link>
+    </div>
 
   </aside>
 
@@ -118,55 +147,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { onKeyStroke, useMediaQuery } from '@vueuse/core'
-import { useAdminSettingsStore, useAppStore, useAuthStore } from '@/stores'
+import { useAppStore } from '@/stores'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
-import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
-import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
-import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import { getOperatorArea, operatorAreas, type OperatorAreaId } from '@/router/operatorNavigation'
+import { getOperatorArea } from '@/router/operatorNavigation'
+import { useAppNavigation, type NavItem } from '@/composables/useAppNavigation'
+import { useGatewayPulse } from '@/composables/useGatewayPulse'
 
-type IconName = InstanceType<typeof Icon>['$props']['name']
-
-interface NavItem {
-  path: string
-  label: string
-  icon: IconName | null
-  iconSvg?: string
-  hideInSimpleMode?: boolean
-  /** Operator area that owns this entry; its sections share the active state. */
-  areaId?: OperatorAreaId
-  children?: NavItem[]
-  /**
-   * Feature gate. `false` hides the entry; `undefined` (settings not loaded
-   * yet) keeps it visible so the menu does not flicker on refresh.
-   */
-  featureFlag?: () => boolean | undefined
-}
-
-interface NavSection {
-  key: string
-  title?: string
-  items: NavItem[]
-}
-
-const { t } = useI18n()
 const route = useRoute()
 const appStore = useAppStore()
-const authStore = useAuthStore()
-const adminSettingsStore = useAdminSettingsStore()
-const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
+const { t } = useI18n()
+const { sections, isAdmin, adminSettingsStore, refreshBatchImageAccess } = useAppNavigation()
 
 const isDesktop = useMediaQuery('(min-width: 1024px)')
 const sidebarCollapsed = computed(() => isDesktop.value && appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
-const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
@@ -176,168 +177,38 @@ const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRela
 const siteVersion = computed(() => appStore.siteVersion)
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 
-const areaIcons: Record<OperatorAreaId, IconName> = {
-  overview: 'grid',
-  stats: 'chartBar',
-  accounts: 'server',
-  'models-routing': 'layers',
-  activity: 'trendingUp',
-  settings: 'cog',
-}
-
-// Public-settings flags go through the registry in utils/featureFlags.ts,
-// which resolves unloaded settings without flicker. Admin-only flags stay inline.
-const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
-const flagPayment = makeSidebarFlag(FeatureFlags.payment)
-const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
-const flagSubscription = makeSidebarFlag(FeatureFlags.subscription)
-const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
-const flagPluginManagement = makeSidebarFlag(FeatureFlags.pluginManagement)
-const flagAdminPayment = () => adminSettingsStore.paymentEnabled
-const flagBatchImageAccess = () => canUseBatchImage.value
-
-const purchaseNavLabel = computed(() => {
-  switch (resolveSiteBillingMode(appStore.cachedPublicSettings)) {
-    case 'recharge_only':
-      return t('nav.recharge')
-    case 'subscription_only':
-      return t('nav.subscribe')
-    default:
-      return t('nav.buySubscription')
-  }
+const pulse = useGatewayPulse(() => isAdmin.value)
+const pulseToneClass = computed(() => ({ ok: 'is-ok', warn: 'is-warn', bad: 'is-bad' })[pulse.tone.value])
+const statusLabel = computed(() => {
+  if (!pulse.loaded.value || pulse.attention.value === 0) return t('nav.statusOperational')
+  return t('nav.needAttention', { count: pulse.attention.value })
 })
 
-function applyFeatureFlags(items: NavItem[]): NavItem[] {
-  const out: NavItem[] = []
-  for (const item of items) {
-    if (item.featureFlag && item.featureFlag() === false) continue
-    out.push(item.children ? { ...item, children: applyFeatureFlags(item.children) } : item)
+// One highlight slides between items instead of each link painting its own.
+const indicator = reactive({ top: 0, height: 0, visible: false })
+
+function measureIndicator() {
+  const nav = sidebarNavRef.value
+  const active = nav?.querySelector<HTMLElement>('.sidebar-link-active')
+  if (!nav || !active || active.offsetParent === null) {
+    indicator.visible = false
+    return
   }
-  return out
+  const navBox = nav.getBoundingClientRect()
+  const box = active.getBoundingClientRect()
+  if (box.height === 0) {
+    indicator.visible = false
+    return
+  }
+  indicator.top = box.top - navBox.top + nav.scrollTop
+  indicator.height = box.height
+  indicator.visible = true
 }
 
-function applySimpleMode(items: NavItem[]): NavItem[] {
-  return items.flatMap((item) => {
-    if (item.hideInSimpleMode) return []
-    if (!item.children) return [item]
-    const children = applySimpleMode(item.children)
-    return children.length ? [{ ...item, children }] : []
-  })
-}
-
-function finalizeNav(items: NavItem[]): NavItem[] {
-  const visible = applyFeatureFlags(items)
-  const filtered = authStore.isSimpleMode ? applySimpleMode(visible) : visible
-  return filtered.filter((item) => !item.children || item.children.length > 0)
-}
-
-const customMenuItemsForUser = computed(() =>
-  (appStore.cachedPublicSettings?.custom_menu_items ?? [])
-    .filter((item) => item.visibility === 'user')
-    .sort((a, b) => a.sort_order - b.sort_order),
+watch(
+  () => [route.path, sidebarCollapsed.value, sections.value.length],
+  () => void nextTick(measureIndicator),
 )
-
-const customMenuItemsForAdmin = computed(() =>
-  adminSettingsStore.customMenuItems
-    .filter((item) => item.visibility === 'admin')
-    .sort((a, b) => a.sort_order - b.sort_order),
-)
-
-// Personal entries are shared by the user menu and the admin "My Account" section.
-// Order: keys, usage, available channels, channel status, billing, profile.
-function buildSelfNavItems(withDashboard: boolean): NavItem[] {
-  const items: NavItem[] = []
-  if (withDashboard) {
-    items.push({ path: '/dashboard', label: t('nav.dashboard'), icon: 'grid' })
-  }
-  items.push(
-    { path: '/keys', label: t('nav.apiKeys'), icon: 'key' },
-    { path: '/batch-image', label: t('nav.batchImage'), icon: 'camera', hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
-    { path: '/usage', label: t('nav.usage'), icon: 'chart', hideInSimpleMode: true },
-    { path: '/available-channels', label: t('nav.availableChannels'), icon: 'layers', hideInSimpleMode: true, featureFlag: flagAvailableChannels },
-    { path: '/monitor', label: t('nav.channelStatus'), icon: 'signal', featureFlag: flagChannelMonitor },
-    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: 'creditCard', hideInSimpleMode: true, featureFlag: flagSubscription },
-    { path: '/purchase', label: purchaseNavLabel.value, icon: 'wallet', hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/orders', label: t('nav.myOrders'), icon: 'documentText', hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/redeem', label: t('nav.redeem'), icon: 'gift', hideInSimpleMode: true },
-    { path: '/affiliate', label: t('nav.affiliate'), icon: 'users', hideInSimpleMode: true, featureFlag: flagAffiliate },
-    { path: '/profile', label: t('nav.profile'), icon: 'user' },
-    ...customMenuItemsForUser.value.map((item): NavItem => ({
-      path: `/custom/${item.id}`,
-      label: item.label,
-      icon: null,
-      iconSvg: item.icon_svg,
-    })),
-  )
-  return items
-}
-
-// The operator areas come from the shared area map, so the sidebar, the
-// area tabs, and the breadcrumb always agree. Secondary routes stay under More.
-const adminNavItems = computed((): NavItem[] => {
-  const areaItems: NavItem[] = operatorAreas.map((area) => ({
-    path: area.primaryPath,
-    label: t(area.labelKey),
-    icon: areaIcons[area.id],
-    areaId: area.id,
-    hideInSimpleMode: area.hideInSimpleMode,
-  }))
-  const moreItem: NavItem = {
-    path: '/admin/more',
-    label: t('nav.administration'),
-    icon: 'folder',
-    children: [
-      { path: '/admin/users', label: t('nav.users'), icon: 'users', hideInSimpleMode: true },
-      { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: 'creditCard', hideInSimpleMode: true, featureFlag: flagSubscription },
-      { path: '/admin/plugins', label: t('nav.plugins'), icon: 'cube', featureFlag: flagPluginManagement },
-      { path: '/admin/announcements', label: t('nav.announcements'), icon: 'bell' },
-      { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: 'ticket', hideInSimpleMode: true },
-      { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: 'gift', hideInSimpleMode: true },
-      { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: 'userPlus', hideInSimpleMode: true, featureFlag: flagAffiliate },
-      { path: '/admin/affiliates/rebates', label: t('nav.affiliateRebateRecords'), icon: 'receipt', hideInSimpleMode: true, featureFlag: flagAffiliate },
-      { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: 'swap', hideInSimpleMode: true, featureFlag: flagAffiliate },
-      { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: 'chartBar', hideInSimpleMode: true, featureFlag: flagAdminPayment },
-      { path: '/admin/orders', label: t('nav.orderManagement'), icon: 'receipt', hideInSimpleMode: true, featureFlag: flagAdminPayment },
-      { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: 'creditCard', hideInSimpleMode: true, featureFlag: flagAdminPayment },
-      ...customMenuItemsForAdmin.value.map((item): NavItem => ({
-        path: `/custom/${item.id}`,
-        label: item.label,
-        icon: null,
-        iconSvg: item.icon_svg,
-      })),
-    ],
-  }
-
-  const items = finalizeNav([...areaItems, moreItem])
-  if (authStore.isSimpleMode) {
-    items.push({ path: '/keys', label: t('nav.apiKeys'), icon: 'key' })
-  }
-  return items
-})
-
-// The console is built for one operator: daily tools sit in one short list,
-// and secondary admin and personal pages fold into two groups below it.
-const sections = computed((): NavSection[] => {
-  if (isAdmin.value) {
-    const items = [...adminNavItems.value]
-    if (!authStore.isSimpleMode) {
-      const personal = finalizeNav(buildSelfNavItems(false))
-      const keys = personal.find((item) => item.path === '/keys')
-      const more = items.findIndex((item) => item.path === '/admin/more')
-      if (keys) items.splice(more === -1 ? items.length : more, 0, keys)
-      items.push({
-        path: '/account/more',
-        label: t('nav.myAccount'),
-        icon: 'userCircle',
-        children: personal.filter((item) => item.path !== '/keys'),
-      })
-    }
-    return [{ key: 'operator', items }]
-  }
-  if (appStore.backendModeEnabled) return []
-  return [{ key: 'user', items: finalizeNav(buildSelfNavItems(true)) }]
-})
-
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(`${path}/`)
 }
@@ -400,6 +271,8 @@ watch(
 
 onMounted(() => {
   void refreshBatchImageAccess()
+  void nextTick(measureIndicator)
+  window.addEventListener('resize', measureIndicator)
   // Restore the scroll position after a route change re-mounts the sidebar.
   if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
     void nextTick(() => {
@@ -411,6 +284,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', measureIndicator)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }

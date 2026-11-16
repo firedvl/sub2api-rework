@@ -55,14 +55,14 @@
       </div>
 
       <template v-else-if="loaded">
-        <dl class="viz-kpis" data-testid="stats-kpis">
+        <dl class="viz-kpis ui-stagger" data-testid="stats-kpis">
           <div v-for="kpi in kpis" :key="kpi.key" class="viz-card viz-kpi">
             <dt class="viz-kpi-label">
               <Icon :name="kpi.icon" size="sm" />
               {{ kpi.label }}
             </dt>
             <dd class="viz-kpi-row">
-              <span class="viz-kpi-value">{{ kpi.text }}</span>
+              <span class="viz-kpi-value"><CountUp :value="kpi.value" :format="kpi.format" /></span>
               <SparkLine v-if="kpi.spark" :values="kpi.spark" />
             </dd>
             <span
@@ -78,7 +78,7 @@
           </div>
         </dl>
 
-        <div class="viz-grid">
+        <div class="viz-grid ui-stagger">
           <section class="viz-card viz-span-8" aria-labelledby="stats-traffic" data-testid="stats-traffic">
             <header class="viz-card-head">
               <h2 id="stats-traffic" class="viz-card-title">{{ t('admin.viz.traffic') }}</h2>
@@ -325,6 +325,7 @@ import StatsCapacitySection from '@/components/admin/StatsCapacitySection.vue'
 import HeatGrid from '@/components/viz/HeatGrid.vue'
 import ProviderMark from '@/components/viz/ProviderMark.vue'
 import SparkLine from '@/components/viz/SparkLine.vue'
+import CountUp from '@/components/ui/CountUp.vue'
 import TrendChart, { type TrendSeries } from '@/components/viz/TrendChart.vue'
 import { useAccountFleet } from '@/composables/useAccountFleet'
 import { providerColor, providerName, providerOfModel } from '@/utils/providerSeries'
@@ -460,7 +461,8 @@ const kpis = computed(() => {
     key: string
     icon: IconName
     label: string
-    text: string
+    value: number | null
+    format: (value: number) => string
     spark?: number[]
     delta: ReturnType<typeof delta>
   }> = [
@@ -468,7 +470,8 @@ const kpis = computed(() => {
       key: 'requests',
       icon: 'trendingUp',
       label: t('admin.viz.requests'),
-      text: formatCompact(current.requests),
+      value: current.requests,
+      format: formatCompact,
       spark: buckets.value.map((bucket) => bucket.requests),
       delta: delta(current.requests, previous.requests, true),
     },
@@ -476,7 +479,8 @@ const kpis = computed(() => {
       key: 'tokens',
       icon: 'cube',
       label: t('admin.viz.tokens'),
-      text: formatCompact(current.total_tokens),
+      value: current.total_tokens,
+      format: formatCompact,
       spark: buckets.value.map((bucket) => bucket.total_tokens),
       delta: delta(current.total_tokens, previous.total_tokens, true),
     },
@@ -484,7 +488,8 @@ const kpis = computed(() => {
       key: 'cost',
       icon: 'dollar',
       label: t('admin.viz.cost'),
-      text: formatMoney(current.actual_cost),
+      value: current.actual_cost,
+      format: formatMoney,
       spark: buckets.value.map((bucket) => bucket.actual_cost),
       delta: delta(current.actual_cost, previous.actual_cost, false),
     },
@@ -492,7 +497,8 @@ const kpis = computed(() => {
       key: 'latency',
       icon: 'clock',
       label: t('admin.viz.avgResponse'),
-      text: averageDuration.value === null ? '–' : formatDuration(averageDuration.value),
+      value: averageDuration.value,
+      format: formatDuration,
       delta: averageDuration.value === null ? null : delta(averageDuration.value, previousAverageDuration.value, false),
     },
   ]

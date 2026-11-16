@@ -146,7 +146,7 @@ const layoutStub = { template: '<div><slot /></div>' }
 const chartStub = { template: '<div />' }
 const iconStub = { template: '<span />' }
 const adminFiltersStub = defineComponent({
-  template: '<div><slot name="after-reset" /></div>',
+  template: '<div><slot name="leading" /><slot name="actions" /></div>',
 })
 
 const emptyStats = {
@@ -278,6 +278,7 @@ describe('usage reasoning effort page display', () => {
 
     expect(wrapper.find('[data-testid="reasoning-effort-cell"]').exists()).toBe(false)
 
+    await wrapper.get('[data-testid="usage-more-actions"]').trigger('click')
     await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
     await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
     await flushPromises()
@@ -285,7 +286,7 @@ describe('usage reasoning effort page display', () => {
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('Max')
     expect(cell).toContain('XHigh')
-    expect(cell).toContain('↳')
+    expect(cell).toContain('→')
   })
 
   it('admin usage page shows a single value when reasoning effort was not mapped', async () => {
@@ -311,12 +312,13 @@ describe('usage reasoning effort page display', () => {
     })
     await flushPromises()
 
+    await wrapper.get('[data-testid="usage-more-actions"]').trigger('click')
     await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
     await wrapper.get('[data-testid="usage-column-toggle-reasoning_effort"]').trigger('click')
     await flushPromises()
 
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('High')
-    expect(cell).not.toContain('↳')
+    expect(cell).not.toContain('→')
   })
 })

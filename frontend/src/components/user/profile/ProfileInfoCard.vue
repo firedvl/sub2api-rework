@@ -1,186 +1,128 @@
 <template>
-  <div class="space-y-6">
+  <div class="pf-stack">
     <section
       data-testid="profile-overview-hero"
-      class="card overflow-hidden"
+      class="viz-card pf-identity"
+      aria-labelledby="profile-identity-name"
     >
-      <div class="px-6 py-6 md:px-8">
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div
-            class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-900 text-2xl font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+      <div class="pf-identity-top">
+        <div class="pf-avatar">
+          <img
+            v-if="avatarUrl"
+            :src="avatarUrl"
+            :alt="displayName"
+            class="h-full w-full object-cover"
           >
-            <img
-              v-if="avatarUrl"
-              :src="avatarUrl"
-              :alt="displayName"
-              class="h-full w-full object-cover"
-            >
-            <span v-else>{{ avatarInitial }}</span>
-          </div>
-
-          <div class="min-w-0 flex-1 space-y-5">
-            <div class="space-y-3">
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="truncate text-2xl font-semibold text-gray-900 dark:text-white">
-                  {{ displayName }}
-                </h2>
-                <span :class="['badge', user?.role === 'admin' ? 'badge-primary' : 'badge-gray']">
-                  {{ user?.role === 'admin' ? t('profile.administrator') : t('profile.user') }}
-                </span>
-                <span
-                  :class="['badge', user?.status === 'active' ? 'badge-success' : 'badge-danger']"
-                >
-                  {{
-                    user?.status === 'active'
-                      ? t('common.active')
-                      : t('common.disabled')
-                  }}
-                </span>
-              </div>
-
-              <div class="space-y-1">
-                <p class="truncate text-sm text-gray-600 dark:text-gray-300">
-                  {{ primaryEmailDisplay }}
-                </p>
-                <div
-                  v-if="sourceHints.length"
-                  class="flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400"
-                >
-                  <span
-                    v-for="hint in sourceHints"
-                    :key="hint.key"
-                    class="inline-flex items-center gap-1 rounded-full bg-white/80 px-3 py-1 ring-1 ring-primary-100 dark:bg-dark-900/70 dark:ring-primary-900/40"
-                  >
-                    <Icon name="link" size="sm" />
-                    {{ hint.text }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-3">
-              <div
-                data-testid="profile-overview-metric-balance"
-                class="rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-white/70 dark:bg-dark-900/60 dark:ring-dark-700"
-              >
-                <p class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
-                  {{ t('profile.accountBalance') }}
-                </p>
-                <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ formatCurrency(user?.balance || 0) }}
-                </p>
-              </div>
-              <div
-                data-testid="profile-overview-metric-concurrency"
-                class="rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-white/70 dark:bg-dark-900/60 dark:ring-dark-700"
-              >
-                <p class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
-                  {{ t('profile.concurrencyLimit') }}
-                </p>
-                <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ user?.concurrency || 0 }}
-                </p>
-              </div>
-              <div
-                data-testid="profile-overview-metric-member-since"
-                class="rounded-2xl bg-white/85 px-4 py-3 shadow-sm ring-1 ring-white/70 dark:bg-dark-900/60 dark:ring-dark-700"
-              >
-                <p class="text-xs font-medium uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">
-                  {{ t('profile.memberSince') }}
-                </p>
-                <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ memberSinceLabel }}
-                </p>
-              </div>
-            </div>
-          </div>
+          <span v-else aria-hidden="true">{{ avatarInitial }}</span>
         </div>
+
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 id="profile-identity-name" class="pf-name">{{ displayName }}</h2>
+            <span :class="['badge', user?.role === 'admin' ? 'badge-primary' : 'badge-gray']">
+              {{ user?.role === 'admin' ? t('profile.administrator') : t('profile.user') }}
+            </span>
+            <span :class="['badge', user?.status === 'active' ? 'badge-success' : 'badge-danger']">
+              {{ user?.status === 'active' ? t('common.active') : t('common.disabled') }}
+            </span>
+          </div>
+          <p v-if="primaryEmailDisplay" class="pf-email">
+            <Icon name="mail" size="xs" />
+            <span class="truncate">{{ primaryEmailDisplay }}</span>
+          </p>
+          <ul
+            v-if="sourceHints.length"
+            class="ui-chips pf-hints"
+            :aria-label="t('profile.linkedProfileSources')"
+            :title="t('profile.linkedProfileSourcesDescription')"
+          >
+            <li v-for="hint in sourceHints" :key="hint.key" class="ui-chip">
+              <Icon name="link" size="xs" />
+              {{ hint.text }}
+            </li>
+          </ul>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm pf-edit"
+          data-testid="profile-edit-toggle"
+          :aria-expanded="editing"
+          aria-controls="profile-basics"
+          @click="editing = !editing"
+        >
+          <Icon :name="editing ? 'x' : 'edit'" size="xs" />
+          {{ editing ? t('common.close') : t('profile.editProfile') }}
+        </button>
+      </div>
+
+      <dl class="pf-metrics">
+        <div data-testid="profile-overview-metric-balance">
+          <dt>{{ t('profile.accountBalance') }}</dt>
+          <dd>{{ formatCurrency(user?.balance || 0) }}</dd>
+        </div>
+        <div data-testid="profile-overview-metric-concurrency">
+          <dt>{{ t('profile.concurrencyLimit') }}</dt>
+          <dd>{{ user?.concurrency || 0 }}</dd>
+        </div>
+        <div data-testid="profile-overview-metric-member-since">
+          <dt>{{ t('profile.memberSince') }}</dt>
+          <dd>{{ memberSinceLabel }}</dd>
+        </div>
+      </dl>
+
+      <div
+        v-show="editing"
+        id="profile-basics"
+        data-testid="profile-basics-panel"
+        class="pf-basics"
+        :aria-label="t('profile.basicsTitle')"
+        role="region"
+      >
+        <ProfileAvatarCard
+          :user="user"
+          embedded
+        />
+        <ProfileEditForm
+          :initial-username="user?.username || ''"
+          embedded
+        />
       </div>
     </section>
 
-    <div class="space-y-6">
-      <div data-testid="profile-main-column" class="space-y-6">
-        <section
-          data-testid="profile-basics-panel"
-          class="card border border-gray-100 bg-white/90 p-6 dark:border-dark-700 dark:bg-dark-900/50"
+    <section
+      data-testid="profile-auth-bindings-panel"
+      class="viz-card"
+      aria-labelledby="profile-connections-title"
+    >
+      <header class="viz-card-head">
+        <h2
+          id="profile-connections-title"
+          class="viz-card-title inline-flex items-center gap-2"
+          :title="t('profile.authBindings.description')"
         >
-          <div class="mb-5 flex items-start justify-between gap-4">
-            <div>
-              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t('profile.basicsTitle') }}
-              </h3>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t('profile.basicsDescription') }}
-              </p>
-            </div>
-          </div>
-
-          <div class="grid gap-6 sm:grid-cols-1 md:grid-cols-2">
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-5 dark:border-dark-700 dark:bg-dark-800/60">
-              <ProfileAvatarCard
-                :user="user"
-                embedded
-              />
-            </div>
-
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-5 dark:border-dark-700 dark:bg-dark-800/60">
-              <ProfileEditForm
-                :initial-username="user?.username || ''"
-                embedded
-              />
-            </div>
-          </div>
-        </section>
-
-        <section
-          data-testid="profile-auth-bindings-panel"
-          class="card border border-gray-100 bg-white/90 p-6 dark:border-dark-700 dark:bg-dark-900/50"
-        >
-          <ProfileIdentityBindingsSection
-            :user="user"
-            :linuxdo-enabled="linuxdoEnabled"
-            :dingtalk-enabled="dingtalkEnabled"
-            :oidc-enabled="oidcEnabled"
-            :oidc-provider-name="oidcProviderName"
-            :wechat-enabled="wechatEnabled"
-            :wechat-open-enabled="wechatOpenEnabled"
-            :wechat-mp-enabled="wechatMpEnabled"
-            embedded
-            compact
-          />
-        </section>
-      </div>
-
-      <div data-testid="profile-side-column" class="space-y-6">
-        <section
-          v-if="sourceHints.length"
-          class="card border border-gray-100 bg-white/90 p-6 dark:border-dark-700 dark:bg-dark-900/50"
-        >
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {{ t('profile.linkedProfileSources') }}
-          </h3>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {{ t('profile.linkedProfileSourcesDescription') }}
-          </p>
-
-          <div class="mt-5 grid gap-3">
-            <div
-              v-for="hint in sourceHints"
-              :key="hint.key"
-              class="flex items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50/80 px-4 py-3 text-sm text-gray-600 dark:border-dark-700 dark:bg-dark-900/30 dark:text-gray-300"
-            >
-              <Icon name="link" size="sm" class="mt-0.5 text-gray-400 dark:text-gray-500" />
-              <span>{{ hint.text }}</span>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+          <Icon name="link" size="sm" class="text-gray-400" />
+          {{ t('profile.authBindings.title') }}
+        </h2>
+      </header>
+      <ProfileIdentityBindingsSection
+        :user="user"
+        :linuxdo-enabled="linuxdoEnabled"
+        :dingtalk-enabled="dingtalkEnabled"
+        :oidc-enabled="oidcEnabled"
+        :oidc-provider-name="oidcProviderName"
+        :wechat-enabled="wechatEnabled"
+        :wechat-open-enabled="wechatOpenEnabled"
+        :wechat-mp-enabled="wechatMpEnabled"
+        embedded
+        compact
+      />
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import ProfileAvatarCard from '@/components/user/profile/ProfileAvatarCard.vue'
@@ -208,6 +150,7 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
+const editing = ref(false)
 
 function normalizeBindingStatus(binding: boolean | UserAuthBindingStatus | undefined): boolean | null {
   if (typeof binding === 'boolean') {
@@ -380,3 +323,163 @@ const sourceHints = computed(() => {
   return hints
 })
 </script>
+
+<style scoped>
+.pf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pf-identity {
+  overflow: hidden;
+}
+
+.pf-identity::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(55% 140% at 0% 0%, rgb(var(--operator-accent-rgb) / 0.22), transparent 70%);
+  content: '';
+  opacity: var(--operator-glow);
+  pointer-events: none;
+}
+
+.pf-identity-top {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+.pf-avatar {
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--operator-accent);
+  box-shadow: 0 0 0 3px var(--operator-accent-soft);
+  color: var(--operator-accent-foreground);
+  font-size: 1.375rem;
+  font-weight: 650;
+}
+
+.pf-name {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-email {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.pf-hints {
+  margin-top: 0.5rem;
+}
+
+.pf-edit {
+  flex: none;
+}
+
+.pf-metrics {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--operator-border-subtle);
+}
+
+.pf-metrics > div {
+  min-width: 0;
+  padding: 0.75rem 1.25rem;
+}
+
+.pf-metrics > div + div {
+  border-left: 1px solid var(--operator-border-subtle);
+}
+
+.pf-metrics dt {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.pf-metrics dd {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 1.125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-basics {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  padding: 1.125rem 1.25rem 1.25rem;
+  border-top: 1px solid var(--operator-border-subtle);
+  background: var(--operator-muted);
+  animation: pf-reveal var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+@keyframes pf-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-basics {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .pf-identity-top {
+    flex-wrap: wrap;
+    padding: 1rem;
+  }
+
+  .pf-avatar {
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.125rem;
+  }
+
+  .pf-edit {
+    order: 3;
+    margin-left: 4rem;
+  }
+
+  .pf-metrics > div {
+    padding: 0.625rem 0.75rem;
+  }
+
+  .pf-metrics dd {
+    font-size: 1rem;
+  }
+
+  .pf-basics {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem;
+  }
+}
+</style>

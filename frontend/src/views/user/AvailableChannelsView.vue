@@ -1,38 +1,59 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <template #filters>
-        <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-80">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('availableChannels.searchPlaceholder')"
-                class="input pl-10"
-              />
-            </div>
-          </div>
-
-          <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
-            <button
-              @click="loadChannels"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh', 'Refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-          </div>
+    <div class="ui-page ui-stagger">
+      <div class="ui-toolbar">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
+          <span class="sr-only">{{ t('availableChannels.searchPlaceholder') }}</span>
+          <input
+            v-model="searchQuery"
+            type="search"
+            :placeholder="t('availableChannels.searchPlaceholder')"
+          />
+        </label>
+        <div
+          v-if="platforms.length > 1"
+          class="ui-chips"
+          role="group"
+          :aria-label="t('availableChannels.columns.platform')"
+        >
+          <button
+            type="button"
+            class="ui-chip"
+            :aria-pressed="platformFilter === ''"
+            @click="platformFilter = ''"
+          >
+            {{ t('common.all') }}
+          </button>
+          <button
+            v-for="item in platforms"
+            :key="item.platform"
+            type="button"
+            class="ui-chip"
+            :aria-pressed="platformFilter === item.platform"
+            :aria-label="platformLabel(item.platform)"
+            :title="platformLabel(item.platform)"
+            :data-testid="`channel-platform-${item.platform}`"
+            @click="platformFilter = platformFilter === item.platform ? '' : item.platform"
+          >
+            <ProviderMark :platform="item.platform" :size="18" />
+            <span class="ui-chip-count">{{ item.count }}</span>
+          </button>
         </div>
-      </template>
+        <span class="ui-grow"></span>
+        <button
+          type="button"
+          class="app-icon-button"
+          :disabled="loading"
+          :title="t('common.refresh', 'Refresh')"
+          :aria-label="t('common.refresh', 'Refresh')"
+          @click="loadChannels"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+      </div>
 
-      <template #table>
+      <section class="ui-card overflow-hidden">
         <AvailableChannelsTable
           :columns="columnLabels"
           :rows="filteredChannels"
@@ -43,22 +64,23 @@
           :no-models-label="t('availableChannels.noModels')"
           :empty-label="t('availableChannels.empty')"
         />
-      </template>
-    </TablePageLayout>
+      </section>
+    </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import AvailableChannelsTable from '@/components/channels/AvailableChannelsTable.vue'
 import userChannelsAPI, { type UserAvailableChannel } from '@/api/channels'
 import userGroupsAPI from '@/api/groups'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { platformLabel } from '@/utils/platformColors'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -67,6 +89,30 @@ const channels = ref<UserAvailableChannel[]>([])
 const userGroupRates = ref<Record<number, number>>({})
 const loading = ref(false)
 const searchQuery = ref('')
+const platformFilter = ref('')
+
+/** Platforms present across channels, with how many channels serve each. */
+const platforms = computed(() => {
+  const counts = new Map<string, number>()
+  for (const channel of channels.value) {
+    for (const platform of new Set(channel.platforms.map((section) => section.platform))) {
+      counts.set(platform, (counts.get(platform) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()].map(([platform, count]) => ({ platform, count }))
+})
+
+watch(platforms, (list) => {
+  if (platformFilter.value && !list.some((item) => item.platform === platformFilter.value)) platformFilter.value = ''
+})
+
+const platformChannels = computed(() => {
+  const platform = platformFilter.value
+  if (!platform) return channels.value
+  return channels.value
+    .map((ch) => ({ ...ch, platforms: ch.platforms.filter((section) => section.platform === platform) }))
+    .filter((ch) => ch.platforms.length > 0)
+})
 
 const columnLabels = computed(() => ({
   name: t('availableChannels.columns.name'),
@@ -84,8 +130,8 @@ const columnLabels = computed(() => ({
  */
 const filteredChannels = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return channels.value
-  return channels.value
+  if (!q) return platformChannels.value
+  return platformChannels.value
     .map((ch) => {
       const nameHit = ch.name.toLowerCase().includes(q)
       const descHit = (ch.description || '').toLowerCase().includes(q)

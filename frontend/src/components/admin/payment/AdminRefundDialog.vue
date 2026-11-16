@@ -3,6 +3,7 @@
     :show="show"
     :title="t('payment.admin.refundOrder')"
     width="normal"
+    :z-index="90"
     @close="emit('cancel')"
   >
     <form id="refund-form" @submit.prevent="handleSubmit" class="space-y-4">

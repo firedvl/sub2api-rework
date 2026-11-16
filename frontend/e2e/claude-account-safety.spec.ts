@@ -51,7 +51,8 @@ for (const width of [390, 1280]) {
         await expect(availability.getByRole('switch')).toHaveCount(0)
       }
       await editor.getByRole('button', { name: 'Cancel', exact: true }).click()
-      await page.getByRole('button', { name: 'More', exact: true }).click()
+      // Scope to the account table: the mobile tab bar also has a "More" button.
+      await page.locator('.operator-account-table').getByRole('button', { name: 'More', exact: true }).click()
       await page.getByRole('button', { name: 'Test Connection', exact: true }).click()
       const tester = page.getByRole('dialog', { name: 'Test Account Connection' })
       await expect(tester.getByTestId('test-usage-warning')).toContainText('real inference request')

@@ -22,6 +22,10 @@ for (const width of [1440, 390]) {
       })
     })
     await page.goto('/admin/ops')
+    // Runtime log settings now sit behind a disclosure toggle that starts closed on every load.
+    const runtimeToggle = page.getByRole('button', { name: 'Runtime Log Configuration (applies immediately)', exact: true })
+    await runtimeToggle.click()
+    await expect(runtimeToggle).toHaveAttribute('aria-expanded', 'true')
     const checkbox = page.getByRole('checkbox', { name: 'Store access logs in database', exact: true })
     await expect(checkbox).not.toBeChecked()
     await checkbox.check()
@@ -31,6 +35,7 @@ for (const width of [1440, 390]) {
     expect(saved.retention_days).toBe(14)
     expect(saved.request_retention_days).toBe(90)
     await page.reload()
+    await runtimeToggle.click()
     await expect(checkbox).toBeChecked()
     await checkbox.uncheck()
     await page.getByRole('button', { name: 'Save and apply', exact: true }).click()

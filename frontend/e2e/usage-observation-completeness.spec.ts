@@ -19,15 +19,22 @@ for (const width of [390, 1280]) {
     await expect(page.getByTestId('usage-observation-label')).toHaveCount(2)
     await expect(page.getByTestId('usage-observation-label').nth(0)).toHaveText('Partial response observed')
     await expect(page.getByTestId('usage-observation-label').nth(1)).toHaveText('Observation completeness unknown')
+    // The cost disclaimer is now a `?` tooltip on the Total Cost tile.
+    await page.getByLabel('About costs', { exact: true }).focus()
     await expect(page.getByText(/Costs reflect gateway observations/)).toBeVisible()
-    const triggers = page.getByRole('button', { name: 'Cost Breakdown', exact: true })
+    // Cost Breakdown moved from a per-row tooltip into the record drawer (row Enter / click).
+    const triggers = page.getByTestId('usage-record-row').filter({ visible: true })
+    await expect(triggers).toHaveCount(3)
     for (const [index, label] of ['Partial response observed', 'Observation completeness unknown', 'Complete response observed'].entries()) {
       const trigger = triggers.nth(index)
       await trigger.focus()
-      const tooltip = page.getByRole('tooltip').filter({ hasText: 'Cost Breakdown' })
+      await page.keyboard.press('Enter')
+      const tooltip = page.getByRole('dialog').getByTestId('usage-cost-details')
       await expect(tooltip).toBeVisible()
       await expect(tooltip).toContainText(label)
       await expect(tooltip).toContainText('$0.00000042')
+      // The drawer slides in from the right; let it settle before measuring.
+      await expect.poll(async () => { const box = await tooltip.boundingBox(); return box ? box.x + box.width : Infinity }).toBeLessThanOrEqual(width)
       const bounds = await tooltip.boundingBox()
       expect(bounds!.x).toBeGreaterThanOrEqual(0)
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)

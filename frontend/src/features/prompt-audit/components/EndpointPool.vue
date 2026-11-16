@@ -1,95 +1,88 @@
 <template>
-  <section aria-labelledby="prompt-pool-title" class="border-b border-gray-200 py-6 dark:border-dark-700/60">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h2 id="prompt-pool-title" class="text-base font-semibold text-gray-950 dark:text-white">{{ t('admin.promptAudit.pool.title') }}</h2>
-        <p class="mt-1 text-sm text-gray-500 dark:text-dark-300">{{ t('admin.promptAudit.pool.description') }}</p>
+  <section aria-labelledby="prompt-pool-title" class="ui-card overflow-hidden">
+    <header class="viz-card-head pb-3.5">
+      <h2 id="prompt-pool-title" class="viz-card-title flex items-center">
+        {{ t('admin.promptAudit.pool.title') }}
+        <HelpTooltip :content="t('admin.promptAudit.pool.description')" />
+      </h2>
+      <span class="viz-count">{{ endpoints.length }}</span>
+      <div class="viz-card-tools">
+        <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
+          <Icon name="plus" size="sm" />{{ t('admin.promptAudit.pool.add') }}
+        </button>
       </div>
-      <button type="button" class="btn btn-primary btn-sm" data-test="add-endpoint" @click="openCreate">
-        {{ t('admin.promptAudit.pool.add') }}
-      </button>
-    </div>
+    </header>
 
-    <div v-if="endpoints.length === 0" class="mt-5 rounded-xl border border-dashed border-gray-300 px-5 py-10 text-center text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/20 dark:text-dark-300">
-      {{ t('admin.promptAudit.pool.empty') }}
+    <div v-if="endpoints.length === 0" class="ui-empty border-t border-[var(--operator-border)]">
+      <span class="ui-empty-icon"><Icon name="server" size="lg" /></span>
+      <b>{{ t('admin.promptAudit.pool.empty') }}</b>
     </div>
-    <div v-else class="mt-5 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700/60 dark:bg-dark-900/20">
-      <div class="hidden grid-cols-[minmax(260px,1.45fr)_minmax(210px,1fr)_minmax(190px,.8fr)_minmax(230px,1.15fr)_auto] gap-5 border-b border-l-[3px] border-b-gray-200 border-l-transparent bg-gray-50/80 px-5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500 dark:border-b-dark-700/60 dark:bg-dark-900/70 dark:text-dark-400 xl:grid">
-        <span>{{ t('admin.promptAudit.pool.node') }}</span>
-        <span>{{ t('admin.promptAudit.pool.model') }}</span>
-        <span>{{ t('admin.promptAudit.pool.limits') }}</span>
-        <span>{{ t('admin.promptAudit.pool.credential') }}</span>
-        <span class="text-right">{{ t('admin.promptAudit.common.actions') }}</span>
-      </div>
-
-      <div class="divide-y divide-gray-100 dark:divide-dark-800">
-        <article
-          v-for="endpoint in endpoints"
-          :key="endpoint.id"
-          :data-test="`endpoint-${endpoint.id}`"
-          class="group grid gap-4 border-l-[3px] border-l-transparent px-4 py-4 transition-[background-color,border-color] duration-200 hover:border-l-primary-500 hover:bg-gray-50/80 dark:hover:bg-dark-800/55 sm:px-5 xl:grid-cols-[minmax(260px,1.45fr)_minmax(210px,1fr)_minmax(190px,.8fr)_minmax(230px,1.15fr)_auto] xl:items-center xl:gap-5"
-        >
-          <div class="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              role="switch"
-              :aria-checked="endpoint.enabled"
-              :aria-label="t('admin.promptAudit.pool.toggleNode', { name: endpoint.name })"
-              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
-              :class="endpoint.enabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'"
-              @click="toggleEndpoint(endpoint.id)"
-            >
-              <span
-                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ease-in-out"
-                :class="endpoint.enabled ? 'translate-x-5' : 'translate-x-0'"
-              />
-            </button>
-            <div class="min-w-0">
-              <div class="flex min-w-0 items-center gap-2">
-                <p class="truncate font-semibold text-gray-950 dark:text-white">{{ endpoint.name }}</p>
-                <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="endpoint.enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'" aria-hidden="true" />
+    <div v-else class="ui-table-wrap border-t border-[var(--operator-border)]">
+      <table class="ui-table">
+        <thead>
+          <tr>
+            <th class="w-14"><span class="sr-only">{{ t('admin.promptAudit.saveBar.enabled') }}</span></th>
+            <th>{{ t('admin.promptAudit.pool.node') }}</th>
+            <th>{{ t('admin.promptAudit.pool.model') }}</th>
+            <th>{{ t('admin.promptAudit.pool.limits') }}</th>
+            <th>{{ t('admin.promptAudit.pool.credential') }}</th>
+            <th><span class="sr-only">{{ t('admin.promptAudit.common.actions') }}</span></th>
+          </tr>
+        </thead>
+        <tbody class="ui-rows-enter">
+          <tr v-for="endpoint in endpoints" :key="endpoint.id" :data-test="`endpoint-${endpoint.id}`">
+            <td>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="endpoint.enabled"
+                :aria-label="t('admin.promptAudit.pool.toggleNode', { name: endpoint.name })"
+                class="pa-switch"
+                :class="endpoint.enabled ? 'is-on' : ''"
+                @click="toggleEndpoint(endpoint.id)"
+              >
+                <span class="bg-white" />
+              </button>
+            </td>
+            <td class="max-w-[18rem]">
+              <div class="ui-cell-main truncate">{{ endpoint.name }}</div>
+              <div class="ui-cell-sub truncate font-mono" :title="endpoint.base_url">{{ endpoint.base_url }}</div>
+            </td>
+            <td class="max-w-[14rem]"><span class="block truncate font-mono text-xs" :title="endpoint.model">{{ endpoint.model }}</span></td>
+            <td class="whitespace-nowrap text-xs tabular-nums">
+              <span class="badge badge-gray">{{ endpoint.timeout_ms }} ms</span>
+              <span class="badge badge-gray ml-1">{{ endpoint.input_limit }} chars</span>
+            </td>
+            <td class="max-w-[18rem]">
+              <span class="flex items-center gap-1.5 text-xs font-medium">
+                <span :class="credentialInvalid(endpoint) ? 'ui-dot is-bad' : hasCredential(endpoint) ? 'ui-dot is-ok' : 'ui-dot'" />
+                {{ credentialInvalid(endpoint) ? t('admin.promptAudit.pool.invalid') : hasCredential(endpoint) ? t('admin.promptAudit.pool.configured') : t('admin.promptAudit.pool.missing') }}
+              </span>
+              <p v-if="probingIds.includes(endpoint.id)" class="ui-cell-sub mt-1 text-primary-600 dark:text-primary-300">
+                {{ t('admin.promptAudit.pool.probeProgress') }}
+              </p>
+              <p v-if="probeResults[endpoint.id]" class="mt-1 line-clamp-2 text-xs leading-5" :class="probeResults[endpoint.id].ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'" :title="probeResults[endpoint.id].message">
+                {{ t('admin.promptAudit.pool.probeResult', { status: probeResults[endpoint.id].status, http: probeResults[endpoint.id].http_status || '—', latency: probeResults[endpoint.id].latency_ms }) }}
+                · {{ probeResults[endpoint.id].message }}
+              </p>
+            </td>
+            <td class="whitespace-nowrap">
+              <div class="flex items-center justify-end gap-1">
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="probingIds.includes(endpoint.id)" @click="$emit('probe', endpoint)">
+                  <Icon name="signal" size="sm" :class="probingIds.includes(endpoint.id) ? 'animate-pulse' : ''" />
+                  {{ probingIds.includes(endpoint.id) ? t('admin.promptAudit.pool.probing') : t('admin.promptAudit.pool.probe') }}
+                </button>
+                <button type="button" class="app-icon-button" :aria-label="t('common.edit')" :title="t('common.edit')" @click="openEdit(endpoint)">
+                  <Icon name="edit" size="sm" />
+                </button>
+                <button type="button" class="app-icon-button text-red-600 dark:text-red-400" :aria-label="t('common.delete')" :title="t('common.delete')" @click="removeEndpoint(endpoint)">
+                  <Icon name="trash" size="sm" />
+                </button>
               </div>
-              <p class="mt-0.5 truncate font-mono text-[11px] text-gray-500 dark:text-dark-400" :title="endpoint.base_url">{{ endpoint.base_url }}</p>
-            </div>
-          </div>
-
-          <div class="min-w-0 xl:block">
-            <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.model') }}</p>
-            <p class="truncate text-sm font-medium text-gray-700 dark:text-dark-200" :title="endpoint.model">{{ endpoint.model }}</p>
-          </div>
-
-          <div>
-            <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.limits') }}</p>
-            <div class="flex flex-wrap gap-1.5 text-xs text-gray-600 dark:text-dark-300">
-              <span class="rounded-md bg-gray-100 px-2 py-1 tabular-nums dark:bg-dark-800">{{ endpoint.timeout_ms }} ms</span>
-              <span class="rounded-md bg-gray-100 px-2 py-1 tabular-nums dark:bg-dark-800">{{ endpoint.input_limit }} chars</span>
-            </div>
-          </div>
-
-          <div class="min-w-0">
-            <p class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 xl:hidden">{{ t('admin.promptAudit.pool.credential') }}</p>
-            <div class="flex items-center gap-1.5 text-xs font-medium" :class="credentialInvalid(endpoint) ? 'text-red-600 dark:text-red-300' : hasCredential(endpoint) ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-dark-400'">
-              <span class="h-1.5 w-1.5 rounded-full" :class="credentialInvalid(endpoint) ? 'bg-red-500' : hasCredential(endpoint) ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-dark-500'" aria-hidden="true" />
-              {{ credentialInvalid(endpoint) ? t('admin.promptAudit.pool.invalid') : hasCredential(endpoint) ? t('admin.promptAudit.pool.configured') : t('admin.promptAudit.pool.missing') }}
-            </div>
-            <p v-if="probingIds.includes(endpoint.id)" class="mt-1.5 text-xs text-primary-600 dark:text-primary-300">
-              {{ t('admin.promptAudit.pool.probeProgress') }}
-            </p>
-            <p v-if="probeResults[endpoint.id]" class="mt-1.5 line-clamp-2 text-xs leading-5" :class="probeResults[endpoint.id].ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-red-600 dark:text-red-300'">
-              {{ t('admin.promptAudit.pool.probeResult', { status: probeResults[endpoint.id].status, http: probeResults[endpoint.id].http_status || '—', latency: probeResults[endpoint.id].latency_ms }) }}
-              · {{ probeResults[endpoint.id].message }}
-            </p>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-end gap-1 border-t border-gray-100 pt-3 dark:border-dark-800 xl:flex-nowrap xl:border-0 xl:pt-0">
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="probingIds.includes(endpoint.id)" @click="$emit('probe', endpoint)">
-              {{ probingIds.includes(endpoint.id) ? t('admin.promptAudit.pool.probing') : t('admin.promptAudit.pool.probe') }}
-            </button>
-            <button type="button" class="btn btn-ghost btn-sm" @click="openEdit(endpoint)">{{ t('common.edit') }}</button>
-            <button type="button" class="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" @click="removeEndpoint(endpoint)">{{ t('common.delete') }}</button>
-          </div>
-        </article>
-      </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <BaseDialog :show="Boolean(editing)" :title="editingIndex < 0 ? t('admin.promptAudit.pool.add') : t('admin.promptAudit.pool.edit')" width="wide" @close="closeEditor">
@@ -142,6 +135,8 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { PromptAuditEndpointDraft, PromptProbeResult } from '../types'
 import { cloneData, createDefaultEndpoint } from '../viewModel'
 
@@ -194,3 +189,39 @@ function credentialInvalid(endpoint: PromptAuditEndpointDraft): boolean {
   return endpoint.token_status === 'invalid' && !endpoint.token.trim() && !endpoint.clear_token
 }
 </script>
+
+<style scoped>
+.pa-switch {
+  position: relative;
+  display: inline-flex;
+  width: 2.25rem;
+  height: 1.25rem;
+  flex: none;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--operator-border-strong);
+  transition: background-color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.pa-switch > span {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  box-shadow: var(--operator-shadow-xs);
+  transition: transform var(--operator-duration-fast) var(--operator-spring);
+}
+
+.pa-switch.is-on {
+  background: var(--operator-accent);
+}
+
+.pa-switch.is-on > span {
+  transform: translateX(1rem);
+}
+
+.pa-switch:focus-visible {
+  outline: 2px solid var(--operator-accent-text);
+  outline-offset: 2px;
+}
+</style>

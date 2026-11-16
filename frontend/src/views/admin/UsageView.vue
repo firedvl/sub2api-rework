@@ -1,83 +1,164 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
-      <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('usage.observationCostDisclaimer') }}</p>
-      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
-      <div class="card">
-        <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
-          <button
-            v-for="tab in detailTabs"
-            :key="tab.key"
-            type="button"
-            data-testid="usage-detail-tab"
-            class="-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4"
-            :class="activeTab === tab.key
-              ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
-            @click="switchTab(tab.key)"
-          >
-            <Icon :name="tab.icon" size="sm" />
-            {{ tab.label }}
-          </button>
+    <div class="ui-page ui-stagger">
+      <UsageKpiStrip :stats="usageStats" :trend="trendData" />
+
+      <section class="ui-card usage-records-card">
+        <div class="usage-records-head">
+          <div class="viz-seg" role="group" :aria-label="t('admin.activityUi.view')">
+            <button
+              v-for="tab in detailTabs"
+              :key="tab.key"
+              type="button"
+              data-testid="usage-detail-tab"
+              :aria-pressed="activeTab === tab.key"
+              @click="switchTab(tab.key)"
+            >
+              <Icon :name="tab.icon" size="xs" class="usage-seg-icon" />
+              {{ tab.label }}
+            </button>
+          </div>
         </div>
 
-        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
-          <template #after-reset>
-            <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
+        <div class="usage-records-toolbar">
+          <UsageFilters
+            v-model="filters"
+            ref="usageFiltersRef"
+            layout="toolbar"
+            :mode="activeTab"
+            :start-date="startDate"
+            :end-date="endDate"
+            :exporting="exporting"
+            :model-options="modelNameOptions"
+            @change="applyFilters"
+            @refresh="refreshData"
+            @reset="resetFilters"
+            @cleanup="openCleanupDialog"
+            @export="exportToExcel"
+          >
+            <template #leading>
+              <DateRangePicker
+                v-model:start-date="startDate"
+                v-model:end-date="endDate"
+                @change="onDateRangeChange"
+              />
+            </template>
+            <template #actions>
               <button
-                data-testid="usage-column-settings"
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
+                type="button"
+                class="app-icon-button"
+                data-testid="usage-refresh"
+                :aria-label="t('common.refresh')"
+                :title="t('common.refresh')"
+                @click="refreshData"
               >
-                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                </svg>
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+                <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />
               </button>
-              <div
-                v-if="showColumnDropdown"
-                class="operator-menu menu-enter absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto py-1"
-              >
+              <div ref="columnDropdownRef" class="relative">
                 <button
-                  v-for="col in currentToggleableColumns"
-                  :key="col.key"
-                  :data-testid="`usage-column-toggle-${col.key}`"
-                  @click="toggleCurrentColumn(col.key)"
-                  class="operator-menu-item flex w-full items-center justify-between px-4 py-2 text-left text-sm"
-                  :aria-pressed="isCurrentColumnVisible(col.key)"
+                  type="button"
+                  class="app-icon-button"
+                  data-testid="usage-more-actions"
+                  aria-haspopup="menu"
+                  :aria-expanded="showColumnDropdown"
+                  :aria-label="t('admin.activityUi.moreActions')"
+                  :title="t('admin.activityUi.moreActions')"
+                  @click="toggleMoreMenu"
                 >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isCurrentColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="operator-menu-check"
-                    :stroke-width="2"
-                  />
+                  <Icon name="more" size="sm" />
                 </button>
+                <Transition name="menu-pop">
+                  <div
+                    v-if="showColumnDropdown"
+                    class="operator-menu absolute right-0 top-full z-50 mt-1 max-h-96 w-60 overflow-y-auto py-1"
+                    role="menu"
+                    @keydown.esc.stop="showColumnDropdown = false"
+                  >
+                    <template v-if="menuView === 'main'">
+                      <button
+                        v-if="activeTab !== 'ranking'"
+                        type="button"
+                        role="menuitem"
+                        data-testid="usage-column-settings"
+                        class="operator-menu-item usage-menu-item"
+                        :title="t('admin.users.columnSettings')"
+                        @click="menuView = 'columns'"
+                      >
+                        <Icon name="grid" size="sm" />
+                        <span class="flex-1">{{ t('admin.users.columnSettings') }}</span>
+                        <Icon name="chevronRight" size="xs" />
+                      </button>
+                      <button type="button" role="menuitem" class="operator-menu-item usage-menu-item" @click="runMenuAction(resetFilters)">
+                        <Icon name="sync" size="sm" />
+                        <span class="flex-1">{{ t('common.reset') }}</span>
+                      </button>
+                      <template v-if="activeTab === 'usage'">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class="operator-menu-item usage-menu-item"
+                          :disabled="exporting"
+                          @click="runMenuAction(exportToExcel)"
+                        >
+                          <Icon name="download" size="sm" />
+                          <span class="flex-1">{{ t('usage.exportExcel') }}</span>
+                        </button>
+                        <div class="operator-menu-divider my-1 h-px"></div>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class="operator-menu-item operator-menu-item-destructive usage-menu-item"
+                          @click="runMenuAction(openCleanupDialog)"
+                        >
+                          <Icon name="trash" size="sm" />
+                          <span class="flex-1">{{ t('admin.usage.cleanup.button') }}</span>
+                        </button>
+                      </template>
+                    </template>
+                    <template v-else>
+                      <button type="button" class="operator-menu-item usage-menu-item text-gray-500" @click="menuView = 'main'">
+                        <Icon name="chevronLeft" size="xs" />
+                        <span class="flex-1">{{ t('admin.users.columnSettings') }}</span>
+                      </button>
+                      <div class="operator-menu-divider my-1 h-px"></div>
+                      <button
+                        v-for="col in currentToggleableColumns"
+                        :key="col.key"
+                        type="button"
+                        role="menuitemcheckbox"
+                        :data-testid="`usage-column-toggle-${col.key}`"
+                        class="operator-menu-item usage-menu-item"
+                        :aria-checked="isCurrentColumnVisible(col.key)"
+                        :aria-pressed="isCurrentColumnVisible(col.key)"
+                        @click="toggleCurrentColumn(col.key)"
+                      >
+                        <span class="flex-1">{{ col.label }}</span>
+                        <Icon v-if="isCurrentColumnVisible(col.key)" name="check" size="sm" class="operator-menu-check" :stroke-width="2" />
+                      </button>
+                    </template>
+                  </div>
+                </Transition>
               </div>
-            </div>
-          </template>
-        </UsageFilters>
+            </template>
+          </UsageFilters>
+        </div>
 
-        <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
-          <UsageTable
-            flat
+        <div v-show="activeTab === 'usage'" class="usage-records-body">
+          <UsageRecordsTable
             :data="usageLogs"
             :loading="loading"
             :columns="visibleColumns"
-            :server-side-sort="true"
-            :default-sort-key="'created_at'"
-            :default-sort-order="'desc'"
+            :sort-key="sortState.sort_by"
+            :sort-order="sortState.sort_order"
+            :selected-id="selectedRecord?.id ?? null"
             @sort="handleSort"
-            @userClick="handleUserClick"
-            @ipGeoBatchFailed="handleIpGeoBatchFailed"
+            @row-click="openRecord"
+            @user-click="handleUserClick"
+            @ip-geo-batch-failed="handleIpGeoBatchFailed"
           />
           <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
-        <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
+        <div v-show="activeTab === 'errors'" class="usage-records-body">
           <OpsErrorLogTable
             flat
             :rows="errRows" :total="errTotal" :loading="errLoading"
@@ -92,7 +173,7 @@
             @ipGeoBatchFailed="handleIpGeoBatchFailed" />
         </div>
         <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
-        <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
+        <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="usage-records-body">
           <UserTokenRanking
             ref="rankingRef"
             :start-date="startDate"
@@ -102,28 +183,23 @@
             @select-user="handleRankingSelectUser"
           />
         </div>
-      </div>
-      <!-- Charts Section -->
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
-                <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
-              </div>
-            </div>
+      </section>
+
+      <section class="usage-charts" :aria-label="t('admin.activityUi.breakdown')">
+        <div class="ui-toolbar">
+          <h2 class="ui-section-label mb-0">{{ t('admin.activityUi.breakdown') }}</h2>
+          <span class="ui-grow"></span>
+          <div class="viz-seg" role="group" :aria-label="t('admin.dashboard.granularity')">
+            <button
+              v-for="option in granularityOptions"
+              :key="option.value"
+              type="button"
+              :aria-pressed="granularity === option.value"
+              @click="setGranularity(option.value)"
+            >{{ option.label }}</button>
           </div>
         </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <ModelDistributionChart
             v-model:source="modelDistributionSource"
             v-model:metric="modelDistributionMetric"
@@ -146,8 +222,6 @@
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <EndpointDistributionChart
             v-model:source="endpointDistributionSource"
             v-model:metric="endpointDistributionMetric"
@@ -164,10 +238,16 @@
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
-      </div>
+      </section>
       <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="'request'" />
     </div>
   </AppLayout>
+  <UsageRecordDrawer
+    :open="recordDrawerOpen"
+    :record="selectedRecord"
+    @close="recordDrawerOpen = false"
+    @user-click="handleUserClick"
+  />
   <UsageExportProgress :show="exportProgress.show" :progress="exportProgress.progress" :current="exportProgress.current" :total="exportProgress.total" :estimated-time="exportProgress.estimatedTime" @cancel="cancelExport" />
   <UsageCleanupDialog
     :show="cleanupDialogVisible"
@@ -195,9 +275,9 @@ import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admi
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
-import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
-import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
-import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import UsageKpiStrip from '@/components/admin/usage/UsageKpiStrip.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageRecordsTable from '@/components/admin/usage/UsageRecordsTable.vue'; import UsageRecordDrawer from '@/components/admin/usage/UsageRecordDrawer.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
@@ -277,7 +357,20 @@ const handleRankingSelectUser = (userId: number, email: string) => {
   applyFilters()
 }
 
-const granularityOptions = computed(() => [{ value: 'day', label: t('admin.dashboard.day') }, { value: 'hour', label: t('admin.dashboard.hour') }])
+const granularityOptions = computed(() => [{ value: 'day' as const, label: t('admin.dashboard.day') }, { value: 'hour' as const, label: t('admin.dashboard.hour') }])
+const setGranularity = (value: 'day' | 'hour') => {
+  if (granularity.value === value) return
+  granularity.value = value
+  loadChartData()
+}
+
+// Record drawer
+const selectedRecord = ref<AdminUsageLog | null>(null)
+const recordDrawerOpen = ref(false)
+const openRecord = (row: AdminUsageLog) => {
+  selectedRecord.value = row
+  recordDrawerOpen.value = true
+}
 // Use local timezone to avoid UTC timezone issues
 const formatLD = (d: Date) => {
   const year = d.getFullYear()
@@ -641,6 +734,7 @@ const HIDDEN_COLUMNS_PREV_VERSION = 'request-id-hidden-by-default'
 const HIDDEN_COLUMNS_CURRENT_VERSION = 'upstream-request-id-hidden-by-default'
 
 const allColumns = computed(() => [
+  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user', label: t('admin.usage.user'), sortable: false },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'account', label: t('admin.usage.account'), sortable: false },
@@ -653,7 +747,6 @@ const allColumns = computed(() => [
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'latency', label: t('usage.latency'), sortable: false },
-  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
   { key: 'upstream_request_id', label: t('admin.usage.upstreamRequestId'), sortable: false },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
@@ -860,9 +953,19 @@ const openError = (id: number) => { selectedErrorId.value = id; showErrorModal.v
 
 const showColumnDropdown = ref(false)
 const columnDropdownRef = ref<HTMLElement | null>(null)
+const menuView = ref<'main' | 'columns'>('main')
+const toggleMoreMenu = () => {
+  menuView.value = 'main'
+  showColumnDropdown.value = !showColumnDropdown.value
+}
+const runMenuAction = (action: () => unknown) => {
+  showColumnDropdown.value = false
+  void action()
+}
 
 const handleColumnClickOutside = (event: MouseEvent) => {
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as HTMLElement)) {
+  // composedPath keeps the menu in the path even when the clicked item is swapped out (columns view).
+  if (columnDropdownRef.value && !event.composedPath().includes(columnDropdownRef.value)) {
     showColumnDropdown.value = false
   }
 }
@@ -888,3 +991,62 @@ watch(modelDistributionSource, (source) => {
 
 defineExpose({ requestedModelStats, refreshData })
 </script>
+
+<style scoped>
+.usage-records-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem 0;
+}
+.usage-records-head .viz-seg {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.usage-records-head .viz-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out),
+    box-shadow var(--operator-duration-fast) var(--operator-ease-out),
+    transform 120ms var(--operator-ease-out);
+}
+.usage-records-head .viz-seg button:active {
+  transform: scale(0.96);
+}
+.usage-seg-icon {
+  opacity: 0.7;
+}
+.usage-records-toolbar {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--operator-border);
+}
+.usage-records-body {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 0 0 var(--operator-radius-lg) var(--operator-radius-lg);
+}
+.usage-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0 0.875rem;
+  text-align: left;
+}
+.usage-charts {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+@media (max-width: 640px) {
+  .usage-records-head,
+  .usage-records-toolbar {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+}
+</style>

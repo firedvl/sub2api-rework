@@ -1,213 +1,238 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="ui-page ui-stagger">
       <template #filters>
-        <!-- Top Toolbar: Left (search + filters) / Right (actions) -->
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <!-- Left: Fuzzy user search + filters (wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- User Search -->
-            <div
-              class="relative w-full sm:w-64"
-              data-filter-user-search
-            >
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                v-model="filterUserKeyword"
-                type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10 pr-8"
-                @input="debounceSearchFilterUsers"
-                @focus="showFilterUserDropdown = true"
-              />
-              <button
-                v-if="selectedFilterUser"
-                @click="clearFilterUser"
-                type="button"
-                class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                :title="t('common.clear')"
-              >
-                <Icon name="x" size="sm" :stroke-width="2" />
-              </button>
-
-              <!-- User Dropdown -->
-              <div
-                v-if="showFilterUserDropdown && (filterUserResults.length > 0 || filterUserKeyword)"
-                class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
-              >
-                <div
-                  v-if="filterUserLoading"
-                  class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"
-                >
-                  {{ t('common.loading') }}
-                </div>
-                <div
-                  v-else-if="filterUserResults.length === 0 && filterUserKeyword"
-                  class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"
-                >
-                  {{ t('common.noOptionsFound') }}
-                </div>
+        <div class="subs-top">
+          <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.adminUi.filters')">
+            <!-- User filter: fuzzy search, then pick a user -->
+            <div class="subs-search" data-filter-user-search>
+              <label class="ui-search">
+                <Icon name="search" size="sm" />
+                <input
+                  v-model="filterUserKeyword"
+                  type="text"
+                  :placeholder="t('admin.users.searchUsers')"
+                  :aria-label="t('admin.users.searchUsers')"
+                  @input="debounceSearchFilterUsers"
+                  @focus="showFilterUserDropdown = true"
+                />
                 <button
-                  v-for="user in filterUserResults"
-                  :key="user.id"
+                  v-if="selectedFilterUser"
                   type="button"
-                  @click="selectFilterUser(user)"
-                  class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-700"
+                  class="subs-search-clear"
+                  :title="t('common.clear')"
+                  :aria-label="t('common.clear')"
+                  @click="clearFilterUser"
                 >
-                  <span class="font-medium text-gray-900 dark:text-white">{{ user.email }}</span>
-                  <span class="ml-2 text-gray-500 dark:text-gray-400">#{{ user.id }}</span>
+                  <Icon name="x" size="sm" :stroke-width="2" />
                 </button>
-              </div>
-            </div>
-
-            <!-- Filters -->
-            <div class="w-full sm:w-40">
-              <Select
-                v-model="filters.status"
-                :options="statusOptions"
-                :placeholder="t('admin.subscriptions.allStatus')"
-                @change="applyFilters"
-              />
-            </div>
-            <div class="w-full sm:w-48">
-              <Select
-                v-model="filters.group_id"
-                :options="groupOptions"
-                :placeholder="t('admin.subscriptions.allGroups')"
-                @change="applyFilters"
-              />
-            </div>
-            <div class="w-full sm:w-40">
-              <Select
-                v-model="filters.platform"
-                :options="platformFilterOptions"
-                :placeholder="t('admin.subscriptions.allPlatforms')"
-                @change="applyFilters"
-              />
-            </div>
-          </div>
-
-          <!-- Right: Actions -->
-          <div class="ml-auto flex flex-wrap items-center justify-end gap-3">
-            <button
-              @click="loadSubscriptions"
-              :disabled="loading"
-              class="btn btn-secondary"
-              :title="t('common.refresh')"
-            >
-              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-            </button>
-            <!-- Column Settings Dropdown -->
-            <div class="relative" ref="columnDropdownRef">
-              <button
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
-              >
-                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                </svg>
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
-              </button>
-              <!-- Dropdown menu -->
-              <div
-                v-if="showColumnDropdown"
-                class="menu-enter absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
-              >
-                <div class="p-2">
-                  <!-- User column mode selection -->
-                  <div class="mb-2 border-b border-gray-200 pb-2 dark:border-dark-700">
-                    <div class="px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      {{ t('admin.subscriptions.columns.user') }}
-                    </div>
-                    <button
-                      @click="setUserColumnMode('email')"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ t('admin.users.columns.email') }}</span>
-                      <Icon v-if="userColumnMode === 'email'" name="check" size="sm" class="text-primary-500" />
-                    </button>
-                    <button
-                      @click="setUserColumnMode('username')"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                    >
-                      <span>{{ t('admin.users.columns.username') }}</span>
-                      <Icon v-if="userColumnMode === 'username'" name="check" size="sm" class="text-primary-500" />
-                    </button>
+              </label>
+              <Transition name="menu-pop">
+                <div
+                  v-if="showFilterUserDropdown && (filterUserResults.length > 0 || filterUserKeyword)"
+                  class="subs-search-menu"
+                >
+                  <div v-if="filterUserLoading" class="subs-search-note">
+                    {{ t('common.loading') }}
                   </div>
-                  <!-- Other columns toggle -->
-                  <button
-                    v-for="col in toggleableColumns"
-                    :key="col.key"
-                    @click="toggleColumn(col.key)"
-                    class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                  <div
+                    v-else-if="filterUserResults.length === 0 && filterUserKeyword"
+                    class="subs-search-note"
                   >
-                    <span>{{ col.label }}</span>
-                    <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+                    {{ t('common.noOptionsFound') }}
+                  </div>
+                  <button
+                    v-for="user in filterUserResults"
+                    :key="user.id"
+                    type="button"
+                    class="dropdown-item"
+                    @click="selectFilterUser(user)"
+                  >
+                    <span class="min-w-0 flex-1 truncate">{{ user.email }}</span>
+                    <span class="ui-cell-sub">#{{ user.id }}</span>
+                  </button>
+                </div>
+              </Transition>
+            </div>
+
+            <div class="viz-seg" role="group" :aria-label="t('admin.subscriptions.columns.status')">
+              <button
+                v-for="option in statusOptions"
+                :key="option.value"
+                type="button"
+                :aria-pressed="filters.status === option.value"
+                @click="setStatusFilter(option.value)"
+              >
+                {{ option.label }}
+                <span
+                  v-if="filters.status === option.value && !loading && pagination.total > 0"
+                  class="ui-chip-count"
+                >{{ pagination.total }}</span>
+              </button>
+            </div>
+
+            <ToolbarPopover
+              :label="t('admin.adminUi.filters')"
+              icon="filter"
+              :count="activeFilterCount"
+              align="left"
+              width="19rem"
+            >
+              <div>
+                <div class="ui-section-label">{{ t('admin.subscriptions.columns.group') }}</div>
+                <Select
+                  v-model="filters.group_id"
+                  :options="groupOptions"
+                  :placeholder="t('admin.subscriptions.allGroups')"
+                  @change="applyFilters"
+                />
+              </div>
+              <div>
+                <div class="ui-section-label">{{ t('admin.adminUi.subscriptions.platform') }}</div>
+                <div class="ui-chips" role="group" :aria-label="t('admin.adminUi.subscriptions.platform')">
+                  <button
+                    v-for="option in platformChipOptions"
+                    :key="option.value"
+                    type="button"
+                    class="ui-chip is-icon"
+                    :aria-pressed="filters.platform === option.value"
+                    :aria-label="option.label"
+                    :title="option.label"
+                    @click="togglePlatformFilter(option.value)"
+                  >
+                    <ProviderMark :platform="option.value" :size="20" />
                   </button>
                 </div>
               </div>
-            </div>
+              <button
+                v-if="activeFilterCount > 0"
+                type="button"
+                class="btn btn-ghost btn-sm self-start"
+                @click="clearExtraFilters"
+              >
+                <Icon name="x" size="sm" />
+                {{ t('admin.adminUi.clearFilters') }}
+              </button>
+            </ToolbarPopover>
+
+            <span class="ui-grow" />
+
             <button
-              @click="showGuideModal = true"
-              class="btn btn-secondary"
-              :title="t('admin.subscriptions.guide.showGuide')"
+              type="button"
+              class="app-icon-button"
+              :disabled="loading"
+              :title="t('common.refresh')"
+              :aria-label="t('common.refresh')"
+              @click="loadSubscriptions"
             >
-              <Icon name="questionCircle" size="md" />
+              <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <button @click="showAssignModal = true" class="btn btn-primary">
-              <Icon name="plus" size="md" class="mr-2" />
+
+            <ToolbarPopover
+              :label="t('admin.adminUi.moreActions')"
+              icon="more"
+              icon-only
+              menu
+              width="14rem"
+            >
+              <div class="subs-menu-label">{{ t('admin.subscriptions.columns.user') }}</div>
+              <button
+                type="button"
+                role="menuitemradio"
+                class="dropdown-item"
+                :aria-checked="userColumnMode === 'email'"
+                @click="setUserColumnMode('email')"
+              >
+                <span class="flex-1">{{ t('admin.users.columns.email') }}</span>
+                <Icon v-if="userColumnMode === 'email'" name="check" size="sm" class="subs-check" />
+              </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                class="dropdown-item"
+                :aria-checked="userColumnMode === 'username'"
+                @click="setUserColumnMode('username')"
+              >
+                <span class="flex-1">{{ t('admin.users.columns.username') }}</span>
+                <Icon v-if="userColumnMode === 'username'" name="check" size="sm" class="subs-check" />
+              </button>
+              <div class="subs-menu-label">{{ t('admin.users.columnSettings') }}</div>
+              <button
+                v-for="col in toggleableColumns"
+                :key="col.key"
+                type="button"
+                role="menuitemcheckbox"
+                class="dropdown-item"
+                :aria-checked="isColumnVisible(col.key)"
+                @click="toggleColumn(col.key)"
+              >
+                <span class="flex-1">{{ col.label }}</span>
+                <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="subs-check" />
+              </button>
+              <div class="subs-menu-divider" role="separator"></div>
+              <button type="button" role="menuitem" class="dropdown-item" @click="showGuideModal = true">
+                <Icon name="questionCircle" size="sm" />
+                {{ t('admin.subscriptions.guide.showGuide') }}
+              </button>
+            </ToolbarPopover>
+
+            <button type="button" class="btn btn-primary" @click="showAssignModal = true">
+              <Icon name="plus" size="sm" />
               {{ t('admin.subscriptions.assignSubscription') }}
             </button>
           </div>
-        </div>
-        <div v-if="pendingOperations.length > 0 || pendingLoadError" class="mt-3 border-t border-gray-200 py-3 dark:border-dark-700">
-          <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.subscriptions.bulk.pendingTitle') }}</h3>
-          <p v-if="pendingLoadError" role="alert" class="mt-2 text-sm text-red-600 dark:text-red-400">{{ pendingLoadError }}</p>
-          <div v-for="operation in pendingOperations" :key="operation.storageKey" class="flex flex-wrap items-center justify-between gap-2 py-2">
-            <span class="min-w-0 flex-1 break-words text-sm text-gray-600 dark:text-gray-400">
-              {{ t(`admin.subscriptions.bulk.${operation.request.action}`) }}:
-              {{ operation.request.subscription_ids.map(id => `#${id}`).join(', ') }}
-            </span>
-            <div class="flex shrink-0 gap-2">
-              <button type="button" class="btn btn-secondary btn-sm" data-test="subscription-pending-retry" :disabled="loading" @click="resumeBulkOperation(operation)">
-                <Icon name="refresh" size="sm" class="mr-2" />{{ t('admin.subscriptions.bulk.retry') }}
+
+          <!-- Unconfirmed bulk actions saved in this browser -->
+          <section
+            v-if="pendingOperations.length > 0 || pendingLoadError"
+            class="subs-notice"
+            :aria-label="t('admin.subscriptions.bulk.pendingTitle')"
+          >
+            <div class="subs-notice-head">
+              <Icon name="exclamationTriangle" size="sm" />
+              <h3>{{ t('admin.subscriptions.bulk.pendingTitle') }}</h3>
+            </div>
+            <p v-if="pendingLoadError" role="alert" class="subs-notice-error">{{ pendingLoadError }}</p>
+            <div v-for="operation in pendingOperations" :key="operation.storageKey" class="subs-notice-row">
+              <span class="min-w-0 flex-1 break-words">
+                <b>{{ t(`admin.subscriptions.bulk.${operation.request.action}`) }}</b>
+                <span class="ui-cell-sub">{{ operation.request.subscription_ids.map(id => `#${id}`).join(', ') }}</span>
+              </span>
+              <div class="flex shrink-0 gap-1">
+                <button type="button" class="btn btn-secondary btn-sm" data-test="subscription-pending-retry" :disabled="loading" @click="resumeBulkOperation(operation)">
+                  <Icon name="refresh" size="sm" />{{ t('admin.subscriptions.bulk.retry') }}
+                </button>
+                <button type="button" class="app-icon-button" :title="t('admin.subscriptions.bulk.dismissSaved')" :aria-label="t('admin.subscriptions.bulk.dismissSaved')" @click="pendingToDismiss = operation">
+                  <Icon name="x" size="sm" />
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Bulk actions for the selected rows -->
+          <Transition name="fade">
+            <div v-if="selectedCount > 0" class="subs-bulkbar" data-test="subscription-bulk-actions">
+              <span class="subs-bulkbar-count">
+                {{ t('admin.subscriptions.bulk.selected', { count: selectedCount }) }}
+              </span>
+              <HelpTooltip :content="t('admin.subscriptions.bulk.selectionHint')" />
+              <span class="ui-grow" />
+              <button
+                v-for="action in bulkActions"
+                :key="action"
+                type="button"
+                :class="action === 'revoke' ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'"
+                :data-test="`bulk-${action}`"
+                :disabled="loading || !!pendingLoadError || bulkTargets[action].length === 0"
+                @click="openBulkAction(action)"
+              >
+                {{ t(`admin.subscriptions.bulk.${action}`) }} ({{ bulkTargets[action].length }})
               </button>
-              <button type="button" class="btn btn-secondary btn-sm" :title="t('admin.subscriptions.bulk.dismissSaved')" :aria-label="t('admin.subscriptions.bulk.dismissSaved')" @click="pendingToDismiss = operation">
-                <Icon name="x" size="sm" />
+              <button type="button" class="btn btn-ghost btn-sm" @click="clearSelection">
+                {{ t('admin.subscriptions.bulk.clearSelection') }}
               </button>
             </div>
-          </div>
-        </div>
-        <div
-          v-if="selectedCount > 0"
-          class="mt-3 space-y-2 rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20"
-          data-test="subscription-bulk-actions"
-        >
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="mr-2 text-sm font-medium text-primary-800 dark:text-primary-200">
-              {{ t('admin.subscriptions.bulk.selected', { count: selectedCount }) }}
-            </span>
-            <button
-              v-for="action in bulkActions"
-              :key="action"
-              type="button"
-              :class="action === 'revoke' ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'"
-              :data-test="`bulk-${action}`"
-              :disabled="loading || !!pendingLoadError || bulkTargets[action].length === 0"
-              @click="openBulkAction(action)"
-            >
-              {{ t(`admin.subscriptions.bulk.${action}`) }} ({{ bulkTargets[action].length }})
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" @click="clearSelection">
-              {{ t('admin.subscriptions.bulk.clearSelection') }}
-            </button>
-          </div>
-          <p class="text-xs text-gray-600 dark:text-gray-400">{{ t('admin.subscriptions.bulk.selectionHint') }}</p>
+          </Transition>
         </div>
       </template>
 
@@ -219,29 +244,25 @@
           :loading="loading"
           row-key="id"
           selectable
+          clickable-rows
           :selected-keys="selectedIds"
           :selection-label="getSubscriptionSelectionLabel"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
+          @row-click="openDetail"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
           <template #cell-user="{ row }">
-            <div class="flex items-center gap-2">
-              <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
-              >
-                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
-                  {{ userColumnMode === 'email'
-                    ? (row.user?.email?.charAt(0).toUpperCase() || '?')
-                    : (row.user?.username?.charAt(0).toUpperCase() || '?')
-                  }}
-                </span>
-              </div>
+            <div class="flex min-w-0 items-center gap-2.5">
+              <span class="subs-avatar" aria-hidden="true">
+                {{ userInitial(row) }}
+              </span>
               <RouterLink
                 :to="{ path: '/admin/usage', query: { user_id: row.user_id } }"
-                class="rounded font-medium text-gray-900 hover:text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-white dark:hover:text-primary-400 dark:focus-visible:ring-offset-dark-800"
+                class="subs-user-link"
+                @click.stop
               >
                 {{ userColumnMode === 'email'
                   ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
@@ -252,227 +273,116 @@
           </template>
 
           <template #cell-group="{ row }">
-            <GroupBadge
-              v-if="row.group"
-              :name="row.group.name"
-              :platform="row.group.platform"
-              :subscription-type="row.group.subscription_type"
-              :rate-multiplier="row.group.rate_multiplier"
-              :show-rate="false"
-            />
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <div v-if="row.group" class="flex min-w-0 items-center gap-2">
+              <ProviderMark :platform="row.group.platform" :size="20" />
+              <span class="ui-cell-main">{{ row.group.name }}</span>
+            </div>
+            <span v-else class="ui-cell-sub">-</span>
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="min-w-[280px] space-y-2">
-              <!-- Daily Usage -->
-              <div v-if="row.group?.daily_limit_usd" class="usage-row">
-                <div class="flex items-center gap-2">
-                  <span class="usage-label">{{ t('admin.subscriptions.daily') }}</span>
-                  <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
-                    <div
-                      class="h-1.5 rounded-full transition-all"
-                      :class="getProgressClass(row.daily_usage_usd, row.group?.daily_limit_usd)"
-                      :style="{
-                        width: getProgressWidth(row.daily_usage_usd, row.group?.daily_limit_usd)
-                      }"
-                    ></div>
+            <div class="subs-usage">
+              <template v-for="(windows, slot) in [usageWindows(row)]" :key="slot">
+                <div
+                  v-for="window in windows"
+                  :key="window.key"
+                  class="subs-usage-row"
+                  :title="window.reset ?? undefined"
+                >
+                  <span class="subs-usage-label">{{ window.label }}</span>
+                  <div :class="meterClass(window.percent)">
+                    <div class="ui-meter-track"><i :style="{ width: meterWidth(window.percent) }"></i></div>
                   </div>
-                  <span class="usage-amount">
-                    ${{ row.daily_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.daily_limit_usd?.toFixed(2) }}
+                  <span class="subs-usage-amount">
+                    {{ formatUsd(window.used) }}<span> / {{ formatUsd(window.limit) }}</span>
                   </span>
                 </div>
-                <div class="reset-info" v-if="row.daily_window_start">
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>{{ formatDailyUsageWindow(row) }}</span>
-                </div>
-              </div>
-
-              <!-- Weekly Usage -->
-              <div v-if="row.group?.weekly_limit_usd" class="usage-row">
-                <div class="flex items-center gap-2">
-                  <span class="usage-label">{{ t('admin.subscriptions.weekly') }}</span>
-                  <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
-                    <div
-                      class="h-1.5 rounded-full transition-all"
-                      :class="getProgressClass(row.weekly_usage_usd, row.group?.weekly_limit_usd)"
-                      :style="{
-                        width: getProgressWidth(row.weekly_usage_usd, row.group?.weekly_limit_usd)
-                      }"
-                    ></div>
-                  </div>
-                  <span class="usage-amount">
-                    ${{ row.weekly_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.weekly_limit_usd?.toFixed(2) }}
-                  </span>
-                </div>
-                <div class="reset-info" v-if="row.weekly_window_start">
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>{{ formatResetTime(row.weekly_window_start, 'weekly') }}</span>
-                </div>
-              </div>
-
-              <!-- Monthly Usage -->
-              <div v-if="row.group?.monthly_limit_usd" class="usage-row">
-                <div class="flex items-center gap-2">
-                  <span class="usage-label">{{ t('admin.subscriptions.monthly') }}</span>
-                  <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
-                    <div
-                      class="h-1.5 rounded-full transition-all"
-                      :class="getProgressClass(row.monthly_usage_usd, row.group?.monthly_limit_usd)"
-                      :style="{
-                        width: getProgressWidth(row.monthly_usage_usd, row.group?.monthly_limit_usd)
-                      }"
-                    ></div>
-                  </div>
-                  <span class="usage-amount">
-                    ${{ row.monthly_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.monthly_limit_usd?.toFixed(2) }}
-                  </span>
-                </div>
-                <div class="reset-info" v-if="row.monthly_window_start">
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>{{ formatResetTime(row.monthly_window_start, 'monthly') }}</span>
-                </div>
-              </div>
-
-              <!-- No Limits - Unlimited badge -->
-              <div
-                v-if="
-                  !row.group?.daily_limit_usd &&
-                  !row.group?.weekly_limit_usd &&
-                  !row.group?.monthly_limit_usd
-                "
-                class="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 dark:bg-emerald-900/20"
-              >
-                <span class="text-lg text-emerald-600 dark:text-emerald-400">∞</span>
-                <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                <span v-if="windows.length === 0" class="subs-unlimited">
+                  <span aria-hidden="true">∞</span>
                   {{ t('admin.subscriptions.unlimited') }}
                 </span>
-              </div>
+              </template>
             </div>
           </template>
 
           <template #cell-expires_at="{ value }">
             <div v-if="value">
-              <span
-                class="text-sm"
-                :class="
-                  isExpiringSoon(value)
-                    ? 'text-orange-600 dark:text-orange-400'
-                    : 'text-gray-700 dark:text-gray-300'
-                "
-              >
+              <span class="subs-date" :class="isExpiringSoon(value) ? 'is-soon' : ''">
                 {{ formatDateTimeToMinute(value) }}
               </span>
               <template
                 v-for="remainingExpiry in [formatRemainingExpiry(value)]"
                 :key="remainingExpiry ?? 'expired'"
               >
-                <div v-if="remainingExpiry" class="text-xs text-gray-500">
+                <div v-if="remainingExpiry" class="ui-cell-sub">
                   {{ remainingExpiry }}
                 </div>
               </template>
             </div>
-            <span v-else class="text-sm text-gray-500">{{
-              t('admin.subscriptions.noExpiration')
-            }}</span>
+            <span v-else class="ui-cell-sub">{{ t('admin.subscriptions.noExpiration') }}</span>
           </template>
 
           <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active'
-                  ? 'badge-success'
-                  : value === 'expired'
-                    ? 'badge-warning'
-                    : 'badge-danger'
-              ]"
-            >
+            <span class="subs-status">
+              <span :class="statusDotClass(value)" aria-hidden="true"></span>
               {{ t(`admin.subscriptions.status.${value}`) }}
             </span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="subs-row-actions" @click.stop @keydown.enter.stop>
               <button
                 v-if="row.status === 'active' || row.status === 'expired'"
-                @click="handleExtend(row)"
-                class="row-action"
+                type="button"
+                class="app-icon-button"
                 :title="t('admin.subscriptions.adjust')"
+                :aria-label="t('admin.subscriptions.adjust')"
+                @click="handleExtend(row)"
               >
                 <Icon name="calendar" size="sm" />
-                <span class="row-action-label">{{ t('admin.subscriptions.adjust') }}</span>
-              </button>
-              <button
-                v-if="row.status === 'active'"
-                @click="handleResetQuota(row)"
-                :disabled="resettingQuota && resettingSubscription?.id === row.id"
-                class="row-action disabled:cursor-not-allowed disabled:opacity-50"
-                :title="t('admin.subscriptions.resetQuota')"
-              >
-                <Icon name="refresh" size="sm" />
-                <span class="row-action-label">{{ t('admin.subscriptions.resetQuota') }}</span>
-              </button>
-              <button
-                v-if="row.status === 'active'"
-                @click="handleRevoke(row)"
-                class="row-action row-action-danger"
-                :title="t('admin.subscriptions.revoke')"
-              >
-                <Icon name="ban" size="sm" />
-                <span class="row-action-label">{{ t('admin.subscriptions.revoke') }}</span>
               </button>
               <button
                 v-if="row.status === 'revoked'"
-                @click="handleRestore(row)"
-                class="row-action"
+                type="button"
+                class="app-icon-button"
                 :title="t('admin.subscriptions.restore')"
+                :aria-label="t('admin.subscriptions.restore')"
+                @click="handleRestore(row)"
               >
                 <Icon name="refresh" size="sm" />
-                <span class="row-action-label">{{ t('admin.subscriptions.restore') }}</span>
               </button>
+              <ToolbarPopover
+                :label="t('admin.adminUi.moreActions')"
+                icon="more"
+                icon-only
+                menu
+              >
+                <button type="button" role="menuitem" class="dropdown-item" @click="openDetail(row)">
+                  <Icon name="eye" size="sm" />
+                  {{ t('admin.adminUi.details') }}
+                </button>
+                <button
+                  v-if="row.status === 'active'"
+                  type="button"
+                  role="menuitem"
+                  class="dropdown-item"
+                  :disabled="resettingQuota && resettingSubscription?.id === row.id"
+                  @click="handleResetQuota(row)"
+                >
+                  <Icon name="refresh" size="sm" />
+                  {{ t('admin.subscriptions.resetQuota') }}
+                </button>
+                <button
+                  v-if="row.status === 'active'"
+                  type="button"
+                  role="menuitem"
+                  class="dropdown-item is-danger"
+                  @click="handleRevoke(row)"
+                >
+                  <Icon name="ban" size="sm" />
+                  {{ t('admin.subscriptions.revoke') }}
+                </button>
+              </ToolbarPopover>
             </div>
           </template>
 
@@ -489,16 +399,163 @@
 
       <!-- Pagination -->
       <template #pagination>
-      <Pagination
-        v-if="pagination.total > 0"
-        :page="pagination.page"
-        :total="pagination.total"
-        :page-size="pagination.page_size"
-        @update:page="handlePageChange"
-        @update:pageSize="handlePageSizeChange"
-      />
+        <Pagination
+          v-if="pagination.total > 0"
+          :page="pagination.page"
+          :total="pagination.total"
+          :page-size="pagination.page_size"
+          @update:page="handlePageChange"
+          @update:pageSize="handlePageSizeChange"
+        />
       </template>
     </TablePageLayout>
+
+    <!-- Subscription detail -->
+    <SideDrawer
+      :open="detailSubscription !== null"
+      :title="detailSubscription ? userDisplayName(detailSubscription) : ''"
+      :subtitle="detailSubscription?.group?.name"
+      width="30rem"
+      @close="closeDetail"
+    >
+      <template #leading>
+        <ProviderMark
+          v-if="detailSubscription?.group"
+          :platform="detailSubscription.group.platform"
+          :size="36"
+        />
+        <span v-else class="subs-avatar is-lg" aria-hidden="true">
+          {{ detailSubscription ? userInitial(detailSubscription) : '' }}
+        </span>
+      </template>
+      <template #badge>
+        <span v-if="detailSubscription" class="subs-status">
+          <span :class="statusDotClass(detailSubscription.status)" aria-hidden="true"></span>
+          {{ t(`admin.subscriptions.status.${detailSubscription.status}`) }}
+        </span>
+      </template>
+
+      <template v-if="detailSubscription">
+        <section>
+          <div class="ui-section-label">{{ t('admin.subscriptions.columns.usage') }}</div>
+          <template v-for="(windows, slot) in [usageWindows(detailSubscription)]" :key="slot">
+            <div v-if="windows.length" class="subs-windows">
+              <div v-for="window in windows" :key="window.key" class="subs-window">
+                <div class="subs-window-head">
+                  <span>{{ window.label }}</span>
+                  <span class="subs-window-amount">
+                    {{ formatUsd(window.used) }}<span> / {{ formatUsd(window.limit) }}</span>
+                  </span>
+                </div>
+                <div :class="meterClass(window.percent)">
+                  <div class="ui-meter-track"><i :style="{ width: meterWidth(window.percent) }"></i></div>
+                  <b>{{ Math.round(window.percent) }}%</b>
+                </div>
+                <div v-if="window.reset" class="subs-window-reset">
+                  <Icon name="clock" size="xs" />
+                  {{ window.reset }}
+                </div>
+              </div>
+            </div>
+            <span v-else class="subs-unlimited">
+              <span aria-hidden="true">∞</span>
+              {{ t('admin.subscriptions.unlimited') }}
+            </span>
+          </template>
+        </section>
+
+        <dl class="ui-dl">
+          <dt>{{ t('admin.subscriptions.columns.user') }}</dt>
+          <dd>
+            <RouterLink
+              :to="{ path: '/admin/usage', query: { user_id: detailSubscription.user_id } }"
+              class="subs-user-link"
+            >
+              {{ detailSubscription.user?.email || t('admin.redeem.userPrefix', { id: detailSubscription.user_id }) }}
+            </RouterLink>
+            <div v-if="detailSubscription.user?.username" class="ui-cell-sub">
+              {{ detailSubscription.user.username }} · #{{ detailSubscription.user_id }}
+            </div>
+          </dd>
+          <dt>{{ t('admin.subscriptions.columns.group') }}</dt>
+          <dd>
+            <GroupBadge
+              v-if="detailSubscription.group"
+              :name="detailSubscription.group.name"
+              :platform="detailSubscription.group.platform"
+              :subscription-type="detailSubscription.group.subscription_type"
+              :rate-multiplier="detailSubscription.group.rate_multiplier"
+            />
+            <span v-else>-</span>
+          </dd>
+          <dt>{{ t('admin.adminUi.subscriptions.starts') }}</dt>
+          <dd>{{ formatDateTimeToMinute(detailSubscription.starts_at) }}</dd>
+          <dt>{{ t('admin.subscriptions.columns.expires') }}</dt>
+          <dd>
+            <template v-if="detailSubscription.expires_at">
+              <span :class="isExpiringSoon(detailSubscription.expires_at) ? 'subs-date is-soon' : 'subs-date'">
+                {{ formatDateTimeToMinute(detailSubscription.expires_at) }}
+              </span>
+              <div v-if="formatRemainingExpiry(detailSubscription.expires_at)" class="ui-cell-sub">
+                {{ formatRemainingExpiry(detailSubscription.expires_at) }}
+              </div>
+            </template>
+            <span v-else>{{ t('admin.subscriptions.noExpiration') }}</span>
+          </dd>
+          <template v-if="detailSubscription.revoked_at">
+            <dt>{{ t('admin.adminUi.subscriptions.revokedAt') }}</dt>
+            <dd>{{ formatDateTimeToMinute(detailSubscription.revoked_at) }}</dd>
+          </template>
+          <dt>{{ t('admin.adminUi.subscriptions.created') }}</dt>
+          <dd>{{ formatDateTimeToMinute(detailSubscription.created_at) }}</dd>
+          <dt>ID</dt>
+          <dd class="tabular-nums">#{{ detailSubscription.id }}</dd>
+        </dl>
+      </template>
+
+      <template #footer>
+        <template v-if="detailSubscription">
+          <button
+            v-if="detailSubscription.status === 'active' || detailSubscription.status === 'expired'"
+            type="button"
+            class="btn btn-primary btn-sm"
+            @click="fromDrawer(handleExtend, detailSubscription)"
+          >
+            <Icon name="calendar" size="sm" />
+            {{ t('admin.subscriptions.adjust') }}
+          </button>
+          <button
+            v-if="detailSubscription.status === 'active'"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="resettingQuota && resettingSubscription?.id === detailSubscription.id"
+            @click="fromDrawer(handleResetQuota, detailSubscription)"
+          >
+            <Icon name="refresh" size="sm" />
+            {{ t('admin.subscriptions.resetQuota') }}
+          </button>
+          <button
+            v-if="detailSubscription.status === 'revoked'"
+            type="button"
+            class="btn btn-primary btn-sm"
+            @click="fromDrawer(handleRestore, detailSubscription)"
+          >
+            <Icon name="refresh" size="sm" />
+            {{ t('admin.subscriptions.restore') }}
+          </button>
+          <span class="ui-grow flex-1" />
+          <button
+            v-if="detailSubscription.status === 'active'"
+            type="button"
+            class="btn btn-ghost btn-sm subs-danger-text"
+            @click="fromDrawer(handleRevoke, detailSubscription)"
+          >
+            <Icon name="ban" size="sm" />
+            {{ t('admin.subscriptions.revoke') }}
+          </button>
+        </template>
+      </template>
+    </SideDrawer>
 
     <BulkSubscriptionActionDialog
       v-if="bulkAction !== null"
@@ -895,6 +952,10 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { completeBulkSubscriptionOperation, listPendingBulkSubscriptionOperations, type BulkSubscriptionOperation } from '@/components/admin/subscription/bulkSubscriptionOperation'
 import {
@@ -1029,13 +1090,9 @@ const columns = computed<Column[]>(() =>
   )
 )
 
-// Column dropdown state
-const showColumnDropdown = ref(false)
-const columnDropdownRef = ref<HTMLElement | null>(null)
-
 // Filter options
 const statusOptions = computed(() => [
-  { value: '', label: t('admin.subscriptions.allStatus') },
+  { value: '', label: t('common.all') },
   { value: 'active', label: t('admin.subscriptions.status.active') },
   { value: 'expired', label: t('admin.subscriptions.status.expired') },
   { value: 'revoked', label: t('admin.subscriptions.status.revoked') }
@@ -1175,10 +1232,9 @@ const groupOptions = computed(() => [
   ...groups.value.map((g) => ({ value: g.id.toString(), label: g.name }))
 ])
 
-const platformFilterOptions = computed(() => [
-  { value: '', label: t('admin.subscriptions.allPlatforms') },
-  ...GROUP_PLATFORM_OPTIONS
-])
+const platformChipOptions = GROUP_PLATFORM_OPTIONS
+
+const activeFilterCount = computed(() => (filters.group_id ? 1 : 0) + (filters.platform ? 1 : 0))
 
 // Group options for assign (only subscription type groups)
 const subscriptionGroupOptions = computed(() =>
@@ -1199,6 +1255,51 @@ const applyFilters = () => {
   pagination.page = 1
   loadSubscriptions()
 }
+
+const setStatusFilter = (status: string) => {
+  if (filters.status === status) return
+  filters.status = status
+  applyFilters()
+}
+
+const togglePlatformFilter = (platform: string) => {
+  filters.platform = filters.platform === platform ? '' : platform
+  applyFilters()
+}
+
+const clearExtraFilters = () => {
+  filters.group_id = ''
+  filters.platform = ''
+  applyFilters()
+}
+
+// Detail drawer: follows the row by ID so it reflects reloaded data.
+const detailId = ref<number | null>(null)
+const detailSubscription = computed(() =>
+  detailId.value === null ? null : (subscriptions.value.find((row) => row.id === detailId.value) ?? null)
+)
+const openDetail = (subscription: UserSubscription) => {
+  detailId.value = subscription.id
+}
+const closeDetail = () => {
+  detailId.value = null
+}
+// Dialogs sit below the drawer layer, so close the drawer before opening one.
+const fromDrawer = (action: (subscription: UserSubscription) => void, subscription: UserSubscription) => {
+  closeDetail()
+  action(subscription)
+}
+
+const userDisplayName = (subscription: UserSubscription) =>
+  subscription.user?.email || subscription.user?.username || t('admin.redeem.userPrefix', { id: subscription.user_id })
+
+const userInitial = (subscription: UserSubscription) =>
+  (userColumnMode.value === 'email'
+    ? subscription.user?.email?.charAt(0).toUpperCase()
+    : subscription.user?.username?.charAt(0).toUpperCase()) || '?'
+
+const statusDotClass = (status: string) =>
+  status === 'active' ? 'ui-dot is-ok' : status === 'expired' ? 'ui-dot is-warn' : 'ui-dot is-bad'
 
 const loadSubscriptions = async () => {
   if (abortController) {
@@ -1586,21 +1687,58 @@ const isExpiringSoon = (expiresAt: string): boolean => {
   return days !== null && days <= 7
 }
 
-const getProgressWidth = (used: number | null | undefined, limit: number | null): string => {
-  if (!limit || limit === 0) return '0%'
-  const usedValue = used ?? 0
-  const percentage = Math.min((usedValue / limit) * 100, 100)
-  return `${percentage}%`
+interface UsageWindow {
+  key: 'daily' | 'weekly' | 'monthly'
+  label: string
+  used: number
+  limit: number
+  percent: number
+  reset: string | null
 }
 
-const getProgressClass = (used: number | null | undefined, limit: number | null): string => {
-  if (!limit || limit === 0) return 'bg-gray-400'
-  const usedValue = used ?? 0
-  const percentage = (usedValue / limit) * 100
-  if (percentage >= 90) return 'bg-red-500'
-  if (percentage >= 70) return 'bg-orange-500'
-  return 'bg-green-500'
+// Configured quota windows only; an empty list means the group is unlimited.
+const usageWindows = (subscription: UserSubscription): UsageWindow[] => {
+  const group = subscription.group
+  if (!group) return []
+  const windows = [
+    {
+      key: 'daily' as const,
+      label: t('admin.subscriptions.daily'),
+      used: subscription.daily_usage_usd,
+      limit: group.daily_limit_usd,
+      reset: subscription.daily_window_start ? formatDailyUsageWindow(subscription) : null
+    },
+    {
+      key: 'weekly' as const,
+      label: t('admin.subscriptions.weekly'),
+      used: subscription.weekly_usage_usd,
+      limit: group.weekly_limit_usd,
+      reset: subscription.weekly_window_start ? formatResetTime(subscription.weekly_window_start, 'weekly') : null
+    },
+    {
+      key: 'monthly' as const,
+      label: t('admin.subscriptions.monthly'),
+      used: subscription.monthly_usage_usd,
+      limit: group.monthly_limit_usd,
+      reset: subscription.monthly_window_start ? formatResetTime(subscription.monthly_window_start, 'monthly') : null
+    }
+  ]
+  return windows
+    .filter((window) => !!window.limit)
+    .map((window) => {
+      const used = window.used ?? 0
+      const limit = window.limit as number
+      return { ...window, used, limit, percent: Math.min((used / limit) * 100, 100) }
+    })
 }
+
+const formatUsd = (value: number) => `$${value.toFixed(2)}`
+
+const meterWidth = (percent: number) => `${percent > 0 ? Math.max(percent, 2) : 0}%`
+
+// Tone follows how much of the window is used.
+const meterClass = (percent: number) =>
+  percent >= 90 ? 'ui-meter is-bad' : percent >= 70 ? 'ui-meter is-warn' : 'ui-meter is-ok'
 
 const formatResetDuration = (parts: RemainingDurationParts): string => {
   if (parts.days > 0) {
@@ -1666,9 +1804,6 @@ const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement
   if (!target.closest('[data-assign-user-search]')) showUserDropdown.value = false
   if (!target.closest('[data-filter-user-search]')) showFilterUserDropdown.value = false
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
-    showColumnDropdown.value = false
-  }
 }
 
 onMounted(() => {
@@ -1692,19 +1827,311 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.usage-row {
-  @apply space-y-1;
+.subs-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.usage-label {
-  @apply w-10 flex-shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400;
+/* Keep the segmented status control inside narrow viewports. */
+.ui-toolbar > .viz-seg {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.usage-amount {
-  @apply whitespace-nowrap text-xs tabular-nums text-gray-600 dark:text-gray-300;
+/* User search wraps the shared .ui-search so the result list can anchor to it. */
+.subs-search {
+  position: relative;
+  display: flex;
+  min-width: 12rem;
+  max-width: 22rem;
+  flex: 1 1 14rem;
 }
 
-.reset-info {
-  @apply flex items-center gap-1 pl-12 text-[10px] text-blue-600 dark:text-blue-400;
+.subs-search > .ui-search {
+  max-width: none;
+}
+
+.subs-search-clear {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--operator-subtle-foreground);
+}
+
+.subs-search-clear:hover {
+  color: var(--operator-foreground);
+}
+
+.subs-search-menu {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  z-index: 60;
+  width: 100%;
+  min-width: 16rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--operator-popup-border);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-popup-surface);
+  box-shadow: var(--operator-popup-shadow);
+  transform-origin: top left;
+}
+
+.subs-search-note {
+  padding: 0.5rem 0.625rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.subs-menu-label {
+  padding: 0.5rem 0.625rem 0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.subs-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--operator-border);
+}
+
+.subs-check {
+  color: var(--operator-accent-text);
+}
+
+.dropdown-item.is-danger,
+.subs-danger-text {
+  color: var(--operator-destructive);
+}
+
+.dropdown-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Unconfirmed bulk actions */
+.subs-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid rgb(var(--operator-warning-rgb) / 0.35);
+  border-radius: var(--operator-radius-lg);
+  background: rgb(var(--operator-warning-rgb) / 0.07);
+  font-size: 0.875rem;
+}
+
+.subs-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--operator-warning);
+}
+
+.subs-notice-head h3 {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.subs-notice-error {
+  color: var(--operator-destructive);
+}
+
+.subs-notice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.subs-notice-row b {
+  margin-right: 0.5rem;
+  color: var(--operator-foreground);
+  font-weight: 500;
+}
+
+/* Selection bar */
+.subs-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem 0.5rem 0.875rem;
+  border: 1px solid rgb(var(--operator-accent-rgb) / 0.35);
+  border-radius: var(--operator-radius-lg);
+  background: var(--operator-accent-soft);
+}
+
+.subs-bulkbar > .ui-grow {
+  flex: 1 1 auto;
+}
+
+.subs-bulkbar-count {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cells */
+.subs-avatar {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.subs-avatar.is-lg {
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 0.875rem;
+}
+
+.subs-user-link {
+  overflow: hidden;
+  border-radius: 4px;
+  color: var(--operator-foreground);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subs-user-link:hover {
+  color: var(--operator-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.subs-user-link:focus-visible {
+  outline: 2px solid rgb(var(--operator-accent-rgb) / 0.6);
+  outline-offset: 2px;
+}
+
+.subs-usage {
+  display: flex;
+  width: 15rem;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.subs-usage-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(4rem, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.subs-usage-row .ui-meter,
+.subs-window .ui-meter {
+  min-width: 0;
+}
+
+.subs-usage-label {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.subs-usage-amount,
+.subs-window-amount {
+  color: var(--operator-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.subs-usage-amount > span,
+.subs-window-amount > span {
+  color: var(--operator-subtle-foreground);
+}
+
+.subs-unlimited {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--operator-success);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.subs-unlimited > span {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.subs-date {
+  color: var(--operator-foreground);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.subs-date.is-soon {
+  color: var(--operator-warning);
+}
+
+.subs-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4375rem;
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.subs-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.125rem;
+}
+
+/* Drawer */
+.subs-windows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.subs-window {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.subs-window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.subs-window-amount {
+  font-size: 0.8125rem;
+}
+
+.subs-window-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
 }
 </style>

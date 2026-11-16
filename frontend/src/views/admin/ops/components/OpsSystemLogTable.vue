@@ -6,6 +6,7 @@ import LogRetentionSelect from './LogRetentionSelect.vue'
 import { opsAPI, type OpsRuntimeLogConfig, type OpsSystemLog, type OpsSystemLogSinkHealth } from '@/api/admin/ops'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -39,6 +40,8 @@ const health = ref<OpsSystemLogSinkHealth>({
 })
 
 const runtimeLoading = ref(false)
+/** Runtime log settings stay behind a disclosure; a write error opens them. */
+const runtimeOpen = ref(false)
 const runtimeConfigLoaded = ref(false)
 const runtimeSaving = ref(false)
 const runtimeConfig = reactive<OpsRuntimeLogConfig>({
@@ -399,25 +402,30 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-900/60">
+  <section class="ui-card p-4 sm:p-5">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.systemLogs.title') }}</h3>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.systemLogs.description') }}</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span class="rounded-md bg-gray-100 px-2 py-1 text-gray-700 dark:bg-dark-700 dark:text-gray-200">{{ t('admin.ops.systemLogs.queue') }} {{ health.queue_depth }}/{{ health.queue_capacity }}</span>
-        <span class="rounded-md bg-gray-100 px-2 py-1 text-gray-700 dark:bg-dark-700 dark:text-gray-200">{{ t('admin.ops.systemLogs.written') }} {{ health.written_count }}</span>
-        <span class="rounded-md bg-amber-100 px-2 py-1 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{{ t('admin.ops.systemLogs.dropped') }} {{ health.dropped_count }}</span>
-        <span class="rounded-md bg-red-100 px-2 py-1 text-red-700 dark:bg-red-900/30 dark:text-red-300">{{ t('admin.ops.systemLogs.failed') }} {{ health.write_failed_count }}</span>
+      <h3 class="viz-card-title" :title="t('admin.ops.systemLogs.description')">{{ t('admin.ops.systemLogs.title') }}</h3>
+      <div class="flex flex-wrap items-center gap-1.5 text-xs">
+        <span class="badge badge-gray tabular-nums">{{ t('admin.ops.systemLogs.queue') }} {{ health.queue_depth }}/{{ health.queue_capacity }}</span>
+        <span class="badge badge-gray tabular-nums">{{ t('admin.ops.systemLogs.written') }} {{ health.written_count }}</span>
+        <span class="badge tabular-nums" :class="health.dropped_count ? 'badge-warning' : 'badge-gray'">{{ t('admin.ops.systemLogs.dropped') }} {{ health.dropped_count }}</span>
+        <span class="badge tabular-nums" :class="health.write_failed_count ? 'badge-danger' : 'badge-gray'">{{ t('admin.ops.systemLogs.failed') }} {{ health.write_failed_count }}</span>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm ops-config-toggle"
+          :aria-expanded="runtimeOpen"
+          aria-controls="ops-runtime-config"
+          @click="runtimeOpen = !runtimeOpen"
+        >
+          <Icon name="cog" size="sm" />
+          {{ t('admin.ops.systemLogs.runtimeConfig') }}
+          <Icon name="chevronDown" size="xs" class="ops-config-chevron" />
+        </button>
       </div>
     </div>
 
-    <div class="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/70">
-      <div class="mb-2 flex items-center justify-between">
-        <div class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ t('admin.ops.systemLogs.runtimeConfig') }}</div>
-        <span v-if="runtimeLoading" class="text-xs text-gray-500">{{ t('common.loading') }}</span>
-      </div>
+    <div v-show="runtimeOpen || !!health.last_error" id="ops-runtime-config" class="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-800/70">
+      <div v-if="runtimeLoading" class="mb-2 text-xs text-gray-500">{{ t('common.loading') }}</div>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <label class="text-xs text-gray-600 dark:text-gray-300">
           {{ t('admin.ops.systemLogs.level') }}
@@ -599,3 +607,15 @@ onMounted(async () => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.ops-config-toggle {
+  gap: 0.375rem;
+}
+.ops-config-chevron {
+  transition: transform var(--operator-duration) var(--operator-ease-out);
+}
+.ops-config-toggle[aria-expanded='true'] .ops-config-chevron {
+  transform: rotate(180deg);
+}
+</style>

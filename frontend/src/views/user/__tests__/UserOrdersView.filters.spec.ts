@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import UserOrdersView from '../UserOrdersView.vue'
-import Select from '@/components/common/Select.vue'
 import Pagination from '@/components/common/Pagination.vue'
 
 const api = vi.hoisted(() => ({ getMyOrders: vi.fn(), getRefundEligibleProviders: vi.fn() }))
@@ -36,10 +35,11 @@ async function openOrders() {
 describe('order status filtering', () => {
   it('loads the first page with the selected status', async () => {
     const wrapper = await openOrders()
-    const select = wrapper.getComponent(Select)
-    await select.get('button').trigger('click')
-    await select.findAll('[role="option"]').find(option => option.text() === 'payment.status.pending')!.trigger('click')
+    const pending = wrapper.get('[data-testid="order-filter-PENDING"]')
+    await pending.trigger('click')
     await flushPromises()
+    expect(pending.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="order-filter-all"]').attributes('aria-pressed')).toBe('false')
     expect(api.getMyOrders).toHaveBeenLastCalledWith({ page: 1, page_size: 20, status: 'PENDING' })
     expect(wrapper.getComponent(Pagination).props('page')).toBe(1)
     expect(api.getMyOrders).toHaveBeenCalledTimes(3)

@@ -1,0 +1,17 @@
+export default {
+  search: 'Search plugins',
+  issues: 'Issues',
+  about: 'About plugins',
+  traffic: '{percent}% traffic',
+  key: 'Key',
+  author: 'Author',
+  version: 'Version',
+  installedAt: 'Installed',
+  updatedAt: 'Updated',
+  enabledAt: 'Enabled at',
+  sha256: 'SHA-256',
+  capabilities: 'Capabilities',
+  protocol: 'Protocol',
+  overview: 'Overview',
+  metadata: 'Metadata',
+}

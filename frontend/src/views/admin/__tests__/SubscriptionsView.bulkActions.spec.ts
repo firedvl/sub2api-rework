@@ -140,7 +140,7 @@ describe('subscription bulk operations', () => {
     await flushPromises()
     expect(wrapper.getComponent({ name: 'DataTable' }).props('selectedKeys')).toEqual([])
     await select([3])
-    wrapper.findAllComponents({ name: 'Select' })[0]!.vm.$emit('change')
+    await wrapper.get('[role="group"] button[aria-pressed="false"]').trigger('click')
     await flushPromises()
     expect(wrapper.getComponent({ name: 'DataTable' }).props('selectedKeys')).toEqual([])
   })

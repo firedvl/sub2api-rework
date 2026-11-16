@@ -78,11 +78,27 @@ const baseRecord = (id: string, parts?: unknown[]) => ({
 
 const wrappers: ReturnType<typeof mount>[] = []
 
+async function openSchedule(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('[data-testid="backup-open-schedule"]').trigger('click')
+}
+
+async function openRowMenu(wrapper: ReturnType<typeof mount>, id: string) {
+  await wrapper.get(`[data-test="backup-more-${id}"]`).trigger('click')
+}
+
 function mountBackupView() {
   const wrapper = mount(BackupView, {
+    attachTo: document.body,
     global: {
       stubs: {
+        // ToolbarPopover teleports its panel to <body>; render it inline here.
+        teleport: true,
         TotpStepUpDialog: true,
+        HelpTooltip: true,
+        SideDrawer: {
+          props: ['open', 'title'],
+          template: '<div v-if="open" data-testid="drawer"><slot /><slot name="footer" /></div>',
+        },
       },
     },
   })
@@ -124,11 +140,8 @@ describe('admin BackupView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('3')
-    const downloadButton = wrapper.findAll('button').find(button =>
-      button.text().includes('admin.backup.actions.download'),
-    )
-    expect(downloadButton).toBeDefined()
-    await downloadButton!.trigger('click')
+    const downloadButton = wrapper.get('[aria-label="admin.backup.actions.download"]')
+    await downloadButton.trigger('click')
     await flushPromises()
 
     expect(document.body.textContent).toContain('admin.backup.actions.partLabel:1')
@@ -142,10 +155,7 @@ describe('admin BackupView', () => {
 
     const wrapper = mountBackupView()
     await flushPromises()
-    const downloadButton = wrapper.findAll('button').find(button =>
-      button.text().includes('admin.backup.actions.download'),
-    )
-    await downloadButton!.trigger('click')
+    await wrapper.get('[aria-label="admin.backup.actions.download"]').trigger('click')
     await flushPromises()
 
     expect(getDownloadURL).toHaveBeenCalledWith('legacy')
@@ -160,18 +170,20 @@ describe('admin BackupView', () => {
     const wrapper = mountBackupView()
     await flushPromises()
 
-    expect(wrapper.find('tbody tr td:nth-child(5)').text()).toBe('-')
-    expect(wrapper.findAll('button').some(button => button.text() === 'common.delete')).toBe(false)
+    expect(wrapper.find('tbody tr td:nth-child(4)').text()).toBe('-')
+    expect(wrapper.find('[data-test="backup-more-running"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="admin.backup.actions.download"]').exists()).toBe(false)
   })
 
   it('兼容旧配置并保留 0 值，不自动启用月度归档', async () => {
     getSchedule.mockResolvedValue({ enabled: true, cron_expr: '0 4 * * *', retain_days: 0, retain_count: 0 })
     const wrapper = mountBackupView()
     await flushPromises()
+    await openSchedule(wrapper)
     expect((wrapper.get('[data-testid="backup-retain-days"]').element as HTMLInputElement).value).toBe('0')
     expect((wrapper.get('[data-testid="backup-retain-count"]').element as HTMLInputElement).value).toBe('0')
     expect((wrapper.get('[data-testid="archive-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await wrapper.get('[data-testid="backup-schedule-save"]').trigger('click')
     await flushPromises()
     expect(updateSchedule).toHaveBeenCalledWith(expect.objectContaining({ retain_days: 0, retain_count: 0, monthly_archive: expect.objectContaining({ enabled: false }) }))
   })
@@ -179,6 +191,7 @@ describe('admin BackupView', () => {
   it('多选日期，手填份数；永久保留隐藏数量并在取消后恢复', async () => {
     const wrapper = mountBackupView()
     await flushPromises()
+    await openSchedule(wrapper)
     await wrapper.get('[data-testid="archive-enabled"]').setValue(true)
     await wrapper.get('#backup-archive-dates').trigger('click')
     await wrapper.get('#backup-archive-options input[value="15"]').setValue(true)
@@ -192,21 +205,22 @@ describe('admin BackupView', () => {
     expect(wrapper.findComponent({ name: 'BackupArchiveSettings' }).text()).not.toContain('admin.backup.archive.copies')
     await wrapper.get('[data-testid="archive-forever"]').setValue(false)
     expect((wrapper.get('[data-testid="archive-count"]').element as HTMLInputElement).value).toBe('17')
-    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await wrapper.get('[data-testid="backup-schedule-save"]').trigger('click')
     await flushPromises()
     expect(updateSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ monthly_archive: { enabled: true, days: [1, 15], include_month_end: true, retain_count: 17 } }))
     await wrapper.get('[data-testid="archive-forever"]').setValue(true)
-    await wrapper.get('[data-testid="backup-schedule"] .btn-primary').trigger('click')
+    await wrapper.get('[data-testid="backup-schedule-save"]').trigger('click')
     expect(updateSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ monthly_archive: expect.objectContaining({ retain_count: 0 }) }))
   })
 
   it('空日期和非法份数不可保存，输入 0 不会误选永久保留', async () => {
     const wrapper = mountBackupView()
     await flushPromises()
+    await openSchedule(wrapper)
     await wrapper.get('[data-testid="archive-enabled"]').setValue(true)
     await wrapper.get('#backup-archive-dates').trigger('click')
     await wrapper.get('#backup-archive-options input[value="1"]').setValue(false)
-    const save = wrapper.get('[data-testid="backup-schedule"] .btn-primary')
+    const save = wrapper.get('[data-testid="backup-schedule-save"]')
     expect(save.attributes('disabled')).toBeDefined()
     await wrapper.get('#backup-archive-options input[value="15"]').setValue(true)
     await wrapper.get('[data-testid="archive-forever"]').setValue(false)
@@ -224,10 +238,11 @@ describe('admin BackupView', () => {
       monthly_archive: { enabled: true, days: [1, 15], include_month_end: false, retain_count: 12 } })
     const wrapper = mountBackupView()
     await flushPromises()
+    await openSchedule(wrapper)
     await wrapper.get('[data-testid="archive-count"]').setValue(1)
     await wrapper.get('[data-testid="archive-enabled"]').setValue(false)
     expect(wrapper.find('[data-testid="archive-count"]').exists()).toBe(false)
-    const save = wrapper.get('[data-testid="backup-schedule"] .btn-primary')
+    const save = wrapper.get('[data-testid="backup-schedule-save"]')
     await save.trigger('click')
     await flushPromises()
     expect(updateSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ monthly_archive: { enabled: false, days: [1, 15], include_month_end: false, retain_count: 12 } }))
@@ -253,6 +268,7 @@ describe('admin BackupView', () => {
       monthly_archive: { enabled: true, days: [1, 15], include_month_end: true, retain_count: 23 } })
     const wrapper = mountBackupView()
     await flushPromises()
+    await openSchedule(wrapper)
     expect((wrapper.get('[data-testid="archive-count"]').element as HTMLInputElement).value).toBe('23')
     await wrapper.get('#backup-archive-dates').trigger('keydown', { key: 'ArrowDown' })
     await flushPromises()
@@ -268,14 +284,31 @@ describe('admin BackupView', () => {
     const wrapper = mountBackupView()
     await flushPromises()
     expect(wrapper.text()).toContain('admin.backup.archive.badge')
-    expect(wrapper.get('tbody tr td:nth-child(6)').text()).toBe('admin.backup.archive.retainLatest')
-    const button = wrapper.findAll('button').find(button => button.text() === 'common.delete')!
-    await button.trigger('click')
+    expect(wrapper.get('tbody tr td:nth-child(5)').text()).toBe('admin.backup.archive.retainLatest')
+    const findDelete = () => wrapper.findAll('[role="menuitem"]').find(button => button.text() === 'common.delete')!
+    await openRowMenu(wrapper, 'archived')
+    await findDelete().trigger('click')
     expect(confirm).toHaveBeenCalledWith('admin.backup.archive.deleteConfirm')
     expect(deleteBackup).not.toHaveBeenCalled()
     confirm.mockReturnValue(true)
-    await button.trigger('click')
+    await openRowMenu(wrapper, 'archived')
+    await findDelete().trigger('click')
     await flushPromises()
     expect(deleteBackup).toHaveBeenCalledWith('archived', true)
+  })
+
+  it('汇总卡片和状态分段反映备份列表', async () => {
+    listBackups.mockResolvedValue({
+      items: [
+        { ...baseRecord('ok-1'), size_bytes: 1024 },
+        { ...baseRecord('bad-1'), status: 'failed', error_message: 'disk full' },
+      ],
+    })
+    const wrapper = mountBackupView()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="backup-status-failed"]').text()).toContain('1')
+    await wrapper.get('[data-testid="backup-status-failed"]').trigger('click')
+    expect(wrapper.find('[data-testid="backup-row-ok-1"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="backup-row-bad-1"] .badge').attributes('title')).toBe('disk full')
   })
 })

@@ -1,55 +1,50 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
-      <!-- Single Row: Search, Filters, and Actions -->
+    <TablePageLayout class="ui-stagger">
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Active Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- Search Box -->
-            <div class="relative w-full md:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
+        <div class="ui-toolbar">
+          <label class="ui-search" :title="t('admin.users.searchUsers')">
+            <Icon name="search" size="sm" />
+            <input
+              v-model="searchQuery"
+              type="search"
+              :placeholder="t('common.search')"
+              :aria-label="t('admin.users.searchUsers')"
+              data-test="users-search"
+              @input="handleSearch"
+            />
+          </label>
 
-            <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.role"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
-                @change="applyFilter"
-              />
-            </div>
+          <div class="viz-seg" role="group" :aria-label="t('admin.users.columns.status')">
+            <button
+              v-for="option in statusOptions"
+              :key="option.value"
+              type="button"
+              :aria-pressed="filters.status === option.value"
+              :data-test="`users-status-${option.value || 'all'}`"
+              @click="setStatusFilter(option.value)"
+            >
+              <span v-if="option.value === 'active'" class="ui-dot is-ok" aria-hidden="true"></span>
+              <span v-else-if="option.value === 'disabled'" class="ui-dot is-bad" aria-hidden="true"></span>
+              {{ option.label }}
+              <span v-if="filters.status === option.value" class="users-seg-count">{{ pagination.total }}</span>
+            </button>
+          </div>
 
-            <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.status"
-                :options="[
-                  { value: '', label: t('admin.users.allStatus') },
-                  { value: 'active', label: t('common.active') },
-                  { value: 'disabled', label: t('admin.users.disabled') }
-                ]"
-                @change="applyFilter"
-              />
+          <ToolbarPopover
+            :label="t('admin.adminUi.filters')"
+            icon="filter"
+            :count="activeFilterCount"
+            align="left"
+            test-id="users-filters"
+            @open="loadFilterGroups"
+          >
+            <div class="users-field">
+              <span class="users-field-label">{{ t('admin.users.columns.role') }}</span>
+              <Select v-model="filters.role" :options="roleOptions" @change="applyFilter" />
             </div>
-
-            <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
+            <div class="users-field">
+              <span class="users-field-label">{{ t('admin.users.authorizedGroupFilter') }}</span>
               <Select
                 v-model="filters.group"
                 :options="groupFilterOptions"
@@ -60,9 +55,8 @@
                 @change="applyFilter"
               />
             </div>
-
-            <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
+            <div class="users-field">
+              <span class="users-field-label">{{ t('admin.users.apiKeyGroupFilter') }}</span>
               <Select
                 v-model="filters.apiKeyGroup"
                 :options="apiKeyGroupFilterOptions"
@@ -71,208 +65,111 @@
                 @change="applyFilter"
               />
             </div>
-
-            <!-- Dynamic Attribute Filters -->
-            <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
-              <div
-                v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-full sm:w-36"
-              >
-                <!-- Text/Email/URL/Textarea/Date type: styled input -->
-                <input
-                  v-if="['text', 'textarea', 'email', 'url', 'date'].includes(getAttributeDefinition(Number(attrId))?.type || 'text')"
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Number type: number input -->
-                <input
-                  v-else-if="getAttributeDefinition(Number(attrId))?.type === 'number'"
-                  :value="value"
-                  type="number"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Select/Multi-select type -->
-                <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
-                  <div class="w-full">
-                    <Select
-                      :model-value="value"
-                      :options="[
-                        { value: '', label: getAttributeDefinitionName(Number(attrId)) },
-                        ...(getAttributeDefinition(Number(attrId))?.options || [])
-                      ]"
-                      @update:model-value="(val) => { updateAttributeFilter(Number(attrId), String(val ?? '')); applyFilter() }"
-                    />
-                  </div>
-                </template>
-                <!-- Fallback -->
-                <input
-                  v-else
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-              </div>
-            </template>
-          </div>
-
-          <!-- Right: Actions and Settings -->
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <!-- Mobile: Secondary buttons (icon only) -->
-            <div class="flex items-center gap-2 md:contents">
-              <!-- Refresh Button -->
-              <button
-                @click="loadUsers"
-                :disabled="loading"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('common.refresh')"
-              >
-                <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-              </button>
-              <!-- Filter Settings Dropdown -->
-              <div class="relative" ref="filterDropdownRef">
-                <button
-                  @click="showFilterDropdown = !showFilterDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.filterSettings')"
-                >
-                  <Icon name="filter" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
-                </button>
-                <!-- Dropdown menu -->
-                <div
-                  v-if="showFilterDropdown"
-                  class="menu-enter absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <!-- Built-in filters -->
-                  <button
-                    v-for="filter in builtInFilters"
-                    :key="filter.key"
-                    @click="toggleBuiltInFilter(filter.key)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ filter.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(filter.key)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                  <!-- Divider if custom attributes exist -->
-                  <div
-                    v-if="filterableAttributes.length > 0"
-                    class="my-1 border-t border-gray-100 dark:border-dark-700"
-                  ></div>
-                  <!-- Custom attribute filters -->
-                  <button
-                    v-for="attr in filterableAttributes"
-                    :key="attr.id"
-                    @click="toggleAttributeFilter(attr)"
-                    class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ attr.name }}</span>
-                    <Icon
-                      v-if="visibleFilters.has(`attr_${attr.id}`)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-              </div>
-              <!-- Column Settings Dropdown -->
-              <div class="relative" ref="columnDropdownRef">
-                <button
-                  @click="showColumnDropdown = !showColumnDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
-                  :title="t('admin.users.columnSettings')"
-                >
-                  <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
-                </button>
-                <!-- Dropdown menu -->
-                <div
-                  v-if="showColumnDropdown"
-                  class="menu-enter absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-                >
-                  <button
-                    v-for="col in toggleableColumns"
-                    :key="col.key"
-                    :disabled="isForcedVisibleColumn(col.key)"
-                    @click="toggleColumn(col.key)"
-                    :class="[
-                      'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
-                      isForcedVisibleColumn(col.key)
-                        ? 'cursor-not-allowed text-gray-400 dark:text-gray-500'
-                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
-                    ]"
-                    :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : ''"
-                  >
-                    <span>{{ col.label }}</span>
-                    <Icon
-                      v-if="isColumnVisible(col.key)"
-                      name="check"
-                      size="sm"
-                      :class="isForcedVisibleColumn(col.key) ? 'text-gray-400 dark:text-gray-500' : 'text-primary-500'"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-              </div>
-              <!-- Attributes Config Button -->
-              <button
-                @click="showAttributesModal = true"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.attributes.configButton')"
-              >
-                <Icon name="cog" size="sm" class="md:mr-1.5" />
-                <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
-              </button>
+            <div v-for="attr in filterableAttributes" :key="attr.id" class="users-field">
+              <span class="users-field-label">{{ attr.name }}</span>
+              <Select
+                v-if="attr.type === 'select' || attr.type === 'multi_select'"
+                :model-value="activeAttributeFilters[attr.id] ?? ''"
+                :options="[{ value: '', label: t('common.all') }, ...(attr.options || [])]"
+                @update:model-value="(val) => { updateAttributeFilter(attr.id, String(val ?? '')); applyFilter() }"
+              />
+              <input
+                v-else
+                :value="activeAttributeFilters[attr.id] ?? ''"
+                :type="attr.type === 'number' ? 'number' : 'text'"
+                :aria-label="attr.name"
+                class="input"
+                @input="(e) => updateAttributeFilter(attr.id, (e.target as HTMLInputElement).value)"
+                @change="applyFilter"
+              />
             </div>
-
             <button
-              v-if="selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
+              v-if="activeFilterCount > 0"
+              type="button"
+              class="btn btn-ghost btn-sm self-start"
+              @click="clearFilters"
+            >
+              <Icon name="x" size="sm" />
+              {{ t('admin.adminUi.clearFilters') }}
+            </button>
+          </ToolbarPopover>
+
+          <span class="ui-grow" />
+
+          <template v-if="selectedCount > 0">
+            <button
+              type="button"
+              class="btn btn-secondary"
               data-test="bulk-edit-limits"
               @click="showBulkEditModal = true"
             >
-              <Icon name="users" size="md" class="mr-2" />
+              <Icon name="users" size="sm" />
               {{ t('admin.users.bulkLimits.action', { count: selectedCount }) }}
             </button>
-
             <button
-              v-if="selectedCount > 0"
-              class="btn btn-danger flex-1 md:flex-initial"
+              type="button"
+              class="btn btn-danger"
               data-test="bulk-delete-users"
               :disabled="bulkDeleting"
               @click="bulkDeleteIds = [...selectedIds]"
             >
-              <Icon name="trash" size="md" class="mr-2" />
+              <Icon name="trash" size="sm" />
               {{ t('admin.users.bulkDelete.action', { count: selectedCount }) }}
             </button>
+          </template>
 
-            <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('admin.users.createUser') }}
+          <button
+            type="button"
+            class="app-icon-button"
+            :aria-label="t('common.refresh')"
+            :title="t('common.refresh')"
+            :disabled="loading"
+            @click="loadUsers"
+          >
+            <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+          </button>
+
+          <ToolbarPopover
+            v-slot="{ close }"
+            :label="t('admin.users.columnSettings')"
+            icon="grid"
+            icon-only
+            width="15rem"
+            test-id="users-columns"
+          >
+            <div class="users-column-list">
+              <label
+                v-for="col in toggleableColumns"
+                :key="col.key"
+                class="users-column-option"
+                :title="isForcedVisibleColumn(col.key) ? t('admin.users.columnAlwaysVisible') : undefined"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isColumnVisible(col.key)"
+                  :disabled="isForcedVisibleColumn(col.key)"
+                  @change="toggleColumn(col.key)"
+                />
+                <span>{{ col.label }}</span>
+              </label>
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              @click="close(); showAttributesModal = true"
+            >
+              <Icon name="cog" size="sm" />
+              {{ t('admin.users.attributes.configButton') }}
             </button>
-          </div>
+          </ToolbarPopover>
+
+          <button type="button" class="btn btn-primary" @click="showCreateModal = true">
+            <Icon name="userPlus" size="sm" />
+            {{ t('admin.users.createUser') }}
+          </button>
         </div>
       </template>
 
-      <!-- Users Table -->
       <template #table>
         <DataTable
           :columns="columns"
@@ -280,27 +177,35 @@
           :loading="loading"
           row-key="id"
           selectable
+          clickable-rows
           :selected-keys="selectedIds"
           :selection-label="getUserSelectionLabel"
-          :actions-count="7"
+          :expandable-actions="false"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
           :sort-storage-key="USER_SORT_STORAGE_KEY"
           @sort="handleSort"
+          @row-click="openUserDrawer"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <template #cell-email="{ value }">
-            <div class="flex items-center gap-2">
-              <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
-              >
-                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
-                  {{ value.charAt(0).toUpperCase() }}
-                </span>
-              </div>
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-            </div>
+          <template #cell-email="{ value, row }">
+            <button
+              type="button"
+              class="users-identity"
+              :aria-label="`${t('admin.adminUi.details')}: ${value}`"
+              @click.stop="openUserDrawer(row)"
+            >
+              <span class="users-avatar" aria-hidden="true">{{ userInitial(value) }}</span>
+              <span class="min-w-0 text-left">
+                <span class="ui-cell-main">{{ value }}</span>
+                <span class="ui-cell-sub">{{ row.username || `#${row.id}` }}</span>
+              </span>
+            </button>
+          </template>
+
+          <template #cell-id="{ value }">
+            <span class="tabular-nums text-gray-500 dark:text-dark-400">{{ value }}</span>
           </template>
 
           <template #cell-username="{ value }">
@@ -308,16 +213,12 @@
           </template>
 
           <template #cell-notes="{ value }">
-            <div class="max-w-xs">
-              <span
-                v-if="value"
-                :title="value.length > 30 ? value : undefined"
-                class="block truncate text-sm text-gray-600 dark:text-gray-400"
-              >
-                {{ value.length > 30 ? value.substring(0, 25) + '...' : value }}
-              </span>
-              <span v-else class="text-sm text-gray-400">-</span>
-            </div>
+            <span
+              v-if="value"
+              :title="value"
+              class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-400"
+            >{{ value }}</span>
+            <span v-else class="text-sm text-gray-400">-</span>
           </template>
 
           <!-- Dynamic attribute columns -->
@@ -326,79 +227,70 @@
             :key="def.id"
             #[`cell-attr_${def.id}`]="{ row }"
           >
-            <div class="max-w-xs">
-              <span
-                class="block truncate text-sm text-gray-700 dark:text-gray-300"
-                :title="getAttributeValue(row.id, def.id)"
-              >
-                {{ getAttributeValue(row.id, def.id) }}
-              </span>
-            </div>
+            <span
+              class="block max-w-xs truncate text-sm text-gray-700 dark:text-gray-300"
+              :title="getAttributeValue(row.id, def.id)"
+            >
+              {{ getAttributeValue(row.id, def.id) }}
+            </span>
           </template>
 
           <template #cell-role="{ value }">
-            <span :class="['badge', value === 'admin' ? 'badge-purple' : 'badge-gray']">
+            <span :class="value === 'admin' ? 'badge badge-primary' : 'badge badge-gray'">
               {{ t('admin.users.roles.' + value) }}
             </span>
           </template>
 
           <template #cell-groups="{ row }">
             <div v-if="allGroups.length > 0" class="flex flex-col gap-1">
-              <!-- 专属分组行 -->
               <span
                 v-if="getUserGroups(row).exclusive.length > 0"
                 class="group/ex relative inline-flex cursor-pointer items-center gap-1 whitespace-nowrap text-xs"
                 @click.stop="toggleExpandedGroup(row.id)"
               >
-                <Icon name="shield" size="xs" class="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
-                <span class="font-medium text-purple-600 dark:text-purple-400">{{ getUserGroups(row).exclusive.length }}</span>
+                <Icon name="shield" size="xs" class="h-3.5 w-3.5 text-primary-500 dark:text-primary-400" />
+                <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ getUserGroups(row).exclusive.length }}</span>
                 <span class="text-gray-500 dark:text-dark-400">{{ t('admin.users.exclusiveLabel') }}</span>
-                <!-- Hover tooltip（操作菜单未打开时显示） -->
                 <div
                   v-if="expandedGroupUserId !== row.id"
                   class="tooltip-enter pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/ex:opacity-100 dark:bg-dark-600"
                 >
-                  <div class="absolute left-4 bottom-full border-4 border-transparent border-b-gray-900 dark:border-b-dark-600"></div>
                   <div class="flex flex-col gap-0.5 whitespace-nowrap">
                     <span v-for="g in getUserGroups(row).exclusive" :key="g.id">{{ g.name }}</span>
                   </div>
                 </div>
-                <!-- 点击展开分组操作菜单 -->
                 <div
                   v-if="expandedGroupUserId === row.id"
-                  class="menu-enter absolute left-0 top-full z-50 mt-1.5 min-w-[160px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-xl dark:border-dark-600 dark:bg-dark-700"
+                  class="dropdown left-0 top-full mt-1.5 min-w-[160px] text-xs"
                 >
-                  <div class="border-b border-gray-100 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
+                  <div class="px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:text-dark-400">
                     {{ t('admin.users.clickToReplace') }}
                   </div>
-                  <div
+                  <button
                     v-for="g in getUserGroups(row).exclusive"
                     :key="g.id"
-                    class="flex cursor-pointer items-center gap-2 px-3 py-2 text-gray-700 transition-colors hover:bg-primary-50 hover:text-primary-600 dark:text-dark-200 dark:hover:bg-primary-900/30 dark:hover:text-primary-400"
+                    type="button"
+                    class="dropdown-item"
                     @click.stop="openGroupReplace(row, g)"
                   >
                     <Icon name="swap" size="xs" class="h-3.5 w-3.5 flex-shrink-0 opacity-50" />
                     <span class="flex-1">{{ g.name }}</span>
-                  </div>
+                  </button>
                 </div>
               </span>
-              <!-- 公开分组行 -->
               <span
                 v-if="getUserGroups(row).publicGroups.length > 0"
                 class="group/pub relative inline-flex cursor-default items-center gap-1 whitespace-nowrap text-xs"
               >
                 <Icon name="globe" size="xs" class="h-3.5 w-3.5 text-gray-400 dark:text-dark-500" />
-                <span class="font-medium text-gray-600 dark:text-dark-300">{{ getUserGroups(row).publicGroups.length }}</span>
+                <span class="font-medium tabular-nums text-gray-600 dark:text-dark-300">{{ getUserGroups(row).publicGroups.length }}</span>
                 <span class="text-gray-400 dark:text-dark-500">{{ t('admin.users.publicLabel') }}</span>
-                <!-- Tooltip: 向下弹出 -->
                 <div class="pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/pub:opacity-100 dark:bg-dark-600">
-                  <div class="absolute left-4 bottom-full border-4 border-transparent border-b-gray-900 dark:border-b-dark-600"></div>
                   <div class="flex flex-col gap-0.5 whitespace-nowrap">
                     <span v-for="g in getUserGroups(row).publicGroups" :key="g.id">{{ g.name }}</span>
                   </div>
                 </div>
               </span>
-              <!-- 都没有 -->
               <span
                 v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0"
                 class="text-xs text-gray-400 dark:text-dark-500"
@@ -423,38 +315,18 @@
                 :title="sub.expires_at ? formatDateTime(sub.expires_at) : ''"
               />
             </div>
-            <span
-              v-else
-              class="inline-flex items-center gap-1.5 rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-400 dark:bg-dark-700/50 dark:text-dark-500"
-            >
-              <Icon name="ban" size="xs" class="h-3.5 w-3.5" />
-              <span>{{ t('admin.users.noSubscription') }}</span>
-            </span>
+            <span v-else class="text-xs text-gray-400 dark:text-dark-500" :title="t('admin.users.noSubscription')">-</span>
           </template>
 
           <template #cell-balance="{ value, row }">
-            <div class="flex items-center gap-2">
-              <div class="group relative">
-                <button
-                  class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
-                  @click="handleBalanceHistory(row)"
-                >
-                  ${{ value.toFixed(2) }}
-                </button>
-                <!-- Instant tooltip -->
-                <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 dark:bg-dark-600">
-                  {{ t('admin.users.balanceHistoryTip') }}
-                  <div class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-dark-600"></div>
-                </div>
-              </div>
-              <button
-                @click.stop="handleDeposit(row)"
-                class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
-                :title="t('admin.users.deposit')"
-              >
-                {{ t('admin.users.deposit') }}
-              </button>
-            </div>
+            <button
+              type="button"
+              class="users-num-link"
+              :title="t('admin.users.balanceHistoryTip')"
+              @click.stop="handleBalanceHistory(row)"
+            >
+              ${{ value.toFixed(2) }}
+            </button>
           </template>
 
           <template #cell-balance_platform_quota="{ row }">
@@ -462,15 +334,13 @@
               type="button"
               class="block text-left underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:decoration-primary-400 dark:decoration-dark-500"
               :title="t('admin.users.platformQuota.cellColumnTooltip')"
-              @click="handlePlatformQuota(row)"
+              @click.stop="handlePlatformQuota(row)"
             >
               <UserPlatformQuotaCell :quotas="platformQuotaStats[row.id]" />
             </button>
           </template>
 
-          <!-- 用量列自定义表头：列名 + 单个排序图标按钮，点击展开"今日/近30天"菜单。
-               column.sortable=false，DataTable 内置点击逻辑不会触发；
-               菜单项三态循环：desc → asc → off。 -->
+          <!-- Usage columns sort current-page data through a today / 30d menu (desc → asc → off). -->
           <template
             v-for="usageKey in USAGE_COLUMN_KEYS"
             :key="usageKey"
@@ -486,6 +356,7 @@
                     ? 'text-primary-600 dark:text-primary-400'
                     : 'text-gray-400 dark:text-dark-500'"
                   :title="t('admin.users.sortBy')"
+                  :aria-label="t('admin.users.sortBy')"
                   :data-test="`usage-sort-trigger-${usageKey}`"
                   @click.stop="toggleUsageSortMenu(usageKey)"
                 >
@@ -493,55 +364,34 @@
                     v-if="usageSort && usageSort.key === usageKey"
                     class="text-[10px] normal-case font-medium tracking-normal"
                   >{{ usageSort.metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
-                  <svg
+                  <Icon
                     v-if="usageSort && usageSort.key === usageKey"
-                    class="h-3.5 w-3.5"
-                    :class="{ 'rotate-180': usageSort.order === 'desc' }"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                  <svg v-else class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M10 3l-4 5h8l-4-5zM10 17l4-5H6l4 5z" />
-                  </svg>
+                    :name="usageSort.order === 'desc' ? 'arrowDown' : 'arrowUp'"
+                    size="xs"
+                  />
+                  <Icon v-else name="arrowsUpDown" size="xs" />
                 </button>
-                <!-- 弹出菜单：今日 / 近30天，点击进行三态循环切换。 -->
                 <div
                   v-if="openUsageSortMenu === usageKey"
-                  class="menu-enter absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                  class="dropdown right-0 top-full mt-1 min-w-[132px]"
                 >
                   <button
                     v-for="metric in (['today', 'total'] as const)"
                     :key="metric"
                     type="button"
-                    class="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-xs normal-case tracking-normal hover:bg-gray-100 dark:hover:bg-dark-700"
-                    :class="isUsageSortActive(usageKey, metric)
-                      ? 'font-medium text-primary-600 dark:text-primary-400'
-                      : 'text-gray-700 dark:text-gray-300'"
+                    class="dropdown-item justify-between text-xs normal-case tracking-normal"
+                    :class="isUsageSortActive(usageKey, metric) ? 'font-medium text-primary-600 dark:text-primary-400' : ''"
                     :data-test="`usage-sort-${usageKey}-${metric}`"
                     @click.stop="toggleUsageSort(usageKey, metric)"
                   >
                     <span>{{ metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
-                    <svg
+                    <Icon
                       v-if="getUsageSortOrder(usageKey, metric)"
-                      class="h-3 w-3"
-                      :class="{ 'rotate-180': getUsageSortOrder(usageKey, metric) === 'desc' }"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
+                      :name="getUsageSortOrder(usageKey, metric) === 'desc' ? 'arrowDown' : 'arrowUp'"
+                      size="xs"
+                    />
                   </button>
-                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-[10px] normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
+                  <div class="px-2.5 py-1 text-[10px] normal-case tracking-normal text-gray-400 dark:text-dark-500">
                     {{ t('admin.users.sortCurrentPageOnly') }}
                   </div>
                 </div>
@@ -574,76 +424,67 @@
           </template>
 
           <template #cell-concurrency="{ row }">
-            <UserConcurrencyCell
-              :current="row.current_concurrency ?? 0"
-              :max="row.concurrency"
-            />
-          </template>
-
-          <template #cell-status="{ value }">
-            <div class="flex items-center gap-1.5">
-              <span
-                :class="[
-                  'inline-block h-2 w-2 rounded-full',
-                  value === 'active' ? 'bg-green-500' : 'bg-red-500'
-                ]"
-              ></span>
-              <span class="text-sm text-gray-700 dark:text-gray-300">
-                {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
-              </span>
+            <div class="flex justify-end">
+              <UserConcurrencyCell :current="row.current_concurrency ?? 0" :max="row.concurrency" />
             </div>
           </template>
 
+          <template #cell-status="{ value }">
+            <span class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <span :class="value === 'active' ? 'ui-dot is-ok' : 'ui-dot is-bad'" aria-hidden="true"></span>
+              {{ value === 'active' ? t('common.active') : t('admin.users.disabled') }}
+            </span>
+          </template>
+
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+            <span class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
           </template>
 
           <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
+            <span class="text-sm tabular-nums text-gray-500 dark:text-dark-400">
               {{ value ? formatDateTime(value) : '-' }}
             </span>
           </template>
 
           <template #cell-last_active_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
+            <span class="text-sm tabular-nums text-gray-500 dark:text-dark-400">
               {{ value ? formatDateTime(value) : '-' }}
             </span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <!-- Edit Button -->
+            <div class="flex items-center justify-end gap-0.5">
               <button
-                @click="handleEdit(row)"
-                class="row-action"
+                type="button"
+                class="app-icon-button"
                 :title="t('common.edit')"
+                @click.stop="handleEdit(row)"
               >
                 <Icon name="edit" size="sm" />
-                <span class="row-action-label">{{ t('common.edit') }}</span>
+                <span class="sr-only">{{ t('common.edit') }}</span>
               </button>
-
-              <!-- Toggle Status Button (not for admin) -->
               <button
                 v-if="row.role !== 'admin'"
-                @click="handleToggleStatus(row)"
-                class="row-action"
-                :class="row.status === 'active' ? 'row-action-danger' : ''"
+                type="button"
+                class="app-icon-button"
+                :class="row.status === 'active' ? 'users-danger-hover' : 'users-ok-hover'"
                 :title="row.status === 'active' ? t('admin.users.disable') : t('admin.users.enable')"
+                @click.stop="handleToggleStatus(row)"
               >
                 <Icon v-if="row.status === 'active'" name="ban" size="sm" />
                 <Icon v-else name="checkCircle" size="sm" />
-                <span class="row-action-label">{{ row.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}</span>
+                <span class="sr-only">{{ row.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}</span>
               </button>
-
-              <!-- More Actions Menu Trigger -->
               <button
-                @click="openActionMenu(row, $event)"
-                class="row-action action-menu-trigger dark:hover:text-white"
-                :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
+                type="button"
+                class="app-icon-button action-menu-trigger"
                 :title="t('common.more')"
+                aria-haspopup="menu"
+                :aria-expanded="activeMenuId === row.id"
+                @click.stop="openActionMenu(row, $event)"
               >
                 <Icon name="more" size="sm" />
-                <span class="row-action-label">{{ t('common.more') }}</span>
+                <span class="sr-only">{{ t('common.more') }}</span>
               </button>
             </div>
           </template>
@@ -651,7 +492,6 @@
           <template #empty>
             <EmptyState
               :title="t('admin.users.noUsersYet')"
-              :description="t('admin.users.createFirstUser')"
               :action-text="t('admin.users.createUser')"
               @action="showCreateModal = true"
             />
@@ -659,103 +499,269 @@
         </DataTable>
       </template>
 
-      <!-- Pagination -->
       <template #pagination>
-      <Pagination
-        v-if="pagination.total > 0"
-        :page="pagination.page"
-        :total="pagination.total"
-        :page-size="pagination.page_size"
-        @update:page="handlePageChange"
-        @update:pageSize="handlePageSizeChange"
-      />
+        <Pagination
+          v-if="pagination.total > 0"
+          :page="pagination.page"
+          :total="pagination.total"
+          :page-size="pagination.page_size"
+          @update:page="handlePageChange"
+          @update:pageSize="handlePageSizeChange"
+        />
       </template>
     </TablePageLayout>
 
-    <!-- Action Menu (Teleported) -->
+    <!-- Row action menu: teleported so it is never clipped by the table scroller. -->
     <Teleport to="body">
       <div
-        v-if="activeMenuId !== null && menuPosition"
-        class="menu-enter action-menu-content fixed z-[9999] w-48 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
+        v-if="activeMenuUser && menuPosition"
+        class="dropdown action-menu-content fixed z-[9999] w-52"
         :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px' }"
       >
-        <div class="py-1">
-          <template v-for="user in users" :key="user.id">
-            <template v-if="user.id === activeMenuId">
-              <!-- View API Keys -->
-              <button
-                @click="handleViewApiKeys(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="key" size="sm" class="text-gray-400" :stroke-width="2" />
-                {{ t('admin.users.apiKeys') }}
-              </button>
-
-              <!-- Allowed Groups -->
-              <button
-                @click="handleAllowedGroups(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="users" size="sm" class="text-gray-400" :stroke-width="2" />
-                {{ t('admin.users.groups') }}
-              </button>
-
-              <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-
-              <!-- Deposit -->
-              <button
-                @click="handleDeposit(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="plus" size="sm" class="text-emerald-500" :stroke-width="2" />
-                {{ t('admin.users.deposit') }}
-              </button>
-
-              <!-- Withdraw -->
-              <button
-                @click="handleWithdraw(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <svg class="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
-                </svg>
-                {{ t('admin.users.withdraw') }}
-              </button>
-
-              <!-- Platform Quotas -->
-              <button
-                @click="handlePlatformQuota(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="chartBar" size="sm" class="text-gray-400" :stroke-width="2" />
-                {{ t('admin.users.platformQuota.menuItem') }}
-              </button>
-
-              <!-- Balance History -->
-              <button
-                @click="handleBalanceHistory(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <Icon name="dollar" size="sm" class="text-gray-400" :stroke-width="2" />
-                {{ t('admin.users.balanceHistory') }}
-              </button>
-
-              <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-
-              <!-- Delete (not for admin) -->
-              <button
-                v-if="user.role !== 'admin'"
-                @click="handleDelete(user); closeActionMenu()"
-                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-              >
-                <Icon name="trash" size="sm" :stroke-width="2" />
-                {{ t('common.delete') }}
-              </button>
-            </template>
-          </template>
-        </div>
+        <button type="button" class="dropdown-item" @click="handleViewApiKeys(activeMenuUser); closeActionMenu()">
+          <Icon name="key" size="sm" class="text-gray-400" />
+          {{ t('admin.users.apiKeys') }}
+        </button>
+        <button type="button" class="dropdown-item" @click="handleAllowedGroups(activeMenuUser); closeActionMenu()">
+          <Icon name="users" size="sm" class="text-gray-400" />
+          {{ t('admin.users.groups') }}
+        </button>
+        <button type="button" class="dropdown-item" @click="handlePlatformQuota(activeMenuUser); closeActionMenu()">
+          <Icon name="chartBar" size="sm" class="text-gray-400" />
+          {{ t('admin.users.platformQuota.menuItem') }}
+        </button>
+        <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+        <button type="button" class="dropdown-item" @click="handleDeposit(activeMenuUser); closeActionMenu()">
+          <Icon name="plus" size="sm" class="text-emerald-500" />
+          {{ t('admin.users.deposit') }}
+        </button>
+        <button type="button" class="dropdown-item" @click="handleWithdraw(activeMenuUser); closeActionMenu()">
+          <Icon name="minus" size="sm" class="text-amber-500" />
+          {{ t('admin.users.withdraw') }}
+        </button>
+        <button type="button" class="dropdown-item" @click="handleBalanceHistory(activeMenuUser); closeActionMenu()">
+          <Icon name="clock" size="sm" class="text-gray-400" />
+          {{ t('admin.users.balanceHistory') }}
+        </button>
+        <template v-if="activeMenuUser.role !== 'admin'">
+          <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
+          <button
+            type="button"
+            class="dropdown-item text-red-600 dark:text-red-400"
+            @click="handleDelete(activeMenuUser); closeActionMenu()"
+          >
+            <Icon name="trash" size="sm" />
+            {{ t('common.delete') }}
+          </button>
+        </template>
       </div>
     </Teleport>
+
+    <SideDrawer
+      :open="drawerUser !== null"
+      :title="drawerUser?.email ?? ''"
+      :subtitle="drawerUser ? (drawerUser.username ? `${drawerUser.username} · #${drawerUser.id}` : `#${drawerUser.id}`) : undefined"
+      width="32rem"
+      @close="closeUserDrawer"
+    >
+      <template #leading>
+        <span v-if="drawerUser" class="users-avatar is-lg" aria-hidden="true">{{ userInitial(drawerUser.email) }}</span>
+      </template>
+      <template #badge>
+        <span v-if="drawerUser" class="flex items-center gap-2">
+          <span :class="drawerUser.role === 'admin' ? 'badge badge-primary' : 'badge badge-gray'">
+            {{ t('admin.users.roles.' + drawerUser.role) }}
+          </span>
+          <span
+            :class="drawerUser.status === 'active' ? 'ui-dot is-ok' : 'ui-dot is-bad'"
+            role="img"
+            :aria-label="drawerUser.status === 'active' ? t('common.active') : t('admin.users.disabled')"
+            :title="drawerUser.status === 'active' ? t('common.active') : t('admin.users.disabled')"
+          ></span>
+        </span>
+      </template>
+
+      <template v-if="drawerUser">
+        <div class="users-drawer-stats" data-test="user-drawer">
+          <button
+            type="button"
+            class="users-stat is-action"
+            :title="t('admin.users.balanceHistoryTip')"
+            @click="runFromDrawer(handleBalanceHistory)"
+          >
+            <span class="users-stat-label">{{ t('admin.users.columns.balance') }}</span>
+            <span class="users-stat-value"><CountUp :value="drawerUser.balance" :format="formatUsd" /></span>
+          </button>
+          <div class="users-stat">
+            <span class="users-stat-label">{{ t('admin.users.columns.concurrency') }}</span>
+            <span class="users-stat-value">
+              {{ drawerUser.current_concurrency ?? 0 }}<small>/{{ drawerUser.concurrency }}</small>
+            </span>
+          </div>
+          <button
+            type="button"
+            class="users-stat is-action"
+            data-test="user-drawer-api-keys"
+            @click="runFromDrawer(handleViewApiKeys)"
+          >
+            <span class="users-stat-label">{{ t('admin.users.apiKeys') }}</span>
+            <span class="users-stat-value">
+              <span v-if="drawerApiKeyCount === undefined" class="skeleton inline-block h-5 w-8 align-middle"></span>
+              <template v-else-if="drawerApiKeyCount === null">–</template>
+              <CountUp v-else :value="drawerApiKeyCount" />
+            </span>
+          </button>
+        </div>
+
+        <section>
+          <h3 class="ui-section-label">{{ t('admin.adminUi.details') }}</h3>
+          <dl class="ui-dl">
+            <dt>{{ t('admin.users.columns.id') }}</dt>
+            <dd class="tabular-nums">{{ drawerUser.id }}</dd>
+            <dt>{{ t('admin.users.columns.username') }}</dt>
+            <dd>{{ drawerUser.username || '-' }}</dd>
+            <template v-if="drawerUser.notes">
+              <dt>{{ t('admin.users.columns.notes') }}</dt>
+              <dd class="whitespace-pre-line">{{ drawerUser.notes }}</dd>
+            </template>
+            <template v-for="def in attributeDefinitions.filter(d => d.enabled)" :key="def.id">
+              <template v-if="userAttributeValues[drawerUser.id]?.[def.id]">
+                <dt>{{ def.name }}</dt>
+                <dd>{{ getAttributeValue(drawerUser.id, def.id) }}</dd>
+              </template>
+            </template>
+            <dt>{{ t('admin.users.columns.lastActive') }}</dt>
+            <dd class="tabular-nums">{{ drawerUser.last_active_at ? formatDateTime(drawerUser.last_active_at) : '-' }}</dd>
+            <dt>{{ t('admin.users.columns.lastUsed') }}</dt>
+            <dd class="tabular-nums">{{ drawerUser.last_used_at ? formatDateTime(drawerUser.last_used_at) : '-' }}</dd>
+            <dt>{{ t('admin.users.columns.created') }}</dt>
+            <dd class="tabular-nums">{{ formatDateTime(drawerUser.created_at) }}</dd>
+          </dl>
+        </section>
+
+        <section>
+          <div class="users-section-head">
+            <h3 class="ui-section-label">{{ t('admin.users.columns.groups') }}</h3>
+            <button type="button" class="btn btn-ghost btn-sm" @click="runFromDrawer(handleAllowedGroups)">
+              <Icon name="edit" size="sm" />
+              {{ t('common.edit') }}
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              v-for="g in getUserGroups(drawerUser).exclusive"
+              :key="g.id"
+              type="button"
+              class="ui-chip"
+              :title="t('admin.users.clickToReplace')"
+              @click="replaceGroupFromDrawer(g)"
+            >
+              <Icon name="shield" size="xs" class="text-primary-500" />
+              {{ g.name }}
+              <Icon name="swap" size="xs" class="opacity-50" />
+            </button>
+            <span
+              v-if="getUserGroups(drawerUser).publicGroups.length > 0"
+              class="ui-chip"
+              :title="getUserGroups(drawerUser).publicGroups.map(g => g.name).join(', ')"
+            >
+              <Icon name="globe" size="xs" />
+              {{ getUserGroups(drawerUser).publicGroups.length }} {{ t('admin.users.publicLabel') }}
+            </span>
+            <span
+              v-if="allGroups.length > 0 && getUserGroups(drawerUser).exclusive.length === 0 && getUserGroups(drawerUser).publicGroups.length === 0"
+              class="text-sm text-gray-400"
+            >-</span>
+          </div>
+          <div v-if="drawerUser.subscriptions?.length" class="mt-3 flex flex-wrap gap-1.5">
+            <GroupBadge
+              v-for="sub in drawerUser.subscriptions"
+              :key="sub.id"
+              :name="sub.group?.name || ''"
+              :platform="sub.group?.platform"
+              :subscription-type="sub.group?.subscription_type"
+              :rate-multiplier="sub.group?.rate_multiplier"
+              :days-remaining="sub.expires_at ? getDaysRemaining(sub.expires_at) : null"
+              :title="sub.expires_at ? formatDateTime(sub.expires_at) : ''"
+            />
+          </div>
+        </section>
+
+        <section>
+          <div class="users-section-head">
+            <h3 class="ui-section-label">{{ t('admin.users.platformQuota.menuItem') }}</h3>
+            <button type="button" class="btn btn-ghost btn-sm" @click="runFromDrawer(handlePlatformQuota)">
+              <Icon name="edit" size="sm" />
+              {{ t('common.edit') }}
+            </button>
+          </div>
+          <div v-if="drawerQuotaItems === undefined" class="skeleton h-10 w-full"></div>
+          <p v-else-if="drawerQuotaItems === null" class="text-sm text-gray-400">–</p>
+          <p v-else-if="drawerQuotaRows.length === 0" class="text-sm text-gray-400">
+            {{ t('admin.users.platformQuota.cellNotConfigured') }}
+          </p>
+          <ul v-else class="users-quota-list">
+            <li v-for="quota in drawerQuotaRows" :key="quota.platform">
+              <span class="users-quota-platform">
+                <ProviderMark :platform="quota.platform" :size="20" />
+                <span class="truncate">{{ quota.platform }}</span>
+              </span>
+              <div class="users-quota-windows">
+                <div v-for="win in quota.windows" :key="win.key" :title="`${formatUsd(win.used)} / ${formatUsd(win.limit)}`">
+                  <span class="users-quota-window">{{ win.label }}</span>
+                  <QuotaMeter :value="win.remaining" :label="`${quota.platform} ${win.label}`" />
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section>
+          <h3 class="ui-section-label">{{ t('admin.users.columns.usage') }}</h3>
+          <div v-if="drawerUsageStats === undefined" class="skeleton h-10 w-full"></div>
+          <p v-else-if="drawerUsageStats === null" class="text-sm text-gray-400">–</p>
+          <PlatformUsageBreakdown
+            v-else
+            :today="drawerUsageStats.today_actual_cost ?? 0"
+            :total="drawerUsageStats.total_actual_cost ?? 0"
+            :by-platform="drawerUsageStats.by_platform"
+          />
+        </section>
+      </template>
+
+      <template #footer>
+        <template v-if="drawerUser">
+          <button type="button" class="btn btn-primary btn-sm" data-test="user-drawer-edit" @click="runFromDrawer(handleEdit)">
+            <Icon name="edit" size="sm" />
+            {{ t('common.edit') }}
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="runFromDrawer(handleDeposit)">
+            <Icon name="plus" size="sm" />
+            {{ t('admin.users.deposit') }}
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="runFromDrawer(handleWithdraw)">
+            <Icon name="minus" size="sm" />
+            {{ t('admin.users.withdraw') }}
+          </button>
+          <span class="flex-1"></span>
+          <template v-if="drawerUser.role !== 'admin'">
+            <button type="button" class="btn btn-ghost btn-sm" @click="handleToggleStatus(drawerUser)">
+              <Icon :name="drawerUser.status === 'active' ? 'ban' : 'checkCircle'" size="sm" />
+              {{ drawerUser.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}
+            </button>
+            <button
+              type="button"
+              class="app-icon-button users-danger-hover"
+              :aria-label="t('common.delete')"
+              :title="t('common.delete')"
+              @click="runFromDrawer(handleDelete)"
+            >
+              <Icon name="trash" size="sm" />
+            </button>
+          </template>
+        </template>
+      </template>
+    </SideDrawer>
 
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.users.deleteUser')" :message="t('admin.users.deleteConfirm', { email: deletingUser?.email })" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog
@@ -798,6 +804,11 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
 import Icon from '@/components/icons/Icon.vue'
+import ToolbarPopover from '@/components/common/ToolbarPopover.vue'
+import SideDrawer from '@/components/ui/SideDrawer.vue'
+import CountUp from '@/components/ui/CountUp.vue'
+import QuotaMeter from '@/components/ui/QuotaMeter.vue'
+import ProviderMark from '@/components/viz/ProviderMark.vue'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -889,14 +900,14 @@ const allColumns = computed<Column[]>(() => [
   { key: 'role', label: t('admin.users.columns.role'), sortable: true },
   { key: 'groups', label: t('admin.users.columns.groups'), sortable: false },
   { key: 'subscriptions', label: t('admin.users.columns.subscriptions'), sortable: false },
-  { key: 'balance', label: t('admin.users.columns.balance'), sortable: true },
+  { key: 'balance', label: t('admin.users.columns.balance'), sortable: true, class: 'text-right' },
   { key: 'balance_platform_quota', label: t('admin.users.columns.balancePlatformQuota'), sortable: false },
   { key: 'usage', label: t('admin.users.columns.usage'), sortable: false },
   { key: 'usage_anthropic', label: t('admin.users.columns.usageAnthropic'), sortable: false },
   { key: 'usage_openai', label: t('admin.users.columns.usageOpenAI'), sortable: false },
   { key: 'usage_gemini', label: t('admin.users.columns.usageGemini'), sortable: false },
   { key: 'usage_antigravity', label: t('admin.users.columns.usageAntigravity'), sortable: false },
-  { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true },
+  { key: 'concurrency', label: t('admin.users.columns.concurrency'), sortable: true, class: 'text-right' },
   { key: 'status', label: t('admin.users.columns.status'), sortable: true },
   { key: 'last_active_at', label: t('admin.users.columns.lastActive'), sortable: true },
   { key: 'last_used_at', label: t('admin.users.columns.lastUsed'), sortable: true },
@@ -1133,45 +1144,37 @@ const filters = reactive({
 })
 const activeAttributeFilters = reactive<Record<number, string>>({})
 
-// Visible filters tracking (which filters are shown in the UI)
-// Keys: 'role', 'status', 'attr_${id}'
-const visibleFilters = reactive<Set<string>>(new Set())
-
-// Dropdown states
-const showFilterDropdown = ref(false)
-const showColumnDropdown = ref(false)
-
-// Dropdown refs for click outside detection
-const filterDropdownRef = ref<HTMLElement | null>(null)
-const columnDropdownRef = ref<HTMLElement | null>(null)
-
-// localStorage keys
+// localStorage key for filter values
 const FILTER_VALUES_KEY = 'user-filter-values'
-const VISIBLE_FILTERS_KEY = 'user-visible-filters'
 
 // All filterable attribute definitions (enabled attributes)
 const filterableAttributes = computed(() =>
   attributeDefinitions.value.filter(def => def.enabled)
 )
 
-// Built-in filter definitions
-const builtInFilters = computed(() => [
-  { key: 'role', name: t('admin.users.columns.role'), type: 'select' as const },
-  { key: 'status', name: t('admin.users.columns.status'), type: 'select' as const },
-  { key: 'group', name: t('admin.users.authorizedGroupFilter'), type: 'select' as const },
-  { key: 'apiKeyGroup', name: t('admin.users.apiKeyGroupFilter'), type: 'select' as const }
+const statusOptions = computed(() => [
+  { value: '', label: t('common.all') },
+  { value: 'active', label: t('common.active') },
+  { value: 'disabled', label: t('admin.users.disabled') }
 ])
 
-// Load saved filters from localStorage
+const roleOptions = computed(() => [
+  { value: '', label: t('admin.users.allRoles') },
+  { value: 'admin', label: t('admin.users.admin') },
+  { value: 'user', label: t('admin.users.user') }
+])
+
+// Filters popover badge: every non-default filter except search and the status segment.
+const activeFilterCount = computed(() =>
+  (filters.role ? 1 : 0) +
+  (filters.group ? 1 : 0) +
+  (filters.apiKeyGroup !== null ? 1 : 0) +
+  Object.values(activeAttributeFilters).filter(Boolean).length
+)
+
+// Load saved filter values from localStorage
 const loadSavedFilters = () => {
   try {
-    // Load visible filters
-    const savedVisible = localStorage.getItem(VISIBLE_FILTERS_KEY)
-    if (savedVisible) {
-      const parsed = JSON.parse(savedVisible) as string[]
-      parsed.forEach(key => visibleFilters.add(key))
-    }
-    // Load filter values
     const savedValues = localStorage.getItem(FILTER_VALUES_KEY)
     if (savedValues) {
       const parsed = JSON.parse(savedValues)
@@ -1188,12 +1191,9 @@ const loadSavedFilters = () => {
   }
 }
 
-// Save filters to localStorage
+// Save filter values to localStorage
 const saveFiltersToStorage = () => {
   try {
-    // Save visible filters
-    localStorage.setItem(VISIBLE_FILTERS_KEY, JSON.stringify([...visibleFilters]))
-    // Save filter values
     const values = {
       role: filters.role,
       status: filters.status,
@@ -1207,10 +1207,6 @@ const saveFiltersToStorage = () => {
   }
 }
 
-// Get attribute definition by ID
-const getAttributeDefinition = (attrId: number): UserAttributeDefinition | undefined => {
-  return attributeDefinitions.value.find(d => d.id === attrId)
-}
 const usageStats = ref<Record<string, BatchUserUsageStats>>({})
 const platformQuotaStats = ref<Record<number, PlatformQuotaItem[]>>({})
 
@@ -1451,6 +1447,9 @@ const refreshCurrentPageSecondaryData = () => {
 // Action Menu State
 const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
+const activeMenuUser = computed(() =>
+  activeMenuId.value === null ? null : users.value.find((user) => user.id === activeMenuId.value) ?? null
+)
 
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
@@ -1463,8 +1462,8 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
     }
 
     const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    const menuHeight = 240
+    const menuWidth = 208
+    const menuHeight = 300
     const padding = 8
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
@@ -1515,14 +1514,6 @@ const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as HTMLElement
   if (!target.closest('.action-menu-trigger') && !target.closest('.action-menu-content')) {
     closeActionMenu()
-  }
-  // Close filter dropdown when clicking outside
-  if (filterDropdownRef.value && !filterDropdownRef.value.contains(target)) {
-    showFilterDropdown.value = false
-  }
-  // Close column dropdown when clicking outside
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
-    showColumnDropdown.value = false
   }
   // Close usage sort dropdown when clicking outside any usage-sort-trigger
   if (openUsageSortMenu.value !== null && !target.closest('.usage-sort-trigger')) {
@@ -1683,42 +1674,25 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 }
 
 // Filter helpers
-const getAttributeDefinitionName = (attrId: number): string => {
-  const def = attributeDefinitions.value.find(d => d.id === attrId)
-  return def?.name || String(attrId)
+const setStatusFilter = (status: string) => {
+  if (filters.status === status) return
+  filters.status = status
+  applyFilter()
 }
 
-// Toggle a built-in filter (role/status)
-const toggleBuiltInFilter = (key: string) => {
-  if (visibleFilters.has(key)) {
-    visibleFilters.delete(key)
-    if (key === 'role') filters.role = ''
-    if (key === 'status') filters.status = ''
-    if (key === 'group') filters.group = ''
-    if (key === 'apiKeyGroup') filters.apiKeyGroup = null
-  } else {
-    visibleFilters.add(key)
-    if (key === 'group') loadAllGroups()
-    if (key === 'apiKeyGroup') loadAllGroupsForApiKeyFilter()
-  }
-  saveFiltersToStorage()
-  pagination.page = 1
-  loadUsers()
+const loadFilterGroups = () => {
+  void loadAllGroups()
+  void loadAllGroupsForApiKeyFilter()
 }
 
-// Toggle a custom attribute filter
-const toggleAttributeFilter = (attr: UserAttributeDefinition) => {
-  const key = `attr_${attr.id}`
-  if (visibleFilters.has(key)) {
-    visibleFilters.delete(key)
-    delete activeAttributeFilters[attr.id]
-  } else {
-    visibleFilters.add(key)
-    activeAttributeFilters[attr.id] = ''
+const clearFilters = () => {
+  filters.role = ''
+  filters.group = ''
+  filters.apiKeyGroup = null
+  for (const key of Object.keys(activeAttributeFilters)) {
+    Reflect.deleteProperty(activeAttributeFilters, key)
   }
-  saveFiltersToStorage()
-  pagination.page = 1
-  loadUsers()
+  applyFilter()
 }
 
 const updateAttributeFilter = (attrId: number, value: string) => {
@@ -1728,6 +1702,7 @@ const updateAttributeFilter = (attrId: number, value: string) => {
 // Apply filter and save to localStorage
 const applyFilter = () => {
   saveFiltersToStorage()
+  pagination.page = 1
   loadUsers()
 }
 
@@ -1881,6 +1856,108 @@ const handleWithdrawFromHistory = () => {
   }
 }
 
+const userInitial = (email: string) => (email || '?').charAt(0).toUpperCase()
+const formatUsd = (value: number) => `$${value.toFixed(2)}`
+
+// User detail drawer. The list row stays the source of truth so in-place
+// updates (status toggles) show immediately; extra detail loads per open.
+const drawerUserId = ref<number | null>(null)
+const drawerUser = computed(() =>
+  drawerUserId.value === null ? null : users.value.find((user) => user.id === drawerUserId.value) ?? null
+)
+// undefined = loading, null = failed
+const drawerApiKeyCount = ref<number | null | undefined>(undefined)
+const drawerQuotas = ref<PlatformQuotaItem[] | null | undefined>(undefined)
+const drawerUsage = ref<BatchUserUsageStats | null | undefined>(undefined)
+let drawerSeq = 0
+
+const drawerQuotaItems = computed(() =>
+  drawerUserId.value === null ? undefined : platformQuotaStats.value[drawerUserId.value] ?? drawerQuotas.value
+)
+const drawerUsageStats = computed(() =>
+  drawerUserId.value === null ? undefined : usageStats.value[drawerUserId.value] ?? drawerUsage.value
+)
+
+const QUOTA_WINDOWS = ['daily', 'weekly', 'monthly'] as const
+const drawerQuotaRows = computed(() => {
+  const labels = {
+    daily: t('admin.users.platformQuota.windowDaily'),
+    weekly: t('admin.users.platformQuota.windowWeekly'),
+    monthly: t('admin.users.platformQuota.windowMonthly')
+  }
+  return (drawerQuotaItems.value ?? [])
+    .map((item) => ({
+      platform: item.platform,
+      windows: QUOTA_WINDOWS.flatMap((key) => {
+        const limit = item[`${key}_limit_usd`]
+        if (limit === null || limit === undefined) return []
+        const used = item[`${key}_usage_usd`] ?? 0
+        // A zero limit blocks the window entirely.
+        const remaining = limit > 0 ? Math.max(0, ((limit - used) / limit) * 100) : 0
+        return [{ key, label: labels[key], used, limit, remaining }]
+      })
+    }))
+    .filter((row) => row.windows.length > 0)
+})
+
+const openUserDrawer = (user: AdminUser) => {
+  closeActionMenu()
+  const id = user.id
+  const seq = ++drawerSeq
+  const isCurrent = () => seq === drawerSeq && drawerUserId.value === id
+  drawerUserId.value = id
+  drawerApiKeyCount.value = undefined
+  drawerQuotas.value = undefined
+  drawerUsage.value = undefined
+  void loadAllGroups()
+
+  adminAPI.users.getUserApiKeys(id)
+    .then((response) => { if (isCurrent()) drawerApiKeyCount.value = response.total })
+    .catch((e) => {
+      if (isCurrent()) drawerApiKeyCount.value = null
+      console.error('Failed to load user API keys:', e)
+    })
+  if (!platformQuotaStats.value[id]) {
+    adminAPI.users.getPlatformQuotas(id)
+      .then((response) => { if (isCurrent()) drawerQuotas.value = response.platform_quotas || [] })
+      .catch((e) => {
+        if (isCurrent()) drawerQuotas.value = null
+        console.error('Failed to load platform quotas:', e)
+      })
+  }
+  if (!usageStats.value[id]) {
+    adminAPI.dashboard.getBatchUsersUsage([id])
+      .then((response) => {
+        if (!isCurrent()) return
+        drawerUsage.value = response.stats[id] ?? { user_id: id, today_actual_cost: 0, total_actual_cost: 0 }
+      })
+      .catch((e) => {
+        if (isCurrent()) drawerUsage.value = null
+        console.error('Failed to load usage stats:', e)
+      })
+  }
+}
+
+const closeUserDrawer = () => {
+  drawerSeq++
+  drawerUserId.value = null
+}
+
+// Modals render below the drawer layer, so close the drawer before opening one.
+const runFromDrawer = (action: (user: AdminUser) => void) => {
+  const user = drawerUser.value
+  if (!user) return
+  closeUserDrawer()
+  action(user)
+}
+
+const replaceGroupFromDrawer = (group: AdminGroup) => {
+  const user = drawerUser.value
+  if (!user) return
+  closeUserDrawer()
+  openGroupReplace(user, group)
+}
+
 // 滚动时关闭菜单
 const handleScroll = () => {
   closeActionMenu()
@@ -1891,10 +1968,10 @@ onMounted(async () => {
   loadSavedFilters()
   loadSavedColumns()
   loadUsers()
-  if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
+  if (hasVisibleGroupsColumn.value || filters.group) {
     loadAllGroups()
   }
-  if (visibleFilters.has('apiKeyGroup')) {
+  if (filters.apiKeyGroup !== null) {
     loadAllGroupsForApiKeyFilter()
   }
   document.addEventListener('click', handleClickOutside)
@@ -1908,3 +1985,232 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+.users-seg-count {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.users-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.users-field-label {
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.users-column-list {
+  display: flex;
+  max-height: 18rem;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.users-column-option {
+  display: flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.25rem;
+  border-radius: var(--operator-radius-sm);
+  color: var(--operator-popup-foreground);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.users-column-option:hover {
+  background: var(--operator-popup-hover);
+}
+
+.users-column-option input {
+  accent-color: rgb(var(--operator-accent-rgb));
+}
+
+.users-column-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.users-identity {
+  display: flex;
+  max-width: 18rem;
+  min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
+  border-radius: var(--operator-radius-sm);
+  text-align: left;
+}
+
+.users-identity:hover .ui-cell-main {
+  color: var(--operator-accent-text);
+}
+
+.users-identity:focus-visible {
+  outline: 2px solid rgb(var(--operator-accent-rgb) / 0.6);
+  outline-offset: 2px;
+}
+
+.users-avatar {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.users-avatar.is-lg {
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 1rem;
+}
+
+.users-num-link {
+  color: var(--operator-foreground);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline dashed var(--operator-border-strong);
+  text-underline-offset: 4px;
+  transition: color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.users-num-link:hover {
+  color: var(--operator-accent-text);
+}
+
+.users-danger-hover:hover {
+  color: var(--operator-destructive);
+}
+
+.users-ok-hover:hover {
+  color: var(--operator-success);
+}
+
+.users-drawer-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+
+.users-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-card);
+  text-align: left;
+}
+
+.users-stat.is-action {
+  transition:
+    border-color var(--operator-duration-fast) var(--operator-ease-out),
+    transform 120ms var(--operator-ease-out);
+}
+
+.users-stat.is-action:hover {
+  border-color: var(--operator-border-strong);
+}
+
+.users-stat.is-action:active {
+  transform: scale(0.98);
+}
+
+.users-stat-label {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.75rem;
+}
+
+.users-stat-value {
+  overflow: hidden;
+  color: var(--operator-foreground);
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-stat-value small {
+  color: var(--operator-subtle-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.users-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.users-section-head .ui-section-label {
+  margin-bottom: 0;
+}
+
+.users-section-head + * {
+  margin-top: 0.5rem;
+}
+
+.users-quota-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.users-quota-list li {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.users-quota-platform {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--operator-foreground);
+  font-size: 0.8125rem;
+}
+
+.users-quota-windows {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.users-quota-window {
+  display: block;
+  color: var(--operator-subtle-foreground);
+  font-size: 0.6875rem;
+}
+
+.users-quota-windows :deep(.ui-meter) {
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .users-quota-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.375rem;
+  }
+
+  .users-stat-value {
+    font-size: 1.0625rem;
+  }
+}
+</style>

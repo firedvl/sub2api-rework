@@ -1,112 +1,158 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <!-- The page title and description come from AppLayout. -->
-      <section
-        class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div class="flex min-w-0 flex-wrap gap-2">
-          <span class="badge badge-gray">{{ t("admin.plugins.onlyOpenAI") }}</span>
-          <span class="badge badge-gray">{{ t("admin.plugins.noAccountCoupling") }}</span>
-        </div>
-
-        <div class="flex flex-shrink-0 items-center gap-2">
+    <div class="ui-page ui-stagger">
+      <div class="ui-toolbar" role="toolbar" :aria-label="t('admin.plugins.title')">
+        <label class="ui-search">
+          <Icon name="search" size="sm" />
           <input
-            ref="fileInput"
-            class="hidden"
-            type="file"
-            accept=".s2plugin,application/zip"
-            @change="handleFileSelected"
+            v-model="query"
+            type="search"
+            :placeholder="t('admin.adminUi.plugins.search')"
+            :aria-label="t('admin.adminUi.plugins.search')"
           />
+        </label>
+        <div class="viz-seg max-w-full overflow-x-auto" role="group" :aria-label="t('common.status')">
           <button
+            v-for="option in stateOptions"
+            :key="option.id"
             type="button"
-            class="btn btn-primary"
-            :disabled="uploading"
-            @click="fileInput?.click()"
+            :aria-pressed="stateFilter === option.id"
+            :data-test="`plugin-state-${option.id}`"
+            @click="stateFilter = option.id"
           >
-            <Icon name="upload" size="sm" />
-            {{ uploading ? t("common.processing") : t("admin.plugins.upload") }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="loading"
-            :title="t('common.refresh')"
-            @click="loadPlugins"
-          >
-            <Icon name="refresh" size="sm" />
-            <span class="sr-only">{{ t("common.refresh") }}</span>
+            {{ option.label }}
+            <span class="plugin-seg-count">{{ stateCounts[option.id] }}</span>
           </button>
         </div>
-      </section>
-
-      <p class="text-xs text-gray-500 dark:text-gray-400">
-        {{ t("admin.plugins.uploadHint") }}
-      </p>
-
-      <div class="operator-callout operator-callout-info px-4 py-3 text-sm">
-        <p>{{ t("admin.plugins.runtimeNotice") }}</p>
-        <p class="mt-1">{{ t("admin.plugins.menuNotice") }}</p>
-      </div>
-
-      <div
-        v-if="loading"
-        class="flex min-h-48 items-center justify-center text-sm text-gray-500"
-      >
-        {{ t("common.loading") }}
-      </div>
-
-      <div
-        v-else-if="plugins.length === 0"
-        class="flex min-h-56 flex-col items-center justify-center border border-dashed border-gray-300 px-6 text-center dark:border-dark-600"
-      >
-        <Icon name="cube" size="xl" class="text-gray-400" />
-        <p class="mt-3 font-medium text-gray-800 dark:text-gray-200">
-          {{ t("admin.plugins.empty") }}
-        </p>
-        <p class="mt-1 max-w-lg text-sm text-gray-500 dark:text-gray-400">
-          {{ t("admin.plugins.emptyHint") }}
-        </p>
-      </div>
-
-      <div v-else class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <article
-          v-for="plugin in plugins"
-          :key="plugin.id"
-          class="card overflow-hidden border border-gray-200 dark:border-dark-700"
+        <HelpTooltip interactive :aria-label="t('admin.adminUi.plugins.about')" width-class="w-80">
+          <template #trigger>
+            <span class="app-icon-button"><Icon name="infoCircle" size="sm" /></span>
+          </template>
+          <ul class="space-y-1.5 pr-4">
+            <li>{{ t('admin.plugins.onlyOpenAI') }}</li>
+            <li>{{ t('admin.plugins.noAccountCoupling') }}</li>
+            <li>{{ t('admin.plugins.uploadHint') }}</li>
+            <li>{{ t('admin.plugins.runtimeNotice') }}</li>
+            <li>{{ t('admin.plugins.menuNotice') }}</li>
+          </ul>
+        </HelpTooltip>
+        <span class="ui-grow" />
+        <button
+          type="button"
+          class="app-icon-button"
+          :disabled="loading"
+          :aria-label="t('common.refresh')"
+          :title="t('common.refresh')"
+          @click="loadPlugins"
         >
-          <div
-            class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 p-5 dark:border-dark-700"
-          >
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3
-                  class="truncate text-base font-semibold text-gray-900 dark:text-white"
-                >
-                  {{ plugin.name }}
-                </h3>
-                <span class="font-mono text-xs text-gray-500"
-                  >v{{ plugin.version }}</span
-                >
-                <span
-                  class="rounded px-2 py-0.5 text-xs font-medium"
-                  :class="stateClass(plugin.state)"
-                >
-                  {{ t(`admin.plugins.${plugin.state}`) }}
-                </span>
-              </div>
-              <p class="mt-1 text-xs text-gray-500">
-                {{ plugin.plugin_key
-                }}<span v-if="plugin.author"> · {{ plugin.author }}</span>
-              </p>
-              <p
-                v-if="plugin.description"
-                class="mt-2 text-sm text-gray-600 dark:text-gray-300"
-              >
-                {{ plugin.description }}
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <input
+          ref="fileInput"
+          class="hidden"
+          type="file"
+          accept=".s2plugin,application/zip"
+          @change="handleFileSelected"
+        />
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="uploading"
+          @click="fileInput?.click()"
+        >
+          <Icon name="upload" size="sm" />
+          {{ uploading ? t("common.processing") : t("admin.plugins.upload") }}
+        </button>
+      </div>
+
+      <div v-if="loading && plugins.length === 0" class="plugin-grid" aria-busy="true">
+        <div v-for="index in 3" :key="index" class="skeleton h-48" />
+      </div>
+
+      <div v-else-if="plugins.length === 0" class="ui-card">
+        <div class="ui-empty">
+          <span class="ui-empty-icon"><Icon name="cube" size="lg" /></span>
+          <b>{{ t("admin.plugins.empty") }}</b>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="uploading" @click="fileInput?.click()">
+            <Icon name="upload" size="sm" />
+            {{ t("admin.plugins.upload") }}
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="visiblePlugins.length === 0" class="ui-card">
+        <div class="ui-empty">
+          <span class="ui-empty-icon"><Icon name="search" size="lg" /></span>
+          <b>{{ t("admin.adminUi.noMatches") }}</b>
+          <button type="button" class="btn btn-ghost btn-sm" @click="clearFilters">
+            {{ t("admin.adminUi.clearFilters") }}
+          </button>
+        </div>
+      </div>
+
+      <TransitionGroup v-else tag="div" name="ui-list" class="plugin-grid">
+        <article
+          v-for="plugin in visiblePlugins"
+          :key="plugin.id"
+          class="ui-card plugin-card"
+          :data-test="`plugin-${plugin.id}`"
+          @click="openDetails(plugin)"
+        >
+          <header class="plugin-card-head">
+            <span class="plugin-icon" :class="hasEnabledBinding(plugin) ? 'is-on' : ''" aria-hidden="true">
+              <Icon name="cube" size="md" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <button type="button" class="plugin-name" @click.stop="openDetails(plugin)">
+                {{ plugin.name }}
+              </button>
+              <p class="ui-cell-sub truncate">
+                <span class="font-mono">v{{ plugin.version }}</span> · {{ plugin.plugin_key }}
               </p>
             </div>
+            <span class="badge" :class="stateBadgeClass(plugin.state)">
+              {{ t(`admin.plugins.${plugin.state}`) }}
+            </span>
+          </header>
+
+          <p v-if="plugin.description" class="plugin-desc">{{ plugin.description }}</p>
+          <p v-if="plugin.last_error" class="plugin-error" :title="plugin.last_error">
+            <Icon name="exclamationCircle" size="xs" />
+            <span class="truncate">{{ plugin.last_error }}</span>
+          </p>
+
+          <div class="plugin-meta">
+            <ProviderMark
+              v-for="platform in bindingPlatforms(plugin)"
+              :key="platform"
+              :platform="platform"
+              :size="18"
+              :label="platform"
+            />
+            <span class="plugin-meta-item" :title="plugin.compatibility.message || undefined">
+              <span :class="compatibilityDotClass(plugin.compatibility.status)" />
+              {{ t(`admin.plugins.${plugin.compatibility.status}`) }}
+            </span>
+            <span class="plugin-meta-item">
+              <span :class="plugin.runtime_healthy ? 'ui-dot is-ok' : 'ui-dot'" />
+              {{ plugin.runtime_healthy ? t("admin.plugins.healthy") : t("admin.plugins.unhealthy") }}
+            </span>
+            <span
+              class="plugin-meta-item"
+              :title="`${t('admin.plugins.signature')}: ${t(`admin.plugins.${plugin.signature_status}`)}`"
+            >
+              <Icon :name="plugin.signature_status === 'trusted' ? 'shield' : 'exclamationTriangle'" size="xs" />
+              {{ t(`admin.plugins.${plugin.signature_status}`) }}
+            </span>
+            <span v-if="hasEnabledBinding(plugin)" class="plugin-meta-item">
+              <Icon name="signal" size="xs" />
+              {{ t("admin.adminUi.plugins.traffic", { percent: currentRollout(plugin) }) }}
+            </span>
+          </div>
+
+          <footer class="plugin-card-foot" @click.stop>
             <button
+              v-if="hasEnabledBinding(plugin)"
               type="button"
               class="btn btn-secondary btn-sm"
               @click="openConfiguration(plugin)"
@@ -114,160 +160,229 @@
               <Icon name="cog" size="sm" />
               {{ t("admin.plugins.configure") }}
             </button>
-          </div>
-
-          <div class="grid grid-cols-1 gap-x-6 gap-y-4 p-5 md:grid-cols-2">
-            <div>
-              <p class="text-xs font-medium uppercase text-gray-500">
-                {{ t("admin.plugins.compatibility") }}
-              </p>
-              <div class="mt-2 flex items-center gap-2">
-                <span
-                  class="rounded px-2 py-0.5 text-xs font-medium"
-                  :class="compatibilityClass(plugin.compatibility.status)"
-                >
-                  {{ t(`admin.plugins.${plugin.compatibility.status}`) }}
-                </span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{
-                  plugin.compatibility.message
-                }}</span>
-              </div>
-              <dl
-                class="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs"
-              >
-                <dt class="text-gray-500">
-                  {{ t("admin.plugins.currentVersion") }}
-                </dt>
-                <dd class="font-mono text-gray-800 dark:text-gray-200">
-                  {{ plugin.compatibility.current_sub2api_version }}
-                </dd>
-                <dt class="text-gray-500">
-                  {{ t("admin.plugins.requiredVersion") }}
-                </dt>
-                <dd class="font-mono text-gray-800 dark:text-gray-200">
-                  {{ plugin.compatibility.required_sub2api_version }}
-                </dd>
-                <dt class="text-gray-500">
-                  {{ t("admin.plugins.recommendedVersion") }}
-                </dt>
-                <dd class="font-mono text-gray-800 dark:text-gray-200">
-                  {{ plugin.compatibility.recommended_sub2api_version || "-" }}
-                </dd>
-              </dl>
-            </div>
-
-            <div>
-              <p class="text-xs font-medium uppercase text-gray-500">
-                {{ t("admin.plugins.runtime") }}
-              </p>
-              <div class="mt-2 flex flex-wrap gap-2 text-xs">
-                <span
-                  class="rounded px-2 py-0.5"
-                  :class="
-                    plugin.runtime_healthy
-                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                      : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
-                  "
-                >
-                  {{
-                    plugin.runtime_healthy
-                      ? t("admin.plugins.healthy")
-                      : t("admin.plugins.unhealthy")
-                  }}
-                </span>
-                <span
-                  class="rounded bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-dark-700 dark:text-gray-300"
-                >
-                  {{ t("admin.plugins.signature") }}:
-                  {{ t(`admin.plugins.${plugin.signature_status}`) }}
-                </span>
-              </div>
-              <p
-                v-if="plugin.last_error"
-                class="mt-3 break-words text-xs text-red-600 dark:text-red-400"
-              >
-                {{ plugin.last_error }}
-              </p>
-              <p
-                v-else-if="plugin.runtime_message"
-                class="mt-3 break-words text-xs text-gray-500"
-              >
-                {{ plugin.runtime_message }}
-              </p>
-            </div>
-
-            <div class="md:col-span-2">
-              <label
-                class="flex items-center justify-between gap-4 text-xs font-medium text-gray-600 dark:text-gray-300"
-              >
-                <span>{{ t("admin.plugins.rollout") }}</span>
-                <span class="w-11 text-right font-mono"
-                  >{{
-                    rolloutValues[plugin.id] ?? currentRollout(plugin)
-                  }}%</span
-                >
-              </label>
-              <input
-                :value="rolloutValues[plugin.id] ?? currentRollout(plugin)"
-                type="range"
-                min="1"
-                max="100"
-                step="1"
-                class="mt-2 w-full accent-primary-600"
-                :disabled="hasEnabledBinding(plugin)"
-                @input="setRollout(plugin.id, $event)"
-              />
-            </div>
-          </div>
-
-          <div
-            class="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-5 py-4 dark:border-dark-700"
-          >
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="busyID === plugin.id"
-              @click="testPlugin(plugin)"
-            >
-              <Icon name="beaker" size="sm" />
-              {{ t("admin.plugins.test") }}
-            </button>
-            <button
-              v-if="hasEnabledBinding(plugin)"
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="busyID === plugin.id"
-              @click="disablePlugin(plugin)"
-            >
-              <Icon name="ban" size="sm" />
-              {{ t("admin.plugins.disable") }}
-            </button>
             <button
               v-else
               type="button"
               class="btn btn-primary btn-sm"
-              :disabled="
-                busyID === plugin.id ||
-                plugin.state === 'starting' ||
-                !plugin.compatibility.compatible
-              "
+              :disabled="!canEnable(plugin)"
               @click="enablePlugin(plugin)"
             >
               <Icon name="play" size="sm" />
               {{ t("admin.plugins.enable") }}
             </button>
-            <button
-              type="button"
-              class="btn btn-danger btn-sm"
-              :disabled="busyID === plugin.id || hasEnabledBinding(plugin)"
-              @click="uninstallPlugin(plugin)"
+            <span class="flex-1" />
+            <ToolbarPopover
+              :label="t('admin.adminUi.moreActions')"
+              icon="more"
+              icon-only
+              menu
+              :test-id="`plugin-more-${plugin.id}`"
             >
-              <Icon name="trash" size="sm" />
-              {{ t("admin.plugins.uninstall") }}
-            </button>
-          </div>
+              <button type="button" role="menuitem" class="dropdown-item" @click="openDetails(plugin)">
+                <Icon name="eye" size="sm" />{{ t("admin.adminUi.details") }}
+              </button>
+              <button
+                v-if="!hasEnabledBinding(plugin)"
+                type="button"
+                role="menuitem"
+                class="dropdown-item"
+                @click="openConfiguration(plugin)"
+              >
+                <Icon name="cog" size="sm" />{{ t("admin.plugins.configure") }}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="dropdown-item"
+                :disabled="busyID === plugin.id"
+                @click="testPlugin(plugin)"
+              >
+                <Icon name="beaker" size="sm" />{{ t("admin.plugins.test") }}
+              </button>
+              <button
+                v-if="hasEnabledBinding(plugin)"
+                type="button"
+                role="menuitem"
+                class="dropdown-item"
+                :disabled="busyID === plugin.id"
+                @click="disablePlugin(plugin)"
+              >
+                <Icon name="ban" size="sm" />{{ t("admin.plugins.disable") }}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="dropdown-item text-red-600 dark:text-red-400"
+                :disabled="busyID === plugin.id || hasEnabledBinding(plugin)"
+                @click="uninstallPlugin(plugin)"
+              >
+                <Icon name="trash" size="sm" />{{ t("admin.plugins.uninstall") }}
+              </button>
+            </ToolbarPopover>
+          </footer>
         </article>
-      </div>
+      </TransitionGroup>
+
+      <SideDrawer
+        :open="detailPlugin !== null"
+        :title="detailPlugin?.name || ''"
+        :subtitle="detailPlugin ? `v${detailPlugin.version} · ${detailPlugin.plugin_key}` : ''"
+        width="30rem"
+        @close="detailId = null"
+      >
+        <template #leading>
+          <span class="plugin-icon" :class="detailPlugin && hasEnabledBinding(detailPlugin) ? 'is-on' : ''" aria-hidden="true">
+            <Icon name="cube" size="md" />
+          </span>
+        </template>
+        <template #badge>
+          <span v-if="detailPlugin" class="badge" :class="stateBadgeClass(detailPlugin.state)">
+            {{ t(`admin.plugins.${detailPlugin.state}`) }}
+          </span>
+        </template>
+
+        <div v-if="detailPlugin" class="space-y-6">
+          <p v-if="detailPlugin.description" class="text-sm text-gray-600 dark:text-gray-300">
+            {{ detailPlugin.description }}
+          </p>
+          <p v-if="detailPlugin.last_error" class="plugin-notice is-bad" role="alert">
+            <Icon name="exclamationCircle" size="sm" />
+            <span class="break-words">{{ detailPlugin.last_error }}</span>
+          </p>
+          <p v-else-if="detailPlugin.runtime_message" class="plugin-notice">
+            <Icon name="infoCircle" size="sm" />
+            <span class="break-words">{{ detailPlugin.runtime_message }}</span>
+          </p>
+
+          <section>
+            <h3 class="ui-section-label">{{ t("admin.plugins.rollout") }}</h3>
+            <div class="flex items-center gap-3">
+              <input
+                :value="rolloutValues[detailPlugin.id] ?? currentRollout(detailPlugin)"
+                type="range"
+                min="1"
+                max="100"
+                step="1"
+                class="w-full accent-primary-600"
+                :aria-label="t('admin.plugins.rollout')"
+                :disabled="hasEnabledBinding(detailPlugin)"
+                @input="setRollout(detailPlugin.id, $event)"
+              />
+              <span class="w-12 text-right font-mono text-sm tabular-nums">
+                {{ rolloutValues[detailPlugin.id] ?? currentRollout(detailPlugin) }}%
+              </span>
+            </div>
+          </section>
+
+          <section>
+            <h3 class="ui-section-label">{{ t("admin.plugins.compatibility") }}</h3>
+            <dl class="ui-dl">
+              <dt>{{ t("common.status") }}</dt>
+              <dd>
+                <span class="plugin-meta-item">
+                  <span :class="compatibilityDotClass(detailPlugin.compatibility.status)" />
+                  {{ t(`admin.plugins.${detailPlugin.compatibility.status}`) }}
+                </span>
+                <span v-if="detailPlugin.compatibility.message" class="ui-cell-sub block">
+                  {{ detailPlugin.compatibility.message }}
+                </span>
+              </dd>
+              <dt>{{ t("admin.plugins.currentVersion") }}</dt>
+              <dd class="font-mono">{{ detailPlugin.compatibility.current_sub2api_version }}</dd>
+              <dt>{{ t("admin.plugins.requiredVersion") }}</dt>
+              <dd class="font-mono">{{ detailPlugin.compatibility.required_sub2api_version }}</dd>
+              <dt>{{ t("admin.plugins.recommendedVersion") }}</dt>
+              <dd class="font-mono">{{ detailPlugin.compatibility.recommended_sub2api_version || "-" }}</dd>
+              <dt>{{ t("admin.adminUi.plugins.protocol") }}</dt>
+              <dd class="font-mono">
+                {{ detailPlugin.compatibility.plugin_protocol }} · {{ detailPlugin.compatibility.transport_api }} · {{ detailPlugin.compatibility.ui_bridge }}
+              </dd>
+            </dl>
+          </section>
+
+          <section>
+            <h3 class="ui-section-label">{{ t("admin.plugins.runtime") }}</h3>
+            <dl class="ui-dl">
+              <dt>{{ t("admin.plugins.runtime") }}</dt>
+              <dd class="plugin-meta-item">
+                <span :class="detailPlugin.runtime_healthy ? 'ui-dot is-ok' : 'ui-dot'" />
+                {{ detailPlugin.runtime_healthy ? t("admin.plugins.healthy") : t("admin.plugins.unhealthy") }}
+              </dd>
+              <dt>{{ t("admin.plugins.signature") }}</dt>
+              <dd>{{ t(`admin.plugins.${detailPlugin.signature_status}`) }}</dd>
+              <dt>{{ t("admin.adminUi.plugins.capabilities") }}</dt>
+              <dd class="space-y-1">
+                <div v-for="binding in detailPlugin.bindings" :key="binding.id" class="flex items-center gap-2">
+                  <ProviderMark :platform="binding.platform" :size="16" :label="binding.platform" />
+                  <span class="min-w-0 truncate font-mono text-xs" :title="binding.capability">{{ binding.capability }}</span>
+                  <span class="ui-cell-sub">{{ binding.account_type }}</span>
+                  <span :class="binding.enabled ? 'ui-dot is-ok' : 'ui-dot'" />
+                </div>
+                <span v-if="detailPlugin.bindings.length === 0">-</span>
+              </dd>
+            </dl>
+          </section>
+
+          <section>
+            <h3 class="ui-section-label">{{ t("admin.adminUi.plugins.metadata") }}</h3>
+            <dl class="ui-dl">
+              <dt>{{ t("admin.adminUi.plugins.author") }}</dt>
+              <dd>{{ detailPlugin.author || "-" }}</dd>
+              <dt>{{ t("admin.adminUi.plugins.installedAt") }}</dt>
+              <dd>{{ formatDate(detailPlugin.installed_at) }}</dd>
+              <dt v-if="detailPlugin.enabled_at">{{ t("admin.adminUi.plugins.enabledAt") }}</dt>
+              <dd v-if="detailPlugin.enabled_at">{{ formatDate(detailPlugin.enabled_at) }}</dd>
+              <dt>{{ t("admin.adminUi.plugins.updatedAt") }}</dt>
+              <dd>{{ formatDate(detailPlugin.updated_at) }}</dd>
+              <dt>{{ t("admin.adminUi.plugins.sha256") }}</dt>
+              <dd class="break-all font-mono text-xs">{{ detailPlugin.binary_sha256 }}</dd>
+            </dl>
+          </section>
+        </div>
+
+        <template v-if="detailPlugin" #footer>
+          <button
+            v-if="hasEnabledBinding(detailPlugin)"
+            type="button"
+            class="btn btn-secondary"
+            :disabled="busyID === detailPlugin.id"
+            @click="disablePlugin(detailPlugin)"
+          >
+            <Icon name="ban" size="sm" />{{ t("admin.plugins.disable") }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="btn btn-primary"
+            :disabled="!canEnable(detailPlugin)"
+            @click="enablePlugin(detailPlugin)"
+          >
+            <Icon name="play" size="sm" />{{ t("admin.plugins.enable") }}
+          </button>
+          <button type="button" class="btn btn-secondary" @click="openConfiguration(detailPlugin)">
+            <Icon name="cog" size="sm" />{{ t("admin.plugins.configure") }}
+          </button>
+          <button
+            type="button"
+            class="btn btn-ghost"
+            :disabled="busyID === detailPlugin.id"
+            @click="testPlugin(detailPlugin)"
+          >
+            <Icon name="beaker" size="sm" />{{ t("admin.plugins.test") }}
+          </button>
+          <span class="flex-1" />
+          <button
+            type="button"
+            class="app-icon-button text-red-600 dark:text-red-400"
+            :disabled="busyID === detailPlugin.id || hasEnabledBinding(detailPlugin)"
+            :aria-label="t('admin.plugins.uninstall')"
+            :title="t('admin.plugins.uninstall')"
+            @click="uninstallPlugin(detailPlugin)"
+          >
+            <Icon name="trash" size="sm" />
+          </button>
+        </template>
+      </SideDrawer>
 
       <BaseDialog
         :show="configPlugin !== null"
@@ -318,7 +433,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   adminAPI,
@@ -328,6 +443,10 @@ import {
 import { useAppStore } from "@/stores";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
+import HelpTooltip from "@/components/common/HelpTooltip.vue";
+import ToolbarPopover from "@/components/common/ToolbarPopover.vue";
+import SideDrawer from "@/components/ui/SideDrawer.vue";
+import ProviderMark from "@/components/viz/ProviderMark.vue";
 import Icon from "@/components/icons/Icon.vue";
 import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import {
@@ -681,24 +800,94 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
   }
 }
 
-function stateClass(state: PluginInstallation["state"]): string {
-  if (state === "enabled")
-    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
-  if (state === "error" || state === "incompatible")
-    return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
-  if (state === "starting")
-    return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
-  return "bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300";
+type StateFilter = "all" | "enabled" | "disabled" | "issues";
+
+const query = ref("");
+const stateFilter = ref<StateFilter>("all");
+const detailId = ref<number | null>(null);
+const detailPlugin = computed(
+  () => plugins.value.find((plugin) => plugin.id === detailId.value) ?? null,
+);
+
+function stateBucket(plugin: PluginInstallation): Exclude<StateFilter, "all"> {
+  if (plugin.state === "error" || plugin.state === "incompatible") return "issues";
+  if (plugin.state === "enabled" || plugin.state === "starting") return "enabled";
+  return "disabled";
 }
 
-function compatibilityClass(
+const searchedPlugins = computed(() => {
+  const needle = query.value.trim().toLowerCase();
+  if (!needle) return plugins.value;
+  return plugins.value.filter((plugin) =>
+    [plugin.name, plugin.plugin_key, plugin.author, plugin.description]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle),
+  );
+});
+
+const stateCounts = computed(() => {
+  const counts: Record<StateFilter, number> = { all: 0, enabled: 0, disabled: 0, issues: 0 };
+  for (const plugin of searchedPlugins.value) {
+    counts.all += 1;
+    counts[stateBucket(plugin)] += 1;
+  }
+  return counts;
+});
+
+const stateOptions = computed<Array<{ id: StateFilter; label: string }>>(() => [
+  { id: "all", label: t("common.all") },
+  { id: "enabled", label: t("admin.plugins.enabled") },
+  { id: "disabled", label: t("admin.plugins.disabled") },
+  { id: "issues", label: t("admin.adminUi.plugins.issues") },
+]);
+
+const visiblePlugins = computed(() =>
+  stateFilter.value === "all"
+    ? searchedPlugins.value
+    : searchedPlugins.value.filter((plugin) => stateBucket(plugin) === stateFilter.value),
+);
+
+function clearFilters(): void {
+  query.value = "";
+  stateFilter.value = "all";
+}
+
+function openDetails(plugin: PluginInstallation): void {
+  detailId.value = plugin.id;
+}
+
+function canEnable(plugin: PluginInstallation): boolean {
+  return (
+    busyID.value !== plugin.id &&
+    plugin.state !== "starting" &&
+    plugin.compatibility.compatible
+  );
+}
+
+function bindingPlatforms(plugin: PluginInstallation): string[] {
+  return [...new Set(plugin.bindings.map((binding) => binding.platform).filter(Boolean))];
+}
+
+function stateBadgeClass(state: PluginInstallation["state"]): string {
+  if (state === "enabled") return "badge-success";
+  if (state === "error" || state === "incompatible") return "badge-danger";
+  if (state === "starting") return "badge-warning";
+  return "badge-gray";
+}
+
+function compatibilityDotClass(
   status: PluginInstallation["compatibility"]["status"],
 ): string {
-  if (status === "compatible")
-    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
-  if (status === "untested")
-    return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
-  return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
+  if (status === "compatible") return "ui-dot is-ok";
+  if (status === "untested") return "ui-dot is-warn";
+  return "ui-dot is-bad";
+}
+
+function formatDate(value?: string): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 onMounted(() => {
@@ -711,3 +900,133 @@ onBeforeUnmount(() => {
   clearPendingBridgeRequests();
 });
 </script>
+
+<style scoped>
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 1rem;
+}
+
+.plugin-card {
+  gap: 0.875rem;
+  padding: 1.125rem;
+  cursor: pointer;
+}
+
+.plugin-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.plugin-icon {
+  display: inline-flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+  color: var(--operator-muted-foreground);
+  transition:
+    background-color var(--operator-duration-fast) var(--operator-ease-out),
+    color var(--operator-duration-fast) var(--operator-ease-out);
+}
+
+.plugin-icon.is-on {
+  background: var(--operator-accent-soft);
+  color: var(--operator-accent-text);
+}
+
+.plugin-name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 0.25rem;
+}
+
+.plugin-name:hover {
+  color: var(--operator-accent-text);
+}
+
+.plugin-name:focus-visible {
+  outline: 2px solid var(--operator-accent-text);
+  outline-offset: 2px;
+}
+
+.plugin-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plugin-error {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--operator-destructive);
+  font-size: 0.75rem;
+}
+
+.plugin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.875rem;
+  margin-top: auto;
+  color: var(--operator-muted-foreground);
+  font-size: 0.75rem;
+}
+
+.plugin-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+}
+
+.plugin-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--operator-border);
+  cursor: default;
+}
+
+.plugin-seg-count {
+  margin-left: 0.25rem;
+  color: var(--operator-subtle-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.plugin-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--operator-border);
+  border-radius: var(--operator-radius);
+  background: var(--operator-raised);
+  color: var(--operator-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.plugin-notice.is-bad {
+  border-color: color-mix(in srgb, var(--operator-destructive) 35%, transparent);
+  color: var(--operator-destructive);
+}
+</style>

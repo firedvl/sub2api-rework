@@ -30,7 +30,9 @@ for (const width of [390, 1280]) {
       }] } })
     })
     await page.goto('/keys')
-    await page.getByRole('button', { name: 'Use Key', exact: true }).click()
+    // The full Use Key dialog now opens from the key row's ⋯ menu (the row "Use" button opens a quick drawer).
+    await page.getByTestId('key-more-1').click()
+    await page.getByRole('menuitem', { name: 'Use Key', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Use API Key' })
     await expect(dialog.locator('pre code').filter({ hasText: 'model_provider = "OpenAI"' })).toContainText('base_url = "https://gateway.example.test/v1"')
     const config = dialog.locator('pre code').filter({ hasText: 'model_provider = "OpenAI"' })
