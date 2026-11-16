@@ -1913,7 +1913,10 @@ test.describe('operator console navigation', () => {
     await expect(menu).toBeVisible()
     await expect(menu.locator('.operator-menu-item').first()).toBeEnabled()
 
-    await page.locator('main.app-main').evaluate((element) => { element.scrollTop += 100 })
+    // The click may already have scrolled the page to its end while rows loaded, so move toward whichever side has room.
+    const main = page.locator('main.app-main')
+    expect(await main.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    await main.evaluate((element) => { element.scrollTop = element.scrollTop > 0 ? 0 : element.scrollHeight })
     await expect.poll(async () => (await trigger.boundingBox())?.y).not.toBe(triggerBefore!.y)
     await expect(menu).toBeHidden()
   })
