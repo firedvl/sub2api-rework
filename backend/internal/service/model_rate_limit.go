@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
@@ -15,7 +16,10 @@ const (
 	openAICodexSparkRateLimitReason    = "openai_codex_spark_rate_limit"
 	// anthropicFableRateLimitKey 是 Anthropic 7d_oi（Fable 专属 7d 窗口）限流的
 	// 家族级 scope：命中后所有 Fable 变体（含 [1m] 等后缀）都不再调度到该账号。
-	anthropicFableRateLimitKey = "claude-fable-5"
+	anthropicFableRateLimitKey       = "claude-fable-*"
+	anthropicSonnetRateLimitKey      = "claude-sonnet-*"
+	anthropicOpusRateLimitKey        = "claude-opus-*"
+	legacyAnthropicFableRateLimitKey = "claude-fable-5"
 )
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
@@ -87,11 +91,43 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 			keys = append(keys, openAIImageGenerationRateLimitKey)
 		}
 	case PlatformAnthropic:
-		if isAnthropicFableModel(modelKey) && modelKey != anthropicFableRateLimitKey {
-			keys = append(keys, anthropicFableRateLimitKey)
+		if canonical := anthropicModelRateLimitKey(modelKey); canonical != modelKey {
+			keys = append(keys, canonical)
+		}
+		if isAnthropicFableModel(modelKey) {
+			if a.isAnthropicFamilyRateLimit(anthropicFableRateLimitKey) {
+				keys = append(keys, anthropicFableRateLimitKey)
+			}
+			if anthropicModelRateLimitKey(modelKey) != legacyAnthropicFableRateLimitKey && a.isAnthropicFamilyRateLimit(legacyAnthropicFableRateLimitKey) {
+				keys = append(keys, legacyAnthropicFableRateLimitKey)
+			}
+		}
+		if strings.HasPrefix(modelKey, "claude-sonnet-") && a.isAnthropicFamilyRateLimit(anthropicSonnetRateLimitKey) {
+			keys = append(keys, anthropicSonnetRateLimitKey)
+		}
+		if strings.HasPrefix(modelKey, "claude-opus-") && a.isAnthropicFamilyRateLimit(anthropicOpusRateLimitKey) {
+			keys = append(keys, anthropicOpusRateLimitKey)
 		}
 	}
 	return keys
+}
+
+func isAnthropicFamilyScope(scope string) bool {
+	return scope == anthropicFableRateLimitKey || scope == anthropicSonnetRateLimitKey || scope == anthropicOpusRateLimitKey
+}
+
+func (a *Account) isAnthropicFamilyRateLimit(scope string) bool {
+	limits, _ := a.Extra[modelRateLimitsKey].(map[string]any)
+	limit, ok := limits[scope].(map[string]any)
+	if !ok {
+		return false
+	}
+	reason, _ := limit["reason"].(string)
+	return (scope == legacyAnthropicFableRateLimitKey && reason == "") || strings.HasPrefix(reason, "anthropic_7d_") || IsAccountSchedulingThresholdReason(reason)
+}
+
+func anthropicModelRateLimitKey(model string) string {
+	return claude.NormalizeModelID(strings.TrimSuffix(strings.TrimSpace(model), "[1m]"))
 }
 
 // isAnthropicFableModel 判断是否为 Fable 模型家族（claude-fable-5、claude-fable-5[1m] 等变体）

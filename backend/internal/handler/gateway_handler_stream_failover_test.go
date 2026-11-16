@@ -16,6 +16,48 @@ import (
 const partialMessageStartSSE = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-5\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n" +
 	"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
 
+func TestFailoverExhausted_AnthropicLongContextCreditsExplainsCompaction(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		if streaming {
+			_, err := c.Writer.Write([]byte(partialMessageStartSSE))
+			require.NoError(t, err)
+		}
+		(&GatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+			StatusCode:   http.StatusTooManyRequests,
+			ResponseBody: []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for long context requests."}}`),
+		}, service.PlatformAnthropic, streaming)
+		require.Contains(t, w.Body.String(), "Compact the conversation or start a new chat")
+		require.Contains(t, w.Body.String(), `"type":"invalid_request_error"`)
+		require.NotContains(t, w.Body.String(), "retry later")
+		if streaming {
+			require.Equal(t, http.StatusOK, w.Code)
+			require.Contains(t, w.Body.String(), `data: {"type":"error"`)
+		} else {
+			require.Equal(t, http.StatusBadRequest, w.Code)
+		}
+	}
+}
+
+func TestFailoverExhausted_OtherRateLimitsKeepRetryResponse(t *testing.T) {
+	for _, tc := range []struct{ platform, message string }{
+		{service.PlatformAnthropic, "This request would exceed your account's rate limit."},
+		{service.PlatformGemini, "Usage credits are required for long context requests."},
+	} {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		(&GatewayHandler{}).handleFailoverExhausted(c, &service.UpstreamFailoverError{
+			StatusCode:   http.StatusTooManyRequests,
+			ResponseBody: []byte(`{"error":{"message":"` + tc.message + `"}}`),
+		}, tc.platform, false)
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Contains(t, w.Body.String(), "retry later")
+	}
+}
+
 // TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten 验证：
 // 当 Forward 在返回 UpstreamFailoverError 前已向客户端写入 SSE 内容时，
 // 故障转移保护逻辑必须终止循环并发送 SSE 错误事件，而不是进行下一次 Forward。

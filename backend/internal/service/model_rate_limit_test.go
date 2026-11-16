@@ -509,6 +509,7 @@ func TestIsModelRateLimited_AnthropicFableFamilyKey(t *testing.T) {
 		Extra: map[string]any{
 			modelRateLimitsKey: map[string]any{
 				anthropicFableRateLimitKey: map[string]any{
+					"reason":              anthropicFableWindowReason,
 					"rate_limit_reset_at": future,
 				},
 			},

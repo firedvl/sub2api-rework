@@ -14,14 +14,15 @@ import (
 
 type anthropicWindowLimitRepo struct {
 	mockAccountRepoForGemini
-	rateLimitCalls          int
-	tempUnschedCalls        int
-	lastRateLimitReset      time.Time
-	modelRateLimitCalls     int
-	lastModelRateLimitScope string
-	lastModelRateLimitReset time.Time
-	sessionWindowCalls      int
-	lastExtraUpdates        map[string]any
+	rateLimitCalls           int
+	tempUnschedCalls         int
+	lastRateLimitReset       time.Time
+	modelRateLimitCalls      int
+	lastModelRateLimitScope  string
+	lastModelRateLimitReason string
+	lastModelRateLimitReset  time.Time
+	sessionWindowCalls       int
+	lastExtraUpdates         map[string]any
 }
 
 func (r *anthropicWindowLimitRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
@@ -35,10 +36,13 @@ func (r *anthropicWindowLimitRepo) SetTempUnschedulable(_ context.Context, _ int
 	return nil
 }
 
-func (r *anthropicWindowLimitRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, _ ...string) error {
+func (r *anthropicWindowLimitRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, reasons ...string) error {
 	r.modelRateLimitCalls++
 	r.lastModelRateLimitScope = scope
 	r.lastModelRateLimitReset = resetAt
+	if len(reasons) > 0 {
+		r.lastModelRateLimitReason = reasons[0]
+	}
 	return nil
 }
 
@@ -176,7 +180,7 @@ func TestHandleUpstreamError_AnthropicFableCreditsRequiredOnlyMarksModelRateLimi
 	require.Zero(t, repo.rateLimitCalls, "Fable entitlement failure must not rate limit the whole account")
 	require.Zero(t, repo.sessionWindowCalls, "Fable entitlement failure must not rewrite the shared session window")
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.Equal(t, "claude-fable-5", repo.lastModelRateLimitScope)
 	require.Equal(t, resetAt, repo.lastModelRateLimitReset)
 }
 
@@ -191,11 +195,53 @@ func TestHandleUpstreamError_AnthropicFableCreditsRequiredFallsBackToRequestedMo
 
 	require.Zero(t, repo.rateLimitCalls)
 	require.Equal(t, 1, repo.modelRateLimitCalls)
-	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
+	require.Equal(t, "claude-fable-5", repo.lastModelRateLimitScope)
 	require.True(t, repo.lastModelRateLimitReset.After(startedAt))
 }
 
-func TestHandleUpstreamError_AnthropicNonFableCreditsRequiredKeepsLegacyBehavior(t *testing.T) {
+func TestHandleUpstreamError_AnthropicLongContextCreditsDoNotBlockShortRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		exhausted, customPolicy bool
+	}{
+		{name: "long-context entitlement"},
+		{name: "local cooldown rule", customPolicy: true},
+		{name: "exhausted shared quota", exhausted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetAt := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+			headers := http.Header{}
+			headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(time.Now().Add(15*24*time.Hour).Unix(), 10))
+			if tc.exhausted {
+				headers.Set("anthropic-ratelimit-unified-5h-status", "rejected")
+				headers.Set("anthropic-ratelimit-unified-5h-reset", strconv.FormatInt(resetAt.Unix(), 10))
+			}
+			repo := &anthropicWindowLimitRepo{}
+			svc := NewRateLimitService(repo, nil, nil, nil, nil)
+			account := &Account{ID: 42, Type: AccountTypeOAuth, Platform: PlatformAnthropic,
+				Credentials: map[string]any{
+					"temp_unschedulable_enabled": tc.customPolicy,
+					"temp_unschedulable_rules": []any{map[string]any{
+						"error_code": float64(http.StatusTooManyRequests), "keywords": []any{"credits"}, "duration_minutes": float64(10),
+					}},
+				},
+			}
+			body := []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"Usage credits are required for long context requests."}}`)
+			require.False(t, svc.HandleUpstreamError(context.Background(), account, http.StatusTooManyRequests, headers, body, "claude-opus-4-6"))
+			require.Zero(t, repo.modelRateLimitCalls, "short requests to the same model must remain eligible")
+			require.Zero(t, repo.tempUnschedCalls)
+			if tc.exhausted {
+				require.Equal(t, 1, repo.rateLimitCalls, "confirmed shared quota exhaustion must still block the account")
+				require.Equal(t, resetAt, repo.lastRateLimitReset)
+			} else {
+				require.Zero(t, repo.rateLimitCalls, "long-context entitlement must not block all models until the billing reset")
+				require.Zero(t, repo.sessionWindowCalls)
+			}
+		})
+	}
+}
+
+func TestHandleUpstreamError_AnthropicNonFableCreditsRequiredOnlyMarksModel(t *testing.T) {
 	resetAt := time.Now().Add(2 * time.Hour).Truncate(time.Second)
 	headers := http.Header{}
 	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(resetAt.Unix(), 10))
@@ -207,9 +253,10 @@ func TestHandleUpstreamError_AnthropicNonFableCreditsRequiredKeepsLegacyBehavior
 
 	svc.HandleUpstreamError(context.Background(), account, http.StatusTooManyRequests, headers, body, "claude-opus-5")
 
-	require.Zero(t, repo.modelRateLimitCalls)
-	require.Equal(t, 1, repo.rateLimitCalls)
-	require.Equal(t, resetAt, repo.lastRateLimitReset)
+	require.Equal(t, 1, repo.modelRateLimitCalls)
+	require.Zero(t, repo.rateLimitCalls)
+	require.Equal(t, "claude-opus-5", repo.lastModelRateLimitScope)
+	require.Equal(t, resetAt, repo.lastModelRateLimitReset)
 }
 
 func TestHandleUpstreamError_AnthropicSharedWindowStillWinsWithFableCreditsRequired(t *testing.T) {
@@ -278,8 +325,7 @@ func TestHandleUpstreamError_AnthropicAccountWindowStillWinsOver7dOi(t *testing.
 	require.Equal(t, anthropicFableRateLimitKey, repo.lastModelRateLimitScope)
 }
 
-func TestHandleUpstreamError_Anthropic429Without7dOiKeepsLegacyBehavior(t *testing.T) {
-	// 无 7d_oi 头、5h/7d 均未超限的 429：保持旧行为（按较早 reset 标记账号限流）。
+func TestHandleUpstreamError_AnthropicHealthyWindowsUseShortCooldown(t *testing.T) {
 	now := time.Now()
 	reset5h := now.Add(2 * time.Hour).Truncate(time.Second)
 	reset7d := now.Add(80 * time.Hour).Truncate(time.Second)
@@ -300,6 +346,6 @@ func TestHandleUpstreamError_Anthropic429Without7dOiKeepsLegacyBehavior(t *testi
 
 	require.Zero(t, repo.modelRateLimitCalls, "no 7d_oi signal → no model rate limit")
 	require.Equal(t, 1, repo.rateLimitCalls)
-	require.Equal(t, reset5h, repo.lastRateLimitReset, "legacy path picks the sooner reset")
-	require.Equal(t, 1, repo.sessionWindowCalls)
+	require.WithinDuration(t, now.Add(5*time.Second), repo.lastRateLimitReset, time.Second)
+	require.Zero(t, repo.sessionWindowCalls, "healthy windows must not be relabeled rejected")
 }

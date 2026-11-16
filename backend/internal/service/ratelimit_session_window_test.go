@@ -33,6 +33,18 @@ type ueCall struct {
 	Updates map[string]any
 }
 
+func TestUpdateSessionWindow_AllowedResponseDoesNotClearConcurrentQuotaLimits(t *testing.T) {
+	repo := &sessionWindowMockRepo{}
+	reset := time.Now().Add(72 * time.Hour)
+	account := &Account{ID: 42, Platform: PlatformAnthropic, RateLimitResetAt: &reset}
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-5h-status", "allowed")
+	NewRateLimitService(repo, nil, nil, nil, nil).UpdateSessionWindow(context.Background(), account, headers)
+	if len(repo.clearRateLimitIDs) != 0 {
+		t.Fatal("an in-flight 5h success must not clear a newer shared limit or independent model limits")
+	}
+}
+
 func (m *sessionWindowMockRepo) UpdateSessionWindow(_ context.Context, id int64, start, end *time.Time, status string) error {
 	m.sessionWindowCalls = append(m.sessionWindowCalls, swCall{ID: id, Start: start, End: end, Status: status})
 	return nil

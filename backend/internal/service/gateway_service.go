@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
@@ -1718,7 +1719,19 @@ func modelMappingClaims(account *Account, model string) bool {
 		return false
 	}
 	mapped, ok := account.GetModelMapping()[model]
-	return ok && strings.TrimSpace(mapped) != ""
+	if ok && strings.TrimSpace(mapped) != "" {
+		return true
+	}
+	if account.Platform == PlatformAnthropic && account.IsModelSupported(model) && strings.TrimSpace(account.GetMappedModel(model)) != "" {
+		if inventory := account.GetUpstreamModelInventorySnapshot(); inventory != nil {
+			for _, id := range inventory.Models {
+				if claude.NormalizeModelID(id) == claude.NormalizeModelID(model) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func explicitModelMappingClaims(account Account, model string) bool {

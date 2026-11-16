@@ -416,6 +416,16 @@ func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int
 
 // handleCCFailoverExhausted writes a failover-exhausted error in CC format.
 func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
+	if lastErr != nil {
+		if status, message := service.AnthropicCreditsRequiredClientResponse(lastErr.StatusCode, lastErr.ResponseBody); status != 0 {
+			if streamStarted {
+				h.handleStreamingAwareError(c, status, "invalid_request_error", message, true)
+			} else {
+				h.chatCompletionsErrorResponse(c, status, "invalid_request_error", message)
+			}
+			return
+		}
+	}
 	if streamStarted {
 		return
 	}
