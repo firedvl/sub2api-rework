@@ -4265,6 +4265,22 @@ func expireCodexModelsManifestCache(s *OpenAIGatewayService, age time.Duration) 
 	s.openAIModelsCache.mu.Unlock()
 }
 
+func TestFetchCodexModelsManifestOAuthLargeNativeCatalogFitsCacheBudget(t *testing.T) {
+	body := `{"models":[{"slug":"gpt-6.2-sol","base_instructions":"` + strings.Repeat("x", 850*1024) + `"}]}`
+	require.Less(t, len(body), openAIModelsCacheBodyLimit)
+	_, calls := newCodexModelsOAuthCacheServer(t, body)
+	s := &OpenAIGatewayService{}
+	account := newCodexModelsTestAccount()
+	first, err := s.FetchCodexModelsManifest(context.Background(), account, "0.169.1", "")
+	require.NoError(t, err)
+	require.Equal(t, body, string(first.Body))
+	first.Body[0] = 'x'
+	second, err := s.FetchCodexModelsManifest(context.Background(), account, "0.169.1", "")
+	require.NoError(t, err)
+	require.Equal(t, body, string(second.Body), "the client copy must not mutate the cache")
+	require.EqualValues(t, 1, calls.Load(), "a native catalog below the body limit must be cached")
+}
+
 func TestFetchCodexModelsManifestOAuthFreshWindowZeroUpstreamRequests(t *testing.T) {
 	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"gpt-5.5"}]}`)
 	s := &OpenAIGatewayService{}
