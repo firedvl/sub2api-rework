@@ -1292,6 +1292,9 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "invalid_request_error", "API key group is required")
 		return
 	}
+	if apiKey.Group.Platform == service.PlatformComposite {
+		c.Request = c.Request.WithContext(service.WithCompositeCatalogOwnership(c.Request.Context(), apiKey.Group.ID))
+	}
 
 	forcedPlatform := ""
 	if value, exists := middleware2.GetForcePlatformFromContext(c); exists {

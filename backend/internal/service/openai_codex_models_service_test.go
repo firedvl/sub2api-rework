@@ -456,6 +456,47 @@ func TestDynamicCodexModelsFetchesAccountsConcurrentlyInStableOrder(t *testing.T
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+type catalogOwnershipReadRepo struct {
+	*scopedCodexModelsAccountRepo
+	ownershipReads atomic.Int32
+}
+
+func (r *catalogOwnershipReadRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	if groupID == nil {
+		r.ownershipReads.Add(1)
+		return append([]Account(nil), r.globalAccounts...), nil
+	}
+	return r.scopedCodexModelsAccountRepo.ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
+}
+
+func TestCompositeDynamicCodexModelsReadsOwnershipOncePerRequest(t *testing.T) {
+	const groupID int64 = 820
+	account := *newCodexModelsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"company-alpha": "company-alpha", "company-beta": "company-beta"}
+	repo := &catalogOwnershipReadRepo{scopedCodexModelsAccountRepo: &scopedCodexModelsAccountRepo{
+		groupAccounts: map[int64][]Account{groupID: {account}}, globalAccounts: []Account{account},
+	}}
+	_, _ = newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"company-alpha"},{"slug":"company-beta"}]}`)
+	resolver := NewCompositeRouteResolver(nil)
+	gateway := &GatewayService{accountRepo: repo, cfg: &config.Config{RunMode: config.RunModeSimple}}
+	resolver.SetModelOwnershipResolver(gateway.resolveCompositeModelOwnership)
+	svc := &OpenAIGatewayService{accountRepo: repo, compositeResolver: resolver}
+	group := &Group{ID: groupID, Platform: PlatformComposite}
+	manifest, used, err := svc.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.169.1", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"company-alpha", "company-beta"}, codexManifestModelSlugs(t, manifest.Body))
+	require.EqualValues(t, 1, repo.ownershipReads.Load(), "one catalog must not reload the account set per model")
+
+	repo.globalAccounts = []Account{{ID: 2, Platform: PlatformGemini, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"model_mapping": map[string]any{"company-alpha": "gemini-pro", "company-beta": "gemini-pro"}}}}
+	manifest, used, err = svc.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.169.1", "")
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Empty(t, codexManifestModelSlugs(t, manifest.Body), "the next request must see changed ownership")
+	require.EqualValues(t, 2, repo.ownershipReads.Load())
+}
+
 func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testing.T) {
 	const groupID int64 = 810
 	accounts := []Account{
