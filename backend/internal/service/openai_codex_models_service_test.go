@@ -34,6 +34,8 @@ type codexModelsVisibilityAccountRepo struct {
 	byGroup map[int64][]Account
 }
 
+var codexModelsVisibilityRepoMu sync.Mutex
+
 func (r codexModelsVisibilityAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
 	accounts := r.byGroup[groupID]
 	return append([]Account(nil), accounts...), nil
@@ -48,6 +50,8 @@ func (r codexModelsVisibilityAccountRepo) ListModelAvailabilityCandidates(_ cont
 }
 
 func (r codexModelsVisibilityAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	codexModelsVisibilityRepoMu.Lock()
+	defer codexModelsVisibilityRepoMu.Unlock()
 	for groupID, accounts := range r.byGroup {
 		for i := range accounts {
 			if accounts[i].ID != id {
@@ -389,6 +393,67 @@ func TestMergeRoutableCodexManifestsDoesNotFabricateAstra(t *testing.T) {
 	}}, nil)
 	require.NoError(t, err)
 	require.NotContains(t, string(body), "gpt-6-astra")
+}
+
+func TestDynamicCodexModelsFetchesAccountsConcurrentlyInStableOrder(t *testing.T) {
+	const groupID int64 = 819
+	accounts := make([]Account, 3)
+	for i := range accounts {
+		accounts[i] = Account{
+			ID: int64(i + 1), Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Credentials: map[string]any{"access_token": fmt.Sprintf("token-%d", i), "chatgpt_account_id": fmt.Sprint(i)},
+		}
+	}
+	started := make(chan struct{}, len(accounts))
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		if r.Header.Get("chatgpt-account-id") == "2" {
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"models":[{"slug":"gpt-6.2-sol","display_name":%q}]}`, r.Header.Get("chatgpt-account-id"))
+	}))
+	defer server.Close()
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	repo := splitCodexModelsAccountRepo{catalog: map[int64][]Account{groupID: accounts}}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	group := &Group{ID: groupID, Platform: PlatformOpenAI}
+	done := make(chan struct{})
+	defer func() {
+		close(release)
+		<-done
+		chatgptCodexModelsURL = original
+	}()
+	var manifest *CodexModelsManifest
+	var used bool
+	var err error
+	go func() {
+		manifest, used, err = svc.BuildGroupDynamicCodexModelsManifest(context.Background(), group, "0.169.1", "")
+		close(done)
+	}()
+	for range accounts {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("account catalog requests were serialized")
+		}
+	}
+	for range accounts {
+		release <- struct{}{}
+	}
+	<-done
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, []string{"gpt-6.2-sol"}, codexManifestModelSlugs(t, manifest.Body))
+	require.Contains(t, string(manifest.Body), `"display_name":"0"`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = svc.BuildGroupDynamicCodexModelsManifest(ctx, group, "0.169.1", "")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCompositeDynamicCodexModelsUsesOnlyRoutableGroupOpenAIAccounts(t *testing.T) {

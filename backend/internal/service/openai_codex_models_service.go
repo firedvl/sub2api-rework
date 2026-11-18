@@ -290,23 +290,38 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 		configuredModels = openAIConfiguredCodexModelIDsForGroup(accounts, group)
 	}
 	hasOAuth := false
+	fetched := make([]*CodexModelsManifest, len(accounts))
+	var fetches sync.WaitGroup
 	for i := range accounts {
 		account := &accounts[i]
 		if account.Platform != PlatformOpenAI || !account.IsOpenAIOAuth() {
 			continue
 		}
 		hasOAuth = true
-		manifest, fetchErr := s.fetchCodexModelsManifestWithLastKnownGood(ctx, account, clientVersion)
-		if fetchErr != nil {
+		fetches.Go(func() {
+			manifest, fetchErr := s.fetchCodexModelsManifestWithLastKnownGood(ctx, account, clientVersion)
+			if fetchErr == nil {
+				fetched[i] = manifest
+			}
+		})
+	}
+	if !hasOAuth {
+		return nil, false, nil
+	}
+	fetches.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, true, err
+	}
+	// Keep account precedence stable even when upstream requests finish out of order.
+	for i, manifest := range fetched {
+		if manifest == nil {
 			continue
 		}
+		account := &accounts[i]
 		if completeErr := s.CompleteAPIKeyCodexModelsManifestForClient(manifest, account); completeErr != nil {
 			continue
 		}
 		manifests = append(manifests, codexAccountManifest{account: account, manifest: manifest})
-	}
-	if !hasOAuth {
-		return nil, false, nil
 	}
 	if len(manifests) == 0 && len(configuredModels) == 0 {
 		return nil, false, nil
