@@ -2061,7 +2061,13 @@ func (c *openAIModelsCache) set(key string, manifest *CodexModelsManifest, now t
 		return
 	}
 	remainingBodyBudget := openAIModelsCacheBodyLimit - len(manifest.Body)
-	if len(manifest.upstreamSourceBody) > remainingBodyBudget {
+	sourceBodySize := len(manifest.upstreamSourceBody)
+	// Identical raw and client payloads share storage and count against the budget once.
+	if bytes.Equal(manifest.Body, manifest.upstreamSourceBody) {
+		manifest.upstreamSourceBody = manifest.Body
+		sourceBodySize = 0
+	}
+	if sourceBodySize > remainingBodyBudget {
 		return
 	}
 	c.mu.Lock()
