@@ -328,6 +328,8 @@ func (s *OpenAIGatewayService) BuildGroupDynamicCodexModelsManifest(
 	}
 	var allowPublicID func(*Account, string, string) bool
 	if group.Platform == PlatformComposite {
+		// All models in one response share the same ownership account read.
+		ctx = WithCompositeCatalogOwnership(ctx, group.ID)
 		allowPublicID = func(account *Account, publicID, upstreamID string) bool {
 			return s.compositeCodexPublicIDRoutable(ctx, group.ID, account, publicID, upstreamID)
 		}

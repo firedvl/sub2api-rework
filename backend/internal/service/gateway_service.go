@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -1643,6 +1644,23 @@ func publicCatalogModelID(account *Account, model string) string {
 	return model
 }
 
+type compositeCatalogOwnershipKey struct{}
+
+type compositeCatalogOwnershipSnapshot struct {
+	groupID  int64
+	once     sync.Once
+	accounts []Account
+	err      error
+}
+
+// WithCompositeCatalogOwnership shares one account read within a catalog request.
+func WithCompositeCatalogOwnership(ctx context.Context, groupID int64) context.Context {
+	if snapshot, _ := ctx.Value(compositeCatalogOwnershipKey{}).(*compositeCatalogOwnershipSnapshot); snapshot != nil && snapshot.groupID == groupID {
+		return ctx
+	}
+	return context.WithValue(ctx, compositeCatalogOwnershipKey{}, &compositeCatalogOwnershipSnapshot{groupID: groupID})
+}
+
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
 	model = strings.TrimSpace(model)
 	if s == nil || s.accountRepo == nil || groupID <= 0 || model == "" {
@@ -1659,12 +1677,17 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	}
 
 	queryGroupID, includeGrouped := s.modelCatalogAccountScope(&groupID)
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(
-		ctx,
-		queryGroupID,
-		gatewayCapabilityPlatforms,
-		includeGrouped,
-	)
+	loadAccounts := func() ([]Account, error) {
+		return s.accountRepo.ListModelAvailabilityCandidates(ctx, queryGroupID, gatewayCapabilityPlatforms, includeGrouped)
+	}
+	var accounts []Account
+	var err error
+	if snapshot, _ := ctx.Value(compositeCatalogOwnershipKey{}).(*compositeCatalogOwnershipSnapshot); snapshot != nil && snapshot.groupID == groupID {
+		snapshot.once.Do(func() { snapshot.accounts, snapshot.err = loadAccounts() })
+		accounts, err = snapshot.accounts, snapshot.err
+	} else {
+		accounts, err = loadAccounts()
+	}
 	if err != nil {
 		return CompositeModelOwnership{}, err
 	}

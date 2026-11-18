@@ -249,6 +249,39 @@ func TestDefaultModelIDsForPlatform_CompositeFallbackExcludesTypeSafe(t *testing
 }
 
 // Composite manifests include only concrete provider-backed model routes.
+type countingCatalogBatchRepo struct {
+	*gatewayModelsAccountRepoStub
+	reads int
+}
+
+func (r *countingCatalogBatchRepo) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]service.Account, error) {
+	r.reads++
+	return r.gatewayModelsAccountRepoStub.ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
+}
+
+func TestGatewayCodexModels_BatchesOwnershipBeforeManifestAssembly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 121
+	repo := &countingCatalogBatchRepo{gatewayModelsAccountRepoStub: &gatewayModelsAccountRepoStub{
+		byGroup: map[int64][]service.Account{groupID: {{ID: 1, Platform: service.PlatformOpenAI,
+			Credentials: map[string]any{"model_mapping": map[string]any{"company-alpha": "company-alpha", "company-beta": "company-beta"}}}}},
+	}}
+	resolver := service.NewCompositeRouteResolver(nil)
+	h := &GatewayHandler{gatewayService: service.NewGatewayService(repo,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, resolver, nil, nil)}
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/models?client_version=0.169.1", nil)
+	ctx.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{ID: groupID, Platform: service.PlatformComposite}})
+	h.CodexModels(ctx)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response codexModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.ElementsMatch(t, []string{"company-alpha", "company-beta"}, codexModelSlugsForTest(response.Models))
+	require.Equal(t, 3, repo.reads, "catalog selection, one ownership snapshot, and manifest assembly each read once")
+}
+
 func TestGatewayCodexModels_CompositeUsesCompleteEffectiveModelList(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const groupID int64 = 120
